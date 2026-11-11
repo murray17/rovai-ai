@@ -9,7 +9,9 @@ last_updated: 2026-11-11
 
 官方 `models --verbose` 批量档位路线的真实 CLI/ACP 对照、模型过滤差集与计时见
 [批量探测记录](../../versions/v1.72/kilo-bulk-models-probe.md)和
-[白名单结果](bulk-models-7.8.27-macos-arm64.json)。该轮只做研究，未替换生产目录采集路径。
+[白名单结果](bulk-models-7.8.27-macos-arm64.json)。该证据只记录原生研究；后续 User sequence 75
+已要求生产目录切换为单次官方 CLI，当前实现和 Core 验证见同一记录的[生产阶段](../../versions/v1.72/kilo-bulk-models-probe.md#user-sequence-75生产切换)。
+新的官方 Core 40 Run、批量目录及实际 variant 选择见[生产白名单结果](bulk-catalog-core-7.8.27-macos-arm64.json)。
 
 与最新主线整合后的本机受控 40 Run、模型目录/健康分离和回归门禁见
 [主线集成](../../versions/v1.72/kilo-simplification.md#主线集成user-sequence-66)及

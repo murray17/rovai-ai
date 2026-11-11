@@ -283,7 +283,8 @@ try{
     assert.equal(model.options[0].key,'effort')
     assert.deepEqual(model.options[0].values.map(choice=>choice.value),values)
   }
-  assert.equal(catalog.models.find(model=>model.isDefault)?.id,'local/local-model')
+  assert(catalog.models.every(model=>!model.isDefault),'CLI metadata must not invent a native default model')
+  assert(catalog.models.flatMap(model=>model.options).every(option=>option.defaultValue===null),'Variant keys do not report a selected effort')
   assert.deepEqual(catalog.models.find(model=>model.id==='local/local-plain').options,[])
   assert.equal(calls.length,catalogCallOffset,'Catalog discovery must not generate model requests')
   result.checks.modelCatalog={models:modelOptions,elapsedMs:Date.now()-catalogStarted,modelCalls:0}

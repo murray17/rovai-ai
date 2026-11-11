@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Runtime Catalog Boundaries
@@ -82,9 +82,12 @@ instructions 的局部有序追加不重排原生规则；用户插件与 pure �
 不同 cwd 的 MCP 复用 bundled CLI 的私有 cwd 启动模式，不引入 PATH Node 依赖；取消使用共享绝对阶段期限。
 成功 Steer 与已确认完整收尾的普通取消沿共享 Fleet 复用；异常、未知、超时及显式退役继续回收。
 共享 release outcome 区分旧 Run 隔离与进程已回收，不以缺少 handle 写 cleanup ACK。
-Kilo 完整目录使用临时 Session 逐模型做非生成查询，收集各模型实际提供的 effort；
-普通健康检查不遍历模型，也不覆盖已有完整目录及其成功时间。没有新缓存、参数推断或选择器组件。
-启动、权限、原生来源和数值口径见 [Runtime Launch v84](../contracts/runtime-launch-and-verification-v84.md)。
+Kilo 完整目录只用官方 `models --verbose` 一次读取模型与各自的 variants，进入共享目录缓存；
+不创建 ACP Session 逐模型扫描，也不混合 ACP 模型集合。目录遵循官方 CLI 原生集合，
+不复刻 ACP 路由独有的隐藏过滤；CLI 未报告的默认模型/effort 不推断，实际 Run 继续由 ACP 设置和观察。
+普通健康检查既不读取 CLI 目录也不遍历模型，不覆盖已有完整目录及其成功时间。
+没有新缓存、参数推断或选择器组件；失败继续共享 LKG，不回退扫描。
+启动、权限、原生来源和数值口径见 [Runtime Launch v85](../contracts/runtime-launch-and-verification-v85.md)。
 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。开放范围见
 [macOS 准入](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)和
 [Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)及

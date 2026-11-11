@@ -6,6 +6,17 @@ last_updated: 2026-11-10
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-11 Kilo 官方 CLI 批量模型目录
+
+按 User sequence 75 将完整模型/effort 目录改为单次官方 `models --verbose`，移除 ACP 逐模型扫描。
+7.8.27、macOS arm64 的生产 Core 与受控 Provider 完成 40 个 Run（37 成功、3 主动取消），
+目录三模型的不同档位/无档位、零生成、无默认推断及实际选模/variant 参数通过，目录打开耗时 2482 ms。
+原文件、MCP、原生权限、Steer、取消复用、输出预算和自动压缩矩阵均继续通过。
+原生 Sub2API 配置副本的 325 模型/806 档位比较来自前一阶段 metadata probe，不是新增的付费生成验收。
+CLI 与 ACP 隐藏过滤存在差集，当前目录采用 CLI 语义；平台资格保持。
+[实施与范围](versions/v1.72/kilo-bulk-models-probe.md#user-sequence-75生产切换)、
+[Core 白名单证据](research/kilo-runtime/bulk-catalog-core-7.8.27-macos-arm64.json)。
+
 ## 2026-11-11 Kilo Linux 与 Windows 目标机验收
 
 官方 **7.8.27** 在 Ubuntu 24.04.5 x64 和 Windows 10 Pro 22H2 x64 分别完成 Sub2API 真实模型与受控 ACP 验收。

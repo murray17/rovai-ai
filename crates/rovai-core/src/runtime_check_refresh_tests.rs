@@ -2403,12 +2403,30 @@ with (root / 'launches').open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\n'
 if '--version' in sys.argv:
     print('7.8.27' if kilo else '0.6.12'); sys.exit(0)
 count = int((root / 'count').read_text())
-current = 'model-0'
+def model_id(i): return ('fixture/' if kilo else '') + f'model-{i}'
+def wait_gate():
+    if (root / 'gate').exists():
+        (root / 'started').touch()
+        while (root / 'gate').exists(): time.sleep(.01)
+if kilo and sys.argv[1:] == ['models','--verbose']:
+    wait_gate()
+    if (root/'cli-fault').exists():
+        fault=(root/'cli-fault').read_text()
+        if fault=='exit': sys.exit(1)
+        if fault=='malformed': print('fixture/model-0\n{')
+        sys.exit(0)
+    for i in range(count):
+        print(model_id(i))
+        # A real verbose catalog exceeds the ordinary 64 KiB diagnostic capture.
+        print(json.dumps({'name':f'Model {i}', 'unused':('x'*70000 if i==0 else ''),
+            'variants':{value:{} for value in (['low','high'] if i==0 else ['medium','max'] if i==1 else [])}},indent=2))
+    sys.exit(0)
+current = model_id(0)
 def session():
-    values = ['low','high'] if current == 'model-0' else (['medium','max'] if kilo else ['xhigh','max'])
+    values = ['low','high'] if current == model_id(0) else (['medium','max'] if kilo else ['xhigh','max'])
     result = {'sessionId':'fixture-session', 'configOptions':[
         {'id':'model','name':'Model','category':'model','type':'select','currentValue':current,
-         'options':[{'value':f'model-{i}','name':f'Model {i}'} for i in range(count)]},
+         'options':[{'value':model_id(i),'name':f'Model {i}'} for i in range(count)]},
         {'id':'effort' if kilo else 'thinkingEffort','name':'Thinking','type':'select','currentValue':values[-1] if kilo else 'high',
          'options':[{'value':value,'name':value.title()} for value in values]}]}
     if not kilo and current=='model-2': result['configOptions'].pop()
@@ -2417,17 +2435,12 @@ for line in sys.stdin:
     request=json.loads(line); method=request['method']
     with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method, 'value':request.get('params',{}).get('value'), 'current':current})+'\n')
     if method == 'initialize':
-        if (root / 'gate').exists():
-            (root / 'started').touch()
-            while (root / 'gate').exists(): time.sleep(.01)
+        wait_gate()
         result={'protocolVersion':1,'agentCapabilities':{'loadSession':True}}
     elif method == 'session/new': result=session()
     elif method == 'session/set_config_option':
+        assert not kilo, 'Kilo directory discovery must not select Session models'
         assert request['params']['configId']=='model'
-        if kilo and (request['params']['value']=='model-2' or (count==2 and request['params']['value']=='model-1')):
-            current=request['params']['value']
-            print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'Provider unavailable'}}),flush=True)
-            continue
         if request['params']['value']=='model-1' and (root/'fault').exists():
             fault=(root/'fault').read_text()
             if fault=='timeout': time.sleep(31)
@@ -2578,24 +2591,19 @@ for line in sys.stdin:
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
-        let expected_setters = if kind == AdapterKind::KiloCli && count > 1 {
-            count
-        } else {
-            0
-        };
         assert_eq!(
             methods
                 .iter()
                 .filter(|m| m["method"] == "session/new")
                 .count(),
-            2
+            if kind == AdapterKind::KiloCli { 1 } else { 2 }
         );
         assert_eq!(
             methods
                 .iter()
                 .filter(|m| m["method"] == "session/set_config_option")
                 .count(),
-            expected_setters
+            0
         );
         let mut settings_by_process = std::collections::BTreeMap::new();
         for method in &methods {
@@ -2610,31 +2618,19 @@ for line in sys.stdin:
         settings.sort();
         assert_eq!(
             settings,
-            vec![0, expected_setters],
-            "only the Kilo full catalog traverses models"
+            vec![0; if kind == AdapterKind::KiloCli { 1 } else { 2 }],
+            "directory discovery never traverses Session models"
         );
-        let restore = methods
-            .iter()
-            .filter(|m| m["method"] == "session/set_config_option")
-            .next_back();
-        if expected_setters == 0 {
-            assert!(
-                restore.is_none(),
-                "a directory that does not switch models needs no restore RPC"
-            );
-        } else {
+        if kind == AdapterKind::KiloCli {
             assert_eq!(
-                restore.unwrap()["value"],
-                "model-0",
-                "the disposable Session restores its initial model"
+                std::fs::read_to_string(fixture.root.join("launches"))
+                    .unwrap()
+                    .lines()
+                    .filter(|line| line.contains("models"))
+                    .count(),
+                1,
+                "one CLI command supplies every model's options"
             );
-            if kind == AdapterKind::KiloCli && count == 2 {
-                assert_eq!(
-                    restore.unwrap()["current"],
-                    "model-1",
-                    "a failed selection may have changed native state and still needs restoration"
-                );
-            }
         }
         assert!(!methods.iter().any(|m| m["method"] == "session/prompt"));
         let complete = AgentProfileService::default()
@@ -2647,25 +2643,18 @@ for line in sys.stdin:
         );
         if kind == AdapterKind::KiloCli {
             for model in &complete.snapshot.as_ref().unwrap().models {
-                if kind == AdapterKind::KiloCli
-                    && (model.id == "model-2" || (count == 2 && model.id == "model-1"))
-                {
+                assert!(!model.is_default);
+                assert!(model.runtime_metadata.is_none());
+                if model.id == "fixture/model-2" {
                     assert!(
                         model.options.is_empty(),
-                        "one unavailable model must not hide the catalog"
+                        "native models without variants have no effort control"
                     );
                     continue;
                 }
                 let option = &model.options[0];
-                assert_eq!(
-                    option.key,
-                    if kind == AdapterKind::KiloCli {
-                        "effort"
-                    } else {
-                        "thinkingEffort"
-                    }
-                );
-                let values = if model.id == "model-0" {
+                assert_eq!(option.key, "effort");
+                let values = if model.id == "fixture/model-0" {
                     ["low", "high"]
                 } else {
                     ["medium", "max"]
@@ -2678,7 +2667,7 @@ for line in sys.stdin:
                         .collect::<Vec<_>>(),
                     values
                 );
-                assert_eq!(option.default_value.as_deref(), Some(values[1]));
+                assert_eq!(option.default_value, None);
             }
         } else {
             assert!(
@@ -2767,6 +2756,41 @@ for line in sys.stdin:
         assert_eq!(catalog["refreshStatus"], "completed");
         assert_eq!(catalog["cache"]["status"], "fresh");
         if kind == AdapterKind::KiloCli {
+            if count == 3 {
+                let methods_before = std::fs::read_to_string(fixture.root.join("methods")).unwrap();
+                for fault in ["empty", "malformed", "exit"] {
+                    std::fs::write(fixture.root.join("cli-fault"), fault).unwrap();
+                    let failure = fixture
+                        .core
+                        .open_runtime_model_catalog(kind, true, true)
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        failure
+                            .to_string()
+                            .contains("runtime_model_catalog_unavailable")
+                    );
+                    let retained = AgentProfileService::default()
+                        .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        serde_json::to_value(&retained.snapshot.as_ref().unwrap().models).unwrap(),
+                        catalog["models"],
+                        "last good CLI catalog survives {fault}"
+                    );
+                    assert_eq!(
+                        serde_json::to_value(&retained.model_catalog.observed_at).unwrap(),
+                        catalog["cache"]["observedAt"]
+                    );
+                    assert_eq!(
+                        std::fs::read_to_string(fixture.root.join("methods")).unwrap(),
+                        methods_before,
+                        "a failed CLI query must not fall back to ACP"
+                    );
+                }
+                std::fs::remove_file(fixture.root.join("cli-fault")).unwrap();
+            }
             fixture.close().await;
             continue;
         }
