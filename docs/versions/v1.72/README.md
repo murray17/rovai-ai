@@ -11,6 +11,21 @@ last_updated: 2026-11-10
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## OpenCode Steer 局部接入（2026-11-10）
+
+按 User 确认接通 OpenCode 稳定 2.x 自 2.2.7 起的官方 ACP Steer，旧版继续普通排队。
+可用性与 Native Session 连续性沿用既有 Runtime 原则：Host 收尾回收与 Session 恢复分别处理，
+正常插话后兼容且可恢复的后继 Run 继续原 Session，不以 Steer 账本条目触发专属换会话。
+接受原生在结束边界将已接收输入留给同 Session 后续执行消费；Rovai 保留接收事实，不自动重发 accepted／unknown。
+共享 reader 仅新增精确 noRunningTurn 拒绝例外；自然收尾遵守既有请求期限，Stop 不等 ACK。
+当前合同为 [Message Delivery v19](../../contracts/message-delivery-v19.md)，范围和验证见
+[实施记录](implementation-plan.md#opencode-steer-局部接入2026-11-10)。
+
+跨版本影响：Contracts、Architecture、Runtime compatibility、Documentation routing 已更新；
+Version lifecycle 保持 v1.72，Decisions 复用现有投递／恢复边界，无独立新决定；UI、Runtime Activity、Root README
+确认无需更新，继续现有投影及活动事件。本项无 Schema、Builder／Formatter／Profile／Manifest 版本或提示词变化，
+不增加专属隔离、核对、历史搬运、能力目录或长期回执跟踪。
+
 ## User Automation 成员代发与回执兼容（2026-11-10）
 
 PR #1020 增加用户终端的显式成员代发，保留 User 审计 actor、当前成员资格和原命令幂等回执；

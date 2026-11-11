@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-05
+last_updated: 2026-11-10
 ---
 
 # 当前规范与决定理由导航
@@ -69,7 +69,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 - 对话与使命引用：[Thread Reference v2](../contracts/thread-reference-v3.md)、[Composer 架构](../architecture/camp-composer-draft.md)；理由见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。
 
-- Claude 受管执行回执与启动期待插话：[Delivery v18](../contracts/message-delivery-v18.md)；取舍见 [V1.72-D49](../versions/v1.72/decisions.md#v1-72-d49)。
+- Claude 受管执行回执与启动期待插话：[Delivery v19](../contracts/message-delivery-v19.md)；取舍见 [V1.72-D49](../versions/v1.72/decisions.md#v1-72-d49)。
 - 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v17](../contracts/camp-history-v17.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
 - 模型 Mention 统一：[Message Mentions v1](../contracts/message-mentions-v1.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)、[Camp History v17](../contracts/camp-history-v17.md)；仅合并两处元数据、按 Run 冻结的取舍见 [V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)。
 
@@ -161,7 +161,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 - 文件引用、临时正文与三渠道提示：[Send v27](../contracts/camp-message-send-v27.md#agent-文件引用与发送教学)与[已确认 R3](../versions/v1.72/model-context-change-send-file-guidance.md)；沿用旧 Binding 的冻结 Bootstrap，无新增 Version Decision。
 
-- User Steer：[公开投递架构](../architecture/public-a2a-message-delivery.md#用户运行中插话)、[Send v28](../contracts/camp-message-send-v31.md)、[Delivery v18](../contracts/message-delivery-v18.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md) 和 [Profile 15/16](../contracts/context-delivery-profile-v15.md)；复用取舍见 [V1.72-D48](../versions/v1.72/decisions.md#v1-72-d48)。
+- User Steer：[公开投递架构](../architecture/public-a2a-message-delivery.md#用户运行中插话)、[Send v28](../contracts/camp-message-send-v31.md)、[Delivery v19](../contracts/message-delivery-v19.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md) 和 [Profile 15/16](../contracts/context-delivery-profile-v15.md)；复用取舍见 [V1.72-D48](../versions/v1.72/decisions.md#v1-72-d48)。
 
 - 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Thread 队员关系](../architecture/dynamic-camp-membership.md)、[Public Thread Message/Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Task v6](../contracts/durable-task-v6.md)、[Camp Message Send v23](../contracts/camp-message-send-v23.md)、[Message Delivery v15](../contracts/message-delivery-v15.md)和[Camp History v10](../contracts/camp-history-v10.md)。主动查询与撤回边界理由见 [V1.69-D01](../versions/v1.69/decisions.md#v1-69-d01)；Task 去版本化与模型投影清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)；正文收敛理由见 [V1.63-D01](../versions/v1.63/decisions.md#v1-63-d01)，协议 clean break 见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。Gather 只保留[历史解释](../architecture/durable-gather-barrier.md)。
 - 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)、[V1.29-D05](../versions/v1.29/decisions.md#v1-29-d05)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)及[V1.37-D03](../versions/v1.37/decisions.md#v1-37-d03)。
@@ -381,7 +381,7 @@ v62 移除原生会话重建提示和展示查询，保留恢复及审计行为�
 - 新操作与活动统一保存的理由见 [V1.72-D45](../versions/v1.72/decisions.md#v1-72-d45)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
 - 新操作预览预算与结果摘要分离的理由见 [V1.72-D46](../versions/v1.72/decisions.md#v1-72-d46)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
 
-- Steer 合并、版本资格与碰撞迁移：[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md)、[Delivery v18](../contracts/message-delivery-v18.md)；理由见 [V1.72-D47](../versions/v1.72/decisions.md#v1-72-d47)。
+- Steer 合并、版本资格与碰撞迁移：[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md)、[Delivery v19](../contracts/message-delivery-v19.md)；理由见 [V1.72-D47](../versions/v1.72/decisions.md#v1-72-d47)。
 
 
 MiniMax Code 的 ACP、Host 与精确恢复边界由[当前架构](../architecture/runtime-catalog-boundaries.md#minimax-code-acp-实施边界)

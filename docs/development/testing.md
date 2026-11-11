@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-04
+last_updated: 2026-11-10
 ---
 
 # 测试与 Smoke Test
@@ -20,10 +20,11 @@ last_updated: 2026-11-04
 node scripts/smoke-steer.mjs /absolute/empty-fixture /absolute/bin/rovai-core qwen-code
 ```
 
-第三参数为 `codex-cli`（默认）、`claude-code-cli`、`pi`、`codebuddy-cli`、`qwen-code`、`grok-build`、`kiro-cli` 、`zcode-app`、`trae-cn-cli` 或 `minimax-code-cli`。
+第三参数为 `codex-cli`（默认）、`claude-code-cli`、`pi`、`codebuddy-cli`、`qwen-code`、`grok-build`、`kiro-cli` 、`zcode-app`、`trae-cn-cli`、`minimax-code-cli` 或 `opencode-cli`。
 可选第四参数 `steer-only` 仅验同轮文字与纯附件，`mixed-only` 仅验多队员混合投递，`cancel-only`
 仅验取消后的副作用与后继 Run；默认顺序验证同轮输入、普通后继和多队员混合。混合场景额外调用
-OpenCode 作为忙碌且不支持 Steer 的接收者。Claude 使用本机显式配置的 API，报告记录其 endpoint
+OpenCode 作为另一位忙碌接收者，路线按 Core 返回的冻结版本资格断言，不固定假设它不支持 Steer。
+旧版普通排队使用下面的 `ineligible` 探针单独验证。Claude 使用本机显式配置的 API，报告记录其 endpoint
 和模型供核对。单项通过不能覆盖其余场景的超时，失败报告也必须保留。
 
 可选第五参数为目标原生程序绝对路径，保存独立的 Runtime startup 配置并核对安装入口，防止旧版
@@ -153,6 +154,18 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 ```
 
 ## Rust 测试准入与退役门槛
+
+OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
+`steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和
+`active_input_receipts_preserve_the_original_prompt_and_fence_late_sources` owners，不新增 Rust 测试函数。
+原 SQL／ACP 进程夹具分别覆盖严格 2.2.7／2.x 冻结资格、Steer 后成功及重开保留 Session／Binding、
+既有 cleanup 后同 Session FIFO、明确未接收回队列及 accepted／unknown 不重发，另覆盖 Host 能力、精确拒绝、
+两种 reader 顺序和原期限内收尾／及时停止。Host 回收不要求 Session 轮换。
+OpenCode 停止探针验证旧 Host 回收及 Rovai 不重投；原生已接收输入可在同 Session 恢复后消费，单独记录原生后续效果。
+最小命令分别是 `cargo test -p rovai-core --features extended-tests --lib <owner名称>`，再运行默认 workspace。
+复用版本探针的 OpenCode 入口必须分别指定官方 2.2.6（`ineligible`）和 2.2.7（`receipts`／`boundaries`）绝对程序路径，
+XDG config/data/state/cache 均隔离，取消继承 `OPENCODE_DB`；不复制原生日常 Session 或数据库。
+受控 ACP fixture 不等同官方 Runtime／真实模型验收；实际覆盖见[本版记录](../versions/v1.72/implementation-plan.md#opencode-steer-局部接入2026-11-10)。
 
 Hermes 思考强度扩展已有 `model_selection_matches_native_provider_forms_without_suffix_matching`、
 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs` 与

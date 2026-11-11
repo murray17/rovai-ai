@@ -33,6 +33,7 @@ pub fn supports_active_input(adapter: &str) -> bool {
             | "zcode-app"
             | "trae-cn-cli"
             | "hermes-cli"
+            | "opencode-cli"
     )
 }
 
@@ -88,6 +89,11 @@ pub fn protocol_unavailable(
     if protocol != expected {
         return Some(ProtocolIncompatible);
     }
+    // Only OpenCode Steer requires a complete SemVer-shaped identity. Keep
+    // ordinary launch and the other adapters' reported-version parsing intact.
+    if adapter == "opencode-cli" && !version.is_some_and(opencode_steer_version_format) {
+        return Some(RuntimeIdentityUnknown);
+    }
     let Some((v, prerelease)) =
         version.and_then(crate::agent_runtime_adapter::parse_reported_runtime_version)
     else {
@@ -107,6 +113,7 @@ pub fn protocol_unavailable(
         "zcode-app" => ([0, 16, 5], 0),
         "trae-cn-cli" => ([0, 207, 1], 0),
         "hermes-cli" => ([0, 22, 4], 0),
+        "opencode-cli" => ([2, 2, 7], 2),
         // The unresolved 2.132.0 business outcome is not an established ABI break.
         // CodeBuddy uses a minimum-only version policy; observed release results
         // remain separate from this compatibility policy.
@@ -120,6 +127,46 @@ pub fn protocol_unavailable(
     } else {
         None
     }
+}
+
+fn opencode_steer_version_format(value: &str) -> bool {
+    let value = value.trim();
+    let value = value.strip_prefix("opencode ").unwrap_or(value);
+    let value = value.strip_prefix('v').unwrap_or(value);
+    let identifiers = |value: &str, prerelease: bool| {
+        value.split('.').all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !(prerelease
+                    && part.len() > 1
+                    && part.starts_with('0')
+                    && part.bytes().all(|b| b.is_ascii_digit()))
+        })
+    };
+    let release = if let Some((release, build)) = value.split_once('+') {
+        if !identifiers(build, false) {
+            return false;
+        }
+        release
+    } else {
+        value
+    };
+    let release = if let Some((release, prerelease)) = release.split_once('-') {
+        if !identifiers(prerelease, true) {
+            return false;
+        }
+        release
+    } else {
+        release
+    };
+    let mut components = release.split('.');
+    (0..3).all(|_| {
+        components.next().is_some_and(|part| {
+            !part.is_empty()
+                && part.bytes().all(|b| b.is_ascii_digit())
+                && (part.len() == 1 || !part.starts_with('0'))
+        })
+    }) && components.next().is_none()
 }
 
 /// All callers use the target Run's frozen executable identity and protocol.
