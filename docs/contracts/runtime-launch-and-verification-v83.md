@@ -46,5 +46,6 @@ Kilo 继续加载用户／项目／环境／具体工具及 Agent 原生规则�
 释放结果与 cleanup ACK 的精确区别、重试、late fencing 和所有权例外见
 [Accepted Input Recovery v9](accepted-input-recovery-v9.md)。不增加 Kilo 私有复用机制。
 
-平台仍为 macOS arm64 Preview，其他平台不因本轮提升。实施、失败对照与实际证据见
+平台开放范围由 [Runtime Platform Admission v2](runtime-platform-admission-v2.md#kilo-macos-preview)拥有，
+不由本合同的功能验证推断完整平台资格。实施、失败对照与实际证据见
 [简化记录](../versions/v1.72/kilo-simplification.md)。

@@ -537,7 +537,10 @@ mod tests {
             let kilo = registry.platform_admission(AdapterKind::KiloCli, platform);
             assert_eq!(
                 kilo.status(),
-                if platform == HostPlatformKey::MacosArm64 {
+                if matches!(
+                    platform,
+                    HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64
+                ) {
                     RuntimePlatformAdmissionStatus::Preview
                 } else {
                     RuntimePlatformAdmissionStatus::NotQualified
@@ -546,7 +549,10 @@ mod tests {
             assert!(kilo.evidence_revision().is_none());
             assert_eq!(
                 kilo.allows_runtime_use(),
-                platform == HostPlatformKey::MacosArm64
+                matches!(
+                    platform,
+                    HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64
+                )
             );
         }
         for platform in HostPlatformKey::ALL {

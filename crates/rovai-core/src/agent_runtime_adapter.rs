@@ -824,7 +824,10 @@ impl AgentRuntimeAdapterRegistry {
             )
         };
         if kind == AdapterKind::KiloCli {
-            return if platform == HostPlatformKey::MacosArm64 {
+            return if matches!(
+                platform,
+                HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64
+            ) {
                 RuntimePlatformAdmission::preview(
                     kind,
                     platform,

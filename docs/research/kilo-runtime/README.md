@@ -9,14 +9,15 @@ last_updated: 2026-11-10
 
 当前 MCP 保存、原生权限和共享取消 Warm 的简化，含官方 Core 40 Run、同 PID 后继、新租约、
 原生四 RPC 取消与失败对照，见[简化记录](../../versions/v1.72/kilo-simplification.md)和
-[白名单证据](simplification-7.8.27-macos-arm64.json)。平台仍为 macOS arm64 Preview。
+[白名单证据](simplification-7.8.27-macos-arm64.json)。该批实测限 macOS arm64，当前开放范围见
+[Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)。
 
 自动阈值/overflow 压缩及逐模型 effort 查询的新验证见[专项核对](../../versions/v1.72/kilo-auto-compaction-and-options.md)。
 下方早期手动压缩记录不替代自动验收；模型目录当前实现范围与原生可查询能力分别记录。
 
 结论：采用官方 `kilo acp`，复用共享 ACP/Fleet；单 Binding Host 和原生 instructions 已用于产品实现，
 不增加压缩插件、独立进程池、配置镜像、二次审批或 SHA256 校验。
-当前 macOS arm64 为 Preview，其他平台 NotQualified，不宣称 First-Class。
+当前 macOS arm64/x64 为 Preview；Windows/Linux 保持 NotQualified，待独立目标机验收，不宣称 First-Class。
 User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-kilo-acp.md)；
 后续 Core 实施、验证和当前缺失范围见[实施记录](../../versions/v1.72/kilo-acp-implementation.md)，
 七个真实 Core Run 的本地 Provider 结果见[Core evidence](core-smoke-7.8.27-macos-arm64.json)。

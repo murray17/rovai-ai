@@ -16,7 +16,8 @@ last_updated: 2026-11-10
 User sequence 4 确认 [R1 输入方案](model-context-change-kilo-acp.md)后，已新增独立 `kilo-cli`，
 复用共享 ACP/Fleet、原生 Session 与审批；一个 Binding 一个 Host，instructions 承载现有完整 Bootstrap。
 不增加 SHA256 校验、压缩插件或私有进程池。Migration 223 扩展闭集至 schema 173，现有 Runtime 输入保持。
-macOS arm64 开放主动使用的 Preview，其他平台 NotQualified；完整 First-Class 资格仍未满足。
+macOS arm64/x64 开放主动使用的 Preview；Windows/Linux 待各自目标机验收，保持 NotQualified。
+Apple Intel 的维护者开放范围见 [D82](decisions.md#v1-72-d82)及[平台跟进](kilo-simplification.md#apple-intel-开放user-sequence-61)；完整 First-Class 资格仍未满足。
 实现、Core/官方 CLI 验证及缺失范围见[实施记录](kilo-acp-implementation.md)，
 上游原生探测见[研究矩阵](../../research/kilo-runtime/README.md)，架构理由见 [D76](decisions.md#v1-72-d76)。
 

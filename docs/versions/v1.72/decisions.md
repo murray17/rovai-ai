@@ -8,6 +8,19 @@ last_updated: 2026-11-10
 
 # v1.72 版本决定
 
+<a id="v1-72-d82"></a>
+## V1.72-D82：Kilo Apple Intel 按维护者授权开放 Preview
+
+- 状态：accepted
+- 日期：2026-11-10
+- 授权：User sequence 61 要求提供验收分支，并将 Apple Intel 也设为开放。
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)。
+
+选择复用原有 macOS arm64 Preview，让 macOS x64 沿共享 Admission 开放；不等待完整资格闭合才允许使用，
+也不将维护者的开放请求解释为已完成 Intel 目标机验收。保留 null evidence 和缺少资格证据的 reason，
+不增加 Renderer 平台名单、安装特例或证据校验机制。Windows/Linux 继续由各自目标机验收决定资格。
+此选择更新 D76 最初只开放 arm64 的范围；原生权限、模型输入、会话、进程复用和版本门槛保持。
+
 <a id="v1-72-d81"></a>
 ## V1.72-D81：Kilo 继承原生权限，MCP 下一轮生效，取消沿共享释放
 

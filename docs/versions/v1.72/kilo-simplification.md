@@ -96,8 +96,9 @@ Core fixture `rovai-kilo-simplify-accept-41u1t04g` 完成 **40 个 Run：37 succ
 
 ## 未验证范围
 
-平台仍为 macOS arm64 Preview。Windows/Linux、所有官方 Provider/真实付费模型、完整 First-Class 矩阵及 Skills 深度资格
-不因本轮升级。环境修改仍遵循 cold-spawn 语义。日常安装包不重启、不替换。
+本轮实测限 macOS arm64。其他平台、所有官方 Provider/真实付费模型、完整 First-Class 矩阵及 Skills 深度资格
+不由该批证据推断；当前开放范围见 [Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)。
+环境修改仍遵循 cold-spawn 语义。日常安装包不重启、不替换。
 
 ## 新提交
 
@@ -129,3 +130,21 @@ Core fixture `rovai-kilo-simplify-accept-41u1t04g` 完成 **40 个 Run：37 succ
 该模块独立复跑 5 项通过。两处实现/测试相对本轮基线均无改动，未据此认定根因或调整生产行为、断言和期限。
 随后使用 `cargo test --workspace -- --test-threads=4` 完整复跑，484 passed/1 ignored，前述两项均通过。
 该结果保留实际运行参数，不将此前默认并行失败改记为通过。
+
+## Apple Intel 开放（User sequence 61）
+
+分支为 `rovai/kilo-acp`，本次基线为 `5831f2d24f123ea55c8fe087619d88c1bfb466b2`。
+按维护者请求，将 `kilo-cli × macos-x64` 沿既有 Core Registry 从 NotQualified 改为 Preview，
+与 macOS arm64 相同；允许发现、检查、安装配置、成员选择和普通执行，原机器与能力检查继续生效。
+reason 保持 qualification_evidence_missing，evidenceRevision 为 null，不新增平台列表或校验机制。
+
+本次只确认准入投影和既有机器门禁，不宣称 Intel 目标机真实模型验收已完成。
+Linux/Windows 的目标机资格验收可基于本分支继续，当前两行保持 NotQualified，未借用 macOS 的结果。
+当前权威和理由见 [Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)与 [D82](decisions.md#v1-72-d82)。
+
+本次本机验证：
+
+- 既有 `runtime_platform_admission::` 测试 owner：5 passed，包含 Kilo 四个平台的开放状态、执行准入和空证据投影。
+- `cargo test --workspace -- --test-threads=4`：484 passed、1 ignored、0 failed。
+- `cargo fmt --all -- --check`、`git diff --check`、`pnpm docs:test`（10 passed）、`pnpm docs:check` 和
+  `DOCS_BASE_REF=958784f6e17fc32d8b2753d7f14fd6122dceea9d pnpm docs:check:ci` 通过。
