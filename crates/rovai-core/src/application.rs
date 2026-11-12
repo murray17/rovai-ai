@@ -17521,6 +17521,10 @@ impl Core {
                             &id,
                             observation.executable_path.as_deref().unwrap(),
                         );
+                    drop(database);
+                    // Launch version publication matches this discovery identity.
+                    // Publish the verified entry under the same commit guard.
+                    self.publish_verified_runtime_discovery(observation).await;
                     return Ok::<(), anyhow::Error>(());
                 }
                 if attempt == 0 {

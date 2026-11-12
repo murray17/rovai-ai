@@ -304,6 +304,190 @@ fn configuration(path: Option<&Path>) -> RuntimeStartupConfiguration {
 #[tokio::test]
 async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_state() {
     let fixture = Fixture::new();
+    // A cold launch must publish the identity it just committed before its
+    // actual version read. Otherwise the old discovery record hides a version
+    // already saved in SQLite, and the same-Run receipt suppresses a second read.
+    for previous_version in [Some("opencode v2.0.29"), None] {
+        use crate::agent_profile::{
+            AdapterPermissionConfig, AgentProfileService, FrozenAgentRuntimeConfig,
+            ResolvedModelSelection,
+        };
+        let kind = AdapterKind::OpencodeCli;
+        let root = fixture.root.join(if previous_version.is_some() {
+            "cold-old-version"
+        } else {
+            "cold-empty-version"
+        });
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join(if cfg!(windows) {
+            "opencode.cmd"
+        } else {
+            "opencode"
+        });
+        let calls = root.join("version-calls");
+        let write_program = |version: &str| {
+            #[cfg(windows)]
+            let body = format!(
+                "@echo off\r\necho %*>>\"{}\"\r\nif \"%~1\"==\"--version\" (\r\necho opencode v{}\r\nexit /b 0\r\n)\r\nexit /b 79\r\n",
+                calls.display(),
+                version,
+            );
+            #[cfg(unix)]
+            let body = format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n[ \"$1\" = '--version' ] || exit 79\nprintf 'opencode v{}\\n'\n",
+                calls.display(),
+                version,
+            );
+            std::fs::write(&program, body).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+        };
+        write_program("2.0.29");
+        let mut core = crate::application::tests::runtime_resolution_test_core(&root).unwrap();
+        *core.runtime_search_environment.get_mut() = Arc::new(
+            RuntimeSearchEnvironment::for_test_paths(1, vec![root.clone()]),
+        );
+        let (output, mut notifications) = mpsc::unbounded_channel();
+        core.output = output;
+        let (requests, mut pending) = mpsc::unbounded_channel();
+        core.runtime_check_requests = requests;
+        core.run_runtime_discovery().await;
+        let service = AgentProfileService::default();
+        let (installation, fingerprint) = {
+            let mut database = core.database.lock().await;
+            let installation = service
+                .managed_installation(&database, kind, "default")
+                .unwrap()
+                .unwrap();
+            let (fingerprint, _) = service
+                .recorded_executable_identity(
+                    &database,
+                    &installation.id,
+                    &installation.executable_path,
+                )
+                .unwrap()
+                .unwrap();
+            assert!(
+                service
+                    .record_runtime_version(
+                        &mut database,
+                        &installation.id,
+                        &installation.executable_path,
+                        &fingerprint,
+                        "opencode v2.0.29",
+                    )
+                    .unwrap()
+            );
+            (installation, fingerprint)
+        };
+        core.runtime_discovery
+            .get_mut()
+            .get_mut(&kind)
+            .unwrap()
+            .reported_version = previous_version.map(str::to_owned);
+        let runtime = FrozenAgentRuntimeConfig {
+            environment: None,
+            custom_api: None,
+            camp_fast: None,
+            adapter_kind: kind,
+            installation_id: installation.id.clone(),
+            installation_generation: installation.generation,
+            search_environment_generation: 1,
+            executable_path: installation.executable_path.clone(),
+            auth_scope: "default".into(),
+            reported_version: Some("opencode v2.0.29".into()),
+            executable_fingerprint: fingerprint,
+            capabilities: vec![],
+            protocol_version: "acp-v1".into(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".into(),
+                model_id: "default".into(),
+                options: json!({}),
+                dsh_source: None,
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: kind,
+                schema_version: 1,
+                values: crate::agent_runtime_adapter::AgentRuntimeAdapterRegistry::default()
+                    .member_permission_defaults(kind),
+            },
+            native_session_compatibility_key: None,
+            binding_compatibility_digest: None,
+            host_config_digest: None,
+            config_digest: "cold-version-fixture".into(),
+        };
+        while notifications.try_recv().is_ok() {}
+        assert!(!calls.exists(), "passive discovery cannot query a version");
+        write_program("2.2.7");
+        let prepared = core
+            .prepare_cold_runtime(
+                runtime,
+                &crate::runtime::AgentRunWorkspace::runtime_managed_path(
+                    root.to_string_lossy().into_owned(),
+                ),
+                Some("cold-version-run"),
+            )
+            .await
+            .map_err(|failure| failure.error)
+            .unwrap();
+        assert_eq!(
+            prepared.reported_version.as_deref(),
+            Some("opencode v2.2.7")
+        );
+        let saved = service
+            .managed_installation(&*core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.snapshot.unwrap().reported_version.as_deref(),
+            Some("opencode v2.2.7")
+        );
+        let health = core.runtime_health_payload().await.unwrap();
+        let row = health["runtimeAvailability"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["runtimeKind"] == kind.as_str())
+            .unwrap();
+        assert_eq!(
+            row["reportedVersion"], "opencode v2.2.7",
+            "cold launch must publish the saved version for {previous_version:?}"
+        );
+        let mut published = Vec::new();
+        while let Ok(message) = notifications.try_recv() {
+            let event: Value = serde_json::from_str(&message).unwrap();
+            if event["method"] == "runtime.discovery.updated"
+                && event["params"]["runtimeKind"] == kind.as_str()
+                && event["params"]["reportedVersion"] == "opencode v2.2.7"
+            {
+                published.push(event["params"].clone());
+            }
+        }
+        assert_eq!(published.len(), 1, "publish the actual read once");
+        assert_eq!(published[0]["executablePath"], prepared.executable_path);
+        assert_eq!(
+            published[0]["executableFingerprint"],
+            prepared.executable_fingerprint
+        );
+        assert_eq!(published[0]["versionProbeSucceeded"], true);
+        core.enqueue_automatic_version_refresh(&prepared, "cold-version-run");
+        assert!(matches!(
+            pending.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(calls)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["--version"],
+            "display refresh reuses the launch read"
+        );
+        drop(core);
+    }
     let old = fixture.program("old", "1.0.0", false);
     let new = fixture.program("new", "2.0.0", false);
     *fixture.paths.lock().unwrap() = vec![old.parent().unwrap().into()];
