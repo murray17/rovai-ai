@@ -17363,6 +17363,23 @@ while IFS= read -r ignored; do :; done
             patch.native_session_compatibility_key
         );
         assert_eq!(v2.host_config_digest, patch.host_config_digest);
+        // Preserve the same-path patch case above, then cover a package-manager
+        // link selecting a new directory without changing the Warm Host owner.
+        let mut relocated = opencode.clone();
+        relocated.executable_path = Path::new(&workspace.execution_root)
+            .join("cellar-new/opencode")
+            .to_string_lossy()
+            .into_owned();
+        let relocated = freeze_native_session_compatibility(relocated, &workspace).unwrap();
+        assert_eq!(patch.host_config_digest, relocated.host_config_digest);
+        assert_eq!(
+            patch.binding_compatibility_digest,
+            relocated.binding_compatibility_digest
+        );
+        assert_eq!(
+            patch.native_session_compatibility_key,
+            relocated.native_session_compatibility_key
+        );
         opencode.reported_version = None;
         assert!(freeze_native_session_compatibility(opencode, &workspace).is_err());
         let first = runtime_compatibility_digest(
