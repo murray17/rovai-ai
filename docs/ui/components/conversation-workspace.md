@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Thread 会话工作区
@@ -549,7 +549,9 @@ Web 与 Desktop 共用上述结构和样式；Mobile 横竖屏均取消额外左
 当前用户与外部 Principal 消息不提供回复入口；optimistic message 在取得稳定 Message ID 前也不提供回复。
 点击回复把同 Thread
 父消息写入当前 Renderer Composer，并在 Composer 内显示轻量无框 reply dock：正常状态不绘制独立边框、
-底色、阴影或回复图标；作者与有界摘要共用一个可视行，超出可用宽度显示省略号，末尾保留取消按钮。
+底色、阴影或回复图标；作者与有界摘要共用一个可视行，超出可用宽度显示省略号。
+回复摘要位于待发送附件之前，二者都在正文编辑器上方。摘要末尾使用 X 图标关闭回复，保留“取消回复”
+可访问名称和悬浮说明；点击区为 26×26px，粗指针下扩大至 44×44px，按下时不位移。
 
 鼠标点击“回复”后正文编辑器获得焦点和插入光标，但不得因为程序化 focus 改变 Composer 的边框、阴影
 或增加包围框。键盘激活“回复”或通过 Tab 进入编辑器时也只保留输入光标，不增加额外焦点装饰。

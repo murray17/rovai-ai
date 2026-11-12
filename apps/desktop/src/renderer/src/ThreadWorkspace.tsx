@@ -6467,47 +6467,6 @@ export function ThreadWorkspace({
             <span className="composer-destination"><UiText zh={"将添加到这条消息"} /></span>
           )}
           <div className="composer-input">
-            {(composerDraft?.attachments.length ?? 0) > 0
-              || preparingAttachments.length > 0
-              || failedAttachments.length > 0
-              ? (
-                  <ComposerAttachmentStrip>
-                    {composerDraft?.attachments.map((attachment) => (
-                      <AttachmentCard
-                        attachment={attachment}
-                        locator={{
-                          owner: 'composer',
-                          threadId: snapshot.thread.id,
-                          attachmentRefId: attachment.id
-                        }}
-                        key={attachment.id}
-                        onRemove={() => void removePreparedAttachment(attachment.id)}
-                        presentation="composer"
-                      />
-                    ))}
-                    {preparingAttachments.map((attachment) => (
-                      <AttachmentPlaceholder
-                        key={attachment.id}
-                        name={attachment.name}
-                        kind={attachment.kind}
-                        state="preparing"
-                      />
-                    ))}
-                    {failedAttachments.map((attachment) => (
-                      <AttachmentPlaceholder
-                        key={attachment.id}
-                        name={attachment.name}
-                        kind={attachment.kind}
-                        state="error"
-                        detail={attachment.error}
-                        onRemove={() => setFailedAttachments((current) =>
-                          current.filter(({ id }) => id !== attachment.id)
-                        )}
-                      />
-                    ))}
-                  </ComposerAttachmentStrip>
-                )
-              : null}
             {composerDraft?.replyIntent && (
               <div className="composer-reply-region">
                 <div
@@ -6525,9 +6484,14 @@ export function ThreadWorkspace({
                     className="composer-reply-cancel"
                     type="button"
                     aria-label={uiAttribute("取消回复")}
+                    title={uiAttribute("取消回复")}
                     disabled={composerInteractionDisabled}
                     onClick={() => void cancelReply()}
-                  ><UiText zh={"取消"} /></button>
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 12 12">
+                      <path d="m3 3 6 6M9 3 3 9" />
+                    </svg>
+                  </button>
                 </div>
                 {replyRepairRequired && (
                   <div className="reply-recipient-repair" role="alert" aria-live="assertive">
@@ -6580,6 +6544,47 @@ export function ThreadWorkspace({
                 </span>
               </div>
             )}
+            {(composerDraft?.attachments.length ?? 0) > 0
+              || preparingAttachments.length > 0
+              || failedAttachments.length > 0
+              ? (
+                  <ComposerAttachmentStrip>
+                    {composerDraft?.attachments.map((attachment) => (
+                      <AttachmentCard
+                        attachment={attachment}
+                        locator={{
+                          owner: 'composer',
+                          threadId: snapshot.thread.id,
+                          attachmentRefId: attachment.id
+                        }}
+                        key={attachment.id}
+                        onRemove={() => void removePreparedAttachment(attachment.id)}
+                        presentation="composer"
+                      />
+                    ))}
+                    {preparingAttachments.map((attachment) => (
+                      <AttachmentPlaceholder
+                        key={attachment.id}
+                        name={attachment.name}
+                        kind={attachment.kind}
+                        state="preparing"
+                      />
+                    ))}
+                    {failedAttachments.map((attachment) => (
+                      <AttachmentPlaceholder
+                        key={attachment.id}
+                        name={attachment.name}
+                        kind={attachment.kind}
+                        state="error"
+                        detail={attachment.error}
+                        onRemove={() => setFailedAttachments((current) =>
+                          current.filter(({ id }) => id !== attachment.id)
+                        )}
+                      />
+                    ))}
+                  </ComposerAttachmentStrip>
+                )
+              : null}
             {continuationRepairRequired && continuationIntent && !composerDraft?.replyIntent && (
               <div className="reply-recipient-repair" role="alert" aria-live="assertive">
                 <div className="reply-recipient-repair-copy">
