@@ -14,7 +14,7 @@ last_updated: 2026-11-11
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v88](../contracts/runtime-launch-and-verification-v88.md)。实测版本和能力只由
+[Runtime Launch and Verification v89](../contracts/runtime-launch-and-verification-v89.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 原生提问边界
@@ -289,7 +289,9 @@ Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统�
 
 配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台与目标；已有驻留能力的 Adapter 由 Fleet
 实际取得健康且兼容的 Host，磁盘文件身份只在创建进程分支检查。取得的 Host 启动身份在首次输入前进入本轮，
-磁盘升级不改写执行中 Run。实际目标版本刷新在 Run 正常执行后按需提交，十分钟限频且不阻塞输入；
+磁盘升级不改写执行中 Run。安装版本刷新在 Run 正常执行后按需提交，十分钟限频且不阻塞输入；
+后台按当前 Runtime 的既有选择规则重新解析安装入口，不能被旧 Host 冻结的 canonical 路径钉住。
+稳定启动链接换目标时更新安装版本，显式固定的旧版本路径仍受尊重，不全量重扫或轮询安装副本。
 现有检查状态保存实际尝试时间与结果顺序，静态缓存命中不算读取。入口替换清理旧入口的尝试记录，
 切回同一路径也不能接纳上次选择期间的迟到结果。当前入口的不同启动环境保持隔离，活跃 Run 的实际读取事实
 不随入口记录清理而丢失。不同安装和有效环境的结果不混用，迟到读取不能覆盖较新安装版本。
@@ -298,7 +300,7 @@ Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统�
 取消、协议/进程故障、配置变化、空闲回收和正常关闭保持。新进程沿原入口和 Session 接续，安装版本不改写运行版本。
 Pi 采用相同规则，不预置升级退役例外；真实原地升级证据按当前版本实施记录维护。
 Hermes 共享 Gateway 不在本功能管理范围。自动失败只记日志，手动等待同一读取仍收到具体错误。
-精确来源、顺序及失败边界见 [Runtime Launch v88](../contracts/runtime-launch-and-verification-v88.md)。
+精确来源、顺序及失败边界见 [Runtime Launch v89](../contracts/runtime-launch-and-verification-v89.md)。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。

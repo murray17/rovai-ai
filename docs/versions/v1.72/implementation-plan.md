@@ -8,6 +8,47 @@ last_updated: 2026-11-11
 
 # v1.72 实施与验收
 
+## 安装版本刷新当前入口修正（2026-11-11）
+
+Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-install-version-current-entry`；
+分支：`rovai/install-version-current-entry`；基线：`origin/main@171f80bad4813b4f848ade4b33b91a5422ad954a`。
+这是安装版本投影的局部修正，不涉及 Context、Bootstrap、Manifest 或 Renderer 格式。
+
+### 问题与实现
+
+Homebrew 将稳定入口从 2.2.6 转到 2.2.7 后，旧 Cellar 程序和旧 OpenCode Host 仍存在。
+原后台请求只验证 Host 冻结的 canonical 路径，导致用户发起后续 Run 时，安装版本行仍被旧目录钉住。
+
+`refresh_runtime_version_for_launch()` 在后台按当前 Runtime 的既有发现规则解析入口，
+保留显式程序路径、手动／自定义归属与必要的缺失入口 fallback；选中后仍只执行一次适配器版本命令。
+解析的新目标登记自身读取顺序，并通过原安装、搜索代次和文件身份围栏提交到既有版本行。
+Manager 以当前安装目标和捕获环境判断自动限频／合并，不因 Warm Host 留有旧路径拒绝同一安装的请求。
+入口读取失败继续计入十分钟间隔，自动失败不更新可用性，不在版本失败后改试其他程序副本。
+
+没有 Fleet 获取／释放／清扫、Host 基线或退役调用变更；旧 Run 的版本不被安装投影更新覆盖。
+当前入口确实改变时的既有身份处理保留。合同只增补 [Runtime Launch v89](../../contracts/runtime-launch-and-verification-v89.md)，
+Architecture 当前入口同步；v88 及其 Pi 真实升级验收记录保持原范围。
+
+### 验证归属
+
+扩展现有 `manual_rescan_reads_versions_and_discards_replaced_version_responses`，新增 Rust 测试函数为零。
+在原私有 Core／Check Manager／可计数合成程序 owner 内覆盖：自动 PATH 与显式稳定链接分别指向新目录、
+旧程序保留、安装行更新、原 Warm Host 可复用、当前 Run 版本保留、后续旧 Host 请求共享新目标限频，
+以及用户固定旧版本绝对路径时不自动改选。另覆盖新目标版本失败不回退副本、失败静默及解析后命中缓存不移动尝试时间。
+扩展既有 `warm_compatibility_matches_process_inputs_across_acp_adapters`，在保留同路径 patch 用例的基础上，
+增加 canonical 目录变化后的 OpenCode Host／Binding／Native Session 兼容性断言；ACP 生产生命周期代码不变。
+
+修复前，相同回归稳定在等待安装版本更新处失败；修复后的最终相关 owners 为 40 passed。
+默认 workspace 为 484 passed、1 ignored；TypeScript 与完整 `pnpm test` 通过，包含 Vitest 3274 passed／2 skipped、
+Node 主测试组 377 passed／2 skipped，文档单测 10 passed，格式及文档差异门禁通过。
+本轮是隔离合成程序与现有兼容性 owner 验证，没有将其表述为真实 OpenCode／LLM 的新版日常 App 验收。
+最小命令：
+
+```sh
+cargo test -p rovai-core --features slow-tests,extended-tests --lib manual_rescan_reads_versions_and_discards_replaced_version_responses
+cargo test --workspace
+```
+
 ## 侧栏菜单图文对齐（2026-11-11）
 
 - 从 `origin/main@d7b69cb64` 建立 `rovai/sidebar-menu-alignment`。仅调整共享菜单项 CSS，
