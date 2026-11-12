@@ -23,25 +23,37 @@ app.whenReady().then(async () => {
     window.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point})
     window.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point});await pause(60)
   }
-  const key=async keyCode=>{window.webContents.sendInputEvent({type:'keyDown',keyCode});window.webContents.sendInputEvent({type:'keyUp',keyCode});await pause(60)}
+  const key=async (keyCode,modifiers=[])=>{window.webContents.sendInputEvent({type:'keyDown',keyCode,modifiers});if(keyCode==='Return')window.webContents.sendInputEvent({type:'char',keyCode:'\r',modifiers});window.webContents.sendInputEvent({type:'keyUp',keyCode,modifiers});await pause(60)}
   const active=()=>run('document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId')
   const row=id=>click(`document.querySelector('[data-thread-id="${id}"] .camp-nav-open')`)
   const menu=async()=>{await click('document.querySelector("[data-message-id=review-message-2] .message-more-button")');await wait('!!document.querySelector(".message-action-menu")');await pause(140)}
   const select=()=>click('document.querySelector(".message-action-menu [role=menuitem]")')
   const fork=async()=>{await run('forkQA.hold()');await menu();await select();await wait('!!document.querySelector(".app-toast-spinner")')}
-  const open=()=>click('document.querySelector(".is-top-center .app-toast-action")')
-  const dismiss=()=>click('document.querySelector(".is-top-center .icon-button")')
+  const quiet=()=>wait('!document.querySelector(".app-toast")')
   const count=()=>run('forkQA.calls.filter(c=>c.method==="threads.fork").length')
   const screenshots=[]
   const output=process.argv[4]
   try {
     await window.loadFile(process.argv[2]);await wait('!!document.querySelector("[data-message-id=review-message-2] .message-more-button")')
+    // Quick completion never flashes a loading toast. Visible loading lasts 600ms
+    // while the actual copy/navigation can complete independently.
+    await run('forkQA.trackLoading()');await menu();await select()
+    await wait('(document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId??"").startsWith("copy-")')
+    await pause(250);assert.deepEqual(await run('forkQA.loadingEvents'),[]);await quiet()
+    await row('source');await run('forkQA.trackLoading()');await fork();await run('forkQA.release()')
+    await wait('(document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId??"").startsWith("copy-")')
+    assert(await run('!!document.querySelector(".app-toast-spinner")'))
+    await quiet()
+    const loadingTiming=await run('forkQA.loadingEvents')
+    assert.equal(loadingTiming.length,2);assert.equal(loadingTiming[0].visible,true);assert.equal(loadingTiming[1].visible,false)
+    assert(loadingTiming[1].time-loadingTiming[0].time>=575,JSON.stringify(loadingTiming))
+    await row('source')
     // Real mounted Composer continues to accept editing while the command waits.
     await fork();await click('document.querySelector("[data-thread-id=source] .camp-menu-trigger")');await wait('!!document.querySelector(".sidebar-action-menu:not(.message-action-menu)")');
     assert(await run('[...document.querySelectorAll(".sidebar-action-menu-item")].some(e=>e.textContent.trim()==="分叉"&&e.hasAttribute("data-disabled"))'));await key('Escape');await click('document.querySelector("[contenteditable=true]")');await window.webContents.insertText('保留源草稿')
     await run('forkQA.release()');await wait('document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId.startsWith("copy-")')
     assert.equal(await run('document.querySelector("[contenteditable=true]").textContent'),'')
-    assert.equal(await run('!!document.querySelector(".is-top-center")'),false)
+    await quiet()
     // Exercise the real ThreadWorkspace locator with the normalized API shape:
     // one copied source is navigable; the omitted source retains text and author.
     const quotedCopy=await active()
@@ -60,50 +72,46 @@ app.whenReady().then(async () => {
     assert.equal(await run('!!document.querySelector(".message-quote-error")'),false);await key('Escape')
     await row('source');await wait('document.querySelector("[contenteditable=true]")?.textContent==="保留源草稿"')
     const initialRequests=await count()
-    await fork();await row('other');await run('forkQA.release()');await wait('!!document.querySelector(".is-top-center .app-toast-action")')
-    assert.equal(await active(),'other');await open();await wait('(document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId??"").startsWith("copy-")')
-    assert.equal(await count(),initialRequests+1)
-    await row('source');await fork();await row('other');await row('source');await run('forkQA.release()');await wait('!!document.querySelector(".is-top-center .app-toast-action")')
+    await fork();await row('other');await run('forkQA.release()');await quiet()
+    assert.equal(await active(),'other');assert.equal(await count(),initialRequests+1)
+    await row('source');await fork();await row('other');await row('source');await run('forkQA.release()');await quiet()
     assert.equal(await active(),'source')
-    // A known copy visited through the sidebar now has a cached preview. A
-    // failed full open must keep B displayed and retain the same recovery ID.
-    const cachedTarget=await run('[...forkQA.receipts.values()].at(-1).payload.threadId')
-    await wait(`!!document.querySelector('[data-thread-id="${cachedTarget}"] .camp-nav-open')`)
-    await row(cachedTarget);await wait(`document.querySelector('.camp-nav-open[aria-current=page]')?.closest('[data-thread-id]')?.dataset.threadId===${JSON.stringify(cachedTarget)}`)
-    await row('other');await wait('document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId==="other"')
-    const cachedAttempts=await count()
-    await run('forkQA.failOpen()');await open();await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
-    assert.equal(await active(),'other')
-    assert.equal(await run(`JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('rovai.thread-fork.v1:')))).threadId`),cachedTarget)
-    assert.equal(await count(),cachedAttempts)
-    // Ordinary sidebar navigation can still show a preview on failure. Being
-    // on that preview is not proof that the recovery target opened fully.
-    await row(cachedTarget);await wait(`document.querySelector('.camp-nav-open[aria-current=page]')?.closest('[data-thread-id]')?.dataset.threadId===${JSON.stringify(cachedTarget)}`)
-    const beforePreviewRetry=await run('forkQA.calls.filter(c=>c.method==="threads.open"||c.method==="threads.enter").length')
-    await open();await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
-    assert(await run('forkQA.calls.filter(c=>c.method==="threads.open"||c.method==="threads.enter").length')>beforePreviewRetry)
-    assert.equal(await run(`JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('rovai.thread-fork.v1:')))).threadId`),cachedTarget)
-    await run('forkQA.failOpen(false)');await open();await wait('!document.querySelector(".is-top-center")');assert.equal(await active(),cachedTarget);assert.equal(await count(),cachedAttempts)
-    assert.equal(await run('Object.keys(localStorage).filter(k=>k.startsWith("rovai.thread-fork.v1:")).length'),0)
-    await row('source')
-    // A failed open retries only the saved target.
-    await run('forkQA.failOpen()');await fork();await run('forkQA.release()');await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
-    const attempts=await count();await open();assert.equal(await count(),attempts)
-    await run('forkQA.failOpen(false)');await open();await wait('!document.querySelector(".is-top-center")')
-    // Failed draft persistence stays on the source and must not repeat the copy.
+    assert.equal(await run('!!document.querySelector(".app-toast-action")'),false)
+    // Known-target open failures stay quiet. The ordinary sidebar still opens
+    // that copy once its full projection is available, with no repeated fork.
+    await run('forkQA.failOpen()');await fork();await run('forkQA.release()');await quiet()
+    assert.equal(await active(),'source')
+    const failedTarget=await run('[...forkQA.receipts.values()].at(-1).payload.threadId'),attempts=await count()
+    await run('forkQA.failOpen(false)')
+    if(!await run(`!!document.querySelector('[data-thread-id="${failedTarget}"] .camp-nav-open')`))await click('document.querySelector(".show-more-camps")')
+    await wait(`!!document.querySelector('[data-thread-id="${failedTarget}"] .camp-nav-open')`);await row(failedTarget)
+    await wait(`document.querySelector('.camp-nav-open[aria-current=page]')?.closest('[data-thread-id]')?.dataset.threadId===${JSON.stringify(failedTarget)}`)
+    assert.equal(await count(),attempts)
+    // Draft persistence failure does not repeat the copy or introduce feedback.
     await row('source');await run('forkQA.failDraft()');await click('document.querySelector("[contenteditable=true]")');await window.webContents.insertText(' 尚未保存')
-    await fork();await run('forkQA.release()');await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
-    assert.equal(await active(),'source');const afterSaveFailure=await count();await run('forkQA.failDraft(false)');await open();await wait('!document.querySelector(".is-top-center")');assert.equal(await count(),afterSaveFailure)
-    // The restored operation reads its receipt and offers an existing target.
-    await row('source');await run('forkQA.lose()');await menu();await select();await wait('document.querySelector(".is-top-center")?.textContent.includes("尚未确认")')
-    const copies=await run('forkQA.receipts.size');await window.webContents.reload();await wait('!!document.querySelector(".is-top-center .app-toast-action") && !!document.querySelector("[data-message-id=review-message-2]")')
-    assert.equal(await count(),0);assert.equal(await run('forkQA.receipts.size'),copies);await dismiss()
-    // A deleted result is an opening failure; it never falls back to a new copy.
-    await run('forkQA.dropTarget()');await menu();await select();await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")');assert.equal(await active(),'source');const deletedAttempts=await count();await open();assert.equal(await count(),deletedAttempts);await dismiss()
-    // The actual attachment queue keeps navigation pending. Later navigation
-    // intent takes ownership before that queue settles, including a return to A.
+    await fork();await run('forkQA.release()');await quiet();assert.equal(await active(),'source')
+    const afterSaveFailure=await count();await run('forkQA.failDraft(false)');await pause(100);assert.equal(await count(),afterSaveFailure)
+    if(await run('!!document.querySelector(".error-banner")'))await click('document.querySelector(".error-banner .icon-button")')
+    // An uncertain command keeps one explicit retry; receipt recovery does not
+    // create another copy or restore the removed completion/opening prompt.
+    await run('forkQA.lose()');await menu();await select();await wait('document.querySelector(".app-toast")?.textContent.includes("尚未确认")')
+    await mkdir(output,{recursive:true});await writeFile(join(output,'fork-unknown-retry.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('fork-unknown-retry.png')
+    const uncertainAttempts=await count();await pause(3300)
+    assert(await run('document.querySelector(".app-toast")?.textContent.includes("尚未确认")'))
+    await click('document.querySelector(".app-toast-action")');await quiet()
+    assert.equal(await count(),uncertainAttempts)
+    await row('source');await run('forkQA.lose()');await menu();await select();await wait('document.querySelector(".app-toast")?.textContent.includes("尚未确认")')
+    const copies=await run('forkQA.receipts.size');await window.webContents.reload()
+    await wait('!!document.querySelector("[data-message-id=review-message-2]") && forkQA.calls.some(c=>c.method==="commands.reconcile")');await quiet()
+    assert.equal(await count(),0);assert.equal(await run('forkQA.receipts.size'),copies)
+    // Known deleted targets stay quiet; rejected commands auto-dismiss normally.
+    await run('forkQA.dropTarget()');await menu();await select();await quiet();assert.equal(await active(),'source')
+    const deletedAttempts=await count();await pause(250);assert.equal(await count(),deletedAttempts)
+    await run('forkQA.reject()');await menu();await select();await wait('document.querySelector(".app-toast")?.textContent.includes("无法从这里分叉")')
+    await quiet();assert.equal(await active(),'source')
+    // The actual attachment queue retains newer navigation intent, even A→B→A.
     await run('forkQA.addAttachment()');await wait('forkQA.attachmentPending()');await fork();await run('forkQA.release()');await pause(120)
-    await row('other');await row('source');await run('forkQA.releaseAttachment()');await wait('!!document.querySelector(".is-top-center .app-toast-action")');assert.equal(await active(),'source');await dismiss()
+    await row('other');await row('source');await run('forkQA.releaseAttachment()');await quiet();assert.equal(await active(),'source')
     // Production Radix menus and AppToast across the agreed visual matrix.
     const geometry=[]
     await mkdir(output,{recursive:true})
@@ -128,11 +136,11 @@ app.whenReady().then(async () => {
     assert(await run('(()=>{const r=document.querySelector(".message-action-menu").getBoundingClientRect();return r.right<=innerWidth&&r.bottom<=innerHeight})()'))
     await writeFile(join(output,'zoom-200-keyboard.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('zoom-200-keyboard.png');await key('Escape');window.webContents.setZoomFactor(1);await wait('innerWidth>1000');await pause(200)
     await run('forkQA.hold()');await menu();await select();await wait('!!document.querySelector(".app-toast-spinner")')
-    const center=await run('(()=>{const r=document.querySelector(".is-top-center").getBoundingClientRect(),a=document.querySelector(".navigation-shell").getBoundingClientRect();return Math.abs(r.x+r.width/2-a.x-a.width/2)})()');assert(center<1)
+    const center=await run('(()=>{const r=document.querySelector(".app-toast").getBoundingClientRect(),a=document.querySelector(".navigation-shell").getBoundingClientRect();return Math.abs(r.x+r.width/2-a.x-a.width/2)})()');assert(center<1)
     await click('document.querySelector(".navigation-chrome-controls > .navigation-collapse-button")');await pause(180)
-    assert(await run('(()=>{const r=document.querySelector(".is-top-center").getBoundingClientRect();return Math.abs(r.x+r.width/2-innerWidth/2)<1})()'))
-    window.setContentSize(1040,700);await pause(120);assert(await run('(()=>{const r=document.querySelector(".is-top-center").getBoundingClientRect();return Math.abs(r.x+r.width/2-innerWidth/2)<1})()'))
-    await window.webContents.debugger.attach('1.3');await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
+    assert(await run('(()=>{const r=document.querySelector(".app-toast").getBoundingClientRect();return Math.abs(r.x+r.width/2-innerWidth/2)<1})()'))
+    window.setContentSize(1040,700);await pause(120);assert(await run('(()=>{const r=document.querySelector(".app-toast").getBoundingClientRect();return Math.abs(r.x+r.width/2-innerWidth/2)<1})()'))
+    await window.webContents.debugger.attach('1.3');await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
     assert.equal(await run('getComputedStyle(document.querySelector(".app-toast-spinner")).animationName'),'none')
     await window.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1})
     const point=await run('(()=>{const e=document.querySelector("[data-message-id=review-message-2] .message-more-button");e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()')
@@ -140,8 +148,44 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await wait('!!document.querySelector(".message-action-menu")');await key('Escape')
     await writeFile(join(output,'loading-reduced-motion.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('loading-reduced-motion.png')
     await run('forkQA.release()');await pause(100)
+    await wait('!document.querySelector(".app-toast")')
+    // Shared production portals stack independent owners and clean up in StrictMode.
+    const toastGeometry=[]
+    for(const language of ['zh-CN','en'])for(const theme of ['day','night','horizon','classic-red','ember']) {
+      window.setContentSize(1040,700)
+      await run(`forkQA.language(${JSON.stringify(language)});forkQA.theme(${JSON.stringify(theme)})`)
+      await run('forkQA.showToasts()')
+      await wait('document.querySelectorAll(".app-toast").length===2')
+      const measured=await run(`(()=>{
+        const host=document.querySelector('.app-toast-viewport'),shell=document.querySelector('.app-shell'),toasts=[...host.querySelectorAll('.app-toast')];
+        const sample=document.createElement('div');sample.style.cssText='color:var(--ink);background:var(--surface)';shell.append(sample);
+        const normal=getComputedStyle(sample);const colors={ink:normal.color,surface:normal.backgroundColor};const dangerSample=document.createElement('div');dangerSample.style.cssText='color:var(--danger)';shell.append(dangerSample);colors.danger=getComputedStyle(dangerSample).color;sample.remove();dangerSample.remove();
+        const bounds=shell.getBoundingClientRect(),rows=toasts.map(t=>{const r=t.getBoundingClientRect(),message=t.querySelector('.app-toast-message').getBoundingClientRect(),action=t.querySelector('.app-toast-action'),a=action.getBoundingClientRect(),close=t.querySelector('.app-toast-close'),c=close.getBoundingClientRect(),style=getComputedStyle(t);return {top:r.top,bottom:r.bottom,center:Math.abs(r.x+r.width/2-bounds.x-bounds.width/2),inside:r.left>=bounds.left&&r.right<=bounds.right,aligned:Math.max(Math.abs(message.y+message.height/2-a.y-a.height/2),Math.abs(c.y+c.height/2-a.y-a.height/2)),actionBackground:getComputedStyle(action).backgroundColor,actionHeight:a.height,closeWidth:c.width,closeHeight:c.height,svg:!!close.querySelector('svg'),closeText:close.textContent,role:t.getAttribute('role'),live:t.getAttribute('aria-live'),color:style.color,background:style.backgroundColor,pointer:style.pointerEvents}});
+        return {hosts:document.querySelectorAll('.app-toast-viewport').length,parent:host.parentElement===shell,top:rows[0].top-bounds.top,gap:rows[1].top-rows[0].bottom,rows,colors,pointer:getComputedStyle(host).pointerEvents};
+      })()`)
+      assert.equal(measured.hosts,1);assert(measured.parent);assert.equal(measured.top,10);assert.equal(measured.gap,8);assert.equal(measured.pointer,'none')
+      assert(measured.rows.every(r=>r.center<1&&r.inside&&r.aligned<1&&r.actionHeight>=28&&r.closeWidth===28&&r.closeHeight===28&&r.svg&&r.closeText===''&&r.pointer==='auto'&&r.actionBackground==='rgba(0, 0, 0, 0)'),JSON.stringify(measured))
+      assert.equal(measured.rows[0].role,'status');assert.equal(measured.rows[0].live,'polite');assert.equal(measured.rows[1].role,'alert');assert.equal(measured.rows[1].live,'assertive')
+      assert.equal(measured.rows[0].color,measured.colors.ink);assert.equal(measured.rows[0].background,measured.colors.surface);assert.equal(measured.rows[1].color,measured.colors.danger)
+      await run(`document.querySelector('.app-toast.is-danger .app-toast-action').focus()`);await key('Tab');await key('Tab',['shift'])
+      assert.equal(await run(`getComputedStyle(document.querySelector('.app-toast.is-danger .app-toast-action')).backgroundColor`),'rgba(0, 0, 0, 0)')
+      assert.equal(await run(`getComputedStyle(document.querySelector('.app-toast.is-danger .app-toast-action > span')).textDecorationLine`),'underline')
+      assert.equal(await run(`document.activeElement===document.querySelector('.app-toast.is-danger .app-toast-action')`),true)
+      await key('Return');assert.deepEqual(await run('forkQA.probeActions'),['retry']);assert.equal(await run('document.querySelectorAll(".app-toast").length'),2)
+      const name=`toast-${language}-${theme}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);toastGeometry.push({language,theme,...measured})
+      await click(`document.querySelector('.app-toast.is-danger .app-toast-close')`);await wait('document.querySelectorAll(".app-toast").length===1')
+      await click(`document.querySelector('.app-toast-action')`);await wait('!document.querySelector(".app-toast-viewport")')
+      assert.deepEqual(await run('forkQA.probeActions'),['retry','close:danger','close:neutral','retry-neutral'])
+    }
+    window.webContents.setZoomFactor(2)
+    await run(`forkQA.showToasts('A long conversation title '.repeat(8))`)
+    await wait('document.querySelectorAll(".app-toast").length===2')
+    const zoomed=await run(`[...document.querySelectorAll('.app-toast')].every(t=>{const r=t.getBoundingClientRect(),m=t.querySelector('.app-toast-message'),a=t.querySelector('.app-toast-action').getBoundingClientRect();return r.left>=16&&r.right<=innerWidth-16&&m.scrollWidth<=m.clientWidth+1&&Math.abs(r.y+r.height/2-a.y-a.height/2)<1})`)
+    assert(zoomed)
+    await writeFile(join(output,'toast-zoom-200-long.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('toast-zoom-200-long.png')
+    await run('forkQA.clearToasts()');await wait('!document.querySelector(".app-toast-viewport")');window.webContents.setZoomFactor(1)
     assert.deepEqual(await run('forkQA.errors'),[]);assert.deepEqual(errors,[])
-    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','cached target full-open failure preserves source and recovery','current cached preview retries full open','open-only retry','deleted target remains opening failure','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion']}
+    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,loadingTiming,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','aligned transparent actions and SVG close','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
     await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:true,output,verified:report.verified}));app.exit(0)
   }catch(error){console.error(error.stack??error);console.error(await run('JSON.stringify(forkQA.calls.slice(-12))').catch(()=>''));app.exit(1)}
 })

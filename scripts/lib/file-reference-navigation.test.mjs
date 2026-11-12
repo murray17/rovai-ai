@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -23,6 +23,8 @@ test('message file links preserve reading anchors and production workspaces cont
       build: { outDir: join(fixture, 'renderer'), minify: false } })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
+    await mkdir(join(fixture, 'user-data/managed-skill-library'), { recursive: true })
+    console.log(`Automatic acceptance userData: ${join(fixture, 'user-data')}; Skill Library: ${join(fixture, 'user-data/managed-skill-library')} (unused); no Core/Runtime`)
     child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')

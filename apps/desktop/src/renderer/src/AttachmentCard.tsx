@@ -208,11 +208,11 @@ export function AttachmentCard({
             threadId: locator.threadId,
             locator
           }, undefined, { fileName: attachment.displayName })
-          if (outcome.kind === 'error') {
+          if (outcome.kind === 'error' || outcome.kind === 'preview_error') {
             if (outcome.error.code === 'attachment_missing') setAvailability('missing')
             else if (outcome.error.code === 'attachment_unreadable') setAvailability('unreadable')
             else if (outcome.error.code === 'attachment_kind_changed') setAvailability('kind_changed')
-            onNotify(outcome.error.message)
+            if (outcome.kind === 'error') onNotify(outcome.error.message)
           } else setAvailability('available')
           return
         }

@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BusinessApp } from '../../../apps/desktop/src/renderer/src/BusinessApp'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
@@ -5,9 +6,11 @@ import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/sr
 import { createReviewModel } from '../host-web-parity/model'
 import { initial, agents, installations, message, navigation, now, availability } from '../host-web-parity/data'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
+import { EMPTY_SNAPSHOT } from '../../../apps/desktop/src/shared/navigation-preferences-model'
+import { AppToast, type AppToastValue } from '../../../apps/desktop/src/renderer/src/AppToast'
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
-import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { changeInterfaceLanguage, uiAttribute } from '../../../apps/desktop/src/renderer/src/interface-language'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/mobile.css'
 
@@ -23,7 +26,7 @@ let sequence = saved?.sequence ?? 10
 const appearance = { ...DEFAULT_APPEARANCE, preference: 'day', resolvedTheme: 'day' } as const
 applyAppearanceSnapshot(document.documentElement, appearance)
 const prefs = { ...DEFAULT_GENERAL_PREFERENCES, interfaceLanguagePreference: 'zh-CN', interfaceLanguage: 'zh-CN', newConversationDefaults: null }
-const navPrefs = { schemaVersion: 4, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
+const navPrefs = { ...EMPTY_SNAPSHOT, legacyProjectsSynced: true }
 const applied = (payload = {}) => ({ commandId:'fixture',commandType:'camp.fork',status:'applied',code:'camp.forked',payload,resultEntity:null,recordedAt:now })
 function seed(id: string, title: string) {
   const value = structuredClone(initial)
@@ -48,7 +51,7 @@ const projection = (value: any) => {
   return {...structuredClone(value),schemaVersion:9,throughGlobalSequence:sequence,coverage:{tasks:coverage(0),messages:{...coverage(value.messages.length),hasEarlier:false,oldestLoadedSequence:1,newestLoadedSequence:value.messages.length},messageDeliveries:coverage(0),turns:coverage(0),agentRuns:coverage(0),approvals:coverage(0)}}
 }
 let releaseFork: (()=>void) | undefined
-let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false
+let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false, rejectFork = false
 let releaseAttachment:(()=>void)|undefined, attachmentPending=false
 const client = {...model.client,composerAttachments:{...model.client.composerAttachments,
   prepare:async(_thread:string,_revision:number,file:File)=>{attachmentPending=true;await new Promise<void>(resolve=>{releaseAttachment=resolve});attachmentPending=false;return {id:crypto.randomUUID(),sourcePath:'/fixture/'+file.name,displayName:file.name,kind:'file',fileCount:1,mediaType:'text/plain',byteSize:file.size,previewKind:'none',availability:'unknown'}},
@@ -58,6 +61,7 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
     calls.push({method,params:structuredClone(params)})
     const command=params.command??params,value=threads.get(command.threadId)
     if(method==='threads.fork') {
+      if(rejectFork) {rejectFork=false;return {...applied(),status:'rejected',code:'camp.fork_anchor_unavailable'}}
       if(holdFork) await new Promise<void>(resolve=>{releaseFork=resolve})
       if(receipts.has(params.commandId)) return receipts.get(params.commandId)
       const source=threads.get(params.sourceThreadId),target=structuredClone(source),id=`copy-${++sequence}`
@@ -105,7 +109,30 @@ const environment:any={client,files:{...model.fileApi,bindThread:async()=>{}},pr
 const nativeSet=Storage.prototype.setItem
 let failDraft=false
 Storage.prototype.setItem=function(key:string,value:string){if(failDraft&&key.startsWith('rovai.camp-composer-draft'))throw new Error('Draft storage failed');return nativeSet.call(this,key,value)}
-;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+const loadingEvents: Array<{ visible: boolean; time: number }> = []
+let previousLoading = false
+new MutationObserver(() => {
+  const visible = !!document.querySelector('.app-toast-spinner')
+  if (visible !== previousLoading) { previousLoading = visible; loadingEvents.push({ visible, time: performance.now() }) }
+}).observe(document.body, { childList: true, subtree: true })
+// Independent real AppToast instances exercise portal ownership and StrictMode cleanup.
+const probeNode = document.createElement('div')
+document.body.append(probeNode)
+const probeRoot = createRoot(probeNode)
+let probeToasts: Array<AppToastValue & { id: string }> = []
+const probeActions: string[] = []
+const renderToasts = () => probeRoot.render(<StrictMode>{probeToasts.map(toast => <AppToast key={toast.id}
+  toast={toast} onClose={() => { probeActions.push(`close:${toast.id}`); probeToasts = probeToasts.filter(item => item.id !== toast.id); renderToasts() }} />)}</StrictMode>)
+const showToasts = (message?: string) => {
+  probeActions.length = 0
+  probeToasts = [
+    { id: 'neutral', message: message ?? uiAttribute('响应模式未保存，请重试。'), tone: 'neutral', action: { label: uiAttribute('重试'), icon: 'retry', onSelect: () => probeActions.push('retry-neutral') } },
+    { id: 'danger', message: uiAttribute('删除未完成，请重试。'), tone: 'danger', keepOnAction: true,
+      action: { label: uiAttribute('重试'), icon: 'retry', onSelect: () => probeActions.push('retry') } }
+  ]
+  renderToasts()
+}
+;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,probeActions,clearToasts:()=>{probeToasts=[];renderToasts()},hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
   addAttachment:()=>{const input=document.querySelector('.camp-workspace form.composer:not(.single-chat-composer) .composer-file-input') as HTMLInputElement;const data=new DataTransfer();data.items.add(new File(['pending'],'pending.txt',{type:'text/plain'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))},attachmentPending:()=>attachmentPending,releaseAttachment:()=>releaseAttachment?.(),
   language:(value:any)=>changeInterfaceLanguage(preferences.generalPreferences,value),
   theme:(theme:any)=>applyAppearanceSnapshot(document.documentElement,{...appearance,preference:theme,resolvedTheme:['night','ember'].includes(theme)?'night':'day'})}
