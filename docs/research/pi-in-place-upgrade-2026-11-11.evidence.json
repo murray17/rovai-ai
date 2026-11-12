@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-11",
+  "platform": "macOS arm64",
+  "nodeVersion": "26.13.0",
+  "sourceParent": "aa270c9701bb19a8f128cde88b65ec07c0d76374",
+  "candidate": "version-refresh/Host-lifecycle decoupled WIP after function-scoped retirement removal",
+  "coreSha256": "5e32d32941afecec86237fe64af078a9cb61eae6e63444faafb1f89a38a773f0",
+  "cliSha256": "15f7f3b76b688b2e260ff1da3d0c14d68a18377524a602792487284ad709e9f6",
+  "sourceDigests": {
+    "crates/rovai-core/src/application.rs": "03915e3827c4d3c0672bee88e30855e3ff0de7e4a786b7ab86df3e879bd38e46",
+    "crates/rovai-core/src/runtime_check_environment.rs": "9ca7422e8f4c6e805d9b23f44d66e065c8d1957ad59135dbc67d87f8508afd7a",
+    "crates/rovai-core/src/runtime_discovery.rs": "7e33bc7cf59075e96eab1521ec918b744d883ae8dda132f17f4d7392b38c0919",
+    "crates/rovai-core/src/runtime_fleet.rs": "4732a415231b77fdc613bec90a3c40f6633dbd5e57a9e5923e24a19859a4d54a",
+    "crates/rovai-core/src/codex.rs": "240df14e028d059503853140980b77912f28c6ac9d60b90551948bccccd343b4",
+    "crates/rovai-core/src/pi/host.rs": "f440c4f876e03af399fde86a6175c85a29b62adc6204b197ad5d0ef8fcf6c3d3"
+  },
+  "model": "sub2api/gpt-6.1-sol",
+  "from": "1.1.0",
+  "to": "1.5.2",
+  "cases": [
+    {
+      "case": "warm",
+      "status": "passed",
+      "upgrade": {
+        "from": "1.1.0",
+        "to": "1.5.2",
+        "milliseconds": 1518,
+        "entryUnchanged": true,
+        "actualPackageReplaced": true,
+        "oldRuntimeModuleSha256": "c30fd8f7f1a50fdf4860b87613fc6e906d04cc1d4646360826e001abbd1f2152",
+        "newRuntimeModuleSha256": "8fdd4161be64f4aadb8bec47ae77b56dcbeab288da6e55dcab3e0243e50f80fc",
+        "reportedVersion": "1.5.2"
+      },
+      "stages": [
+        {
+          "label": "seed-old",
+          "status": "succeeded",
+          "hostInstanceId": "317940fb-2e3e-43a1-993f-68bb2c1108a3",
+          "nativeSessionId": "01a1cb87-5b60-7797-952e-b4bdc99aac44",
+          "nativePid": 50617,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": false
+        },
+        {
+          "label": "reuse-old",
+          "status": "succeeded",
+          "hostInstanceId": "317940fb-2e3e-43a1-993f-68bb2c1108a3",
+          "nativeSessionId": "01a1cb87-5b60-7797-952e-b4bdc99aac44",
+          "nativePid": 50617,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        },
+        {
+          "label": "continue-old-after-upgrade",
+          "status": "succeeded",
+          "hostInstanceId": "317940fb-2e3e-43a1-993f-68bb2c1108a3",
+          "nativeSessionId": "01a1cb87-5b60-7797-952e-b4bdc99aac44",
+          "nativePid": 50617,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        },
+        {
+          "label": "cold-new-resume",
+          "status": "succeeded",
+          "hostInstanceId": "25c6389b-50f5-459d-9a5e-52395deae989",
+          "nativeSessionId": "01a1cb87-5b60-7797-952e-b4bdc99aac44",
+          "nativePid": 51045,
+          "launchCount": 2,
+          "launchVersion": "1.5.2",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.5.2",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        }
+      ],
+      "sameOldProcessAcrossUpgrade": true,
+      "sameNativeSessionThroughout": true,
+      "normalCloseThenNewProcess": true,
+      "contextAndToolEffectsConfirmed": true
+    },
+    {
+      "case": "busy",
+      "status": "passed",
+      "upgrade": {
+        "from": "1.1.0",
+        "to": "1.5.2",
+        "milliseconds": 1293,
+        "entryUnchanged": true,
+        "actualPackageReplaced": true,
+        "oldRuntimeModuleSha256": "c30fd8f7f1a50fdf4860b87613fc6e906d04cc1d4646360826e001abbd1f2152",
+        "newRuntimeModuleSha256": "8fdd4161be64f4aadb8bec47ae77b56dcbeab288da6e55dcab3e0243e50f80fc",
+        "reportedVersion": "1.5.2"
+      },
+      "stages": [
+        {
+          "label": "seed-old",
+          "status": "succeeded",
+          "hostInstanceId": "3a6cfbd4-08b4-46c0-82af-bd3f6020e96c",
+          "nativeSessionId": "01a1cb87-5b74-7381-86c1-22e9f3b2e65a",
+          "nativePid": 50618,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": false
+        },
+        {
+          "label": "reuse-old",
+          "status": "succeeded",
+          "hostInstanceId": "3a6cfbd4-08b4-46c0-82af-bd3f6020e96c",
+          "nativeSessionId": "01a1cb87-5b74-7381-86c1-22e9f3b2e65a",
+          "nativePid": 50618,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        },
+        {
+          "label": "busy-upgrade",
+          "status": "succeeded",
+          "hostInstanceId": "3a6cfbd4-08b4-46c0-82af-bd3f6020e96c",
+          "nativeSessionId": "01a1cb87-5b74-7381-86c1-22e9f3b2e65a",
+          "nativePid": 50618,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        },
+        {
+          "label": "continue-old-after-upgrade",
+          "status": "succeeded",
+          "hostInstanceId": "3a6cfbd4-08b4-46c0-82af-bd3f6020e96c",
+          "nativeSessionId": "01a1cb87-5b74-7381-86c1-22e9f3b2e65a",
+          "nativePid": 50618,
+          "launchCount": 1,
+          "launchVersion": "1.1.0",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.1.0",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        },
+        {
+          "label": "cold-new-resume",
+          "status": "succeeded",
+          "hostInstanceId": "7cf6e6d1-038b-4445-ba21-9929fdc12fd2",
+          "nativeSessionId": "01a1cb87-5b74-7381-86c1-22e9f3b2e65a",
+          "nativePid": 51220,
+          "launchCount": 2,
+          "launchVersion": "1.5.2",
+          "contextRecalled": true,
+          "runRuntimeVersion": "1.5.2",
+          "readCompleted": true,
+          "bashSearchOutputConfirmed": true
+        }
+      ],
+      "sameOldProcessAcrossUpgrade": true,
+      "sameNativeSessionThroughout": true,
+      "normalCloseThenNewProcess": true,
+      "contextAndToolEffectsConfirmed": true
+    }
+  ],
+  "initialAttemptsRetained": [
+    {
+      "case": "warm",
+      "classification": "pre-upgrade model did tools successfully but omitted requested context tag in its reply; prompt clarified and fresh case run",
+      "successfulRecordedRuns": 1
+    },
+    {
+      "case": "busy",
+      "classification": "harness incorrectly required stable outer CLI shim hash to change after npm upgrade; actual compiled cli-runtime.js hash is now checked; fresh case run",
+      "successfulRecordedRuns": 2
+    }
+  ],
+  "scope": [
+    "Both cases used isolated Core data, managed Skills, MCP, workspace, native config copies and npm install prefix.",
+    "npm install replaced the same installation at the same selected entry path while the old Host stayed alive. Python entry only recorded PID/launch metadata then execed the real installed Node CLI; no model or protocol mock.",
+    "Installed version V2 was published using the existing manual lightweight check. Automatic attempt timing/failure/order covered by the related Rust owner; no clock backdating in live Pi cases.",
+    "After publication the follow-up Run still reports runtimeVersion 1.1.0; only normal Core shutdown and cold exact resume report 1.5.2.",
+    "No Pi retirement exception was added. No live daily App, global install, login or global settings changed.",
+    "This proves the recorded macOS versions/tools/model combination; no every-extension, every-platform or arbitrary-duration claim.",
+    "Prior 19-Runtime acceptance belongs to its original frozen builds; it was not rerun.",
+    "Native frozen binaries precede the final compatibility-report digest-only refresh. Admission flags and Runtime execution code are unchanged; focused admission evidence checks run after the refresh."
+  ],
+  "successfulFinalAgentRuns": 9,
+  "officialPackageProvenance": [
+    {
+      "version": "1.1.0",
+      "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.1.0.tgz",
+      "integrity": "sha512-SeEi/4hdcHNgA9UWlefZl7ZZpm3dzi2OoxNjDHsBJ9o298LNOtbL4DGKgitlEj6uCTccvtw6f2hlCkTPVJ2RXg==",
+      "shasum": "0ebd064bf1342f812f9676dde85b2f0b3e02b7e6"
+    },
+    {
+      "version": "1.5.2",
+      "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.5.2.tgz",
+      "integrity": "sha512-mUWI04rqF1Vd/m1q+Ps1XeWsTXEVvRUnsmRa83I3Dzua0Tx5bYS93imeqtIfrXf7PkkaR6ERz+AuQhIJlom5yA==",
+      "shasum": "26300ab187a9b5a6db0efc8dd4d41a6c6bfcd610"
+    }
+  ],
+  "cleanup": {
+    "copiedCredentialFilesPurged": 16,
+    "knownTestPidsAbsent": 6,
+    "normalCoreShutdownConfirmed": true
+  },
+  "postAcceptanceIntegration": {
+    "main": "a8391a5e874cf8c7ca30d69f48e05341da22bd3c",
+    "contract": "v88 inherits main v87",
+    "unchangedExecutionPaths": [
+      "crates/rovai-core/src/pi/host.rs",
+      "crates/rovai-core/src/codex.rs",
+      "crates/rovai-core/src/runtime_fleet.rs"
+    ],
+    "notes": "Main Kilo/catalog/usage and CJK work preserved; Pi execution/continuation code unchanged. Original frozen Core/CLI hashes above identify the live-test candidate.",
+    "relatedOwnersPassed": 39,
+    "workspace": {
+      "passed": 484,
+      "failed": 0,
+      "ignored": 1
+    },
+    "newRustTestFunctions": 0
+  }
+}

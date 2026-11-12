@@ -1602,13 +1602,14 @@ impl CodexCliRuntimeAdapter {
                     compatibility,
                 },
                 move || async move {
-                    let spawn_runtime = prepare_cold(spawn_runtime).await?;
+                    let mut spawn_runtime = prepare_cold(spawn_runtime).await?;
                     let spawn_executable = PathBuf::from(&spawn_runtime.executable_path);
                     let spawn_environment = rovai_core::member_environment::resolve_for_launch(
                         spawn_environment_source,
                         spawn_runtime.environment.clone(),
                     )
                     .await?;
+                    spawn_runtime.environment = spawn_environment.clone();
                     let mut spawn_custom_api = spawn_runtime.custom_api.clone();
                     if spawn_environment
                         .as_ref()
@@ -3009,6 +3010,19 @@ for line in sys.stdin:
         .unwrap();
         assert_eq!(warm.host_instance_id(), first.host_instance_id());
         assert_eq!(
+            warm.launch_runtime()
+                .environment
+                .as_ref()
+                .unwrap()
+                .values
+                .as_ref()
+                .unwrap()
+                .get("LAUNCH_VALUE")
+                .map(String::as_str),
+            Some("A"),
+            "the reused Host keeps the environment captured at its original launch"
+        );
+        assert_eq!(
             std::fs::read_to_string(root.join("codex.env")).unwrap(),
             "A\n"
         );
@@ -3058,6 +3072,19 @@ for line in sys.stdin:
         fleet.invalidate_member("agent_1").await;
         let next = pending.await.unwrap();
         assert_ne!(next.host_instance_id(), first.host_instance_id());
+        assert_eq!(
+            next.launch_runtime()
+                .environment
+                .as_ref()
+                .unwrap()
+                .values
+                .as_ref()
+                .unwrap()
+                .get("LAUNCH_VALUE")
+                .map(String::as_str),
+            Some("C"),
+            "cold creation records its actual resolved environment"
+        );
         assert_eq!(
             std::fs::read_to_string(root.join("codex.env")).unwrap(),
             "A\n\nC\n"

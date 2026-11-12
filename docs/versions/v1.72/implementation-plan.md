@@ -5144,6 +5144,70 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 本次未运行真实模型/Pi 或 Windows 原生验收，不把受控 Runtime 元数据与 Electron 夹具当作此类证据。
 
 
+## 安装版本按需刷新与 Host 生命周期解耦（2026-11-11）
+
+User seq79 确认最终范围：保留实际目标的按需版本刷新，撤下 PR #1073 中所有版本驱动退役，不增加配置开关或 Pi 特例。
+合同为继承 v87 的 [Runtime Launch v88](../../contracts/runtime-launch-and-verification-v88.md)。
+
+- Core 保留原有 Check Manager、十分钟实际尝试间隔、手动共享与顺序围栏，成功和失败都计时；静态缓存不冒充实际读取。
+  入口替换清理旧入口范围，切回相同路径也拒收原选择期间的迟到结果；不同有效环境保持各自归属。
+- 本轮已有正式版本读取不追加自动查询。版本命令不作为 Run 的额外前置条件，自动失败不投影为不可用，草稿仍独立。
+- 移除 `retire_changed_versions` 调用、仅供退役的 Host 版本基线/比较，以及获取、释放、清扫里的温和版本标志与后继等待/拒绝。
+  Codex/Pi 真正启动时捕获的有效环境继续保存，以准确执行后续版本命令；现有最低版本和协议代际校验保留。
+- 版本写回只更新安装信息，原有 Host 健康、取消、插话后关闭、故障清理、配置变化、TTL/LRU 与 Session 接续独立运行。
+  安装版本不作为进程复用/Native Session 身份，不自动改变当前 Host/Run 的实际版本；原有完整配置审计 digest 不变。
+
+### 验证归属
+
+不新增 Rust 测试函数。原 `manual_rescan_reads_versions_and_discards_replaced_version_responses` owner 保留
+版本保存、599/600 秒边界、迟到结果、环境/安装归属、失败静默和手动反馈、草稿隔离与入口替换/切回矩阵，
+改验手动/后台版本发布后原健康 Host 仍可获取和释放，并由原 Sweep 独立处理。
+原 Codex warm/cold 环境 owner 验证实际捕获环境继续保留。
+
+仅与已删除版本退役机制有关的空闲/忙碌基线、软标志、关闭 gate 和比较矩阵随生产路径撤下；
+这些用例没有独立当前合同。原 Fleet hard retirement、inflight shutdown、取消/回收确认、配置失效、原生后台与 LRU owners
+完整保留；OpenCode 原代际/Steer 收尾 owners 保留，不能删除原有关闭条件来掩盖旧方案交互。
+
+最小相关命令：
+
+```sh
+cargo test -p rovai-core --features slow-tests,extended-tests --lib -- runtime_fleet:: manual_rescan_reads_versions_and_discards_replaced_version_responses runtime_check_activity_has_two_slots runtime_discovery:: startup_settings:: warm_host_ignores_unreadable_environment opencode_host_keeps_prepared_generation active_input_receipts_preserve_the_original_prompt --quiet
+cargo test --workspace
+```
+
+### Pi 真实原地升级
+
+自动验收通道使用独立 Core/data/Skills/MCP、工作区、原生配置副本与 npm 安装目录。
+固定选定入口和安装目录，使用官方 Pi 1.1.0→1.5.2；分别在空闲 Warm 和活动 Run 执行期间完成真实 npm 原地升级。
+验收必须记录 Host ID/PID、Session、工具与上下文，并确认升级后仍使用旧进程，再经原有关闭和新版冷接续。
+两组最终验收共 9 个真实模型 AgentRun 成功，旧进程在升级后继续完成 read、bash 搜索与文件追加，Host ID/PID 不变，
+上下文标签和 Native Session 均保留。空闲组旧 PID 50617、忙碌组 50618；正常 Core 关闭后新版冷接续分别使用 51045、51220，
+仍为原 Native Session。安装行已是 1.5.2 时，旧进程的 Run 仍准确记录 runtimeVersion 1.1.0，冷启动后才为 1.5.2。
+实际替换的是同一 npm prefix 下的官方包；外层 cli.js/选定入口不变，真正 cli-runtime.js 的 SHA-256 已变。
+忙碌组在真实 Bash 工具阻塞期间完成 npm 升级和轻量版本发布，再正常释放工具；没有提前切换新进程。
+
+本次未观察到可归因于升级的功能故障，Pi 不增加退役特例。模型为现有 sub2api/gpt-6.1-sol，Core/Skills/MCP/原生 Home/安装均隔离。
+两次初步尝试保留：一组模型未按要求复述标签；另一组脚本错误地要求稳定外层 shim 的内容变化。
+澄清提示、改为核对实际模块后，使用新 Core/Session 独立重跑；不将这两次脚本判定归为升级故障或隐藏记录。
+精确身份、工具证据、官方包来源与边界见[脱敏 Pi 证据](../../research/pi-in-place-upgrade-2026-11-11.evidence.json)。
+正常关闭后六个已知测试 PID 均不存在，16 个复制配置文件已清理，未改全局安装/登录或日常 App。
+
+相关 Rust owners 39 项及默认 workspace 首轮 484 passed、1 ignored；摘要同步后的 5 项准入证据 owner 通过，准入标记不变。
+随后同步 main `a8391a5e8` 的 Kilo/usage 与 CJK 改动，将合同顺延为继承 v87 的 v88，保留主线 v85–v87 正文。
+最终集成相关 owners 39 项、默认 workspace 484 passed、1 ignored，格式与三项文档门禁通过；两轴复核无新增问题。
+Pi/Codex/Fleet 与真实验收候选执行代码相同；新增主线 Kilo/usage 分支未改变 Pi 接续路径，原生证据仍标识其冻结二进制。
+本轮不重跑此前 19 种真实模型矩阵或整套扩展回归。
+
+### 前期证据的适用范围
+
+`f4143b0` / `cd96c777f` 的前期 19 种真实模型、79 次最终成功 AgentRun 与 4 组原生旧新版本证据保留在
+[兼容记录](../../runtime-compatibility.md#2026-11-11-按需版本刷新与真实模型验收)及[脱敏证据](../../research/runtime-on-demand-version-2026-11-11.evidence.json)。
+这些构建含已撤下的版本退役路径，不将其计作当前方案的换代资格或本轮重跑。
+Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起，也没有宣称根因已修复。
+
+合入 Kilo 前，基线 `cb1c027e4` 的整套扩展 Core target 为 1023 passed、12 failed、8 ignored；
+12 项数据库/准入、legacy Steer 和队员工具失败已在干净主线逐项复现。本轮不修改或跳过它们，也不冒充重跑全套扩展。
+
 ## MiniMax 参数按需读取（2026-11-10）
 
 基线 main@6d51b19f2；工作分支 rovai/minimax-model-options-on-demand。实现与本机验收完成。

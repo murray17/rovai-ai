@@ -224,6 +224,10 @@ impl Core {
                 "所选程序不存在或无法执行，请重新选择。"
             );
         }
+        let program_path_changed = prepared
+            .edits
+            .iter()
+            .any(|edit| edit.path == ["programPath"]);
         let settings = {
             let mut database = self.database.lock().await;
             runtime_startup::commit_save_with_common(
@@ -247,6 +251,13 @@ impl Core {
         }
         .with_startup_configuration(kind, check_configuration);
         search.activate_for_runtime_commands();
+        {
+            let mut state = self.runtime_check_activity.write().await;
+            state.published_search_generation = search.generation();
+            if program_path_changed {
+                state.version_reads.retain(|target, _| target.kind != kind);
+            }
+        }
         *self.runtime_search_environment.write().await = Arc::new(search);
         if settings.reconnect_required {
             self.native_skill_discovery.invalidate_cache();
@@ -392,6 +403,8 @@ impl Core {
                     model_target: None,
                     search: self.runtime_search_environment.read().await.clone(),
                     startup_preview: Some(preview.clone()),
+                    version_refresh: None,
+                    version_target: None,
                     runtime_kind: kind,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
                     trigger: RuntimeCheckTrigger::UserCheck,

@@ -179,10 +179,11 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v84](runtime-launch-and-verification-v84.md) | Kilo MCP 下一 Run 生效、原生权限继承及共享取消 Warm／回收；原输入与平台资格保持 |
-| [Runtime Launch and Verification v85（历史）](runtime-launch-and-verification-v85.md) | Kilo 单次官方 CLI 模型/variants 目录，移除逐模型扫描；原 ACP 执行、缓存与平台资格保持 |
+| [Runtime Launch and Verification v88（当前）](runtime-launch-and-verification-v88.md) | Run 按需限频刷新本机版本、读取顺序围栏与 Host 生命周期解耦 |
+| [Runtime Launch and Verification v87（历史）](runtime-launch-and-verification-v87.md) | 保留执行默认 allow；Kilo 权限展示细节由 UI 规范拥有 |
 | [Runtime Launch and Verification v86（历史）](runtime-launch-and-verification-v86.md) | Kilo 正式执行进程环境默认 allow，具体权限仍由原生裁决；目录、输入与生命周期保持 |
-| [Runtime Launch and Verification v87（当前）](runtime-launch-and-verification-v87.md) | 保留执行默认 allow；Kilo 权限展示细节由 UI 规范拥有 |
+| [Runtime Launch and Verification v85（历史）](runtime-launch-and-verification-v85.md) | Kilo 单次官方 CLI 模型/variants 目录，移除逐模型扫描；原 ACP 执行、缓存与平台资格保持 |
+| [Runtime Launch and Verification v84（历史）](runtime-launch-and-verification-v84.md) | Kilo MCP 下一 Run 生效、原生权限继承及共享取消 Warm／回收；原输入与平台资格保持 |
 | [Runtime Launch and Verification v83（历史）](runtime-launch-and-verification-v83.md) | Kilo 逐模型 effort 复用 MiniMax 非生成目录收集与健康／完整目录分离；不改执行或权限 |
 | [Runtime Launch and Verification v82（历史）](runtime-launch-and-verification-v82.md) | Kilo 成功 Steer 全部收口后沿普通 Fleet 复用 Host；失败、取消与未收口维持原清理 |
 | [Runtime Launch and Verification v81（历史）](runtime-launch-and-verification-v81.md) | Kilo 回调前提、无隐式 Node 的共享 MCP cwd、统一取消期限、路径/投影与 effort 展示 |
