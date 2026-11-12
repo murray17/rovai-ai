@@ -8,21 +8,6 @@ last_updated: 2026-11-11
 
 # v1.72 实施与验收
 
-## 侧栏菜单图文对齐（2026-11-11）
-
-- 从 `origin/main@d7b69cb64` 建立 `rovai/sidebar-menu-alignment`。仅调整共享菜单项 CSS，
-  保留 Project／Thread 菜单动作、侧栏菜单最小宽度、消息菜单内容宽度和所有主题 Token。
-- 侧栏旧规则使用 18px 列容纳 16px 图标，实测图文间距为 10px、文字行高为 `normal`。
-  统一为横向居中布局、16px 不收缩图标、8px 间距和 20px 文字行高，消息菜单消费同一规则。
-- 隔离 Electron 加载生产 `ThreadNavigation`、语言、主题和 CSS；64 组几何检查通过，覆盖中英文、
-  五主题、1040×700／1440×920／2560×1440、200% 缩放及 Project／Thread 两种菜单。
-  图文间距均为 8px，图标与文字行框中心差为 0，文本未裁切、菜单未越界；人工核对代表性截图。
-- `pnpm typecheck`、`pnpm test:navigation-shell`、`pnpm test:thread-fork` 通过；完整
-  `TZ=UTC pnpm test` 为 3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped。
-  既有生产组件验收继续覆盖消息菜单、导出、键盘／触屏、草稿和导航恢复。
-- 验证记录与前后截图保存到 Thread 附件目录 `Sidebar-Menu-Alignment`。未新增测试函数、页面或依赖；
-  没有 Main／Core 逻辑改动，不重跑桌面构建、Rust 或真实模型验收；日常 App／真实数据库未用于写入验收。
-
 ## Thread 分叉（2026-11-11）
 
 - Work item：Thread 分叉；Branch：`rovai/thread-fork`；Checkout：仓库主 checkout 的任务分支。
