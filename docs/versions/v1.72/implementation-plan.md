@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # v1.72 实施与验收
@@ -43,6 +43,8 @@ Architecture 当前入口同步；v88 及其 Pi 真实升级验收记录保持�
 默认 workspace 为 484 passed、1 ignored；TypeScript 与完整 `pnpm test` 通过，包含 Vitest 3274 passed／2 skipped、
 Node 主测试组 377 passed／2 skipped，文档单测 10 passed，格式及文档差异门禁通过。
 本轮是隔离合成程序与现有兼容性 owner 验证，没有将其表述为真实 OpenCode／LLM 的新版日常 App 验收。
+同步主线后的首次 Node 全量重跑出现一项既有文件预览 watcher 一秒等待超时；该模块与主线字节一致，
+单独复查 59 项及完整 Node 重跑均通过。未修改该模块或测试期限，原失败记录保留，不宣称其根因已修复。
 最小命令：
 
 ```sh

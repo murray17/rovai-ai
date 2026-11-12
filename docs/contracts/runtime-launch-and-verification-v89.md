@@ -4,7 +4,7 @@ name: Runtime Launch and Verification
 version: v89
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Runtime Launch and Verification v89
