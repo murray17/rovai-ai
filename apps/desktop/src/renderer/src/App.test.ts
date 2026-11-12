@@ -2985,8 +2985,8 @@ describe('task event projections', () => {
   })
 
   it('defines the final unified Thread and Project menu labels', () => {
-    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
-    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '分叉', '导出', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '分叉', '导出', '删除'])
     expect(projectNavigationMenuLabels(false)).toEqual(['新建对话', '置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
     expect(projectNavigationMenuLabels(true)).toEqual(['新建对话', '取消置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
   })

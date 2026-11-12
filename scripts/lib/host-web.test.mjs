@@ -304,6 +304,14 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const created = await call(first, 'camps.create', createParams)
     assert.equal(created.status, 'applied')
     const threadId = created.payload.threadId
+    const forkParams = { commandId: crypto.randomUUID(), sourceThreadId: threadId }
+    const forked = await call(first, 'threads.fork', forkParams)
+    assert.equal(forked.status, 'applied')
+    assert.notEqual(forked.payload.threadId, threadId)
+    assert.deepEqual(await call(first, 'threads.fork', forkParams), forked)
+    assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'threads.fork', params: forkParams })).result, forked)
+    const forbiddenForkInput = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation: 'threads.fork', params: { ...forkParams, commandId: crypto.randomUUID(), messages: [] } }) })
+    assert.ok((await forbiddenForkInput.json()).error, 'Frontend message arrays are not admitted')
     for (const [operation, cursor] of [
       ['agentRunExecution.page', { afterSequence: 1 }],
       ['agentRunExecution.changes', { afterChangeSequence: 1, refreshEvidenceIds: [] }]

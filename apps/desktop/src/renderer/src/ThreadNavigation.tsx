@@ -1,3 +1,4 @@
+import { ForkIcon } from './ForkIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import { TeamGlyph } from './MissionDefinitionEditor'
 import { useShortcutAction, useShortcutLabel, useShortcuts } from './ShortcutProvider'
@@ -85,7 +86,7 @@ type NavigationAction = {
 export function campNavigationMenuLabels(pinned: boolean, unread = false): string[] {
   return [pinned ? uiAttribute('取消置顶') : uiAttribute('置顶'),
     unread ? uiAttribute('标记已读') : uiAttribute('标记未读'),
-    uiAttribute('重命名'), uiAttribute('复制会话 ID'), uiAttribute('导出会话'), uiAttribute('删除')]
+    uiAttribute('重命名'), uiAttribute('复制会话 ID'), uiAttribute('分叉'), uiAttribute('导出'), uiAttribute('删除')]
 }
 
 export async function copyThreadIdToClipboard(
@@ -190,6 +191,8 @@ export function ThreadNavigation({
   onRenameProject,
   onThreadIdCopied = () => undefined,
   onExportThread,
+  onForkThread,
+  forkBusy = false,
   onRename,
   onDelete,
   onDeleteError,
@@ -240,6 +243,8 @@ export function ThreadNavigation({
   onRemoveProject(project: ProjectNavigationGroup): Promise<void>
   onThreadIdCopied?(): void
   onExportThread?(thread: NavigationThreadItem): void
+  onForkThread?(thread: NavigationThreadItem): void
+  forkBusy?: boolean
   onRename(thread: NavigationThreadItem, title: string): Promise<void>
   onDelete(thread: NavigationThreadItem): Promise<void>
   onDeleteError?(error: unknown): void
@@ -487,6 +492,8 @@ export function ThreadNavigation({
                 onTogglePin={() => void togglePin('camp', thread.id, thread)}
                 onCopyThreadId={() => void copyThreadId(thread)}
                 onExport={onExportThread ? () => onExportThread(thread) : undefined}
+                onFork={onForkThread ? () => onForkThread(thread) : undefined}
+                forkBusy={forkBusy}
                 onThread={onThread}
                 onAction={openAction}
               />
@@ -523,6 +530,8 @@ export function ThreadNavigation({
                 onToggleThreadPin={(thread) => void togglePin('camp', thread.id, thread)}
                 onCopyThreadId={(thread) => void copyThreadId(thread)}
                 onExportThread={onExportThread}
+                onForkThread={onForkThread}
+                forkBusy={forkBusy}
                 threadReadStates={threadReadStates}
                 onSetThreadUnread={onSetThreadUnread ? setThreadUnread : undefined}
                 platform={platform}
@@ -570,6 +579,8 @@ export function ThreadNavigation({
                 onToggleThreadPin={(thread) => void togglePin('camp', thread.id, thread)}
                 onCopyThreadId={(thread) => void copyThreadId(thread)}
                 onExportThread={onExportThread}
+                onForkThread={onForkThread}
+                forkBusy={forkBusy}
                 threadReadStates={threadReadStates}
                 onSetThreadUnread={onSetThreadUnread ? setThreadUnread : undefined}
                 platform={platform}
@@ -602,6 +613,8 @@ export function ThreadNavigation({
             onToggleThreadPin={(thread) => void togglePin('camp', thread.id, thread)}
             onCopyThreadId={(thread) => void copyThreadId(thread)}
             onExportThread={onExportThread}
+                onForkThread={onForkThread}
+                forkBusy={forkBusy}
             threadReadStates={threadReadStates}
             onSetThreadUnread={onSetThreadUnread ? setThreadUnread : undefined}
             platform={platform}
@@ -977,6 +990,8 @@ function ThreadGroup({
   onToggleThreadPin,
   onCopyThreadId,
   onExportThread,
+  onForkThread,
+  forkBusy = false,
   threadReadStates,
   onSetThreadUnread,
   platform,
@@ -1015,6 +1030,8 @@ function ThreadGroup({
   onToggleThreadPin(thread: NavigationThreadItem): void
   onCopyThreadId(thread: NavigationThreadItem): void
   onExportThread?(thread: NavigationThreadItem): void
+  onForkThread?(thread: NavigationThreadItem): void
+  forkBusy?: boolean
   onThread(thread: NavigationThreadItem): void
   onAction(kind: 'rename' | 'delete', thread: NavigationThreadItem): void
 }): JSX.Element {
@@ -1104,6 +1121,8 @@ function ThreadGroup({
             onTogglePin={() => onToggleThreadPin(thread)}
             onCopyThreadId={() => onCopyThreadId(thread)}
             onExport={onExportThread ? () => onExportThread(thread) : undefined}
+                onFork={onForkThread ? () => onForkThread(thread) : undefined}
+                forkBusy={forkBusy}
             onThread={onThread}
             onAction={onAction}
           />
@@ -1131,6 +1150,8 @@ function ThreadRow({
   onTogglePin,
   onCopyThreadId,
   onExport,
+  onFork,
+  forkBusy = false,
   onThread,
   onAction
 }: {
@@ -1144,6 +1165,8 @@ function ThreadRow({
   onTogglePin(): void
   onCopyThreadId(): void
   onExport?(): void
+  onFork?(): void
+  forkBusy?: boolean
   onThread(thread: NavigationThreadItem): void
   onAction(kind: 'rename' | 'delete', thread: NavigationThreadItem): void
 }): JSX.Element {
@@ -1187,12 +1210,15 @@ function ThreadRow({
     icon: 'copy',
     onSelect: onCopyThreadId
   })
+  if (onFork && thread.activationState !== 'pending') menuItems.push({
+    key: 'fork', label: menuLabels[4], icon: 'fork', disabled: forkBusy, onSelect: onFork
+  })
   if (onExport && thread.activationState !== 'pending') menuItems.push({
-    key: 'export', label: menuLabels[4], icon: 'export', onSelect: onExport
+    key: 'export', label: menuLabels[5], icon: 'export', onSelect: onExport
   })
   menuItems.push({
     key: 'delete',
-    label: menuLabels[5],
+    label: menuLabels[6],
     icon: 'trash',
     danger: true,
     separatorBefore: true,
@@ -1234,7 +1260,7 @@ function ThreadRow({
 type SidebarActionMenuItem = {
   key: string
   label: string
-  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export'
+  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export' | 'fork'
   disabled?: boolean
   filled?: boolean
   danger?: boolean
@@ -1326,6 +1352,7 @@ function SidebarMenuIcon({ kind, filled = false }: {
   filled?: boolean
 }): JSX.Element {
   if (kind === 'square-pen') return <NavigationIcon name="square-pen" />
+  if (kind === 'fork') return <ForkIcon className="sidebar-action-menu-icon" />
   if (kind === 'export') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5" /></svg>
   if (kind === 'reveal') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v3M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9" /><path d="M12 14h9m-3-3 3 3-3 3" /></svg>
   if (kind === 'read') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-6 9 6v10H3ZM3 9l9 6 9-6" /></svg>

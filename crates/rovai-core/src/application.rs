@@ -1153,6 +1153,7 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "members.remove"
             | "navigation.campViewed"
             | "camps.create"
+            | "camps.fork"
             | "camps.discardPending"
             | "camps.rename"
             | "camps.members.add"
@@ -1174,6 +1175,7 @@ fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
     matches!(
         method,
         "camps.create"
+            | "camps.fork"
             | "camps.discardPending"
             | "camp.messages.send"
             | "camp.messages.withdraw"
@@ -1352,6 +1354,27 @@ struct CreateThreadParams {
     collaboration_mode: ThreadCollaborationMode,
     #[serde(default)]
     activation_state: ThreadActivationState,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ForkThreadParams {
+    command_id: String,
+    #[serde(deserialize_with = "rovai_core::camp_id::deserialize_camp_id_string")]
+    source_thread_id: String,
+    source_message_id: Option<String>,
+}
+
+impl ForkThreadParams {
+    fn envelope(self) -> CommandEnvelope<rovai_core::camp_fork::ForkThreadCommand> {
+        user_command_envelope(
+            self.command_id,
+            rovai_core::camp_fork::ForkThreadCommand {
+                source_thread_id: self.source_thread_id,
+                source_message_id: self.source_message_id,
+            },
+        )
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -11440,6 +11463,22 @@ impl Core {
             | "missions.status"
             | "missions.start"
             | "missions.linkPr" => self.handle_mission(request).await,
+            "camps.fork" => {
+                let params: ForkThreadParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::camp_fork::fork_thread(
+                    &mut database,
+                    &params.envelope(),
+                    &self.data_dir,
+                )?;
+                if execution.result.status == CommandResultStatus::Applied
+                    && !execution.replayed
+                    && let Some(id) = execution.result.payload["threadId"].as_str()
+                {
+                    emit_navigation_invalidated(&self.output, "camps.fork", Some(id));
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "camps.create" => {
                 let params: CreateThreadParams = serde_json::from_value(request.params.clone())?;
                 let (project_binding_kind, requested_path) = match &params.workspace {
@@ -36723,6 +36762,7 @@ done
             "members.remove",
             "navigation.campViewed",
             "camps.create",
+            "camps.fork",
             "camps.rename",
             "camp.messages.send",
             "camp.messages.withdraw",
@@ -36747,6 +36787,7 @@ done
         }
         for method in [
             "camps.create",
+            "camps.fork",
             "camps.discardPending",
             "camp.messages.send",
             "camp.messages.withdraw",

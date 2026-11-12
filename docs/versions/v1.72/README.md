@@ -11,6 +11,14 @@ last_updated: 2026-11-11
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Thread 分叉（2026-11-11）
+
+在 `rovai/thread-fork` 从 `origin/main@3568dc1f8831eafadf937159f4cc61e146fe621d` 实施。
+公开历史通过一个应用作用域命令原子复制为普通 Active Thread；不继承执行、Session、渠道绑定或输入草稿。
+规则归 [Thread Fork v1](../../contracts/thread-fork-v1.md)、[会话 UI](../../ui/components/conversation-workspace.md#thread-分叉)
+和[统一侧栏](../../ui/components/app-shell-navigation.md)，实施与验证证据见[本版记录](implementation-plan.md#thread-分叉2026-11-11)。
+版本指针保持 v1.72；没有新增表、后台服务或 Context／Bootstrap／Manifest 格式变更。
+
 ## Kilo 官方 ACP（2026-11-08，Preview）
 
 User sequence 4 确认 [R1 输入方案](model-context-change-kilo-acp.md)后，已新增独立 `kilo-cli`，

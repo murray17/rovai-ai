@@ -50,6 +50,10 @@ pub(super) fn reconcile(
         }};
     }
     match query.operation.as_str() {
+        "camps.fork" => {
+            let params: ForkThreadParams = serde_json::from_value(query.params)?;
+            receipt(database, params.envelope())
+        }
         "missions.create" => {
             let mut params: UserCommandParams<crate::mission::CreateMissionCommand> =
                 serde_json::from_value(query.params)?;
@@ -294,6 +298,7 @@ mod tests {
             ("thread.messages.send", "camp.messages.send"),
             ("thread.messages.withdraw", "camp.messages.withdraw"),
             ("threads.create", "camps.create"),
+            ("threads.fork", "camps.fork"),
             ("threads.rename", "camps.rename"),
             ("threads.members.add", "camps.members.add"),
             ("singleChat.send", "singleChat.send"),

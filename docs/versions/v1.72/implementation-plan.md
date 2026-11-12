@@ -8,6 +8,118 @@ last_updated: 2026-11-11
 
 # v1.72 实施与验收
 
+## Thread 分叉（2026-11-11）
+
+- Work item：Thread 分叉；Branch：`rovai/thread-fork`；Checkout：仓库主 checkout 的任务分支。
+- Base：`origin/main@3568dc1f8831eafadf937159f4cc61e146fe621d`；Governance：同一 PR 更新当前合同与 UI，无主线先行要求。
+- Status：实施与隔离验收完成；[PR #1075](https://github.com/murray17/rovai-ai/pull/1075) 已推送，等待远端门禁与审核。
+- Core：`camp_fork.rs` 专用 immediate transaction，应用作用域回执、发布事实去重、白名单复制、引用重映射、
+  历史附件转 Source Ref、关系初始化与提交后读取失效。普通创建准入未放宽；不产生投递、通知、未读或渠道外发。
+- Renderer：BusinessApp 共享前台状态；原请求与目标 ID 按现有 Profile/Host/Owner scope 保存；刷新读取回执。
+  页面访问序号隔离 A→B→A，异步离开保护后再次核对；保存／打开失败只重试导航。两处入口与现有导出同菜单。
+- Rust 测试准入：三个 `extended-tests` owners 各自拥有复制/后继发送、准入、回滚/并发/删除后重放的独立失败语义；
+  原创建/发送/网关 owner 不经过新事务路径，纯函数不能证明跨表回滚和 INSERT producer 无副作用。
+- 已通过：`pnpm typecheck`；`TZ=UTC pnpm exec vitest run`（276 文件，3274 passed / 2 skipped）；
+  `cargo test -p rovai-core --features extended-tests --lib camp_fork::`（3 项）；`pnpm test:rust:pr`（workspace 484 passed / 1 ignored）；
+  `pnpm build:desktop`；`pnpm test:navigation-shell`；`pnpm test:message-export-ui`（3 项，含完整历史/移动端/HTML/PNG/Markdown）；
+  `node --test scripts/lib/host-web.test.mjs`（2 项真实独立 Host/Core seam，包含分叉、原请求重放与回执读取）。
+- `pnpm test:thread-fork`：生产 BusinessApp／Composer／Radix／AppToast 的独立 Electron userData，受控传输，不启动 Runtime。
+  覆盖复制期间编辑、空副本输入框、源草稿保留、A→B／A→B→A、异步附件保存后的新导航、保存/打开失败只重试导航、
+  目标被删、丢失响应与刷新回执、重复入口禁用；原读取和导出没有换成 HTML 原型实现。
+- 视觉证据对应生产提交 `3a6cdb120a435376f00501471cf57f4f0babcecd`：中英文 × 五套主题 × 三种实际内容尺寸
+  `1040×700 / 1440×920 / 2560×1440`，30 组几何/菜单检查、62 张截图；消息菜单中文宽 113.27px、英文 163.36px，
+  图标 16px、文字与图标中心差 0px。200%（英文绯夜）额外验证键盘菜单，触屏点击与 reduced motion 另验；
+  顶部 loading 在侧栏折叠和窗口变化后继续按 App 居中。公开附件目录为 Thread-Fork-Acceptance（report.json 与五张代表截图）。
+- 干净源码副本中的 `TZ=UTC pnpm test` 已通过：3274 Vitest 通过 / 2 跳过，后续 Node 矩阵 377 通过 / 2 跳过；
+  `docs:test`、`docs:check`、Skills 与 Electron admission 随同通过；`DOCS_BASE_REF=3568dc1f8831eafadf937159f4cc61e146fe621d pnpm docs:check:ci` 通过。
+  该副本只共享既有依赖缓存，显式关闭 pnpm 的自动重新安装检查，不跳过任何项目门禁。
+- 本机 `docs:check` 发现被 Git 忽略的既有 `docs/prototypes/` 草稿链接问题；保留这些并行素材，最终文档门禁将在仅含提交文件的隔离源代码副本执行，不改通用检查器或添加例外。
+- 未覆盖：真实 LLM/Runtime 调用、Windows 原生客户端与辅助技术。复制后普通 Context/投递由 Core fixture 验证，不引入分叉专用历史注入。
+
+### 合并前复核修正（2026-11-11）
+
+- 复核起点为 `12689bbe0b94ef85512db8256144eb4362c61850`，同步最新
+  `origin/main@92ff101a7de0485bb4e74750946eea4b3949f0b7`，保留并行中文斜体改动。
+- 复制集合与现有公屏可见性一致：保留定时任务正式发布的 System 指令，过滤内部事件和旧审批记录；
+  内部事件不能作为锚点。`effective_recipient_ids_json` 按原值复制，历史 `mentions` 与源一致，仍不创建 Delivery。
+- 分叉打开不提前提交缓存预览；已停在目标预览页时重新请求完整投影，确认完整打开后才清除恢复记录。
+  同作者连续分组的带分叉操作栏保持消息下方正常文档流。常驻三点菜单及分叉／导出交互保持已确认方案。
+- 扩展原有两个 Core owners，未新增 Rust 测试函数或数据库 fixture；修复前分别复现系统指令丢失、内部事件混入和冻结提及丢失。
+  隔离生产 Renderer fixture 复现缓存打开误报成功与顶部绝对定位，补充缓存目标失败、当前预览重试和连续消息几何断言。
+- 本轮已通过 `pnpm typecheck`、8 个 Vitest 文件共 60 项、Core 分叉 3 项和 `pnpm build:desktop`。
+  生产 Electron 自动验收继续使用独立 `userData`／Skill 目录、受控传输，不启动 Core 或模型；
+  复用原中英文／五主题／三尺寸矩阵与 200% 检查，30 组连续消息操作栏均位于正文下方，保留 62 张截图。
+  本轮 Thread 附件证据目录为 `Thread-Fork-Review-Fixes`；真实模型及 Windows 原生验收边界不变。
+- 收尾检查：默认 `pnpm test:rust:pr` 为 workspace 484 passed / 1 ignored；完整 `TZ=UTC pnpm test`
+  为 3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped。导出 3 项、导航／启动 2 项、
+  `docs:test`、`docs:check`、以 `92ff101a7de0485bb4e74750946eea4b3949f0b7` 为目标 base 的 `docs:check:ci`
+  与 `cargo fmt --all --check` 均通过。生产修补提交 `df004718e1b7784da142f646d14232c466c945fe` 已推送原 PR。
+- `pnpm test:rust:extended` 未通过：Core lib 为 1026 passed / 12 failed / 8 ignored；
+  扩展运行中的 3 个分叉 owner 均通过。Core lib 失败后未继续其余 workspace 扩展 target。
+  在独立源码 checkout 的最新 `main@92ff101a7` 使用相同 feature、同名 owner 定向复现相同失败。
+  本 PR 相对该 main 未改动 `db.rs`、`db_steer.rs`、`delivery_queue.rs`、`team_tool.rs`、`test_support.rs`
+  或 Core Cargo 配置，没有通过放宽断言、跳过测试或修改原模块来消除失败。
+  最小复现命令为 `cargo test -p rovai-core --features extended-tests --lib <完整 owner 名称> -- --exact`。
+
+| 基线失败 owner | 实际失败边界 |
+| --- | --- |
+| `db::tests::current_migration_state_admission_matrix` | 当前版本未满足显式升级来源断言 |
+| `db::tests::database_contract_preflight_admits_current_and_rejects_future_store` | 当前迁移状态与旧预期不一致 |
+| `db::tests::legacy_feishu_migration_marker_collision_reconciles_without_quarantine` | 删除旧回执后的当前库准入断言 |
+| `db::tests::v95_invalidates_native_session_context_and_nonterminal_runs` | 旧 `formatter_version` 范围断言 |
+| `db::tests::v98_invalidates_profile_v3_context_and_preserves_public_messages` | 旧 `formatter_version` 范围断言 |
+| `db::tests::v103_adds_trae_delivery_without_overriding_custom_skill_assignments` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `db::tests::v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `db::tests::v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `db::tests::v107_adds_grok_catalog_and_preserves_runtime_and_skill_rows` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `delivery_queue::tests::legacy_steer_upgrade_keeps_accepted_unknown_and_unfinished_sources` | Steer 升级 helper 的快照一致性断言 |
+| `team_tool::tests::confirmed_user_input_can_create_one_idempotent_member_but_agent_input_cannot` | 旧资料长度拒绝断言 |
+| `team_tool::tests::member_profile_reads_and_patches_preserve_scope_atomicity_and_replay` | 旧资料更新拒绝断言 |
+
+
+### 复制白名单收窄（2026-11-11）
+
+- 从 `02a0c51a4e819adee5797d0eb8baa1a1c9b7a168` 继续，目标 base 仍为 `origin/main@92ff101a7`。
+  修改范围限定为专用复制模块、原测试 owner／生产组件 fixture 和当前合同。
+- 引用经现有解析器规范化，剔除退役 digest／locator；同源公开、已复制且未撤回的定位映射到副本。
+  其余来源移除可选 source，选文、捕获作者／时间和 quote ID 保留。模型投影仍只有既有的 kind／text。
+- 两列 presentation 保留目标默认值；源可见性筛选保留。只出现在引用作者快照中的身份不补成员关系；
+  实际作者、提及、addressed／effective 收件人仍按原白名单保留。
+- 引用／提及索引仅复制原有记录，撤回占位不生成索引；SQLite／FTS 沿用现有触发器。
+  新副本采用收窄规则，不增加历史数据迁移或文件复制。
+- 扩展原 `fork_copies_published_snapshot_and_ordinary_sends_continue_its_history`，不新增 Rust 测试函数或数据库 fixture。
+  修复前同源引用仍指向旧 Thread 的断言失败；修复后 Core 3 项通过，覆盖集合内外、私聊／其他 Thread、
+  删除／未发布／撤回来源、副本再次分叉、仅引用作者、原记录不改写、列默认值、撤回索引和历史 mentions。
+- 生产 BusinessApp／ThreadWorkspace 的隔离 Electron 验收通过：实际选文定位聚焦副本消息，无来源选文保留文字与作者。
+  复用原主题／尺寸和导航恢复矩阵，增加一张引用气泡截图；传输为受控 fixture，Core 数据边界由上述事务 owner 验证。
+  类型检查通过；真实模型和 Windows 原生验收边界保持原记录。
+- 本轮收窄提交为 `d41481d25fc006f143fbb382720f85c0d78ada28`，已推送原 PR，远端
+  [CI / gate](https://github.com/murray17/rovai-ai/actions/runs/43043673679) 通过。
+  `pnpm build:desktop`、完整 `TZ=UTC pnpm test`（3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped）、
+  默认 Rust workspace（484 passed / 1 ignored）、导出 3 项、引用交互 1 项、格式检查及按目标 base 的文档门禁通过。
+  Thread 附件目录 `Thread-Fork-Cleanup` 只保留新增引用定位图和验证记录；主题矩阵复用原 fixture 的几何断言。
+- 本轮完整扩展回归为 Core lib 1026 passed / 12 failed / 8 ignored，分叉 3 项均通过；失败名称集合与前述
+  已在 `main@92ff101a7` 隔离复现的 12 项完全一致。Core lib 失败后未继续其余 workspace 扩展 target。
+
+### 复制白名单最终收口（2026-11-11）
+
+- 在 `989882aff7badcde773170961046674c5c9ed8df` 上同步 `origin/main@a8391a5e8`，仅补两处复制精简。
+- 撤回占位在历史成员汇总前，把副本的寻址方式设为 `default`、addressed／effective 收件人设为空数组。
+  仅因这些已撤回收件人存在的历史成员不再补建；作者、序号、时间和撤回状态保留，源记录不改写。
+- 分叉停止填充 `camp_message_mention`，正常消息继续保留两类收件人事实和已有 reference 索引。
+  普通发送、表结构、索引维护和历史 mentions 读取不变；不迁移已有副本或继续删减普通消息字段。
+- 扩展既有公开快照和准入 owner，不新增 Rust 测试函数或数据库 fixture。真实普通发送→撤回→收件人离队
+  复现修复前残留寻址信息与多余历史关系；无 mention 索引时继续验证历史 mentions 一致、reference 搜索命中。
+  修复前两条定向断言失败，分别定位残留收件人和 mention 索引复制。
+- 本轮 Core 分叉 3 项、`pnpm typecheck`、默认 Rust workspace（484 passed / 1 ignored）、格式检查通过。
+  完整 `TZ=UTC pnpm test` 通过：3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped；
+  文档／Skills 门禁随同通过。干净源码副本按 `a8391a5e8` 的 `docs:check:ci` 通过，未修改被 Git 忽略的本地原型。
+- 在最新 `main@a8391a5e8` 的独立源码和数据库 fixture 上重新定向运行先前 12 个失败 owner，12 项均复现。
+  本次没有 Renderer／Main 接线变更，不重复桌面构建或截图矩阵；原生产组件验收的覆盖边界保持前述记录。
+- 完整 `pnpm test:rust:extended` 为 Core lib 1026 passed / 12 failed / 8 ignored；分叉 3 项均通过，失败名单
+  与本轮 `main@a8391a5e8` 对照完全一致，无新增失败。Core lib 失败后未执行其余 workspace 扩展 target。
+  Thread 附件目录 `Thread-Fork-Final-Trim` 保存定向修复前后、默认／扩展回归及最新主线对照的验证记录。
+
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
 
 分支 `rovai/kilo-acp`，worktree `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
