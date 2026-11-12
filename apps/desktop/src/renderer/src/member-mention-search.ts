@@ -3,17 +3,20 @@ import { memberSearchMatch, memberSearchMatches } from './member-search'
 import { adapterLabel, VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 
 const aliases: Partial<Record<AdapterKind, readonly string[]>> = {
+  'antigravity-app': ['agy'],
   'codex-cli': ['codex'],
   'claude-code-cli': ['claude'],
   'copilot-cli': ['copilot'],
+  'kiro-cli': ['kiro-cli'],
+  'qoder-cli': ['qodercli'],
   'qwen-code': ['qwen'],
   'trae-cn-cli': ['trae'],
   'kimi-code-cli': ['kimi'],
-  'minimax-code-cli': ['minimax'],
+  'minimax-code-cli': ['minimax', 'mcode'],
   'hermes-cli': ['hermes'],
   'grok-build': ['grok'],
   'deepseek-harness': ['deepseek', 'dsh'],
-  'command-code-cli': ['command']
+  'command-code-cli': ['command', 'cmdc']
 }
 
 const normalizeRuntime = (value: string): string =>
