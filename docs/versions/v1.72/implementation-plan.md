@@ -207,6 +207,11 @@ Linux x64 的真实模型和 ACP 结果见[目标机验收](../../research/kilo-
 Windows x64 资格及 Sub2API 复验见[目标机验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)。
 
 2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正，以及 Steer 接续可行性见[复核记录](kilo-acp-review-fixes.md)。
+
+**TODO：Kilo Steer 提前接收确认。** 等待官方 ACP 提供执行结束前、可关联到具体插话请求的原生接收回执后，
+再接入并对齐“已插话”的显示时机。此前保持现有回执判定；不实施仅放宽 `end_turn` 条件的方案，
+该方案无法缩短“发送中”的等待时间。
+
 ## OpenCode Steer 局部接入（2026-11-10）
 
 - 分支 `rovai/opencode-steer`，基线 `13a4b8f96c71bc7866c749da5321a026d8f876b9`，独立 worktree
