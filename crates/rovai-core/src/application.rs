@@ -7848,7 +7848,7 @@ impl Core {
                             MemoryToolService.write(&mut database, &invocation)
                         }?;
                     evidence_replayed = execution.replayed;
-                    emit_memory_if_applied(&self.output, &execution);
+                    emit_memory_if_committed(&self.output, &execution);
                     command_execution_payload(execution)
                 }
                 MEMORY_VIEW_TOOL_NAME => {
@@ -10702,7 +10702,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.revise" => {
@@ -10713,7 +10713,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.retire" => {
@@ -10724,7 +10724,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.reactivate" => {
@@ -10735,7 +10735,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.forget" => {
@@ -10746,7 +10746,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.supersede" => {
@@ -10757,7 +10757,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.review.schedule" => {
@@ -10768,7 +10768,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.hearthReviewItems.list" => {
@@ -10785,7 +10785,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.hearthReviewItems.reject" => {
@@ -10796,7 +10796,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit_memory_if_applied(&self.output, &execution);
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.export" => {
@@ -29170,8 +29170,8 @@ fn emit_navigation_invalidated(
     );
 }
 
-fn emit_memory_if_applied(output: &mpsc::UnboundedSender<String>, execution: &CommandExecution) {
-    if !execution.replayed && execution.result.status == CommandResultStatus::Applied {
+fn emit_memory_if_committed(output: &mpsc::UnboundedSender<String>, execution: &CommandExecution) {
+    if !execution.replayed && execution.result.status != CommandResultStatus::Rejected {
         emit(output, "memory.changed", json!({}));
     }
 }
@@ -37692,7 +37692,21 @@ done
             std::env::temp_dir().join(format!("rovai-task-discovery-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
+        let mut core = runtime_resolution_test_core(&root).unwrap();
+        let (output, mut host_events) = mpsc::unbounded_channel();
+        core.output = output;
+        let core = Arc::new(core);
+        fn memory_hints(events: &mut mpsc::UnboundedReceiver<String>) -> usize {
+            let mut count = 0;
+            while let Ok(frame) = events.try_recv() {
+                let frame: Value = serde_json::from_str(&frame).unwrap();
+                if frame["method"] == "memory.changed" {
+                    assert_eq!(frame["params"], json!({}));
+                    count += 1;
+                }
+            }
+            count
+        }
         let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
             path: root.join("core.sock").to_string_lossy().into_owned(),
         };
@@ -37866,6 +37880,45 @@ done
             "body":"Keep exact capability receipts.","retrievalKeys":["capability receipts"]});
         let written = invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await;
         assert_eq!(written["envelope"]["ok"], true, "{written}");
+        assert_eq!(memory_hints(&mut host_events), 1);
+        let hearth_id = uuid::Uuid::new_v4().to_string();
+        let hearth_input = json!({"action":"add","scope":"hearth","kind":"agreement",
+            "body":"A committed pending candidate must refresh the review count.","retrievalKeys":["review refresh"]});
+        let pending =
+            invoke_memory(&core, a, &hearth_id, "memory.write", hearth_input.clone()).await;
+        assert_eq!(pending["envelope"]["ok"], true, "{pending}");
+        assert!(pending.to_string().contains("review_pending"));
+        assert_eq!(
+            memory_hints(&mut host_events),
+            1,
+            "accepted Hearth save must emit a content hint"
+        );
+        assert_eq!(
+            invoke_memory(&core, a, &hearth_id, "memory.write", hearth_input.clone()).await,
+            pending
+        );
+        assert_eq!(
+            memory_hints(&mut host_events),
+            0,
+            "receipt replay must not emit another hint"
+        );
+        let duplicate = invoke_memory(
+            &core,
+            a,
+            &uuid::Uuid::new_v4().to_string(),
+            "memory.write",
+            hearth_input,
+        )
+        .await;
+        assert_eq!(
+            duplicate["envelope"]["error"]["code"],
+            "memory.duplicate_pending"
+        );
+        assert_eq!(
+            memory_hints(&mut host_events),
+            0,
+            "rejected duplicate must not refresh content"
+        );
         // Arrange close after the actual read, before final result selection,
         // using the existing FIFO DB mutex rather than a production test hook.
         let racing_id = uuid::Uuid::new_v4().to_string();

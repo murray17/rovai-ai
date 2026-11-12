@@ -56,12 +56,12 @@ User 消息 `f9a37446-9a3f-4716-ac6c-7e0b9cd6aaf0` 已列出完整调用链、�
 复核确认三处行为问题成立，重复读取也有明确调用来源。本轮修正保持在原函数、Provider 和既有失效通道内。
 Provider 只扩展内存中的观察元数据，快照仍为三个字段；成功/失败/事件回包共用同一接收规则。
 Core 将最后一次检查前移到成功证据之前，并复用该数据库 guard 记录证据；外层不再改判。
-Web 的 memory.changed 仅在实际已提交的新 Memory 变更发出，SSE 内容标记不携带正文。
+Web 的 memory.changed 覆盖 applied 正式记忆与 accepted 待审核候选的新提交，SSE 内容标记不携带正文。
 
 | 复核 | 实际结果 |
 | --- | --- |
 | `cargo test --workspace` | 484 passed / 1 existing ignored |
-| Core `task_discovery_refresh_scopes_bindings_and_repairs_saved_preferences` owner | 通过；利用现有 FIFO DB 锁队列稳定安排实际读取之后、最终结果选择之前关闭；回包、完整分段存储证据和活动记录均失败，错误一致且无正文；R3 三类坏设置及回执用例继续通过 |
+| Core `task_discovery_refresh_scopes_bindings_and_repairs_saved_preferences` owner | 通过；利用现有 FIFO DB 锁队列稳定安排实际读取之后、最终结果选择之前关闭；回包、完整分段存储证据和活动记录均失败，错误一致且无正文；正式写入/accepted 审核候选各一次内容提示，回执回放/重复候选拒绝零提示；R3 三类坏设置及回执用例继续通过 |
 | `cargo test -p rovai-core --features slow-tests --lib memory` | 29 passed；权限、生命周期、管理与幂等回放保持 |
 | `pnpm test` | Vitest 276 files / 3275 passed / 2 skipped；默认 Node 377 passed / 2 skipped；通知与 Web 解码 owners 通过 |
 | `pnpm test:memory-workspace-ui` | 通过；生产 Provider 的 save→read 失败、两个方向同序号旧轮询、较高 Core 序号的旧 get、未知/关闭与重试；无关失效零全量读取，内容失效/resync 各一次读取，已有旧列表失败仍可原位重试 |
