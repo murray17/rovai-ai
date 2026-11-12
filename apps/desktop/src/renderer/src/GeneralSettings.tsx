@@ -489,7 +489,7 @@ export function GeneralSettings({
                 onChange={event => void memory.setEnabled(event.target.checked)} />
             </div>
             <div className="sr-only" role="status">{memory.saving && <UiText zh="正在保存…" />}{!memory.ready && !memory.error && <UiText zh="正在读取记忆设置…" />}</div>
-            {memory.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={memory.error === 'save' ? '未能保存，请重试。' : 'Rovai 长期记忆状态暂不可用，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void memory.retry()}><UiText zh="重试" /></button></div>}
+            {memory.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={memory.error === 'save' ? '未能保存，请重试。' : '无法读取长期记忆设置，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void memory.retry()}><UiText zh="重试" /></button></div>}
             <label className="general-world-map-setting" aria-busy={worldMapBusy}>
               <span>
                 <strong><UiText zh={"世界地图"} /></strong>

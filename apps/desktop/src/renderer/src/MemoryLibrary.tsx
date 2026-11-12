@@ -707,7 +707,7 @@ export function MemoryLibrary({
   const capabilityFeedback = <>
     <span className="sr-only" role="status">{memory.saving && <UiText zh="正在保存…" />}</span>
     {memory.error && <div className="memory-capability-error" role="alert">
-      <span><UiText zh={memory.error === 'read' ? 'Rovai 长期记忆状态暂不可用，请重试。' : '未能保存，请重试。'} /></span>
+      <span><UiText zh={memory.error === 'read' ? '无法读取长期记忆设置，请重试。' : '未能保存，请重试。'} /></span>
       <button className="quiet-button compact" type="button" disabled={memory.saving} onClick={() => void memory.retry()}><UiText zh="重试" /></button>
     </div>}
   </>

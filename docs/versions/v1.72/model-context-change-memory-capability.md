@@ -11,7 +11,7 @@ confirmation_message_id: 1d5d32d6-6b6f-40a0-88bd-2de7062ac1df
 authority: proposed-model-input-change-statement
 implementation_status: implemented
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Rovai 长期记忆实例开关
@@ -144,7 +144,7 @@ User 管理读取、导出和全部新变更暂停，控制接口和结果确认
 | 停用页说明 | 已保存的记忆会保留，重新开启后可继续使用和管理。 |
 | 记忆页开关（开启态标题旁、停用态说明下） | Rovai 长期记忆 |
 | 初始读取 | 正在读取记忆设置… |
-| 读取失败 | Rovai 长期记忆状态暂不可用，请重试。 |
+| 读取失败 | 无法读取长期记忆设置，请重试。 |
 | 保存中/失败/重试 | 正在保存… / 未能保存，请重试。 / 重试 |
 
 Memory 导航保留；两处开关共用同一 Provider，保留保存中、读取失败、保存失败和重试行为。
@@ -266,6 +266,28 @@ R2 全文先通过独立提交 `bd6b4acbe` 归档，再修改 Skill 资源。实
 对比稿直接编译上一版 `927613194` 与本工作树的生产组件/CSS，只替换演示数据与 transport；
 沿用 BusinessApp 的设置侧栏及移动布局，另提供真实 MCP 空状态参照。原型按仓库规则仅本地保存，
 测试和当前文档不依赖它存在。验收使用隔离浏览器 profile，不启动 Core 或真实 Runtime，不修改日常数据。
+
+## 收尾与可用性复核（2026-11-12）
+
+User sequence 23（消息 `572a80f2-b5f7-4352-a93e-0c788e7b2ce4`）授权继续在现有 Memory worktree 执行。
+读取失败提示统一收简为“无法读取长期记忆设置，请重试。”，同步中文/英文界面及当前 UI 说明。
+保留既有请求失败与重试分支；S03.3 补清旧 reference 的准确路径和原位覆盖理由，Skill 内容与同步机制保持。
+此次收尾不改变 R2 的模型输入、业务授权、默认值或旧会话边界。
+类型检查、4 个 Renderer owners 的 199 项用例、生产 Memory UI owner（10 组交互 / 18 组视口配色）、
+Desktop/Web 构建及通用文档门禁通过；读取失败仍与已确认关闭分开，保存失败沿用原重试机制。
+
+可用性复核重新运行现有 owners，共 32 项通过：
+
+| 命令 | 结果与覆盖 |
+| --- | --- |
+| `cargo test -p rovai-core --features slow-tests --lib memory` | 29 passed；三种 Scope、读写/管理权限、生命周期、已提交回执与重启保留关闭 |
+| `cargo test -p rovai-core --features slow-tests --lib task_discovery_refresh_scopes_bindings_and_repairs_saved_preferences` | 1 passed；两个开关独立、现有运行进程发现、关闭读缓存、提交回执与重开实时读取、Hermes 既有发现路径 |
+| `cargo test -p rovai-core --features slow-tests --lib newly_bound_session_bootstraps_on_its_current_generation` | 1 passed；新输入按当前状态生成，已冻结 Bootstrap 的 evidence ID 与 payload 保持 |
+| `cargo test -p rovai-core --features slow-tests --lib current_schema_contains_required_contract_objects` | 1 passed；升级显式默认开启、迁移失败回滚、关闭后再次迁移不重置、历史数据证据保持 |
+
+默认开启及人工关闭是一个 Core 实例的持久设置；普通对话、Run 与其他工具继续，
+关闭暂停后续记忆业务和管理，保留已有数据和已提交事实。已进入模型上下文的内容仍可能被使用。
+这些结论属于 Core 与自动化覆盖，真实 Runtime 的全量模型 Gate 仍为前述 `not_run / 证据不足`。
 
 ## 完整提示词与工具对照
 
@@ -488,8 +510,10 @@ Temporary plans, project facts and historical evidence belong to their existing 
 Use `rovai --help` for available operations and exact command help for syntax.
 ```
 
-保留旧文件路径，使已经知道路径的旧会话可以读取通用导航；新 Skill 的 References 不再链接它。
-按既有受管资源同步覆盖文件，不增加删除、旧内容 hash 识别或开关专用的资源发布流程。
+`skills/cli-operations/references/memory.md` 在原位替换为上述通用导航，新 Skill 的 References 不再链接它。
+现有[受管资源同步](../../../crates/rovai-core/src/managed_skills.rs)覆盖包内文件，但不清理源目录中已删除文件的部署副本。
+仅删除源文件可能让已安装目录继续保留旧 Memory 教学；保留路径并用短文覆盖即可沿用现有同步机制。
+旧会话按已知路径读取时会得到通用导航；已冻结上下文保持原样。
 
 #### S03.4：界面元数据
 

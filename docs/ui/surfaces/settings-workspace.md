@@ -374,6 +374,6 @@ runtime checks. Preserve failed drafts and field conflict recovery. Behavior is 
 
 通用 → 会话的 Memory 开关使用 Core 权威 Provider，位于会话任务之后，复用同一标题、问号帮助和开关行。
 帮助为“允许队员读取并形成 Rovai 的长期记忆。关闭后暂停记忆访问与管理，已保存数据保留。”，并说明
-“已进入当前对话上下文的内容仍可能保留。”读取失败显示“Rovai 长期记忆状态暂不可用，请重试。”，
+“已进入当前对话上下文的内容仍可能保留。”读取失败显示“无法读取长期记忆设置，请重试。”，
 不以关闭态代替未知；保存状态及重试沿用 Task 交互。关闭其他客户端也会同步；不停止对话或发送会话提示。
 领域与快照边界见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。

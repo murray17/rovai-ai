@@ -30,7 +30,7 @@ empty-state composition: a narrow 460px content column, generous top spacing, th
 “Rovai 长期记忆已关闭” heading, “已保存的记忆会保留，重新开启后可继续使用和管理。” description,
 and the same “Rovai 长期记忆” switch to re-enable directly. Use the existing Memory neutral tokens, without a warning card.
 Do not load or render the business list/detail, counts, review dialogs, reminders or automatic notices.
-An unavailable setting shows “Rovai 长期记忆状态暂不可用，请重试。” with Retry; initial loading uses
+An unavailable setting shows “无法读取长期记忆设置，请重试。” with Retry; initial loading uses
 “正在读取记忆设置…”. Do not infer a confirmed disable from a failed read. Late business responses cannot
 restore content or notices. Re-enable reads current data without automatically submitting retained drafts.
 Disable the switch during initial loading, unavailable reads and saving; keep the confirmed value until Core replies.

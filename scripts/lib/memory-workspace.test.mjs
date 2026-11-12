@@ -392,7 +392,7 @@ test('Memory workspace: production components, mutations, notifications and resp
     await b.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
     await b.wait('!!document.querySelector(".memory-catalog")')
     await b.evaluate('__memoryFixture.failCapabilityRead()')
-    await b.wait('document.querySelector(".memory-library").textContent.includes("状态暂不可用")')
+    await b.wait('document.querySelector(".memory-library").textContent.includes("无法读取长期记忆设置")')
     assert.equal(await b.evaluate('document.querySelector(".memory-library").textContent.includes("已关闭")'), false)
     assert.equal(await b.evaluate('!!document.querySelector(".memory-catalog")'), false)
     assert.ok(await b.evaluate('document.querySelector(".memory-capability-switch").disabled'), 'unavailable setting cannot be toggled')
