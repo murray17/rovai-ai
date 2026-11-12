@@ -1648,6 +1648,8 @@ User 已在范围和文案审阅后授权独立 worktree 实施，当前为[已�
 仅在新输入原有生成路径省略 Memory 入口和技能，旧 Session/Bootstrap/冻结输入不主动处理。
 R2 沿用 Task 的固定精简方式，从 cli-operations 移除 Memory 专用教学，记忆工作流归条件投递的
 memory-stewardship；通用 CLI 协调始终提供。
+User sequence 17 的界面跟进已将关闭态调整为 MCP 首次空状态的布局，并在记忆页增加与通用设置同步的总开关；
+原有管理功能与 R2 模型输入语义保持，验证见[界面跟进](model-context-change-memory-capability.md#界面跟进与验证user-sequence-17)。
 当前接口见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。实现及自动化验收完成，
 真实模型通用 Gate 尚未执行；范围、结果与限制见[实施记录](implementation-plan.md#rovai-长期记忆实例开关2026-11-11)。
 全部提示词、工具定义/help、关闭错误和回放的前后变化见

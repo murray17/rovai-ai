@@ -102,9 +102,25 @@ const scopeTabs: Array<[LibraryScope, string]> = [
   ['relationship', '队员间']
 ]
 
+function MemoryCapabilitySwitch(): React.JSX.Element {
+  const memory = useMemoryCapability()
+  return <button
+    className="memory-capability-switch"
+    type="button"
+    role="switch"
+    aria-label={uiAttribute('Rovai 长期记忆')}
+    aria-checked={memory.enabled}
+    aria-busy={memory.saving}
+    disabled={!memory.ready || memory.error === 'read' || memory.saving}
+    onClick={() => void memory.setEnabled(!memory.enabled)}
+  >
+    <span><UiText zh="Rovai 长期记忆" /></span>
+    <span className="memory-capability-switch-track" aria-hidden="true" />
+  </button>
+}
+
 export function MemoryLibrary({
   agents,
-  onOpenSettings,
   topNotices,
   refreshSignal = 0,
   focusMemoryId = null,
@@ -117,7 +133,6 @@ export function MemoryLibrary({
   startupFeedbackVisible = true
 }: {
   agents: AgentProfile[]
-  onOpenSettings?(): void
   topNotices?: ReactNode
   refreshSignal?: number
   focusMemoryId?: string | null
@@ -689,14 +704,24 @@ export function MemoryLibrary({
     }}
   />
 
+  const capabilityFeedback = <>
+    <span className="sr-only" role="status">{memory.saving && <UiText zh="正在保存…" />}</span>
+    {memory.error && <div className="memory-capability-error" role="alert">
+      <span><UiText zh={memory.error === 'read' ? 'Rovai 长期记忆状态暂不可用，请重试。' : '未能保存，请重试。'} /></span>
+      <button className="quiet-button compact" type="button" disabled={memory.saving} onClick={() => void memory.retry()}><UiText zh="重试" /></button>
+    </div>}
+  </>
+
   if (!memory.active) return (
-    <section className="memory-library memory-workspace" aria-labelledby="memory-library-title" data-startup-route="memory" data-startup-status={memory.ready || memory.error ? 'ready' : 'loading'}>
-      <header className="memory-library-header"><div><h2 id="memory-library-title"><UiText zh="记忆" /></h2></div></header>
-      {memory.ready && !memory.enabled && memory.error !== 'read' ? <>
-        <p role="status"><UiText zh="Rovai 长期记忆已关闭。重新开启后可继续使用和管理已保存的记忆。" /></p>
-        <div><button className="quiet-button" type="button" onClick={onOpenSettings}><UiText zh="前往设置" /></button></div>
-      </> : memory.error ? <div className="memory-error" role="alert"><span><UiText zh="Rovai 长期记忆状态暂不可用，请重试。" /></span><button className="quiet-button" type="button" onClick={() => void memory.retry()}><UiText zh="重试" /></button></div>
-        : <p role="status"><UiText zh="正在读取记忆设置…" /></p>}
+    <section className="memory-library memory-workspace memory-workspace-inactive" aria-labelledby="memory-library-title" data-startup-route="memory" data-startup-status={memory.ready || memory.error ? 'ready' : 'loading'}>
+      <div className="memory-capability-state">
+        <AppDialogGlyph name="brain" />
+        <h2 id="memory-library-title"><UiText zh={memory.ready && !memory.enabled && memory.error !== 'read' ? 'Rovai 长期记忆已关闭' : 'Rovai 长期记忆'} /></h2>
+        {memory.ready && !memory.enabled && memory.error !== 'read' ? <p><UiText zh="已保存的记忆会保留，重新开启后可继续使用和管理。" /></p>
+          : !memory.error && <p role="status"><UiText zh="正在读取记忆设置…" /></p>}
+        <MemoryCapabilitySwitch />
+        {capabilityFeedback}
+      </div>
       {reviewDialog}
     </section>
   )
@@ -714,7 +739,10 @@ export function MemoryLibrary({
       {mobile && selectedMemory && <div className="mobile-memory-back"><MobileBack label={uiAttribute("返回记忆列表")} onClick={() => setSelectedMemoryId(null)} /><span><UiText zh={"记忆"} /></span></div>}
       <header className="memory-library-header">
         <div>
-          <h2 id="memory-library-title"><UiText zh={"记忆"} /></h2>
+          <div className="memory-title-line">
+            <h2 id="memory-library-title"><UiText zh={"记忆"} /></h2>
+            <MemoryCapabilitySwitch />
+          </div>
           <p><UiText zh={"查看、搜索和管理长期记忆。"} /></p>
         </div>
         <div className="memory-header-actions">
@@ -725,6 +753,8 @@ export function MemoryLibrary({
           <button className="primary-button" type="button" onClick={openCreate} disabled={!library}><DialogControlIcon name="plus" /><UiText zh="新增" /></button>
         </div>
       </header>
+
+      {capabilityFeedback}
 
       <div className="memory-summary-strip" aria-label={uiAttribute("记忆概览")}>
         <div><span><UiText zh="正在沿用" /></span><strong>{library ? activeCount : '—'}</strong></div>

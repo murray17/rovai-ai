@@ -5260,3 +5260,6 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 - R2：User 审阅完整五处 Skill 文本后授权实施；cli-operations 的 description、选择表、引用和
   界面元数据固定精简，旧 Memory reference 保留通用导航。专用记忆 Skill、Charter、Core 业务与
   所有上下文版本轴保持。新一轮资源、Bootstrap、默认回归与文档结果在 R2 变更说明收口。
+- User sequence 17：关闭页按真实 MCP 首次空状态重做，记忆页在开启和停用态均提供与通用设置同步的总开关。
+  生产 UI owner 覆盖保存/重试、防重复和停用零业务读取；194 个 Renderer 定向用例、Desktop/Web 构建与
+  五套配色/桌面/移动/横屏核对通过。模型 R2、Core 和会话生命周期保持，详见[界面验证](model-context-change-memory-capability.md#界面跟进与验证user-sequence-17)。

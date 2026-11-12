@@ -36,6 +36,10 @@ const clearCandidate = (item: HearthReviewItem): void => {
 }
 let memoryCapability = { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0, observedThroughGlobalSequence: 0 }
 let capabilityReadFailures = 0
+let capabilitySaveFailures = 0
+let capabilitySaves = 0
+let heldCapabilitySave: Promise<void> | null = null
+let releaseCapabilitySave: (() => void) | null = null
 let memoryBusinessReads = 0
 const capabilityListeners = new Set<(event: any) => void>()
 let heldCapabilityRead: Promise<void> | null = null
@@ -60,7 +64,13 @@ const client = { platform: 'darwin', async request(method: string, params: any =
     if (heldCapabilityRead) { const held = heldCapabilityRead; heldCapabilityRead = null; capabilityReadWaiting = true; await held; capabilityReadWaiting = false }
     return reply
   }
-  if (method === 'preferences.memory.set') { setMemoryEnabled(params.enabled); return structuredClone(memoryCapability) }
+  if (method === 'preferences.memory.set') {
+    capabilitySaves++
+    if (heldCapabilitySave) { const held = heldCapabilitySave; heldCapabilitySave = null; await held }
+    if (capabilitySaveFailures > 0) { capabilitySaveFailures--; throw new Error('Setting save unavailable') }
+    setMemoryEnabled(params.enabled)
+    return structuredClone(memoryCapability)
+  }
   if (method.startsWith('memory.')) {
     memoryBusinessReads++
     if (!memoryCapability.enabled) throw new Error('memory.feature_disabled')
@@ -131,6 +141,9 @@ function Fixture() {
   useEffect(() => { document.documentElement.dataset.rovaiPlatform = platform; document.documentElement.dataset.platform = platform }, [platform])
   useEffect(() => { (window as any).__memoryFixture = {
     setMemoryEnabled, refreshCapability: invalidateCapability,
+    failCapabilitySave: () => { capabilitySaveFailures++ },
+    holdCapabilitySave: () => { heldCapabilitySave = new Promise(resolve => { releaseCapabilitySave = resolve }) },
+    releaseCapabilitySave: () => { releaseCapabilitySave?.(); releaseCapabilitySave = null },
     holdMutationReceipt: () => { heldMutationReceipt = new Promise(resolve => { releaseMutationReceipt = resolve }) },
     releaseMutationReceipt: () => { releaseMutationReceipt?.(); releaseMutationReceipt = null },
     failCapabilityRead: () => { capabilityReadFailures++; invalidateCapability() },
@@ -138,7 +151,7 @@ function Fixture() {
     releaseCapabilityRead: () => { releaseCapabilityRead?.(); releaseCapabilityRead = null },
     holdMemoryRead: () => { heldMemoryRead = new Promise(resolve => { releaseMemoryRead = resolve }); setRefresh(n => n + 1) },
     releaseMemoryRead: () => { releaseMemoryRead?.(); releaseMemoryRead = null },
-    capabilityStats: () => ({ memoryBusinessReads, capabilityReadWaiting, memoryReadWaiting, mutationReceiptWaiting, enabled: memoryCapability.enabled }),
+    capabilityStats: () => ({ memoryBusinessReads, capabilitySaves, capabilityReadWaiting, memoryReadWaiting, mutationReceiptWaiting, enabled: memoryCapability.enabled }),
     navigate: setTarget, setTheme, setNotice, setPlatform, setLanguage: (language: 'en' | 'zh-CN') => changeInterfaceLanguage(languageTestApi, language),
     failNext: () => { failNext = true },
     failReads: () => { failedReads++ },
@@ -165,7 +178,7 @@ function Fixture() {
   return <ThreadClientProvider client={platformClient}><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile}>
     {!mobile && <ThreadNavigation view="memory" state="ready" navigation={null} activeThreadId={null} pendingMemoryCount={pending} onNewConversation={noop} onMembers={noop} onMemory={noop} onSettings={noop} onOpenProject={noop} onThread={noop} onRemoveProject={asyncNoop} onRename={asyncNoop} onDelete={asyncNoop} onError={noop} />}
     {!mobile && <WindowDragStrip page="memory" />}
-    <main className="content memory-content"><MemoryLibrary onOpenSettings={() => { (window as any).__memorySettingsOpened = true }} agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} /></main>
+    <main className="content memory-content"><MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} /></main>
   </NavigationShell></MobileLayoutProvider></ThreadClientProvider>
 }
 document.documentElement.dataset.platform = 'darwin'

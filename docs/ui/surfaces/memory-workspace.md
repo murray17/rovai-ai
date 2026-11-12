@@ -13,7 +13,8 @@ related_targets:
 ## User goal and first view
 
 Read and manage durable memories with minimal scanning effort. Preserve the shared App rail and typography.
-The header has the title, “查看、搜索和管理长期记忆。” subtitle, review/history entry, and neutral primary Add action.
+The header has the title, a “Rovai 长期记忆” switch, “查看、搜索和管理长期记忆。” subtitle, review/history entry, and neutral primary Add action.
+The page switch and General → 会话 control the same Core preference through the shared Provider.
 Three quiet inline counts show active memories, active agent-origin memories, and memories due for review.
 Loading counts use a dash. A compact dismissible change notice remains visible on the Memory page and in the Thread.
 No capacity meters or separate lifecycle/source filter row is shown.
@@ -24,13 +25,18 @@ selection, badges, borders or decoration. Scope neutral overrides to Memory cont
 
 ## Instance disabled and unavailable
 
-The navigation remains available. When Core confirms Memory is disabled, show only
-“Rovai 长期记忆已关闭。重新开启后可继续使用和管理已保存的记忆。” and “前往设置” leading to General → 会话.
+The navigation remains available. When Core confirms Memory is disabled, follow the MCP first-connection
+empty-state composition: a narrow 460px content column, generous top spacing, the existing neutral brain glyph,
+“Rovai 长期记忆已关闭” heading, “已保存的记忆会保留，重新开启后可继续使用和管理。” description,
+and the same “Rovai 长期记忆” switch to re-enable directly. Use the existing Memory neutral tokens, without a warning card.
 Do not load or render the business list/detail, counts, review dialogs, reminders or automatic notices.
 An unavailable setting shows “Rovai 长期记忆状态暂不可用，请重试。” with Retry; initial loading uses
 “正在读取记忆设置…”. Do not infer a confirmed disable from a failed read. Late business responses cannot
 restore content or notices. Re-enable reads current data without automatically submitting retained drafts.
-Enabled-state labels and review copy below remain unchanged. Authority and replay boundaries belong to
+Disable the switch during initial loading, unavailable reads and saving; keep the confirmed value until Core replies.
+Show save errors beside the control with Retry, retaining its failed intent. The entire labeled control is a keyboard
+operable switch with at least a 44px touch height; narrow layouts wrap header actions without horizontal overflow.
+Existing list/detail labels and review copy below remain unchanged. Authority and replay boundaries belong to
 [Memory Capability v1](../../contracts/memory-capability-v1.md).
 
 ## Scope, search and workbench

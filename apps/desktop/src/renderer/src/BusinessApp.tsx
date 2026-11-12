@@ -4759,7 +4759,6 @@ export function BusinessApp({
         {!startupGateVisible && view === 'memory' && (
           <MobileSettingsLayout pendingMemoryCount={pendingMemoryCount} overview={false} section="memory" appearance={appearance} menuOpen={mobileConversationDrawerOpen} triggerRef={mobileConversationListButtonRef} onOpenMenu={openMobileMenu} onBack={returnToMobileSettings} onSectionChange={chooseSettingsSection}>
           <MemoryLibrary
-            onOpenSettings={() => { chooseSettingsSection('general'); void navigateToSettings('general') }}
             agents={agents}
             topNotices={inlineNotices}
             refreshSignal={memoryRefreshKey}
