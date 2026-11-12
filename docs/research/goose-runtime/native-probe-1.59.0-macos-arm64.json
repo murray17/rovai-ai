@@ -1,0 +1,362 @@
+{
+  "recordType": "native-runtime-research",
+  "status": "pre-implementation",
+  "observedAt": "2026-11-12T16:42:24+00:00",
+  "upstream": {
+    "repository": "https://github.com/aaif-goose/goose",
+    "version": "1.59.0",
+    "revision": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+    "asset": "goose-aarch64-apple-darwin.tar.gz"
+  },
+  "rovai": {
+    "branch": "rovai/goose-acp",
+    "base": "c7295e2b0b4667a5434c855cd2dd456bcf637e4c",
+    "implementation": "NotImplemented"
+  },
+  "scope": {
+    "platform": "macos-arm64",
+    "runtime": "official full CLI, goose acp",
+    "provider": "synthetic loopback HTTP only",
+    "roots": "fresh isolated HOME/XDG/GOOSE_PATH_ROOT/workspace/Skills",
+    "realAccountUsed": false,
+    "paidGenerationUsed": false,
+    "coreStarted": false,
+    "productQualified": false,
+    "scripts": [
+      "scripts/probe-goose-runtime.mjs",
+      "scripts/fixtures/goose-mcp-elicitation.mjs"
+    ]
+  },
+  "requestCount": 55,
+  "requestCountMeaning": "synthetic Provider requests including auxiliary title, compaction and child calls; not Core Run count",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {
+        "image": true,
+        "audio": false,
+        "embeddedContext": true
+      },
+      "mcpCapabilities": {
+        "http": true,
+        "sse": false
+      },
+      "sessionCapabilities": {
+        "list": {},
+        "delete": {},
+        "close": {}
+      },
+      "auth": {},
+      "_meta": {
+        "goose": {
+          "recipeParameterScopes": {},
+          "localInference": {}
+        }
+      }
+    },
+    "authMethods": [
+      {
+        "id": "goose-provider",
+        "name": "Configure Provider",
+        "description": "Run `goose configure` to set up your AI provider and API key"
+      }
+    ],
+    "agentInfo": {
+      "name": "goose",
+      "version": "1.59.0"
+    }
+  },
+  "defaultTools": [
+    "analyze",
+    "apps__create_app",
+    "apps__delete_app",
+    "apps__iterate_app",
+    "apps__list_apps",
+    "delegate",
+    "edit",
+    "extensionmanager__list_resources",
+    "extensionmanager__manage_extensions",
+    "extensionmanager__read_resource",
+    "extensionmanager__search_available_extensions",
+    "load",
+    "load_skill",
+    "read_image",
+    "shell",
+    "tree",
+    "write"
+  ],
+  "checks": {
+    "native": {
+      "version": "1.59.0",
+      "platform": "darwin-arm64",
+      "command": [
+        "goose",
+        "acp"
+      ],
+      "provider": "synthetic-loopback",
+      "qualification": false
+    },
+    "catalog": {
+      "providers": [
+        {
+          "id": "openai",
+          "configured": true,
+          "available": true,
+          "modelCount": 3
+        }
+      ],
+      "providerOptions": 90
+    },
+    "first": {
+      "stopReason": "end_turn",
+      "ordinary": 1,
+      "auxiliary": 1
+    },
+    "warm": {
+      "pid": 67959,
+      "ordinary": 1
+    },
+    "cold": {
+      "pid": 67962,
+      "sameSession": "20261112_1",
+      "ordinary": 1
+    },
+    "missingSession": {
+      "code": -32002,
+      "data": "Session not found: rovai-does-not-exist"
+    },
+    "model": {
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "encoding": "responses",
+      "choices": [
+        "off",
+        "low",
+        "medium",
+        "high",
+        "max"
+      ]
+    },
+    "largeBootstrap": {
+      "bytes": 88099,
+      "verbatim": true
+    },
+    "steer": {
+      "receiptMs": 0.17195800000001782,
+      "receiptBeforeCompletion": true,
+      "messageIds": [
+        "steer_7b1f3bf7-8616-4ccf-bc3e-30d2ac297844",
+        "steer_93165eef-ac57-42fd-9473-5595b18ca9cb"
+      ],
+      "wrongRunRejected": true,
+      "stopReason": "end_turn"
+    },
+    "cancel": {
+      "ms": 2.580500000000029,
+      "stopReason": "cancelled",
+      "samePidSuccessor": 67962,
+      "next": "end_turn"
+    },
+    "files": {
+      "calls": [
+        {
+          "id": "goose_call_13",
+          "title": "write · 测试 空格.txt",
+          "rawOutputKeys": [],
+          "metaKeys": [
+            "goose"
+          ]
+        },
+        {
+          "id": "goose_call_13",
+          "status": "completed",
+          "contentTypes": [
+            "content"
+          ],
+          "rawOutputKeys": [],
+          "metaKeys": []
+        },
+        {
+          "id": "goose_call_14",
+          "title": "shell · cat '测试 空格.txt'",
+          "rawOutputKeys": [],
+          "metaKeys": [
+            "goose"
+          ]
+        },
+        {
+          "id": "goose_call_14",
+          "status": "in_progress",
+          "rawOutputKeys": [],
+          "metaKeys": [
+            "toolNotification"
+          ]
+        },
+        {
+          "id": "goose_call_14",
+          "status": "completed",
+          "contentTypes": [
+            "content"
+          ],
+          "rawOutputKeys": [
+            "stdout",
+            "stderr",
+            "exit_code"
+          ],
+          "metaKeys": []
+        },
+        {
+          "id": "goose_call_15",
+          "title": "edit · 测试 空格.txt",
+          "rawOutputKeys": [],
+          "metaKeys": [
+            "goose"
+          ]
+        },
+        {
+          "id": "goose_call_15",
+          "status": "completed",
+          "contentTypes": [
+            "content"
+          ],
+          "rawOutputKeys": [],
+          "metaKeys": []
+        }
+      ]
+    },
+    "shell": [
+      {
+        "status": "failed",
+        "rawOutput": {
+          "stdout": "GOOSE_STDOUT",
+          "stderr": "GOOSE_STDERR",
+          "exit_code": 7
+        },
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "GOOSE_STDERR\nGOOSE_STDOUT\n\nCommand exited with code 7"
+            }
+          }
+        ]
+      }
+    ],
+    "shellEMPTY": {
+      "stdoutBytes": 0,
+      "stderrBytes": 0,
+      "exitCode": 0
+    },
+    "shellLARGE": {
+      "stdoutBytes": 9000,
+      "stderrBytes": 0,
+      "exitCode": 0
+    },
+    "permissions": {
+      "deny": "end_turn",
+      "allow": "end_turn",
+      "denyEffect": false,
+      "allowEffect": true
+    },
+    "skills": {
+      "read": true,
+      "updatedInSameHost": true,
+      "deletedRejected": true
+    },
+    "delegate": {
+      "completed": true,
+      "parentWaitsForChild": true,
+      "nativeReportReachedParent": true,
+      "childInheritsParentBootstrap": false,
+      "updates": [
+        {
+          "id": "goose_call_33",
+          "status": "completed"
+        }
+      ]
+    },
+    "delegateCancel": {
+      "stopReason": "cancelled",
+      "childProviderDisconnectedBeforeRelease": true,
+      "samePidSuccessor": 67962,
+      "next": "end_turn"
+    },
+    "automaticCompaction": {
+      "nativeStatuses": [
+        "Exceeded auto-compact threshold of 64k tokens. Performing auto-compaction...",
+        "Compaction complete"
+      ],
+      "bootstrapPreserved": true,
+      "messageUsageObserved": false
+    },
+    "overflow": {
+      "injected": true,
+      "compacted": true,
+      "stopReason": "end_turn"
+    },
+    "coldAfterCompaction": {
+      "sameSession": "20261112_1",
+      "bootstrapPreserved": true
+    },
+    "mcp": {
+      "modelCalledServer": true,
+      "restoreIsAdditive": true,
+      "emptyListKeepsOldServers": true,
+      "nativeListKeys": true,
+      "nativeRemoveWorks": true,
+      "coldRemovePersists": true,
+      "sessionBootstrapIsolated": true,
+      "remainingBuiltinTools": 17
+    },
+    "usage": {
+      "messageUsage": {
+        "inputTokens": 100,
+        "outputTokens": 20,
+        "totalTokens": 120,
+        "cacheReadTokens": 10,
+        "cost": 2.625e-05,
+        "costSource": "estimated",
+        "elapsedMs": 3,
+        "timeToFirstTokenMs": 3,
+        "isCompaction": false
+      },
+      "cumulativeIncludesCompaction": true,
+      "compactionMessageUsageObserved": false,
+      "inputSemantics": "cache_inclusive_total"
+    },
+    "elicitation": {
+      "withoutClientCapability": "native_cancel",
+      "noSyntheticAnswers": true,
+      "next": "end_turn"
+    }
+  },
+  "parentSessionUsageSnapshots": {
+    "initial": {
+      "sessionUpdate": "usage_update",
+      "used": 0,
+      "contextLimit": 128000,
+      "accumulatedInputTokens": 0,
+      "accumulatedOutputTokens": 0
+    },
+    "last": {
+      "sessionUpdate": "usage_update",
+      "used": 120,
+      "contextLimit": 128000,
+      "accumulatedInputTokens": 123800,
+      "accumulatedOutputTokens": 780,
+      "accumulatedCost": 0.0193635
+    }
+  },
+  "limitations": [
+    "No real OAuth, subscription, BYOK or Sub2API generation acceptance",
+    "No Core CLI lease/epoch, public-send, late-event or crash-cleanup proof",
+    "No Core/Renderer file projection or persistent 7.5 KiB output-budget proof",
+    "No native HTTP MCP or different-cwd bundled launcher acceptance",
+    "No macOS Intel, Linux or Windows qualification",
+    "Native write/edit transport has no full overwrite preimage",
+    "Native foreground child does not inherit parent Session Bootstrap",
+    "Actual compaction did not expose per-message compaction usage in this run"
+  ]
+}

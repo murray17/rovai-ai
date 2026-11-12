@@ -11,6 +11,16 @@ last_updated: 2026-11-12
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Goose 官方 ACP（2026-11-12，研究与提案）
+
+User sequence 109 的独立 worktree `rovai/goose-acp` 已完成官方 1.59.0 固定源码与真实二进制探测。
+结论、14 轴矩阵和复现脚本见[原生研究](../../research/goose-runtime/README.md)；
+[接入及模型输入 R1](goose-acp-proposal.md)等待二次确认，再提取独立输入说明并进入实现。
+候选复用共享 ACP/Fleet；采用原生 keyed System append、独立 Steer 回执和用量通知，
+不复制 Kilo 的 instructions 文件、第二 prompt、SQLite reader 或已退役权限 Hook。
+MCP 原生恢复不删除旧项、write 缺完整前像等差异已明示。
+本轮没有修改产品目录、Schema、当前合同、模型输入实现或平台资格，详见[状态记录](implementation-plan.md#goose-官方-acp2026-11-12研究与提案)。
+
 ## 通用提示与分叉反馈（2026-11-12）
 
 在独立 worktree 的 `rovai/toast-preview-v4` 实施通用 AppToast 顶部居中、透明文字动作与 SVG 关闭，
