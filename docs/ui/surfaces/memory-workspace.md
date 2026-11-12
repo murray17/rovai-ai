@@ -22,6 +22,17 @@ Use the achromatic `--memory-*` family under every App palette, according to its
 inverse light actions at night. Amber means attention; red means error or permanent forgetting. Do not add blue
 selection, badges, borders or decoration. Scope neutral overrides to Memory content and portals. The shared sidebar, logo and identity avatars keep their production theme; its pending dot is vertically centered.
 
+## Instance disabled and unavailable
+
+The navigation remains available. When Core confirms Memory is disabled, show only
+“Rovai 长期记忆已关闭。重新开启后可继续使用和管理已保存的记忆。” and “前往设置” leading to General → 会话.
+Do not load or render the business list/detail, counts, review dialogs, reminders or automatic notices.
+An unavailable setting shows “Rovai 长期记忆状态暂不可用，请重试。” with Retry; initial loading uses
+“正在读取记忆设置…”. Do not infer a confirmed disable from a failed read. Late business responses cannot
+restore content or notices. Re-enable reads current data without automatically submitting retained drafts.
+Enabled-state labels and review copy below remain unchanged. Authority and replay boundaries belong to
+[Memory Capability v1](../../contracts/memory-capability-v1.md).
+
 ## Scope, search and workbench
 
 Tabs are All / Shared / Member / Between members, defaulting to All. Tabs and search narrow the authoritative list;

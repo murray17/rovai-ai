@@ -1,4 +1,4 @@
-import type { DomainEventView, MemoryScopeKind } from '@contracts'
+import type { DomainEventView, MemoryScopeKind, MemoryCapabilitySnapshot } from '@contracts'
 import { uiAttribute } from './interface-language'
 
 export interface MemoryChange {
@@ -7,6 +7,19 @@ export interface MemoryChange {
   scope: MemoryScopeKind | null
   actorId: string | null
   sequence: number
+}
+
+/** Only the existing Memory event clock defines notice freshness. */
+export function memoryEventsForNotice(
+  events: readonly DomainEventView[], capability: MemoryCapabilitySnapshot | null,
+  active: boolean, afterGlobalSequence: number
+): DomainEventView[] {
+  if (!active || !capability?.enabled) return []
+  const floor = Math.max(afterGlobalSequence, capability.headsUpAfterGlobalSequence)
+  return events.filter(event => event.globalSequence > floor && (
+    event.eventType === 'memory.agent_created' || event.eventType === 'memory.agent_revised'
+    || event.eventType === 'memory.hearth_review_created'
+  ))
 }
 
 /** Count changed records, not repeated revisions of the same record. */

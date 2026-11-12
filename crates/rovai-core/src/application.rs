@@ -6844,11 +6844,14 @@ impl Core {
         &self,
         request: rovai_core::builtin_tool_transport::HermesSessionIpcRequest,
     ) -> BuiltinToolIpcResponse {
-        let BuiltinToolIpcRequestBody::Invoke {
-            request_id,
-            operation,
-            ..
-        } = &request.body;
+        let (request_id, operation) = match &request.body {
+            BuiltinToolIpcRequestBody::Invoke {
+                request_id,
+                operation,
+                ..
+            } => (request_id.as_str(), operation.as_str()),
+            BuiltinToolIpcRequestBody::Capabilities => ("", "builtin.capabilities"),
+        };
         let _gate = self.builtin_tool_leases.invocation_guard().await;
         let resolved: Result<_> = {
             let database = self.database.lock().await;
@@ -6941,6 +6944,32 @@ impl Core {
             Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
         };
         match body {
+            BuiltinToolIpcRequestBody::Capabilities => {
+                let database = self.database.lock().await;
+                let capabilities = (|| -> Result<_> {
+                    let single_chat: bool = database.connection().query_row(
+                        "SELECT invocation_kind='single_chat' FROM agent_run WHERE id=?1",
+                        [&authorized.agent_run_id],
+                        |r| r.get(0),
+                    )?;
+                    Ok(
+                        rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
+                            tasks_enabled: !single_chat
+                                && rovai_core::task_capability::enabled(database.connection())?,
+                            memory_enabled: rovai_core::memory_capability::enabled(
+                                database.connection(),
+                            )?,
+                        },
+                    )
+                })();
+                match capabilities {
+                    Ok(capabilities) => BuiltinToolIpcResponse::Capabilities { capabilities },
+                    Err(_) => BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.internal_error",
+                        "Capability state is unavailable",
+                    ),
+                }
+            }
             BuiltinToolIpcRequestBody::Invoke {
                 request_id,
                 operation,
@@ -7096,7 +7125,7 @@ impl Core {
                         if !matches!(
                             operation.as_str(),
                             MEMBER_LIST_TOOL_NAME | MEMBER_GET_TOOL_NAME | MEMBER_UPDATE_TOOL_NAME
-                        ) =>
+                        ) && !rovai_core::memory_capability::is_read_operation(&operation) =>
                     {
                         return BuiltinToolIpcResponse::Envelope { envelope };
                     }
@@ -7232,6 +7261,24 @@ impl Core {
                         "Built-in Tool CLI is not bound to the current AgentRun",
                     );
                 }
+                let memory_read_guard =
+                    if rovai_core::memory_capability::is_read_operation(&operation) {
+                        let database = self.database.lock().await;
+                        if let Err(error) =
+                            rovai_core::memory_capability::require_enabled(database.connection())
+                        {
+                            let (code, message, _) = classify_builtin_operation_error(&error);
+                            return builtin_tool_rejection(
+                                &operation,
+                                &request_id,
+                                &code,
+                                &message,
+                            );
+                        }
+                        Some(database)
+                    } else {
+                        None
+                    };
                 let envelope = match (domain_response.result, domain_response.error) {
                     (Some(result), None) => {
                         BuiltinToolInvocationEnvelope::success(&operation, &request_id, result)
@@ -7263,6 +7310,7 @@ impl Core {
                         );
                     }
                 };
+                drop(memory_read_guard);
                 if let Err(error) = self
                     .builtin_tool_leases
                     .record(&auth, &request_id, &digest, &envelope)
@@ -10145,12 +10193,56 @@ impl Core {
                 // A same-value save also repairs a previously failed projection.
                 // Retry only this derived file state; the preference stays saved
                 // and each attempt reads the latest value under the invocation gate.
-                if !self.refresh_task_discovery(None).await {
+                if !self.refresh_builtin_discovery(None).await {
                     let core = Arc::clone(self);
                     tokio::spawn(async move {
                         for delay_ms in [100, 500, 2_000] {
                             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                            if core.refresh_task_discovery(None).await {
+                            if core.refresh_builtin_discovery(None).await {
+                                break;
+                            }
+                        }
+                    });
+                }
+                Ok(serde_json::to_value(snapshot)?)
+            }
+            "preferences.memory.get" => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Empty {}
+                let _: Empty = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    rovai_core::memory_capability::snapshot(database.connection())?,
+                )?)
+            }
+            "preferences.memory.set" => {
+                let input: rovai_core::memory_capability::MemoryPreferences =
+                    serde_json::from_value(request.params.clone())?;
+                let (changed, snapshot) = {
+                    let mut database = self.database.lock().await;
+                    let tx = database.connection_mut().transaction()?;
+                    let changed = rovai_core::memory_capability::set(&tx, input.enabled)?;
+                    let snapshot = rovai_core::memory_capability::snapshot(&tx)?;
+                    tx.commit()?;
+                    (changed, snapshot)
+                };
+                if changed {
+                    emit(
+                        &self.output,
+                        "preferences.memory_changed",
+                        json!({"enabled": input.enabled}),
+                    );
+                }
+                // A same-value save also repairs a previously failed projection.
+                // Retry only this derived file state; the preference stays saved
+                // and each attempt reads the latest value under the invocation gate.
+                if !self.refresh_builtin_discovery(None).await {
+                    let core = Arc::clone(self);
+                    tokio::spawn(async move {
+                        for delay_ms in [100, 500, 2_000] {
+                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                            if core.refresh_builtin_discovery(None).await {
                                 break;
                             }
                         }
@@ -13055,12 +13147,16 @@ impl Core {
             "events.subscribe" => {
                 let params: SubscribeEventsParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(ReadModelService.events_since(
+                let mut batch = serde_json::to_value(ReadModelService.events_since(
                     &mut database,
                     params.camp_id.as_ref().map(ThreadId::as_str),
                     params.after_global_sequence,
                     params.limit.unwrap_or(500),
-                )?)?)
+                )?)?;
+                batch["memoryCapability"] = serde_json::to_value(
+                    rovai_core::memory_capability::snapshot(database.connection())?,
+                )?;
+                Ok(batch)
             }
             "executionTrace.export" => {
                 let params: rovai_core::execution_trace::TraceExportParams =
@@ -16828,26 +16924,30 @@ impl Core {
         self.builtin_tool_process_config_factory()?.create()
     }
 
-    async fn refresh_task_discovery(&self, target: Option<(&str, &str, i64)>) -> bool {
+    async fn refresh_builtin_discovery(&self, target: Option<(&str, &str, i64)>) -> bool {
         let _gate = self.builtin_tool_leases.invocation_guard().await;
-        let enabled_runs = {
+        let state = {
             let database = self.database.lock().await;
-            (|| -> Result<HashSet<String>> {
-                if !rovai_core::task_capability::enabled(database.connection())? {
-                    return Ok(HashSet::new());
-                }
-                Ok(database.connection().prepare("SELECT id FROM agent_run WHERE invocation_kind <> 'single_chat' AND status IN ('queued','running','waiting')")?
-                    .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<HashSet<String>>>()?)
+            (|| -> Result<_> {
+                let tasks = rovai_core::task_capability::enabled(database.connection())?;
+                let memory = rovai_core::memory_capability::enabled(database.connection())?;
+                let enabled_runs = if tasks {
+                    database.connection().prepare("SELECT id FROM agent_run WHERE invocation_kind <> 'single_chat' AND status IN ('queued','running','waiting')")?
+                        .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<HashSet<String>>>()?
+                } else {
+                    HashSet::new()
+                };
+                Ok((enabled_runs, memory))
             })()
         };
-        match enabled_runs {
-            Ok(enabled_runs) => {
+        match state {
+            Ok((enabled_runs, memory)) => {
                 self.builtin_tool_leases
-                    .refresh_tasks(&enabled_runs, target)
+                    .refresh_capabilities(&enabled_runs, memory, target)
                     .await
             }
             Err(error) => {
-                eprintln!("Task CLI capability read failed: {error:#}");
+                eprintln!("Built-in CLI capability read failed: {error:#}");
                 false
             }
         }
@@ -16869,7 +16969,7 @@ impl Core {
             )
             .await?;
         if config.context_path().is_some() {
-            self.refresh_task_discovery(Some((
+            self.refresh_builtin_discovery(Some((
                 config.process_id(),
                 &execution.agent_run_id,
                 execution.execution_epoch,
@@ -37637,7 +37737,7 @@ done
         // binding refresh. It must read the new value, not one captured at bind.
         {
             let gate = core.builtin_tool_leases.invocation_guard().await;
-            let refresh = core.refresh_task_discovery(Some((
+            let refresh = core.refresh_builtin_discovery(Some((
                 b.process_id(),
                 &execution_b.agent_run_id,
                 execution_b.execution_epoch,
@@ -37679,6 +37779,270 @@ done
         tokio::time::advance(Duration::from_millis(100)).await;
         tokio::task::yield_now().await;
         assert!(tasks(a)); // Existing bounded retry repairs without another save/bind.
+        // Memory shares the projection transaction but has independent authority.
+        async fn save_memory(core: &Arc<Core>, enabled: bool) -> Value {
+            core.handle(&Request {
+                client: Default::default(),
+                id: json!(2),
+                method: "preferences.memory.set".into(),
+                params: json!({"enabled":enabled}),
+            })
+            .await
+            .unwrap()
+        }
+        async fn invoke_memory(
+            core: &Arc<Core>,
+            config: &BuiltinToolProcessConfig,
+            id: &str,
+            operation: &str,
+            input: Value,
+        ) -> Value {
+            let context: rovai_core::builtin_tool_transport::BuiltinToolCliContext =
+                serde_json::from_slice(&fs::read(config.context_path().unwrap()).unwrap()).unwrap();
+            serde_json::to_value(
+                core.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+                    ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                    auth: context.auth().unwrap(),
+                    body: BuiltinToolIpcRequestBody::Invoke {
+                        request_id: id.into(),
+                        operation: operation.into(),
+                        input,
+                        send_input_file_path: None,
+                    },
+                })
+                .await,
+            )
+            .unwrap()
+        }
+        let body = "Memory capability must never replay a forgotten body.";
+        let memory_id = {
+            let mut database = core.database.lock().await;
+            let created = MemoryService::default()
+                .create(
+                    &mut database,
+                    &user_command_envelope(
+                        uuid::Uuid::new_v4().to_string(),
+                        CreateMemoryCommand {
+                            scope: rovai_core::memory::MemoryScopeKind::Hearth,
+                            kind: rovai_core::memory::MemoryKind::Agreement,
+                            body: body.into(),
+                            retrieval_keys: vec!["capability replay".into()],
+                            companion_agent_id: None,
+                            relationship_agent_ids: vec![],
+                            direction: None,
+                            directed_actor_agent_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            created.result.payload["memoryId"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let read_id = uuid::Uuid::new_v4().to_string();
+        let read_input = json!({"memoryIds":[memory_id]});
+        let first = invoke_memory(&core, a, &read_id, "memory.read", read_input.clone()).await;
+        assert!(first.to_string().contains(body), "{first}");
+        let write_id = uuid::Uuid::new_v4().to_string();
+        let write_input = json!({"action":"add","scope":"companion","kind":"agreement",
+            "body":"Keep exact capability receipts.","retrievalKeys":["capability receipts"]});
+        let written = invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await;
+        assert_eq!(written["envelope"]["ok"], true, "{written}");
+        let off = save_memory(&core, false).await;
+        for config in [a, b] {
+            let context: Value =
+                serde_json::from_slice(&fs::read(config.context_path().unwrap()).unwrap()).unwrap();
+            assert_eq!(context["memoryEnabled"], false);
+            assert_eq!(context["tasksEnabled"], true);
+        }
+        let denied = invoke_memory(&core, a, &read_id, "memory.read", read_input.clone()).await;
+        assert_eq!(
+            denied["envelope"]["error"]["code"],
+            "memory.feature_disabled"
+        );
+        assert_eq!(denied["envelope"]["error"]["recovery"], "stop");
+        assert!(!denied.to_string().contains(body));
+        let replay = invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await;
+        assert_eq!(replay, written);
+        assert!(
+            !replay
+                .to_string()
+                .contains("Keep exact capability receipts.")
+        );
+        for scope in ["hearth", "companion", "relationship"] {
+            let mut view = json!({"scope":scope});
+            if scope == "relationship" {
+                view["counterpartyAgentId"] = json!("another-agent");
+            }
+            let result = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "memory.view",
+                view,
+            )
+            .await;
+            assert_eq!(
+                result["envelope"]["error"]["code"],
+                "memory.feature_disabled"
+            );
+            let mut input = write_input.clone();
+            input["scope"] = json!(scope);
+            if scope == "relationship" {
+                input["counterpartyAgentId"] = json!("another-agent");
+                input["direction"] = json!("directed");
+            }
+            let result = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "memory.write",
+                input,
+            )
+            .await;
+            assert_eq!(
+                result["envelope"]["error"]["code"], "memory.feature_disabled",
+                "{result}"
+            );
+        }
+        let search = invoke_memory(
+            &core,
+            a,
+            &uuid::Uuid::new_v4().to_string(),
+            "memory.search",
+            json!({"query":"capability replay"}),
+        )
+        .await;
+        assert_eq!(
+            search["envelope"]["error"]["code"],
+            "memory.feature_disabled"
+        );
+        let same = save_memory(&core, false).await;
+        assert_eq!(same["enabled"], off["enabled"]);
+        assert_eq!(
+            same["headsUpAfterGlobalSequence"],
+            off["headsUpAfterGlobalSequence"]
+        );
+        assert_eq!(
+            same["observedThroughChangeSequence"],
+            off["observedThroughChangeSequence"]
+        );
+        let on = save_memory(&core, true).await;
+        assert!(
+            on["observedThroughChangeSequence"].as_i64().unwrap()
+                > off["observedThroughChangeSequence"].as_i64().unwrap()
+        );
+        assert_eq!(core.builtin_tool_leases.active_count().await, 2);
+        {
+            let mut database = core.database.lock().await;
+            MemoryService::default()
+                .forget(
+                    &mut database,
+                    &user_command_envelope(
+                        uuid::Uuid::new_v4().to_string(),
+                        ForgetMemoryCommand {
+                            memory_id: memory_id.clone(),
+                            expected_version: 1,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let live = invoke_memory(&core, a, &read_id, "memory.read", read_input).await;
+        assert_eq!(live["envelope"]["ok"], true, "{live}");
+        assert!(!live.to_string().contains(body));
+        let context: rovai_core::builtin_tool_transport::BuiltinToolCliContext =
+            serde_json::from_slice(&fs::read(a.context_path().unwrap()).unwrap()).unwrap();
+        let discovery = serde_json::to_value(
+            core.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                auth: context.auth().unwrap(),
+                body: BuiltinToolIpcRequestBody::Capabilities,
+            })
+            .await,
+        )
+        .unwrap();
+        assert_eq!(discovery["capabilities"]["memoryEnabled"], true);
+        assert_eq!(discovery["capabilities"]["tasksEnabled"], true);
+        // Hermes uses the same discovery request with its existing logical
+        // Session routing. Only this isolated SQL fixture is changed, not a live Runtime.
+        let (conversation, installation, original_adapter): (String, String, String) = {
+            let database = core.database.lock().await;
+            let target = database.connection().query_row(
+                "SELECT c.id,c.native_adapter_installation_id,i.adapter_kind FROM conversation c JOIN adapter_installation i ON i.id=c.native_adapter_installation_id WHERE c.id=(SELECT conversation_id FROM agent_run WHERE id=?1)",
+                [&execution_a.agent_run_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+            database.connection().execute("UPDATE conversation SET native_session_id='hermes-memory-capability' WHERE id=?1", [&target.0]).unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE adapter_installation SET adapter_kind='hermes-cli' WHERE id=?1",
+                    [&target.1],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET runtime_adapter_kind='hermes-cli' WHERE id=?1",
+                    [&execution_a.agent_run_id],
+                )
+                .unwrap();
+            target
+        };
+        let hermes = serde_json::to_value(
+            core.handle_hermes_session_ipc(
+                rovai_core::builtin_tool_transport::HermesSessionIpcRequest {
+                    source: rovai_core::builtin_tool_transport::HermesSessionSource::NativeSession,
+                    native_session_id: "hermes-memory-capability".into(),
+                    body: BuiltinToolIpcRequestBody::Capabilities,
+                },
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(hermes["capabilities"]["memoryEnabled"], true, "{hermes}");
+        save_memory(&core, false).await;
+        let hermes_off = serde_json::to_value(
+            core.handle_hermes_session_ipc(
+                rovai_core::builtin_tool_transport::HermesSessionIpcRequest {
+                    source: rovai_core::builtin_tool_transport::HermesSessionSource::NativeSession,
+                    native_session_id: "hermes-memory-capability".into(),
+                    body: BuiltinToolIpcRequestBody::Capabilities,
+                },
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(
+            hermes_off["capabilities"]["memoryEnabled"], false,
+            "{hermes_off}"
+        );
+        assert_eq!(hermes_off["capabilities"]["tasksEnabled"], true);
+        {
+            let database = core.database.lock().await;
+            database
+                .connection()
+                .execute(
+                    "UPDATE adapter_installation SET adapter_kind=?1 WHERE id=?2",
+                    rusqlite::params![original_adapter, installation],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET runtime_adapter_kind=?1 WHERE id=?2",
+                    rusqlite::params![original_adapter, execution_a.agent_run_id],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE conversation SET native_session_id=NULL WHERE id=?1",
+                    [&conversation],
+                )
+                .unwrap();
+        }
         for (camp, execution, _, config) in &bindings {
             core.builtin_tool_leases
                 .unbind(

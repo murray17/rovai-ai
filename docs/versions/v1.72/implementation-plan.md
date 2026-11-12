@@ -5236,3 +5236,24 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 - `TZ=UTC pnpm test`：Vitest 3264 passed／2 skipped，后续 Node 矩阵通过。本机 Honolulu 时区运行时，
   未改动的 AboutUpdatesSettings 两个既有发布日期断言会落到前一天；本次没有修改该日期逻辑。
 - `pnpm docs:check` 通过；文档单测随 `pnpm test` 通过。当前合同为 Runtime Launch v77，取舍为 V1.72-D76。
+
+## Rovai 长期记忆实例开关（2026-11-11）
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-memory-capability`；分支 `rovai/memory-capability`。
+- 基线：`d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`；方案独立提交 `50f43ef69`，未要求治理先合主线。
+- 范围与确认：[Memory capability R1](model-context-change-memory-capability.md)；当前合同：[v1](../../contracts/memory-capability-v1.md)。
+- 复用 Memory 存储、Agent Facade、Core 发现刷新、CLI、Web 失效和 Renderer 现有 owners；不改 Session 生命周期。
+- 验证归属：Memory 存储 owner 覆盖管理停用、回执和水位；现有 Core Task discovery owner 扩展 Memory 全链路；
+  Bootstrap owner 覆盖冻结材料和新分支；目录 owner 覆盖两开关组合；Memory UI 生产组件夹具覆盖停用/重试。
+- 状态：实现与自动化验收完成；按 User 既有分支交付偏好提交并推送，不自动创建 PR。
+- Core：Migration 224 / schema 174 默认开启，重启保留 false；设置提交后通知和修复发现投影。
+  Agent 读写、读缓存与全部人工管理受实时状态约束，已提交写回执保持；Task 与 Memory 独立。
+- 新生成 Bootstrap 省略 Memory 入口/技能，旧冻结输入逐字保留；CLI 与 Hermes 使用现有发现通路。
+  停用界面不发业务请求，隔离迟到响应，保留草稿但不自动提交；通知水位独立于设置排序序号。
+- 验证：Rust workspace 484 passed / 1 existing ignored，Memory 定向 29 passed；Core discovery、
+  Hermes 逻辑路由、Bootstrap、迁移回滚及重启 owners 通过。`pnpm test` 为 Vitest 3275 passed /
+  2 skipped、默认 Node 377 passed / 2 skipped；typecheck、Desktop/Web 构建、CLI 进程夹具、隔离
+  Electron 设置与 Memory UI（10 组交互 / 18 组视口主题）、文档与格式门禁通过。
+- 完整命令、后续小范围复测与限制见[变更说明结果](model-context-change-memory-capability.md#实施与验证结果2026-11-11)。
+  真实模型 12 Case Gate 为 `not_run / 证据不足`：缺少固定 snapshot Judge 与冻结 campaign，
+  不以受控 Hermes/Core/UI 夹具替代真实模型资格。本次没有启动真实 Runtime 或修改日常数据。

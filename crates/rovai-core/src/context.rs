@@ -14666,6 +14666,38 @@ mod slow_tests {
                 CharterDeliveryMode::FirstPayload,
             )
             .unwrap();
+        let tx = fixture.database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, false).unwrap();
+        tx.commit().unwrap();
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let disabled =
+            claim::BootstrapContents::read(&fixture.database, &fixture.directory, &snapshot)
+                .unwrap();
+        assert!(disabled.memory_entrypoint.is_empty());
+        assert!(disabled.observed_memory_revisions.is_empty());
+        assert!(!disabled.platform_skills.contains("memory-stewardship"));
+        assert!(disabled.platform_skills.contains("cli-operations"));
+        assert_eq!(
+            disabled.authorization_basis_digest,
+            canonical_json_digest(&json!({"schemaVersion":1,"memoryAccess":"none"})).unwrap()
+        );
+        let frozen = ContextService
+            .prepare_session_bootstrap(
+                &mut fixture.database,
+                &store,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                CharterDeliveryMode::FirstPayload,
+            )
+            .unwrap();
+        assert_eq!(frozen.evidence_id, initial_bootstrap.evidence_id);
+        assert_eq!(frozen.payload, initial_bootstrap.payload);
+        let tx = fixture.database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, true).unwrap();
+        tx.commit().unwrap();
         assert!(initial_bootstrap.payload.contains("\"name\": \"叮叮\""));
         let evidence: (String, i64, String, String, String) = fixture
             .database

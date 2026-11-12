@@ -1640,3 +1640,11 @@ Pi 默认不设升级例外，使用隔离真实安装与模型核验原地升�
 逐模型事务合并与现有 Renderer 请求代次。保留 MiniMax thinkingEffort 与正式执行边界。
 合同见 [Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)，
 取舍见 [V1.72-D76](decisions.md#v1-72-d76)，验证见[实施记录](implementation-plan.md#minimax-参数按需读取2026-11-10)。
+
+## Rovai 长期记忆实例开关（2026-11-11）
+
+User 已在范围和文案审阅后授权独立 worktree 实施，见[已确认 R1](model-context-change-memory-capability.md)。
+默认开启一个 Core 实例开关；关闭暂停 Agent 和用户管理业务并保留所有数据及已有提交回执。
+仅在新输入原有生成路径省略 Memory 入口和技能，旧 Session/Bootstrap/冻结输入不主动处理。
+当前接口见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。实现及自动化验收完成，
+真实模型通用 Gate 尚未执行；范围、结果与限制见[实施记录](implementation-plan.md#rovai-长期记忆实例开关2026-11-11)。

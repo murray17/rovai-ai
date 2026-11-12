@@ -64,7 +64,7 @@ Keep draft validation and the local error/save row with the shared save icon and
 The one-click summary shows only saved teammate count and Lead; omit duplicate saved-state text and Project.
 
 The 会话 section appears immediately after 新对话 and before 窗口. Its rows are ordered
-自动打开执行台, 会话任务, 世界地图. The first two rows show only the title, a question-mark help
+自动打开执行台, 会话任务, Rovai 长期记忆, 世界地图. The first three rows show only the title, a question-mark help
 button and the switch. Reuse the existing hover/focus/click help with Escape and outside dismissal;
 help interaction must not toggle the switch. 自动打开执行台 explains
 “发送消息后，或进入有队员正在执行的会话时，自动展开执行台。”; 会话任务 retains
@@ -369,3 +369,11 @@ runtime checks. Preserve failed drafts and field conflict recovery. Behavior is 
 输入不改写草稿，保存成功才展示字符串形式。
 由队员进入时使用具名返回入口，保留其草稿和位置；直接进入保留原返回。精确数据规则见
 [Runtime Launch v69](../../contracts/runtime-launch-and-verification-v69.md)。
+
+## Rovai 长期记忆
+
+通用 → 会话的 Memory 开关使用 Core 权威 Provider，位于会话任务之后，复用同一标题、问号帮助和开关行。
+帮助为“允许队员读取并形成 Rovai 的长期记忆。关闭后暂停记忆访问与管理，已保存数据保留。”，并说明
+“已进入当前对话上下文的内容仍可能保留。”读取失败显示“Rovai 长期记忆状态暂不可用，请重试。”，
+不以关闭态代替未知；保存状态及重试沿用 Task 交互。关闭其他客户端也会同步；不停止对话或发送会话提示。
+领域与快照边界见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。

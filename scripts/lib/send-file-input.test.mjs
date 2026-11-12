@@ -20,7 +20,7 @@ test('CLI discovery stays local and Send files preserve requests without waiting
     ? `\\\\.\\pipe\\rovai-ai-${process.pid}-4b812837-7ffc-4ca2-ab62-d5dc89bcd411`
     : join(root, 'cli.sock')
   const requests = []
-  const rejection = { code: 'message.invalid_input', message: 'Fixture business rejection.', recovery: 'fix_input' }
+  let rejection = { code: 'message.invalid_input', message: 'Fixture business rejection.', recovery: 'fix_input' }
   const server = createServer(connection => {
     let frame = ''
     connection.setEncoding('utf8')
@@ -68,10 +68,10 @@ test('CLI discovery stays local and Send files preserve requests without waiting
       child.stdin.destroy()
     }
   }
-  async function reachesCore(args, expected, stdin) {
+  async function reachesCore(args, expected, stdin, exitCode = 1) {
     const before = requests.length
     const result = await run(args, stdin)
-    assert.equal(result.code, 1, JSON.stringify({ result, dispatched: requests.length - before }))
+    assert.equal(result.code, exitCode, JSON.stringify({ result, dispatched: requests.length - before }))
     assert.deepEqual(result.output, { error: rejection })
     assert.equal(requests.length, before + 1, 'business rejection must not trigger fallback or a second request')
     assert.deepEqual(requests.at(-1).input, expected)
@@ -117,6 +117,20 @@ test('CLI discovery stays local and Send files preserve requests without waiting
     assert.equal((await run(['task', 'get', '--help'], undefined, false)).code, 0)
     assert.ok(!(await run(['send', '--help'], undefined, false)).output.includes('--task-id'))
     assert.equal(requests.length, 0, 'help and disabled Task calls must not contact Core')
+    await writeFile(contextPath, JSON.stringify({ ...context, tasksEnabled: true, memoryEnabled: true }))
+    assert.ok((await run(['--help'], undefined, false)).output.includes('rovai memory'))
+    assert.equal((await run(['memory', 'read', '--help'], undefined, false)).code, 0)
+    await writeFile(contextPath, JSON.stringify({ ...context, tasksEnabled: true, memoryEnabled: false }))
+    assert.ok(!(await run(['--help'], undefined, false)).output.includes('rovai memory'))
+    assert.ok((await run(['--help'], undefined, false)).output.includes('rovai task'))
+    assert.equal(requests.length, 0, 'ordinary capability help does not contact Core')
+    const originalRejection = rejection
+    rejection = { code: 'memory.feature_disabled', message: 'Rovai long-term memory is disabled.', recovery: 'stop' }
+    await reachesCore(['memory', 'view', '--scope', 'hearth'], { scope: 'hearth' }, undefined, 2)
+    await reachesCore(['memory', 'write', '--action', 'add', '--scope', 'companion', '--kind', 'agreement',
+      '--body', 'Preserve an already committed memory receipt.', '--retrieval-keys', 'memory receipts'],
+      { action: 'add', scope: 'companion', kind: 'agreement', body: 'Preserve an already committed memory receipt.', retrievalKeys: ['memory receipts'] }, undefined, 2)
+    rejection = originalRejection
     await writeFile(contextPath, JSON.stringify(context))
     const raw = ' 中文 🌸\r\n# Markdown\n\n"quote" `code` \\n\n'
     await writeFile(join(root, 'reply.md'), raw)

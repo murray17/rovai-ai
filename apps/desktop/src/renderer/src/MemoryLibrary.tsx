@@ -1,3 +1,4 @@
+import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { useThreadClient } from './camp-client'
 import { MobileBack, useMobileLayout } from './MobileLayout'
 import { newCommandId } from '../../shared/command-id'
@@ -103,6 +104,7 @@ const scopeTabs: Array<[LibraryScope, string]> = [
 
 export function MemoryLibrary({
   agents,
+  onOpenSettings,
   topNotices,
   refreshSignal = 0,
   focusMemoryId = null,
@@ -115,6 +117,7 @@ export function MemoryLibrary({
   startupFeedbackVisible = true
 }: {
   agents: AgentProfile[]
+  onOpenSettings?(): void
   topNotices?: ReactNode
   refreshSignal?: number
   focusMemoryId?: string | null
@@ -127,8 +130,17 @@ export function MemoryLibrary({
   startupFeedbackVisible?: boolean
 }): React.JSX.Element {
   const client = useThreadClient()
+  const memory = useMemoryCapability()
+  const memoryActive = useRef(memory.active)
+  const previousActive = memoryActive.current
+  memoryActive.current = memory.active
   const libraryGeneration = useRef(0)
   const reviewGeneration = useRef(0)
+  if (previousActive !== memory.active) { libraryGeneration.current++; reviewGeneration.current++ }
+  const memoryRequest = useCallback(<T,>(method: Parameters<typeof client.request>[0], params?: unknown): Promise<T> => {
+    if (!memoryActive.current) return Promise.reject(new Error(uiAttribute('Rovai 长期记忆状态暂不可用，请重试。')))
+    return client.request<T>(method, params)
+  }, [client])
   useEffect(() => () => { libraryGeneration.current++; reviewGeneration.current++ }, [client])
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const mobile = useMobileLayout()
@@ -173,55 +185,58 @@ export function MemoryLibrary({
 
   const loadMemoryLibrary = useCallback(async (): Promise<MemoryLibraryView> => {
     const request = ++libraryGeneration.current
-    const nextLibrary = await client.request<MemoryLibraryView>('memory.list')
-    if (request === libraryGeneration.current) setLibrary(nextLibrary)
+    const nextLibrary = await memoryRequest<MemoryLibraryView>('memory.list')
+    if (memoryActive.current && request === libraryGeneration.current) setLibrary(nextLibrary)
     return nextLibrary
-  }, [client])
+  }, [memoryRequest])
 
   const load = useCallback(async (): Promise<MemorySnapshot> => {
     const libraryRequest = ++libraryGeneration.current
     const reviewRequest = ++reviewGeneration.current
     const [nextLibrary, nextReviewItems] = await Promise.all([
-      client.request<MemoryLibraryView>('memory.list'),
-      client.request<HearthReviewItem[]>('memory.hearthReviewItems.list')
+      memoryRequest<MemoryLibraryView>('memory.list'),
+      memoryRequest<HearthReviewItem[]>('memory.hearthReviewItems.list')
     ])
-    if (libraryRequest === libraryGeneration.current) setLibrary(nextLibrary)
-    if (reviewRequest === reviewGeneration.current) {
+    if (memoryActive.current && libraryRequest === libraryGeneration.current) setLibrary(nextLibrary)
+    if (memoryActive.current && reviewRequest === reviewGeneration.current) {
       setReviewItems(nextReviewItems)
       onPendingCountChange?.(nextReviewItems.filter((reviewItem) => reviewItem.status === 'pending').length)
     }
     return { library: nextLibrary, reviewItems: nextReviewItems }
-  }, [client, onPendingCountChange])
+  }, [memoryRequest, onPendingCountChange])
 
   useEffect(() => {
-    if (library) onReady?.()
-  }, [library, onReady])
+    if (memory.active ? library : memory.ready || memory.error) onReady?.()
+  }, [library, memory.ready, memory.error, onReady])
 
   useEffect(() => {
-    void load().catch((nextError) => setError(errorMessage(nextError)))
-  }, [load])
+    if (!memory.active) return
+    setError(null)
+    void load().catch((nextError) => { if (memoryActive.current) setError(errorMessage(nextError)) })
+  }, [load, memory.active])
 
   useEffect(() => client.onEvent?.((event) => {
     if (event.method !== 'runtime.state') return
     const params = typeof event.params === 'object' && event.params !== null
       ? event.params as Record<string, unknown>
       : {}
-    if (params.status === 'ready') void load().catch((nextError) => setError(errorMessage(nextError)))
+    if (memoryActive.current && params.status === 'ready') void load().catch((nextError) => setError(errorMessage(nextError)))
   }), [client, load])
 
   useEffect(() => client.onInvalidated?.(() => {
+    if (!memoryActive.current) return
     void load().catch((nextError) => setError(errorMessage(nextError)))
   }), [client, load])
 
   useEffect(() => {
-    if (refreshSignal > 0) void load().catch((nextError) => setError(errorMessage(nextError)))
+    if (memoryActive.current && refreshSignal > 0) void load().catch((nextError) => setError(errorMessage(nextError)))
   }, [load, refreshSignal])
 
   useEffect(() => {
-    if (reviewDrawerSignal <= 0) return
+    if (!memory.active || reviewDrawerSignal <= 0) return
     setReviewDialogOpen(true)
     onReviewDrawerSignalConsumed?.()
-  }, [onReviewDrawerSignalConsumed, reviewDrawerSignal])
+  }, [memory.active, onReviewDrawerSignalConsumed, reviewDrawerSignal])
 
   useEffect(() => {
     if (navigationTarget || !focusMemoryId || !library) return
@@ -230,6 +245,10 @@ export function MemoryLibrary({
     setLocalScope(memory.scope)
     setLocalMemoryId(memory.id)
   }, [focusMemoryId, library, navigationTarget])
+
+  useEffect(() => {
+    if (!memory.active) setFeedback(null)
+  }, [memory.active])
 
   useEffect(() => {
     if (!feedback) return undefined
@@ -286,8 +305,9 @@ export function MemoryLibrary({
     setError(null)
     try {
       await operation()
-      await load()
+      if (memoryActive.current) await load()
     } catch (nextError) {
+      if (!memoryActive.current) return
       if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
         try {
           const snapshot = await load()
@@ -362,13 +382,13 @@ export function MemoryLibrary({
     await run(`editor-${editor.kind}`, async () => {
       let result: StoredCommandResult
       if (editor.kind === 'create') {
-        result = await client.request('memory.create', {
+        result = await memoryRequest('memory.create', {
           commandId: newCommandId(),
           command: createCommand()
         })
       } else {
         if (!editor.memory.currentRevisionId) throw new Error(uiAttribute('当前记忆没有可修订的版本。'))
-        result = await client.request('memory.revise', {
+        result = await memoryRequest('memory.revise', {
           commandId: newCommandId(),
           command: {
             memoryId: editor.memory.id,
@@ -384,10 +404,10 @@ export function MemoryLibrary({
       editorDrafts.current.delete(editorKey(editor))
       if (editor.kind === 'create' && typeof result.payload.memoryId === 'string') createdMemoryId = result.payload.memoryId
       setEditor(null)
-      setFeedback(uiAttribute('记忆已保存。'))
+      if (memoryActive.current) setFeedback(uiAttribute('记忆已保存。'))
     })
     // Select after the refreshed library contains the new identity.
-    if (createdMemoryId) navigateMemory({ scope: draft.scope, search: '', memoryId: createdMemoryId }, 'replace')
+    if (createdMemoryId && memoryActive.current) navigateMemory({ scope: draft.scope, search: '', memoryId: createdMemoryId }, 'replace')
   }
 
   const refreshReview = async (): Promise<void> => {
@@ -414,7 +434,7 @@ export function MemoryLibrary({
     setReviewError(null)
     let applied = false
     try {
-      const result = await client.request<StoredCommandResult>(`memory.hearthReviewItems.${action}`, {
+      const result = await memoryRequest<StoredCommandResult>(`memory.hearthReviewItems.${action}`, {
         commandId: newCommandId(),
         command: {
           reviewItemId: reviewItem.reviewItemId,
@@ -428,6 +448,7 @@ export function MemoryLibrary({
       // terminal record or leave its body editable if the following read fails.
       reviewGeneration.current++
       setReviewItems((items) => items.filter((item) => item.reviewItemId !== reviewItem.reviewItemId))
+      if (!memoryActive.current) return true
       await load()
       setFeedback(action === 'accept'
         ? uiAttribute('已接受，候选内容现在成为正式共同记忆。')
@@ -461,7 +482,7 @@ export function MemoryLibrary({
     method: 'memory.retire' | 'memory.reactivate',
     memory: MemoryRecord
   ): Promise<void> => run(`${method}-${memory.id}`, async () => {
-    const result = await client.request<StoredCommandResult>(method, {
+    const result = await memoryRequest<StoredCommandResult>(method, {
       commandId: newCommandId(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
@@ -469,7 +490,7 @@ export function MemoryLibrary({
   })
 
   const forget = (memory: MemoryRecord): Promise<void> => run(`forget-${memory.id}`, async () => {
-    const result = await client.request<StoredCommandResult>('memory.forget', {
+    const result = await memoryRequest<StoredCommandResult>('memory.forget', {
       commandId: newCommandId(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
@@ -519,7 +540,7 @@ export function MemoryLibrary({
     })
 
     try {
-      const result = await client.request<StoredCommandResult>('memory.review.schedule', {
+      const result = await memoryRequest<StoredCommandResult>('memory.review.schedule', {
         commandId: newCommandId(),
         command: {
           memoryId: current.memory.id,
@@ -528,6 +549,7 @@ export function MemoryLibrary({
         }
       })
       assertApplied(result)
+      if (!memoryActive.current) { setReviewScheduleEditor(null); return }
 
       try {
         await loadMemoryLibrary()
@@ -549,6 +571,7 @@ export function MemoryLibrary({
       setReviewScheduleEditor(null)
       setFeedback(action === 'clear' ? uiAttribute('复核提醒已清除') : uiAttribute('下次复核已设置'))
     } catch (nextError) {
+      if (!memoryActive.current) return
       if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
         try {
           const nextLibrary = await loadMemoryLibrary()
@@ -647,6 +670,37 @@ export function MemoryLibrary({
     }
   }
 
+  // Keep local review drafts while the capability hides all business UI.
+  const reviewDialog = <MemoryReviewDialog
+    key="hearth-review"
+    open={memory.active && reviewDialogOpen}
+    reviewItems={reviewItems}
+    memories={library?.memories ?? []}
+    agents={agents}
+    busy={busy}
+    onOpenChange={setReviewDialogOpen}
+    error={reviewError}
+    needsRefresh={reviewNeedsRefresh}
+    onResolve={resolveReview}
+    onRefresh={refreshReview}
+    onRestoreFocus={() => {
+      const trigger = reviewTrigger.current?.isConnected ? reviewTrigger.current : document.querySelector<HTMLElement>('.memory-review-entry')
+      trigger?.focus()
+    }}
+  />
+
+  if (!memory.active) return (
+    <section className="memory-library memory-workspace" aria-labelledby="memory-library-title" data-startup-route="memory" data-startup-status={memory.ready || memory.error ? 'ready' : 'loading'}>
+      <header className="memory-library-header"><div><h2 id="memory-library-title"><UiText zh="记忆" /></h2></div></header>
+      {memory.ready && !memory.enabled && memory.error !== 'read' ? <>
+        <p role="status"><UiText zh="Rovai 长期记忆已关闭。重新开启后可继续使用和管理已保存的记忆。" /></p>
+        <div><button className="quiet-button" type="button" onClick={onOpenSettings}><UiText zh="前往设置" /></button></div>
+      </> : memory.error ? <div className="memory-error" role="alert"><span><UiText zh="Rovai 长期记忆状态暂不可用，请重试。" /></span><button className="quiet-button" type="button" onClick={() => void memory.retry()}><UiText zh="重试" /></button></div>
+        : <p role="status"><UiText zh="正在读取记忆设置…" /></p>}
+      {reviewDialog}
+    </section>
+  )
+
   return (
     <section
       className={`memory-library memory-workspace${startupContentVisible ? '' : ' startup-feedback-suppressed'}`}
@@ -719,22 +773,7 @@ export function MemoryLibrary({
         />
       </div>
 
-      <MemoryReviewDialog
-        open={reviewDialogOpen}
-        reviewItems={reviewItems}
-        memories={library?.memories ?? []}
-        agents={agents}
-        busy={busy}
-        onOpenChange={setReviewDialogOpen}
-        error={reviewError}
-        needsRefresh={reviewNeedsRefresh}
-        onResolve={resolveReview}
-        onRefresh={refreshReview}
-        onRestoreFocus={() => {
-          const trigger = reviewTrigger.current?.isConnected ? reviewTrigger.current : document.querySelector<HTMLElement>('.memory-review-entry')
-          trigger?.focus()
-        }}
-      />
+      {reviewDialog}
 
       <ReviewScheduleDialog
         editor={reviewScheduleEditor}

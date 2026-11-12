@@ -152,20 +152,29 @@ async fn run() -> Result<u8> {
         );
         return Ok(0);
     }
-    let tasks_enabled = discover_tasks_enabled();
+    let capabilities = discover_capabilities().await;
+    let tasks_enabled = capabilities.tasks_enabled;
+    let memory_enabled = capabilities.memory_enabled;
     if args.first().is_some_and(|value| value == "task") && !tasks_enabled {
         println!("{}", rovai_core::task_capability::unavailable_result());
         return Ok(2);
     }
     if args.as_slice() == ["--help"] || args.is_empty() {
-        print_root_help();
+        print!(
+            "{}",
+            root_help_text_with_memory(
+                !user_automation_available_in_current_process(),
+                tasks_enabled,
+                memory_enabled
+            )
+        );
         return Ok(0);
     }
     if args.as_slice() == ["task", "--help"] {
         print!("{}", task_family_help_text());
         return Ok(0);
     }
-    if let Some(description) = operation_help(&args, tasks_enabled)? {
+    if let Some(description) = operation_help(&args, tasks_enabled, memory_enabled)? {
         print_operation_help(&description);
         return Ok(0);
     }
@@ -261,6 +270,10 @@ async fn run() -> Result<u8> {
     };
 
     match response {
+        BuiltinToolIpcResponse::Capabilities { .. } => {
+            print_safe_cli_error();
+            Ok(2)
+        }
         BuiltinToolIpcResponse::Envelope { envelope } => {
             let exit_code = envelope_exit_code(&envelope);
             let operation = envelope.operation.clone();
@@ -480,11 +493,13 @@ fn envelope_exit_code(
 ) -> u8 {
     if envelope.ok {
         0
-    } else if envelope
-        .error
-        .as_ref()
-        .is_some_and(|error| error.code == rovai_core::task_capability::DISABLED_CODE)
-    {
+    } else if envelope.error.as_ref().is_some_and(|error| {
+        matches!(
+            error.code.as_str(),
+            rovai_core::task_capability::DISABLED_CODE
+                | rovai_core::memory_capability::DISABLED_CODE
+        )
+    }) {
         2
     } else if envelope
         .error
@@ -497,7 +512,11 @@ fn envelope_exit_code(
     }
 }
 
-fn operation_help(args: &[String], tasks_enabled: bool) -> Result<Option<BuiltinToolDescription>> {
+fn operation_help(
+    args: &[String],
+    tasks_enabled: bool,
+    memory_enabled: bool,
+) -> Result<Option<BuiltinToolDescription>> {
     let identity = match args {
         [command, help] if help == "--help" => builtin_tool_identity_by_command(command, ""),
         [group, action, help] if help == "--help" => {
@@ -506,7 +525,13 @@ fn operation_help(args: &[String], tasks_enabled: bool) -> Result<Option<Builtin
         _ => None,
     };
     identity
-        .map(|identity| builtin_tool_description(identity.operation, tasks_enabled))
+        .map(|identity| {
+            rovai_core::builtin_tool_transport::builtin_tool_description_with_memory(
+                identity.operation,
+                tasks_enabled,
+                memory_enabled,
+            )
+        })
         .transpose()
 }
 
@@ -533,18 +558,41 @@ fn hermes_session_source() -> Option<String> {
     )
 }
 
-fn discover_tasks_enabled() -> bool {
-    // Hermes has no per-Run context projection. Core owns capability decisions;
-    // local help remains available without an extra context-fetch request.
-    if hermes_session_source().is_some() {
-        return true;
+async fn discover_capabilities() -> rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
+    use rovai_core::builtin_tool_transport::{
+        BuiltinToolCapabilities, HermesSessionIpcRequest, HermesSessionSource,
+    };
+    if let Some(native_session_id) = hermes_session_source() {
+        let discovered = async {
+            let endpoint: LocalIpcEndpoint = serde_json::from_slice(&fs::read(
+                rovai_core::builtin_tool_transport::builtin_tool_discovery_path()?,
+            )?)?;
+            endpoint.validate()?;
+            let request = HermesSessionIpcRequest {
+                source: HermesSessionSource::NativeSession,
+                native_session_id,
+                body: BuiltinToolIpcRequestBody::Capabilities,
+            };
+            match send_native_session(&endpoint, &request).await {
+                Ok(BuiltinToolIpcResponse::Capabilities { capabilities }) => Ok(capabilities),
+                _ => anyhow::bail!("Capability discovery is unavailable"),
+            }
+        }
+        .await;
+        return discovered.unwrap_or(BuiltinToolCapabilities {
+            tasks_enabled: false,
+            memory_enabled: false,
+        });
     }
-    load_context().is_ok_and(|context| {
+    let context = load_context().ok().filter(|context| {
         context.contract_version == BUILTIN_TOOL_CONTRACT_VERSION
             && context.ipc_protocol_version == BUILTIN_TOOL_IPC_PROTOCOL_VERSION
             && context.lease.is_some()
-            && context.tasks_enabled
-    })
+    });
+    BuiltinToolCapabilities {
+        tasks_enabled: context.as_ref().is_some_and(|c| c.tasks_enabled),
+        memory_enabled: context.as_ref().is_some_and(|c| c.memory_enabled),
+    }
 }
 
 fn load_context() -> Result<BuiltinToolCliContext> {
@@ -1615,14 +1663,17 @@ enum BuiltinToolIpcFailure {
     OutcomeIndeterminate,
 }
 
-fn print_root_help() {
-    print!(
-        "{}",
-        root_help_text(
-            !user_automation_available_in_current_process(),
-            discover_tasks_enabled()
-        )
-    );
+fn root_help_text_with_memory(
+    managed_runtime: bool,
+    tasks_enabled: bool,
+    memory_enabled: bool,
+) -> String {
+    let text = root_help_text(managed_runtime, tasks_enabled);
+    if memory_enabled {
+        text
+    } else {
+        text.replace("  rovai memory view|search|read|write\n", "")
+    }
 }
 
 fn root_help_text(managed_runtime: bool, tasks_enabled: bool) -> String {
@@ -2306,6 +2357,13 @@ mod tests {
         assert!(!user_automation_available_in_process(None, None, true));
         assert!(!root_help_text(true, true).contains("rovai app"));
         assert!(root_help_text(false, true).contains("rovai app --help"));
+        for tasks in [false, true] {
+            for memory in [false, true] {
+                let help = root_help_text_with_memory(true, tasks, memory);
+                assert_eq!(help.contains("rovai memory"), memory);
+                assert_eq!(help.contains("rovai task"), tasks);
+            }
+        }
         for (context, run_tmp, available) in [
             (None, None, true),
             (Some("context"), None, false),
@@ -2390,6 +2448,7 @@ mod tests {
                 "--help".to_string(),
             ],
             false,
+            true,
         )
         .unwrap()
         .unwrap();
@@ -2567,11 +2626,11 @@ mod tests {
             "automation",
         ] {
             let args = [family.to_string(), "--help".to_string()];
-            assert!(operation_help(&args, true).unwrap().is_none());
+            assert!(operation_help(&args, true, true).unwrap().is_none());
             assert!(is_family_help(&args));
         }
         let task_help = ["task".to_string(), "--help".to_string()];
-        assert!(operation_help(&task_help, false).unwrap().is_none());
+        assert!(operation_help(&task_help, false, true).unwrap().is_none());
         assert!(!is_family_help(&task_help));
         assert_eq!(
             task_family_help_text(),
@@ -2619,13 +2678,13 @@ mod tests {
                 .map(|value| (*value).to_string())
                 .collect::<Vec<_>>();
             assert!(
-                operation_help(&args, true).unwrap().is_some(),
+                operation_help(&args, true, true).unwrap().is_some(),
                 "missing exact help for {path:?}"
             );
             if path[0] == "task" {
-                assert!(operation_help(&args, false).is_err());
+                assert!(operation_help(&args, false, true).is_err());
             } else {
-                assert!(operation_help(&args, false).unwrap().is_some());
+                assert!(operation_help(&args, false, true).unwrap().is_some());
             }
         }
         for family in [
@@ -2637,7 +2696,7 @@ mod tests {
             "automation",
         ] {
             let args = vec![family.to_string(), "--help".to_string()];
-            assert!(operation_help(&args, true).unwrap().is_none());
+            assert!(operation_help(&args, true, true).unwrap().is_none());
             assert!(is_family_help(&args));
         }
         assert!(!is_family_help(&["task".to_string(), "--help".to_string()]));
@@ -3019,7 +3078,7 @@ mod tests {
 
     #[test]
     fn public_send_help_has_no_agent_supplied_camp_scope() {
-        let description = operation_help(&["send".to_string(), "--help".to_string()], false)
+        let description = operation_help(&["send".to_string(), "--help".to_string()], false, true)
             .unwrap()
             .unwrap();
         assert!(description.arguments.iter().all(|argument| {

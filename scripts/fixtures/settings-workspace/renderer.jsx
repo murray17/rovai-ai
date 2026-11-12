@@ -4,6 +4,7 @@ import { ThreadNavigation } from '@renderer/ThreadNavigation'
 import { WindowDragStrip } from '@renderer/BusinessApp'
 import { HostWebSettings } from '@renderer/HostWebSettings'
 import { GeneralSettings } from '@renderer/GeneralSettings'
+import { MemoryCapabilityProvider } from '@renderer/MemoryCapabilityProvider'
 import { MobileLayoutProvider } from '@renderer/MobileLayout'
 import { AppearanceSettings } from '@renderer/AppearanceSettings'
 import { NotificationSettings } from '@renderer/NotificationSettings'
@@ -26,6 +27,7 @@ const state = {
   hostWeb: { enabled: false }, holdHostStatus: false, loseHostStartReply: false,
   preferences: fixture.preferences(), notifications: fixture.notifications(),
   channels: fixture.channelsSnapshot(), executionWeb: fixture.executionWeb(),
+  memory: { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0, observedThroughGlobalSequence: 0 },
   startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)
@@ -62,6 +64,19 @@ async function request(method, params) {
     state.failure = null
     throw new Error('隔离测试：暂时无法完成，请重试。')
   }
+}
+const memoryListeners = new Set()
+const memoryClient = {
+  async request(method, params) {
+    await request(method, params)
+    if (method === 'preferences.memory.set' && state.memory.enabled !== params.enabled) {
+      state.memory.enabled = params.enabled
+      state.memory.observedThroughChangeSequence++
+      memoryListeners.forEach(listener => listener({ method: 'preferences.memory_changed', params: {} }))
+    }
+    return clone(state.memory)
+  },
+  onEvent(listener) { memoryListeners.add(listener); return () => memoryListeners.delete(listener) }
 }
 const savePreference = key => async value => {
   await request(key, value)
@@ -241,4 +256,4 @@ window.settingsTest = {
   finishStartupInspection: result => { pendingStartupInspection(result); pendingStartupInspection = null },
   settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 35))))
 }
-createRoot(document.getElementById('root')).render(<Fixture />)
+createRoot(document.getElementById('root')).render(<MemoryCapabilityProvider client={memoryClient}><Fixture /></MemoryCapabilityProvider>)

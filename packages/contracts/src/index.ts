@@ -1190,6 +1190,13 @@ export interface ThreadMemberRemovalPreview {
   blockerCode: 'camp.member_not_active' | null
 }
 
+export interface MemoryCapabilitySnapshot {
+  enabled: boolean
+  headsUpAfterGlobalSequence: number
+  observedThroughChangeSequence: number
+  observedThroughGlobalSequence: number
+}
+
 export interface TaskCapabilitySnapshot {
   enabled: boolean
   headsUpAfterSequence: number
@@ -2784,6 +2791,7 @@ export interface ThreadReadInvalidation {
   notificationsChanged?: boolean
   nativeInteractionsChanged?: boolean
   tasksChanged?: boolean
+  memoryChanged?: boolean
   teamsChanged?: boolean
   resync?: boolean
   messages?: ThreadMessageChange[]
@@ -2903,6 +2911,7 @@ export type MessageDeliveryView = MessageDeliveryBaseView & (
 )
 
 export interface EventBatch {
+  memoryCapability?: MemoryCapabilitySnapshot
   schemaVersion: 9
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number
@@ -4406,6 +4415,8 @@ export interface UpdateAutomationCommand {
 export type CoreMethod =
   | 'projectFiles.request'
   | 'projectFileReferences.resolve'
+  | 'preferences.memory.get'
+  | 'preferences.memory.set'
   | 'preferences.tasks.get'
   | 'preferences.tasks.set'
   | 'teams.list'

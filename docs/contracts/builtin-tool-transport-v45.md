@@ -34,3 +34,11 @@ Transport/CLI 45、capability builtin_cli.transport.v45、Agent Output 15；IPC 
 这两个字段沿用既有原始字符串 maxLength 校验，再由 Core 按 Rust trim 保存；不套用专业职责的 schema 前规范化。
 create 省略为空、update 省略保留、空串清空、null 拒绝均不变；内部格式和合法字符完整保留。
 字段、授权、幂等与所有版本轴保持，旧冻结输入不回填。CLI/Core 配套交付，旧版本可能拒绝超过 300 的新资料。
+
+## Memory capability 发现与回放
+
+按 [Memory Capability v1](memory-capability-v1.md)，CLI context 增加派生 `memoryEnabled`，
+Task/Memory 从统一刷新入口读取两个当前值后生成。Hermes 通过既有 Core IPC 的只读 capabilities 请求发现。
+目录与 help 隐藏关闭的 Memory 操作；已知命令仍送 Core，不依赖投影作执行授权。
+Memory 读回放进入实时读取服务；关闭时正文/片段不交付；写入保留已提交的 body-free 回执。
+新增 `memory.feature_disabled` / `stop` 错误，其他命令、输入、版本轴和冻结记录保持。

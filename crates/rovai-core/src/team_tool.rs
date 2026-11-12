@@ -7893,6 +7893,55 @@ mod tests {
             hearth_exact.result.payload,
             json!({"message": "Memory body and Retrieval Keys are unchanged"})
         );
+        let before: (i64, i64) = fixture.database.connection().query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_revision),(SELECT COUNT(*) FROM hearth_review_item)", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        let tx = fixture.database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, false).unwrap();
+        tx.commit().unwrap();
+        for scope in [
+            MemoryScopeKind::Hearth,
+            MemoryScopeKind::Companion,
+            MemoryScopeKind::Relationship,
+        ] {
+            let rejected = fixture
+                .memory_write(
+                    &format!("disabled-{scope:?}"),
+                    MemoryWriteToolInput {
+                        action: "add".into(),
+                        scope: Some(scope),
+                        kind: Some(MemoryKind::Agreement),
+                        body:
+                            "Disabled memory must create neither revisions nor review candidates."
+                                .into(),
+                        retrieval_keys: vec!["disabled capture".into()],
+                        counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
+                            .then(|| "agent_2".into()),
+                        direction: (scope == MemoryScopeKind::Relationship)
+                            .then_some(RelationshipDirection::Directed),
+                        target: None,
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                rejected.result.code,
+                crate::memory_capability::DISABLED_CODE
+            );
+            let input = MemoryViewInput {
+                scope,
+                counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
+                    .then(|| "agent_2".into()),
+            };
+            assert!(
+                fixture
+                    .memory_view("disabled-view", input)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(crate::memory_capability::DISABLED_CODE)
+            );
+        }
+        let after = fixture.database.connection().query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_revision),(SELECT COUNT(*) FROM hearth_review_item)", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).unwrap();
+        assert_eq!(before, after);
     }
 
     #[cfg(feature = "slow-tests")]

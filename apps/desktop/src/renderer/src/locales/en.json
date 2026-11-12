@@ -4370,5 +4370,12 @@
   "分叉结果尚未确认": "Fork result is not yet confirmed",
   "分叉失败": "Fork failed",
   "这条消息已不可用，无法从这里分叉": "This message is no longer available. Cannot fork from here.",
-  "导出": "Export"
+  "导出": "Export",
+  "Rovai 长期记忆": "Rovai Long-term Memory",
+  "Rovai 长期记忆说明": "About Rovai Long-term Memory",
+  "允许队员读取并形成 Rovai 的长期记忆。关闭后暂停记忆访问与管理，已保存数据保留。": "Allow teammates to read and form Rovai long-term memories. Turning this off pauses memory access and management while keeping saved data.",
+  "已进入当前对话上下文的内容仍可能保留。": "Content already in the current conversation context may remain.",
+  "Rovai 长期记忆已关闭。重新开启后可继续使用和管理已保存的记忆。": "Rovai Long-term Memory is off. Turn it on again to use and manage saved memories.",
+  "正在读取记忆设置…": "Loading memory settings…",
+  "Rovai 长期记忆状态暂不可用，请重试。": "Rovai Long-term Memory status is temporarily unavailable. Please retry."
 }

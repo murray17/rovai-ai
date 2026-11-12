@@ -1,6 +1,7 @@
+import { validMemoryCapability } from './MemoryCapabilityProvider'
 import { describe, expect, it } from 'vitest'
 import type { DomainEventView } from '@contracts'
-import { collectMemoryChanges, memoryChangeText, resolveMemoryChangeScope } from './memory-change-notice'
+import { collectMemoryChanges, memoryChangeText, memoryEventsForNotice, resolveMemoryChangeScope } from './memory-change-notice'
 
 const event = (sequence: number, memoryId: string, action = 'revised', scope?: string): DomainEventView => ({
   globalSequence: sequence, eventType: `memory.agent_${action}`, entityType: 'memory', entityId: memoryId,
@@ -8,6 +9,23 @@ const event = (sequence: number, memoryId: string, action = 'revised', scope?: s
 } as DomainEventView)
 
 describe('automatic memory change notices', () => {
+  it('uses only the Memory event boundary and suppresses disabled, unknown and reconnect history', () => {
+    const snapshot = { enabled: true, headsUpAfterGlobalSequence: 100,
+      observedThroughChangeSequence: 1, observedThroughGlobalSequence: 103 }
+    expect(validMemoryCapability(snapshot)).toBe(true)
+    expect(validMemoryCapability({ ...snapshot, observedThroughGlobalSequence: 99 })).toBe(false)
+    expect(validMemoryCapability({ ...snapshot, observedThroughChangeSequence: -1 })).toBe(false)
+    const events = [event(99, 'old'), event(100, 'boundary'), event(101, 'new'), event(102, 'review'),
+      { ...event(103, 'other'), eventType: 'thread.message_sent' }]
+    events[3].eventType = 'memory.hearth_review_created'
+    expect(memoryEventsForNotice(events, snapshot, true, 0).map(event => event.globalSequence)).toEqual([101, 102])
+    expect(memoryEventsForNotice(events, { ...snapshot, enabled: false }, true, 0)).toEqual([])
+    expect(memoryEventsForNotice(events, snapshot, false, 0)).toEqual([])
+    expect(memoryEventsForNotice(events, null, true, 0)).toEqual([])
+    expect(memoryEventsForNotice(events, snapshot, true, 103)).toEqual([])
+    expect(memoryEventsForNotice([event(104, 'live')], snapshot, true, 103)).toHaveLength(1)
+  })
+
   it('never guesses shared scope or creation for a legacy revision without scope', () => {
     const changes = collectMemoryChanges([], [event(1, 'companion-memory')])
     expect(changes[0].scope).toBeNull()

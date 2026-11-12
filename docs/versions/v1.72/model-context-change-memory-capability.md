@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-11
 confirmation_message_id: 04816bb6-4968-4df3-86bc-ee820c84644e
 authority: proposed-model-input-change-statement
-implementation_status: in_progress
+implementation_status: implemented
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-11
 ---
@@ -163,3 +163,32 @@ Host 切换/乱序响应/状态未知/迟到响应、关闭重开和离线重连
 未执行或基础设施受阻时明确记录证据缺口，不用受控 fixture 代替真实模型 Gate。
 
 实施与验证结果在完成后追加，不改写本 revision 的已确认模型输入规则。
+
+## 实施与验证结果（2026-11-11）
+
+已按 R1 完成 Core 设置、业务阻断、读回放、条件输入与发现、共享 Provider、停用页和必要同步。
+Migration 224 / projection schema 174 是本次唯一数据库版本变化；Builtin transport 45、IPC 3、
+事件 schema 9 及 Bootstrap/Binding/formatter/profile/manifest 版本保持。统一发现刷新同时写入 Task、
+Memory 当前值。Hermes 的已有逻辑 Session 路由只承载只读能力发现，没有新增会话治理。
+
+验证均在独立 worktree 与隔离夹具完成，没有启动日常 App、生产数据目录或真实模型：
+
+| 验证 | 结果 |
+| --- | --- |
+| `cargo check --workspace`、`cargo test --workspace` | 通过；默认 Rust workspace 484 passed、1 existing ignored |
+| `cargo test -p rovai-core --features slow-tests --lib memory` | 29 passed；包含三 Scope、管理停用、既有回执与提示水位 |
+| 既有 Core discovery / Bootstrap / schema / catalog migration / Memory restart owners | 通过；覆盖读缓存拒绝、重开后的实时生命周期、Hermes、两开关独立、冻结输入不变、迁移回滚及重启保留 false |
+| `pnpm test` | 通过；Vitest 276 files / 3275 passed、2 skipped；默认 Node 377 passed、2 skipped；文档、Skills 和沙箱门禁通过 |
+| `pnpm typecheck`、`pnpm build:desktop` | 通过；构建包含 Web 和 Desktop |
+| `pnpm test:send-input-file` | 通过；关闭时 help 隐藏但实际命令仍送 Core，保留 stop 错误与回执路径 |
+| `pnpm test:settings-workspace` | 通过；隔离 Electron 设置页的相邻开关、说明、保存失败与重试 |
+| `pnpm test:memory-workspace-ui` | 通过；10 组交互、18 组视口/主题，包含停用零业务查询、未知/重试、迟到快照/业务响应/已提交回执，以及草稿保留且不自动提交 |
+| `pnpm docs:test`、`pnpm docs:check`、diff-aware documentation gate、`git diff --check` | 通过 |
+
+全量验证后新增的小范围回执/草稿保护、通知序号断言和集中操作识别由相应 UI、TS 与 Core owner 复测；
+不把复测数量重复计入全量结果。UI 证据位于本 Thread 附件 `memory-capability-ui/`。
+
+真实模型通用 Gate 为 **not_run / 证据不足**。本次未取得固定 snapshot Judge 和完整冻结的
+baseline/candidate campaign；检查到的既有计划为 `judge=null`。没有将受控 Core/IPC/Hermes 路由或 UI
+夹具当作真实 Runtime/模型资格，也没有宣称通用 12 Case Gate 通过。本分支只交付实现及自动化验收，
+不创建 PR、不合并或发布；正式模型 Gate 仍按既有通用流程完成，不继承其他任务的豁免。
