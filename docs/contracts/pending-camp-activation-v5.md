@@ -5,10 +5,13 @@ authority: camp-first-input-atomic-member-invitations
 status: accepted
 version: 5
 source_version: v1.72
-last_updated: 2026-10-08
+last_updated: 2026-11-11
 ---
 
 # Pending Camp Activation v5
+
+[Thread Fork v1](thread-fork-v1.md) creates an ordinary Active Thread through its dedicated copy transaction.
+It rejects Pending sources and does not relax the ordinary creation or first-input admission in this contract.
 
 Inherits [v4](pending-camp-activation-v4.md)'s client-local snapshots, presence, navigation and cleanup.
 A User's first inline `thread.messages.send` may now mention present AgentProfiles outside the Pending Thread.

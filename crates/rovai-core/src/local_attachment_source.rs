@@ -336,6 +336,54 @@ pub fn serialize_source_attachments(refs: &[LocalAttachmentSourceRef]) -> Result
     serde_json::to_string(refs).context("Source Attachments could not be serialized")
 }
 
+/// Adapt historical attachment ownership to ordinary message Source Refs. This
+/// reads saved metadata only: expired files must not prevent copying history.
+pub(crate) fn message_sources_for_fork(
+    connection: &rusqlite::Connection,
+    camp_id: &str,
+    message_id: &str,
+    runtime_root: &Path,
+) -> Result<Vec<LocalAttachmentSourceRef>> {
+    let saved: String = connection.query_row(
+        "SELECT source_attachments_json FROM camp_message WHERE camp_id=?1 AND id=?2",
+        params![camp_id, message_id],
+        |r| r.get(0),
+    )?;
+    let mut refs = parse_source_attachments(&saved)?;
+    let rows = connection.prepare(
+        "SELECT display_name,storage_path,media_type,byte_size,
+                'file',0,position
+         FROM message_attachment WHERE camp_id=?1 AND camp_message_id=?2
+         UNION ALL
+         SELECT r.display_name_snapshot,m.root_relative_payload_path,m.media_type,m.byte_size,m.kind,1,r.ordinal
+         FROM camp_message_attachment_ref r JOIN managed_attachment m ON m.camp_id=r.camp_id AND m.id=r.attachment_id
+         WHERE r.camp_id=?1 AND r.camp_message_id=?2 ORDER BY 7",
+    )?.query_map(params![camp_id,message_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,
+        r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,bool>(5)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (name, path, media, size, kind, managed) in rows {
+        let kind = if kind == "directory" || media == DIRECTORY_MEDIA_TYPE {
+            LocalAttachmentKind::Directory
+        } else {
+            LocalAttachmentKind::File
+        };
+        refs.push(LocalAttachmentSourceRef {
+            id: Uuid::new_v4().to_string(),
+            source_path: if managed {
+                runtime_root.join(path).to_string_lossy().into_owned()
+            } else {
+                path
+            },
+            display_name: name,
+            kind,
+            media_type: Some(media),
+            observed_byte_size: (kind == LocalAttachmentKind::File).then_some(u64::try_from(size)?),
+            pasted_text_preview: None,
+        });
+    }
+    Ok(refs)
+}
+
 fn validate_ref_shape(refs: &[LocalAttachmentSourceRef]) -> Result<()> {
     let mut ids = std::collections::HashSet::new();
     for source_ref in refs {

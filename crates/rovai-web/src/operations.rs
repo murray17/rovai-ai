@@ -335,6 +335,8 @@ pub enum Operation {
     Reconcile,
     #[serde(rename = "threads.create", alias = "camps.create")]
     CampCreate,
+    #[serde(rename = "threads.fork", alias = "camps.fork")]
+    CampFork,
     #[serde(
         rename = "threads.creationPreflight",
         alias = "camps.creationPreflight"
@@ -584,6 +586,7 @@ impl Operation {
             Self::ContinueRun => "agentRuns.continue",
             Self::Reconcile => "commands.reconcile",
             Self::CampCreate => "camps.create",
+            Self::CampFork => "camps.fork",
             Self::CampCreationDefaults => "camps.creationPreflight",
             Self::CampAddMember => "camps.members.add",
             Self::CampRemoveMember => "camps.members.remove",

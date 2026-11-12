@@ -852,6 +852,16 @@ export interface SaveTeamCommand extends NewConversationDefaults {
   guidance: string
 }
 
+export interface ForkThreadRequest {
+  commandId: string
+  sourceThreadId: string
+  sourceMessageId?: string
+}
+
+export interface ForkThreadResult {
+  threadId: string
+}
+
 export interface CreateThreadRequest {
   team?: TeamSelection
   commandId: string
@@ -4615,6 +4625,8 @@ export type CoreMethod =
   | 'navigation.findThread'
   | 'navigation.campViewed'
   | 'threads.create'
+  | 'threads.fork'
+  | 'commands.reconcile'
   | 'threads.discardPending'
   | 'threads.pendingDraft.setPresence'
   | 'threads.rename'

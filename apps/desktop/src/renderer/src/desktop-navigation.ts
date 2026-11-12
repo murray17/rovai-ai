@@ -58,6 +58,7 @@ export function createDesktopNavigation<Context = undefined>(
   let pending: NavigationOperation | { kind: 'reservation' } | null = null
   let generation = 0
   let entryRevision = 0
+  let visitSequence = 0
   let supersede: (() => void) | undefined
   const listeners = new Set<() => void>()
   const publish = (): void => { for (const listener of listeners) listener() }
@@ -98,6 +99,7 @@ export function createDesktopNavigation<Context = undefined>(
         if (history && operation.kind !== 'traverse') next = history.write(next, committed ? 'replace' : operation.kind)
         state = next
         pending = null
+        if (!committed) ++visitSequence
         committedRevision = ++entryRevision
         committed = true
         publish()
@@ -120,6 +122,13 @@ export function createDesktopNavigation<Context = undefined>(
       return history?.initial ? navigate({ kind: 'traverse', index: history.initial.index, browserState: history.initial }, context) : Promise.resolve(false)
     },
     getSnapshot: (): NavigationState => state,
+    /** A→B→A is a new visit, while preview→full projection remains one visit. */
+    captureVisit() {
+      const visit = visitSequence
+      const intent = generation
+      return { isCurrent: () => visit === visitSequence && intent === generation,
+        isSameVisit: () => visit === visitSequence }
+    },
     subscribe: (listener: () => void): (() => void) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
@@ -148,6 +157,7 @@ export function createDesktopNavigation<Context = undefined>(
     },
     reset(target?: NavigationTarget): void {
       invalidate()
+      ++visitSequence
       ++entryRevision
       state = target ? { entries: [target], index: 0 } : { entries: [], index: -1 }
       if (target && history) state = history.write(state, 'replace')

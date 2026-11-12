@@ -25,6 +25,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 ## 会话 Task 能力（当前）
 
+- [Thread Fork v1](thread-fork-v1.md)：公开历史的原子副本、应用作用域回执与前台导航恢复；后继读取和执行复用普通 Thread。
+
 - [Durable Task v6](durable-task-v6.md)
 - [Built-in Tool Transport v45](builtin-tool-transport-v45.md)：引用输出统一为 kind/text；继承 [v44（历史）](builtin-tool-transport-v44.md) 的 Thread read 正向分页、Send 输入来源与 Task 发现边界。
 - [ContextManifest Evidence v43 / v44](context-manifest-evidence-v44.md)
