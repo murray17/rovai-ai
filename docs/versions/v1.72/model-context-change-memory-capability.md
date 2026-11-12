@@ -2,21 +2,21 @@
 document_type: model-context-change
 version: v1.72
 change_id: memory-capability
-revision: 3
+revision: 4
 confirmation_status: confirmed
-confirmed_revision: 3
+confirmed_revision: 4
 confirmed_by: User
 confirmed_at: 2026-11-12
-confirmation_message_id: 2b3bcad2-ac73-41d8-bcb7-076ba5a1b8ab
+confirmation_message_id: f9a37446-9a3f-4716-ac6c-7e0b9cd6aaf0
 authority: proposed-model-input-change-statement
-implementation_status: implemented
+implementation_status: in_progress
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-12
 ---
 
 # Rovai 长期记忆实例开关
 
-本说明累计记录 R1/R2 和 User sequence 25 已给出前后行为并明确授权修改的 R3 五项修正。
+本说明累计记录 R1/R2、User sequence 25 的 R3 修正及 User sequence 27 已审阅前后行为并要求局部收口的 R4 修正。
 R2 原稿固定保留在 [f0a8380ab](https://github.com/murray17/rovai-ai/blob/f0a8380ab291c97768ea682fb60364c69f147266/docs/versions/v1.72/model-context-change-memory-capability.md)。
 R2 在 R1 实例开关上增加通用 CLI Skill 的固定精简，
 采用 User 已审阅的五处替换，不动态改写开关两态的共享 Skill。R1 原稿固定保留在
@@ -28,6 +28,28 @@ Companion、Relationship。关闭保留正式记录、修订、审核候选和�
 
 完整提示词、工具定义/help、错误回包与回放差异可直接按文末的
 [逐项审阅清单](#完整提示词与工具对照)阅读；编号与 Task 方案一致，并单列关闭后仍保留的通用文字。
+
+## R4：观察顺序、恢复刷新与最终结果一致性
+
+User 消息 `f9a37446-9a3f-4716-ac6c-7e0b9cd6aaf0` 已列出完整调用链、变更前后和局部修正范围，
+要求继续修复且不增加复杂机制或页面信息。本 revision 只落实该范围，不改变提示词、工具 shape、
+错误文案、三个快照字段或任何会话版本轴。R3 原稿固定保留在
+[5e3202faf](https://github.com/murray17/rovai-ai/blob/5e3202faff7361afda5f044e45b735add31e7b7a/docs/versions/v1.72/model-context-change-memory-capability.md)。
+
+| 位置 | 变更前 | R4 变更后 |
+| --- | --- | --- |
+| Provider | save 错误可能掩盖 read 错误；get 与轮询分开排序 | 读取失败明确 ready=false；共用现有本地观察代次，先按 Core 设置序号，再按同序号观察顺序接收；旧 null/失败不能覆盖较新观察，较高 Core 设置序号仍可更新 |
+| 恢复连接 | 通知抑制水位同时过滤内容刷新 | 旧通知继续抑制；恢复成功独立刷新内容和审核数，Web 沿用 resync |
+| 工具最终读取结果 | 成功活动记录已保存，外层可能再改判拒绝 | 在既有数据库串行边界内选定最终结果，再共同生成活动记录、Envelope 与返回；关闭先于选择则一致失败，选择先于关闭则保留在途成功 |
+| 审核列表 | 父页面与 Memory 页面均读取完整审核列表 | Memory 页面打开时由其现有回调提供计数，页面外由父组件读取；合并初次/内容刷新触发 |
+| Web 失效 | 任意失效都读取 Memory 全量内容 | 现有通道增加 metadata-only memoryContentChanged；实际已提交新变更发出 memory.changed，SSE 解码/合并保留此标记，Memory 只响应内容变化和 resync；设置标记 memoryChanged 继续独立 |
+| 批量管理读取 | list 每条 get 重复检查，export 又重复检查 | 公开入口保持检查，内部使用私有记录加载；export 复用已检查的 list，不增加开关缓存 |
+| 读取恢复 UI | 已有列表时刷新失败没有重试入口 | 原错误行始终提供既有重试按钮，保留当前列表与选中内容，不新增提示块或文案 |
+
+结果选择与设置提交共用现有 Core DB 锁；不新增锁、结果副本、持久字段、epoch、会话缓存或后台刷新。
+冻结 Bootstrap/已投递输入与旧会话保持，不主动更新或提示。现有幂等回放与已提交写入回执保持。
+验证扩展 Provider 交互、Core 工具/活动记录、Web SSE/解码/恢复及 Memory 管理既有 owners，
+不以受控测试代替真实 Runtime/模型资格。本 revision 实施结果完成后追加。
 
 ## R3：局部故障隔离与通知/发现收简
 
