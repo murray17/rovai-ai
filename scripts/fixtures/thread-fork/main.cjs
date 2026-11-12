@@ -91,6 +91,7 @@ app.whenReady().then(async () => {
     await row('source');await run('forkQA.failDraft()');await click('document.querySelector("[contenteditable=true]")');await window.webContents.insertText(' 尚未保存')
     await fork();await run('forkQA.release()');await quiet();assert.equal(await active(),'source')
     const afterSaveFailure=await count();await run('forkQA.failDraft(false)');await pause(100);assert.equal(await count(),afterSaveFailure)
+    if(await run('!!document.querySelector(".error-banner")'))await click('document.querySelector(".error-banner .icon-button")')
     // An uncertain command keeps one explicit retry; receipt recovery does not
     // create another copy or restore the removed completion/opening prompt.
     await run('forkQA.lose()');await menu();await select();await wait('document.querySelector(".app-toast")?.textContent.includes("尚未确认")')
