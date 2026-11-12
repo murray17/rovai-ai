@@ -22,6 +22,13 @@ last_updated: 2026-11-12
 和[Thread Fork v1](../../contracts/thread-fork-v1.md#foreground-recovery-and-navigation)；证据见[实施记录](implementation-plan.md#通用提示与分叉反馈2026-11-12)。
 版本指针、Core／Main 协议、模型输入和历史事实保持现状。
 
+## 安装版本刷新当前入口修正（2026-11-11）
+
+后台按当前 Runtime 的既有选择规则重新解析入口，覆盖 Homebrew 稳定链接换目录、旧程序和旧 Host 仍存活的情形。
+安装版本行读取新目标，旧 Host／Run 保留原运行版本；十分钟限频、静默失败和无版本驱动退役的边界保持。
+合同见 [Runtime Launch v89](../../contracts/runtime-launch-and-verification-v89.md)，
+实现与回归见[本版记录](implementation-plan.md#安装版本刷新当前入口修正2026-11-11)。
+
 ## Thread 分叉（2026-11-11）
 
 在 `rovai/thread-fork` 从 `origin/main@3568dc1f8831eafadf937159f4cc61e146fe621d` 实施。
