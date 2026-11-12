@@ -4661,7 +4661,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .structured-mention-editor[data-composer-atom-selected] { caret-color: transparent; }
 .structured-mention-paragraph { margin: 0; }
 .structured-mention-placeholder { position: absolute; top: 5px; right: 0; left: 0; overflow: hidden; color: var(--faint); font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
-.composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 1px 0 2px; }
+.composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 0 0 2px; }
 .composer-reply-line {
   display: grid;
   min-width: 0;
@@ -4677,8 +4677,11 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer-reply-copy > span { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-reply-line.needs-repair { color: var(--attention); }
 .composer-reply-line.needs-repair .composer-reply-copy strong { color: var(--attention); }
-.composer-reply-cancel { min-height: 22px; padding: 2px 5px; border: 0; border-radius: 4px; color: var(--faint); background: transparent; cursor: pointer; font-size: 9.5px; }
-.composer-reply-cancel:hover { color: var(--ink); background: var(--surface-muted); }
+.composer-reply-cancel { display: grid; width: 26px; height: 26px; min-height: 26px; padding: 0; place-items: center; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; }
+.composer-reply-cancel svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+.composer-reply-cancel:hover:not(:disabled), .composer-reply-cancel:focus-visible { color: var(--ink); background: var(--surface-muted); }
+.composer-reply-cancel:active:not(:disabled) { transform: none; }
+@media (pointer: coarse) { .composer-reply-cancel { width: 44px; height: 44px; } }
 .reply-recipient-repair { display: grid; gap: 8px; margin: 2px 0 1px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--attention) 40%, var(--line)); border-radius: 7px; color: var(--attention); background: var(--attention-soft); }
 .reply-recipient-repair-copy { display: grid; gap: 2px; }
 .reply-recipient-repair-copy strong { font-size: 11px; }
