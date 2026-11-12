@@ -42,6 +42,9 @@ let capabilitySaves = 0
 let heldCapabilitySave: Promise<void> | null = null
 let releaseCapabilitySave: (() => void) | null = null
 let memoryBusinessReads = 0
+let memoryLibraryReads = 0
+let reviewListReads = 0
+const invalidationListeners = new Set<(change: any) => void>()
 const capabilityListeners = new Set<(event: any) => void>()
 let heldCapabilityRead: Promise<void> | null = null
 let releaseCapabilityRead: (() => void) | null = null
@@ -79,11 +82,12 @@ const client = { platform: 'darwin', async request(method: string, params: any =
   if (method === 'preferences.tasks.get') return { enabled: false, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
   if (method === 'memory.list' && failedReads > 0) { failedReads--; throw new Error('演示刷新失败。') }
   if (method === 'memory.list') {
+    memoryLibraryReads++
     const reply = structuredClone({ memories, capacities: [] })
     if (heldMemoryRead) { const held = heldMemoryRead; heldMemoryRead = null; memoryReadWaiting = true; await held; memoryReadWaiting = false }
     return reply
   }
-  if (method === 'memory.hearthReviewItems.list') return structuredClone(reviews)
+  if (method === 'memory.hearthReviewItems.list') { reviewListReads++; return structuredClone(reviews) }
   if (method === 'memory.get') return structuredClone(memories.find(m => m.id === params.memoryId))
   const c = params.command
   if (!c) throw new Error(`Unexpected fixture request: ${method}`)
@@ -125,7 +129,7 @@ const client = { platform: 'darwin', async request(method: string, params: any =
   } else throw new Error(`Unexpected fixture mutation: ${method}`)
   if (heldMutationReceipt) { const held = heldMutationReceipt; heldMutationReceipt = null; mutationReceiptWaiting = true; await held; mutationReceiptWaiting = false }
   return { status: 'applied', code: 'ok', payload: { memoryId } }
-}, onEvent(listener: (event: any) => void) { capabilityListeners.add(listener); return () => { capabilityListeners.delete(listener) } } } as ThreadClient
+}, onInvalidated(listener: (change: any) => void) { invalidationListeners.add(listener); return () => { invalidationListeners.delete(listener) } }, onEvent(listener: (event: any) => void) { capabilityListeners.add(listener); return () => { capabilityListeners.delete(listener) } } } as ThreadClient
 const noop = () => {}
 const asyncNoop = async () => {}
 
@@ -148,6 +152,8 @@ function Fixture() {
   useEffect(() => { document.documentElement.dataset.rovaiPlatform = platform; document.documentElement.dataset.platform = platform }, [platform])
   useEffect(() => { (window as any).__memoryFixture = {
     setMemoryEnabled, refreshCapability: invalidateCapability,
+    invalidate: (change: any) => invalidationListeners.forEach(listener => listener(change)),
+    advanceCapabilitySequence: () => { memoryCapability = { ...memoryCapability, observedThroughChangeSequence: memoryCapability.observedThroughChangeSequence + 1 } },
     failCapabilitySave: () => { capabilitySaveFailures++ },
     holdCapabilitySave: () => { heldCapabilitySave = new Promise(resolve => { releaseCapabilitySave = resolve }) },
     releaseCapabilitySave: () => { releaseCapabilitySave?.(); releaseCapabilitySave = null },
@@ -158,7 +164,7 @@ function Fixture() {
     releaseCapabilityRead: () => { releaseCapabilityRead?.(); releaseCapabilityRead = null },
     holdMemoryRead: () => { heldMemoryRead = new Promise(resolve => { releaseMemoryRead = resolve }); setRefresh(n => n + 1) },
     releaseMemoryRead: () => { releaseMemoryRead?.(); releaseMemoryRead = null },
-    capabilityStats: () => ({ memoryBusinessReads, capabilitySaves, capabilityReadWaiting, memoryReadWaiting, mutationReceiptWaiting, enabled: memoryCapability.enabled }),
+    capabilityStats: () => ({ memoryBusinessReads, memoryLibraryReads, reviewListReads, capabilitySaves, capabilityReadWaiting, memoryReadWaiting, mutationReceiptWaiting, enabled: memoryCapability.enabled }),
     navigate: setTarget, setTheme, setNotice, setPlatform, setLanguage: (language: 'en' | 'zh-CN') => changeInterfaceLanguage(languageTestApi, language),
     failNext: () => { failNext = true },
     failReads: () => { failedReads++ },

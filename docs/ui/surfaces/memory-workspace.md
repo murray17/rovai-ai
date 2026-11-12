@@ -39,6 +39,12 @@ operable switch with at least a 44px touch height; narrow layouts wrap header ac
 Existing list/detail labels and review copy below remain unchanged. Authority and replay boundaries belong to
 [Memory Capability v1](../../contracts/memory-capability-v1.md).
 
+Content refreshes on Memory changes and connection recovery, independently of whether historical behavior
+notices are suppressed. Unrelated Web invalidations do not reload the two full lists. The mounted page reports
+its pending count through the existing callback; the App reads that list only outside this page.
+A failed list refresh retains the current list and selection, with Retry in the existing error row even when old
+content is available. Add no extra status panel or explanatory copy.
+
 ## Scope, search and workbench
 
 Tabs are All / Shared / Member / Between members, defaulting to All. Tabs and search narrow the authoritative list;

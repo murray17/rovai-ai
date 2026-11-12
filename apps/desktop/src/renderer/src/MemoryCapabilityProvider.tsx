@@ -2,6 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { MemoryCapabilitySnapshot } from '@contracts'
 import type { ThreadClient } from './camp-client'
 
+interface MemoryObservation {
+  version: number
+  changeSequence: number
+}
 interface MemoryCapability extends MemoryCapabilitySnapshot {
   ready: boolean
   active: boolean
@@ -9,10 +13,11 @@ interface MemoryCapability extends MemoryCapabilitySnapshot {
   error: 'read' | 'save' | null
   setEnabled(enabled: boolean): Promise<void>
   retry(): Promise<void>
-  acceptSnapshot(snapshot: MemoryCapabilitySnapshot | null, expectedChangeSequence?: number): MemoryCapabilitySnapshot | null
+  beginObservation(): MemoryObservation
+  acceptSnapshot(snapshot: MemoryCapabilitySnapshot | null, observation: MemoryObservation): MemoryCapabilitySnapshot | null
 }
 const initialSnapshot: MemoryCapabilitySnapshot = { enabled: false, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 }
-const unavailable: MemoryCapability = { ...initialSnapshot, ready: false, active: false, saving: false, error: null, setEnabled: async () => {}, retry: async () => {}, acceptSnapshot: () => null }
+const unavailable: MemoryCapability = { ...initialSnapshot, ready: false, active: false, saving: false, error: null, setEnabled: async () => {}, retry: async () => {}, beginObservation: () => ({ version: 0, changeSequence: 0 }), acceptSnapshot: () => null }
 const Context = createContext<MemoryCapability>(unavailable)
 export const useMemoryCapability = (): MemoryCapability => useContext(Context)
 
@@ -31,7 +36,7 @@ export function MemoryCapabilityProvider({ client, children }: { client: ThreadC
   // A return to a cached client is still a new Host visit.
   const clientGeneration = useRef(0)
   const version = useRef(0)
-  const latest = useRef<MemoryCapabilitySnapshot | null>(null)
+  const latest = useRef<{ snapshot: MemoryCapabilitySnapshot; observation: number; available: boolean } | null>(null)
   const pendingSave = useRef<boolean | null>(null)
   const saving = useRef(false)
   if (current.current !== client) {
@@ -43,19 +48,28 @@ export function MemoryCapabilityProvider({ client, children }: { client: ThreadC
     saving.current = false
   }
   const generation = clientGeneration.current
-  const acceptSnapshot = useCallback((next: MemoryCapabilitySnapshot | null, expectedChangeSequence?: number): MemoryCapabilitySnapshot | null => {
+  const beginObservation = useCallback((): MemoryObservation => ({
+    version: ++version.current,
+    changeSequence: latest.current?.snapshot.observedThroughChangeSequence ?? 0
+  }), [])
+  const acceptSnapshot = useCallback((next: MemoryCapabilitySnapshot | null, observation: MemoryObservation): MemoryCapabilitySnapshot | null => {
     if (current.current !== client || generation !== clientGeneration.current) return null
+    if (next !== null && !validMemoryCapability(next)) throw new Error('Invalid Memory capability')
+    const previous = latest.current
+    const sequence = previous?.snapshot.observedThroughChangeSequence ?? 0
+    // A newer Core setting wins even if its request started earlier. Within the
+    // same setting, get, event snapshots and failures share observation order.
+    if ((next !== null && next.observedThroughChangeSequence < sequence)
+      || ((next === null || next.observedThroughChangeSequence === sequence)
+        && ((previous && observation.version < previous.observation)
+          || (next === null && observation.changeSequence < sequence)))) {
+      return previous?.available ? previous.snapshot : null
+    }
+    latest.current = { snapshot: next ?? previous?.snapshot ?? initialSnapshot, observation: observation.version, available: next !== null }
     if (next === null) {
-      if (expectedChangeSequence !== undefined && latest.current
-        && latest.current.observedThroughChangeSequence > expectedChangeSequence) return latest.current
-      version.current++
-      setState(old => old.error === 'read' && !old.ready ? old : { ...old, ready: false, error: old.error === 'save' ? 'save' : 'read' })
+      setState(old => !old.ready && old.error ? old : { ...old, ready: false, error: old.error === 'save' ? 'save' : 'read' })
       return null
     }
-    if (!validMemoryCapability(next)) throw new Error('Invalid Memory capability')
-    if (latest.current && next.observedThroughChangeSequence < latest.current.observedThroughChangeSequence) return latest.current
-    latest.current = next
-    version.current++ // A later failure cannot erase this authoritative snapshot.
     setState(old => old.client === client && old.ready
       && old.enabled === next.enabled && old.headsUpAfterGlobalSequence === next.headsUpAfterGlobalSequence
       && old.observedThroughChangeSequence === next.observedThroughChangeSequence && old.error !== 'read'
@@ -63,20 +77,14 @@ export function MemoryCapabilityProvider({ client, children }: { client: ThreadC
     return next
   }, [client, generation])
   const reload = useCallback(async () => {
-    const request = ++version.current
+    const observation = beginObservation()
     try {
       const next = await client.request<MemoryCapabilitySnapshot>('preferences.memory.get', {})
-      // A newer unavailable projection need not advance the setting clock.
-      // Keep an older read from replacing it; accepted snapshots still use
-      // the Core clock for ordering within the current Host.
-      if (request !== version.current) return
-      acceptSnapshot(next)
+      acceptSnapshot(next, observation)
     } catch {
-      if (current.current === client && generation === clientGeneration.current && request === version.current) {
-        setState(old => ({ ...old, error: old.error === 'save' ? 'save' : 'read' }))
-      }
+      acceptSnapshot(null, observation)
     }
-  }, [client, generation, acceptSnapshot])
+  }, [client, beginObservation, acceptSnapshot])
   useEffect(() => {
     setState({ client, ...initialSnapshot, ready: false, saving: false, error: null })
     void reload()
@@ -92,20 +100,25 @@ export function MemoryCapabilityProvider({ client, children }: { client: ThreadC
     if (saving.current) return
     saving.current = true
     pendingSave.current = enabled
-    version.current++
+    const observation = beginObservation()
     setState(old => ({ ...old, client, saving: true, error: null }))
     try {
       const next = await client.request<MemoryCapabilitySnapshot>('preferences.memory.set', { enabled })
-      if (!acceptSnapshot(next)) return
+      if (current.current !== client || generation !== clientGeneration.current) return
+      acceptSnapshot(next, observation)
       pendingSave.current = null
-      setState(old => ({ ...old, error: null }))
+      setState(old => old.error === 'save' ? { ...old, error: old.ready ? null : 'read' } : old)
       void reload()
     } catch {
-      if (current.current === client && generation === clientGeneration.current) { setState(old => ({ ...old, ready: false, error: 'save' })); void reload() }
+      if (current.current === client && generation === clientGeneration.current) {
+        setState(old => ({ ...old, error: 'save' }))
+        acceptSnapshot(null, observation)
+        void reload()
+      }
     } finally {
       if (current.current === client && generation === clientGeneration.current) { saving.current = false; setState(old => ({ ...old, saving: false })) }
     }
-  }, [client, generation, reload, acceptSnapshot])
+  }, [client, generation, reload, beginObservation, acceptSnapshot])
   const value = state.client === client ? state : { ...unavailable, client }
-  return <Context.Provider value={{ ...value, active: value.ready && value.error !== 'read' && value.enabled, setEnabled, acceptSnapshot, retry: () => pendingSave.current === null ? reload() : setEnabled(pendingSave.current) }}>{children}</Context.Provider>
+  return <Context.Provider value={{ ...value, active: value.ready && value.enabled, setEnabled, beginObservation, acceptSnapshot, retry: () => pendingSave.current === null ? reload() : setEnabled(pendingSave.current) }}>{children}</Context.Provider>
 }

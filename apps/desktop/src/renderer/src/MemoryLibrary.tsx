@@ -228,7 +228,7 @@ export function MemoryLibrary({
     if (!memory.active) return
     setError(null)
     void load().catch((nextError) => { if (memoryActive.current) setError(errorMessage(nextError)) })
-  }, [load, memory.active])
+  }, [load, memory.active, memory.headsUpAfterGlobalSequence, refreshSignal])
 
   useEffect(() => client.onEvent?.((event) => {
     if (event.method !== 'runtime.state') return
@@ -238,14 +238,11 @@ export function MemoryLibrary({
     if (memoryActive.current && params.status === 'ready') void load().catch((nextError) => setError(errorMessage(nextError)))
   }), [client, load])
 
-  useEffect(() => client.onInvalidated?.(() => {
-    if (!memoryActive.current) return
+  useEffect(() => client.onInvalidated?.((change) => {
+    if (!memoryActive.current || (change && !change.resync && !change.memoryContentChanged)) return
+    setError(null)
     void load().catch((nextError) => setError(errorMessage(nextError)))
   }), [client, load])
-
-  useEffect(() => {
-    if (memoryActive.current && refreshSignal > 0) void load().catch((nextError) => setError(errorMessage(nextError)))
-  }, [load, refreshSignal])
 
   useEffect(() => {
     if (!memory.active || reviewDrawerSignal <= 0) return
@@ -762,7 +759,7 @@ export function MemoryLibrary({
         <div><span><UiText zh="待复核" /></span><strong>{library ? reviewCount : '—'}</strong></div>
       </div>
       {topNotices && <div className="memory-page-notices">{topNotices}</div>}
-      {error && <div className="memory-error" role="alert"><strong><UiText zh="操作未完成" /></strong><span>{error}</span>{!library && <button className="quiet-button compact" type="button" onClick={() => { setError(null); void load().catch((nextError) => setError(errorMessage(nextError))) }}><UiText zh="重试" /></button>}</div>}
+      {error && <div className="memory-error" role="alert"><strong><UiText zh="操作未完成" /></strong><span>{error}</span><button className="quiet-button compact" type="button" onClick={() => { setError(null); void load().catch((nextError) => setError(errorMessage(nextError))) }}><UiText zh="重试" /></button></div>}
       {feedback && <div className="memory-feedback" role="status">{feedback}</div>}
       <div className="memory-library-tools">
         <nav className="memory-scope-tabs" aria-label={uiAttribute("记忆范围")}>

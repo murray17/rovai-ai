@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-12
 confirmation_message_id: f9a37446-9a3f-4716-ac6c-7e0b9cd6aaf0
 authority: proposed-model-input-change-statement
-implementation_status: in_progress
+implementation_status: implemented
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-12
 ---
@@ -49,7 +49,30 @@ User 消息 `f9a37446-9a3f-4716-ac6c-7e0b9cd6aaf0` 已列出完整调用链、�
 结果选择与设置提交共用现有 Core DB 锁；不新增锁、结果副本、持久字段、epoch、会话缓存或后台刷新。
 冻结 Bootstrap/已投递输入与旧会话保持，不主动更新或提示。现有幂等回放与已提交写入回执保持。
 验证扩展 Provider 交互、Core 工具/活动记录、Web SSE/解码/恢复及 Memory 管理既有 owners，
-不以受控测试代替真实 Runtime/模型资格。本 revision 实施结果完成后追加。
+不以受控测试代替真实 Runtime/模型资格。实施结果见下节。
+
+## R4 实施与验证结果（2026-11-12）
+
+复核确认三处行为问题成立，重复读取也有明确调用来源。本轮修正保持在原函数、Provider 和既有失效通道内。
+Provider 只扩展内存中的观察元数据，快照仍为三个字段；成功/失败/事件回包共用同一接收规则。
+Core 将最后一次检查前移到成功证据之前，并复用该数据库 guard 记录证据；外层不再改判。
+Web 的 memory.changed 仅在实际已提交的新 Memory 变更发出，SSE 内容标记不携带正文。
+
+| 复核 | 实际结果 |
+| --- | --- |
+| `cargo test --workspace` | 484 passed / 1 existing ignored |
+| Core `task_discovery_refresh_scopes_bindings_and_repairs_saved_preferences` owner | 通过；利用现有 FIFO DB 锁队列稳定安排实际读取之后、最终结果选择之前关闭；回包、完整分段存储证据和活动记录均失败，错误一致且无正文；R3 三类坏设置及回执用例继续通过 |
+| `cargo test -p rovai-core --features slow-tests --lib memory` | 29 passed；权限、生命周期、管理与幂等回放保持 |
+| `pnpm test` | Vitest 276 files / 3275 passed / 2 skipped；默认 Node 377 passed / 2 skipped；通知与 Web 解码 owners 通过 |
+| `pnpm test:memory-workspace-ui` | 通过；生产 Provider 的 save→read 失败、两个方向同序号旧轮询、较高 Core 序号的旧 get、未知/关闭与重试；无关失效零全量读取，内容失效/resync 各一次读取，已有旧列表失败仍可原位重试 |
+| `pnpm test:startup-presentation` | 通过；生产 Desktop App 配受控 API/时钟，轮询断线及事件缺口恢复后内容和待审核数更新，页内审核列表各读一次，不补旧提示；其余启动/导航/Task 场景保持 |
+| `pnpm test:memory-web-ui` | 通过；真实隔离 Host/Web，页内审核读取一次，无关 Task 失效零 Memory 读取，远端内容变更各读一份列表；受控网络中断期间 Core 保持运行，恢复后刷新内容，页面外恢复读取待审核数 |
+| `pnpm typecheck`、`pnpm build:desktop`、`cargo check --workspace`、格式与通用文档门禁 | 通过 |
+
+list/export 的开关检查均收为一次入口检查，get 保持检查。这里减少重复 SQL，不将它描述为主要性能瓶颈。
+Memory 页内与父组件的审核读取互斥；初次与内容刷新使用同一 effect。没有引入缓存、计数表、定时任务或新通知系统。
+界面只放开原错误行的既有重试按钮，没有新增说明文案或区块。真实 Runtime/模型 Gate 仍为
+`not_run / 证据不足`；受控 Desktop/网络测试不替代原生 Runtime 或跨平台真机验收。
 
 ## R3：局部故障隔离与通知/发现收简
 
@@ -372,7 +395,7 @@ Desktop/Web 构建及通用文档门禁通过；读取失败仍与已确认关�
 ## 完整提示词与工具对照
 
 本清单沿用 [Task 方案](model-context-change-task-capability.md) 的 B/D/S/C 编号和
-“变更前、开启后、关闭后”审阅方式，给出 R3 的累计设计。基线固定为
+“变更前、开启后、关闭后”审阅方式，给出 R4 的累计设计。基线固定为
 `d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`，实现快照固定为
 `c0827c4810a4470edbc4f59c03a99a104310af55` 是 R1 实现；R2 的增量严格为 S01/S03 所列的固定
 Skill 精简。其他编号的模型输入、工具和生命周期边界沿用 R1。
@@ -834,6 +857,7 @@ Core 内部仍使用既有带 operation/requestId 的错误 Envelope，CLI 只�
 关闭期间已经记录的 durable 拒绝继续遵循原 commandId 的幂等事实，重新开启后的新意图使用新命令身份。
 
 生效时间以 Core 设置提交与结果选择的顺序为准；此前已确认的结果可能晚到。
+R4 将最终选择置于成功活动记录之前，完整证据、coreEnvelope 和实际回包使用该选择，之后不重新改判。
 不增加读缓存版本、后台失效任务或 Memory epoch。
 
 ### C07：普通 Runtime context 的发现投影
@@ -948,6 +972,7 @@ get/set 返回完整快照示例：
 | Runtime 原生 Memory 策略 | 保持 |
 | R2 增量 | 只替换通用 Skill 文本及元数据，不增加开关两态的共享文件变体 |
 | R3 增量 | 五项局部修正；快照三字段、事件局部错误为 null、通知边界作用于已显示状态、Hermes 实际调用零能力预查询、审核刷新单一 effect |
+| R4 增量 | 同 Core 序号内统一本地观察顺序；读取失败 ready=false；恢复内容刷新独立于提示过滤；最终结果先于活动记录选择；页内/页外审核读取互斥；Web scoped 内容失效；批量读取减少重复检查 |
 | 验证资格 | 前文自动化结果保持；真实模型 12 Case Gate 仍为 not_run / 证据不足 |
 
 本次沿用 Task 的通用 Skill 固定精简方法，Memory 专用教学归按开关投递的 memory-stewardship。

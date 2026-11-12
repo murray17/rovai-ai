@@ -2791,6 +2791,7 @@ export interface ThreadReadInvalidation {
   nativeInteractionsChanged?: boolean
   tasksChanged?: boolean
   memoryChanged?: boolean
+  memoryContentChanged?: boolean
   teamsChanged?: boolean
   resync?: boolean
   messages?: ThreadMessageChange[]

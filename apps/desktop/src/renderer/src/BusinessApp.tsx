@@ -1129,6 +1129,7 @@ export function BusinessApp({
   const [onboardingError, setOnboardingError] = useState<string | null>(null)
   const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
   const [view, setView] = useState<View>(() => startupView(initialTarget))
+  const memoryPageOpen = view === 'memory'
   const mobilePageRef = useMobilePageTransition(mobile, view)
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(
     initialTarget.kind === 'members' ? initialTarget.agentId : null
@@ -1739,13 +1740,15 @@ export function BusinessApp({
     const boundary = memoryCapability.headsUpAfterGlobalSequence
     setMemoryReviewNotice(current => current !== null && current > boundary ? current : null)
     setMemoryAutoNotice(current => memoryChangesAfter(current, boundary))
+    // The mounted page already reads this list and reports its pending count.
+    if (memoryPageOpen) return
     void client.request<HearthReviewItem[]>('memory.hearthReviewItems.list').then(items => {
       if (!cancelled && memoryCapabilityRef.current.active) {
         setPendingMemoryCount(items.filter(item => item.status === 'pending').length)
       }
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [client, memoryCapability.active, memoryCapability.headsUpAfterGlobalSequence, memoryRefreshKey])
+  }, [client, memoryCapability.active, memoryCapability.headsUpAfterGlobalSequence, memoryRefreshKey, memoryPageOpen])
 
   const loadRuntime = useMemo(() => createRuntimeRefresh(async () => {
     setHealthAttempted(true)
@@ -2703,6 +2706,9 @@ export function BusinessApp({
     const unsubscribe = client.onEvent?.((event: CoreEvent) => {
       const params = asRecord(event.params)
       if (shuttingDownRef.current) return
+      if (event.method === 'memory.changed' && !activeThreadIdRef.current && memoryCapabilityRef.current.active) {
+        setMemoryRefreshKey(current => current + 1)
+      }
       const liveEvent = liveRuntimeEventFromCore(
         event,
         `live-${++liveRuntimeEventSequence.current}`
@@ -2736,6 +2742,7 @@ export function BusinessApp({
           setHealthAttempted(false)
         } else if (runtimeStatus === 'ready') {
           void loadOverview().catch(() => undefined)
+          if (viewRef.current !== 'memory' && memoryCapabilityRef.current.active) setMemoryRefreshKey(current => current + 1)
         }
       }
       if (
@@ -2884,7 +2891,7 @@ export function BusinessApp({
 
     const poll = async (): Promise<void> => {
       try {
-        const memoryReadSequence = memoryCapabilityRef.current.observedThroughChangeSequence
+        const memoryObservation = memoryCapabilityRef.current.beginObservation()
         const batch = await client.request<EventBatch>('events.subscribe', {
           threadId,
           afterGlobalSequence: campEventSequenceMarker.current,
@@ -2892,9 +2899,10 @@ export function BusinessApp({
         })
         if (cancelled) return
         const capability = batch.memoryCapability !== undefined
-          ? memoryCapabilityRef.current.acceptSnapshot(batch.memoryCapability, memoryReadSequence)
+          ? memoryCapabilityRef.current.acceptSnapshot(batch.memoryCapability, memoryObservation)
           : memoryCapabilityRef.current
-        if (resumeMemoryNotices || !capability?.enabled || !memoryCapabilityRef.current.active) {
+        const memoryResumed = resumeMemoryNotices || batch.resetRequired
+        if (memoryResumed || !capability?.enabled || !memoryCapabilityRef.current.active) {
           memoryNoticeFloor = Math.max(memoryNoticeFloor, batch.throughGlobalSequence)
           resumeMemoryNotices = false
         }
@@ -2919,8 +2927,9 @@ export function BusinessApp({
             }
           }
         }
-        if (capability?.enabled && memoryCapabilityRef.current.active && batch.events.some(event => event.eventType.startsWith('memory.')
-          && event.globalSequence > Math.max(memoryNoticeFloor, capability.headsUpAfterGlobalSequence))) {
+        // Content freshness is independent of the floor suppressing old notices.
+        if (capability?.enabled && memoryCapabilityRef.current.active
+          && (memoryResumed || batch.events.some(event => event.eventType.startsWith('memory.')))) {
           setMemoryRefreshKey(current => current + 1)
         }
         if (batch.schemaVersion !== 9 || batch.resetRequired || batch.events.length > 0) {
@@ -2943,7 +2952,9 @@ export function BusinessApp({
     }
   }, [activeThreadId, campSnapshot?.thread.id, requestThreadProjection, setThreadSnapshot])
 
-  useEffect(() => client.onInvalidated?.(() => {
+  useEffect(() => client.onInvalidated?.((change) => {
+    if (memoryCapabilityRef.current.active && viewRef.current !== 'memory'
+      && (!change || change.resync || change.memoryContentChanged)) setMemoryRefreshKey(current => current + 1)
     campViewedAcknowledgements.current.clear()
     setOpenedNavigationRow(null)
     void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))

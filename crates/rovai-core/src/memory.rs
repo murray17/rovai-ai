@@ -3912,7 +3912,7 @@ impl MemoryService {
         let memories = ids
             .iter()
             .map(|id| {
-                self.get(database, id)?
+                self.load_view(database, id)?
                     .with_context(|| format!("Memory {id} disappeared while listing"))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -3924,6 +3924,10 @@ impl MemoryService {
 
     pub fn get(&self, database: &Database, memory_id: &str) -> Result<Option<MemoryView>> {
         crate::memory_capability::require_enabled(database.connection())?;
+        self.load_view(database, memory_id)
+    }
+
+    fn load_view(&self, database: &Database, memory_id: &str) -> Result<Option<MemoryView>> {
         let Some(record) = load_memory_record(database.connection(), memory_id)? else {
             return Ok(None);
         };
@@ -4060,7 +4064,6 @@ impl MemoryService {
     }
 
     pub fn export(&self, database: &Database) -> Result<Value> {
-        crate::memory_capability::require_enabled(database.connection())?;
         let memories = self
             .list(database)?
             .memories

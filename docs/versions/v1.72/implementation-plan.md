@@ -5273,3 +5273,11 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
   验证通过：默认 Rust 484 passed / 1 existing ignored，Memory 29、Core discovery 和 Bootstrap owners，
   Vitest 3275 passed / 2 skipped、默认 Node 377 passed / 2 skipped，以及 CLI 进程、Memory UI 和真实隔离
   Host/Web。快照查询减为两次 SQL，审核读取合并至单一 effect，真实模型 Gate 仍未执行。
+
+- R4：按 User sequence 27 的局部收口范围实施。get/事件快照与失败统一观察顺序；
+  读取失败明确不可用，Core 设置序号优先。恢复连接刷新内容但不补旧提示；页内计数复用页面读取，
+  页面外才读审核列表，Web 全量读取限定内容失效/resync。最终 Memory 读取结果在活动证据前选择，
+  不在记录后改判；管理 list/export 不逐条重复检查开关。未增加持久结构、后台刷新或会话版本。
+  验证通过：Rust workspace 484 passed / 1 existing ignored、Memory 29 与确定性并发结果 owner；
+  Vitest 3275 passed / 2 skipped、默认 Node 377 passed / 2 skipped；生产 Memory UI、Desktop 轮询/事件缺口恢复、
+  真实隔离 Host/Web 内容路由及断网恢复通过。页面仅补原错误行重试，真实 Runtime/模型 Gate 未执行。

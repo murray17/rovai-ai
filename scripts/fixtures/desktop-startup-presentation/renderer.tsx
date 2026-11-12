@@ -554,6 +554,7 @@ Object.assign(window, { startupTest: {
     const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
     responses.set('navigationPreferences.get', navPreferences)
     responses.set('memory.hearthReviewItems.list', [])
+    responses.set('preferences.memory.get', { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 })
     responses.set('memory.list', { capacities: [], memories: ['M', 'N'].map(id => ({
       id, scope: 'hearth', kind: 'preference', creationOrigin: 'user', companionAgentId: null,
       relationshipAgentIds: [], direction: null, directedActorAgentId: null, lifecycle: 'active',
@@ -1101,6 +1102,47 @@ Object.assign(window, { startupTest: {
       'Refresh errors for an existing Thread must remain visible')
     cases.push('Web refresh retains real errors when the Thread still exists')
     delete desktopThreadClient.onInvalidated
+
+    let memoryPollingFailed = true, memoryPollingReset = false, memoryEventSequence = 1
+    await captureNavigation('day', false, () => {
+      requestHandlers.set('events.subscribe', ({ afterGlobalSequence }) => {
+        if (memoryPollingFailed) throw new Error('Fixture Memory polling disconnected')
+        return { schemaVersion: 9, memoryCapability: responses.get('preferences.memory.get'),
+          requestedAfterGlobalSequence: afterGlobalSequence, nextGlobalSequence: memoryEventSequence, throughGlobalSequence: memoryEventSequence,
+          events: [{ globalSequence: memoryEventSequence, eventType: 'memory.agent_revised', entityType: 'memory',
+            entityId: 'M', actorType: 'agent', actorId: 'fixture-member', payload: { scope: 'hearth' } }],
+          hasMore: false, resetRequired: memoryPollingReset }
+      })
+    })
+    await openMemory()
+    const reviewReadsBeforeRecovery = calls.filter(call => call === 'memory.hearthReviewItems.list').length
+    const libraryReadsBeforeRecovery = calls.filter(call => call === 'memory.list').length
+    const beforeRecovery = responses.get('memory.list') as any
+    responses.set('memory.list', { ...beforeRecovery, memories: beforeRecovery.memories.map((memory: any) =>
+      memory.id === 'M' ? { ...memory, currentBody: '轮询断线后的最新记忆', version: memory.version + 1 } : memory) })
+    responses.set('memory.hearthReviewItems.list', [{ reviewItemId: 'recovery-review', requestedAction: 'add', status: 'pending',
+      stale: false, version: 1, candidateKind: 'agreement', candidateBody: '断线期间的新候选', candidateRetrievalKeys: ['恢复'],
+      targetMemoryId: null, baseRevisionId: null, sourceAgentId: 'fixture-member', sourceThreadId: 'B',
+      sourceAgentRunId: 'fixture-run', sourceExecutionEpoch: 1, acceptedMemoryId: null, acceptedRevisionId: null,
+      resolvedByUserId: null, invalidationReason: null, editedBeforeAcceptance: null, createdAt: stamp, resolvedAt: null }])
+    memoryPollingFailed = false
+    await advance(1_400); await flush(); await flush()
+    check(document.querySelector('.memory-catalog')?.textContent?.includes('轮询断线后的最新记忆'),
+      'Recovered Desktop polling refreshes actual Memory content while old behavior notices are suppressed')
+    check(document.querySelector('.memory-review-entry')?.textContent?.includes('1'), 'Recovered polling refreshes the pending review count')
+    check(calls.filter(call => call === 'memory.list').length === libraryReadsBeforeRecovery + 1,
+      'Recovered polling requests the Memory library once')
+    check(calls.filter(call => call === 'memory.hearthReviewItems.list').length === reviewReadsBeforeRecovery + 1,
+      'The mounted page provides the recovered count without a second parent request')
+    check(!document.querySelector('.memory-change-notice'), 'Recovery must not replay the old Memory behavior notice')
+    memoryPollingReset = true; memoryEventSequence = 2
+    const beforeGap = responses.get('memory.list') as any
+    responses.set('memory.list', { ...beforeGap, memories: beforeGap.memories.map((memory: any) =>
+      memory.id === 'M' ? { ...memory, currentBody: '事件缺口后的最新记忆', version: memory.version + 1 } : memory) })
+    await advance(1_400); await flush(); await flush()
+    check(document.querySelector('.memory-catalog')?.textContent?.includes('事件缺口后的最新记忆'), 'A reset batch refreshes current Memory data')
+    check(!document.querySelector('.memory-change-notice'), 'An event gap cannot replay the retained batch as a new behavior notice')
+    cases.push('Desktop Memory polling recovery refreshes content and pending count once without replaying old notices')
 
     await captureNavigation('day', false)
     await clickNavigation('导航会话 B', '.camp-nav-open')

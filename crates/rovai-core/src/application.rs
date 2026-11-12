@@ -7261,24 +7261,6 @@ impl Core {
                         "Built-in Tool CLI is not bound to the current AgentRun",
                     );
                 }
-                let memory_read_guard =
-                    if rovai_core::memory_capability::is_read_operation(&operation) {
-                        let database = self.database.lock().await;
-                        if let Err(error) =
-                            rovai_core::memory_capability::require_enabled(database.connection())
-                        {
-                            let (code, message, _) = classify_builtin_operation_error(&error);
-                            return builtin_tool_rejection(
-                                &operation,
-                                &request_id,
-                                &code,
-                                &message,
-                            );
-                        }
-                        Some(database)
-                    } else {
-                        None
-                    };
                 let envelope = match (domain_response.result, domain_response.error) {
                     (Some(result), None) => {
                         BuiltinToolInvocationEnvelope::success(&operation, &request_id, result)
@@ -7310,7 +7292,6 @@ impl Core {
                         );
                     }
                 };
-                drop(memory_read_guard);
                 if let Err(error) = self
                     .builtin_tool_leases
                     .record(&auth, &request_id, &digest, &envelope)
@@ -7867,6 +7848,7 @@ impl Core {
                             MemoryToolService.write(&mut database, &invocation)
                         }?;
                     evidence_replayed = execution.replayed;
+                    emit_memory_if_applied(&self.output, &execution);
                     command_execution_payload(execution)
                 }
                 MEMORY_VIEW_TOOL_NAME => {
@@ -8423,6 +8405,22 @@ impl Core {
             })
         }
         .await;
+        // Select the final read result before constructing any success evidence.
+        // This is the same DB ordering boundary as a preference commit. Once
+        // selected, evidence and transport must not independently reinterpret it.
+        let mut memory_read_guard = if result.is_ok()
+            && rovai_core::memory_capability::is_read_operation(&evidence_tool_name)
+        {
+            Some(self.database.lock().await)
+        } else {
+            None
+        };
+        let result = match memory_read_guard.as_ref() {
+            Some(database) => {
+                rovai_core::memory_capability::require_enabled(database.connection()).and(result)
+            }
+            None => result,
+        };
         if result.is_ok() && member_roster_changed {
             emit_member_roster_invalidated(&self.output, &evidence_tool_name);
             if let Some(authenticated_run) = evidence_run
@@ -8509,7 +8507,10 @@ impl Core {
                 "sendInputFilePath": send_input_file_path,
             });
             let evidence_result = {
-                let mut database = self.database.lock().await;
+                let mut database = match memory_read_guard.take() {
+                    Some(database) => database,
+                    None => self.database.lock().await,
+                };
                 ExecutionEvidenceService.record_builtin_tool_result(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
@@ -10701,6 +10702,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.revise" => {
@@ -10711,6 +10713,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.retire" => {
@@ -10721,6 +10724,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.reactivate" => {
@@ -10731,6 +10735,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.forget" => {
@@ -10741,6 +10746,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.supersede" => {
@@ -10751,6 +10757,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.review.schedule" => {
@@ -10761,6 +10768,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.hearthReviewItems.list" => {
@@ -10777,6 +10785,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.hearthReviewItems.reject" => {
@@ -10787,6 +10796,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_applied(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.export" => {
@@ -29160,6 +29170,12 @@ fn emit_navigation_invalidated(
     );
 }
 
+fn emit_memory_if_applied(output: &mpsc::UnboundedSender<String>, execution: &CommandExecution) {
+    if !execution.replayed && execution.result.status == CommandResultStatus::Applied {
+        emit(output, "memory.changed", json!({}));
+    }
+}
+
 fn member_roster_change_applied(execution: &CommandExecution) -> bool {
     !execution.replayed && execution.result.status == CommandResultStatus::Applied
 }
@@ -37850,6 +37866,99 @@ done
             "body":"Keep exact capability receipts.","retrievalKeys":["capability receipts"]});
         let written = invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await;
         assert_eq!(written["envelope"]["ok"], true, "{written}");
+        // Arrange close after the actual read, before final result selection,
+        // using the existing FIFO DB mutex rather than a production test hook.
+        let racing_id = uuid::Uuid::new_v4().to_string();
+        let mut read = Box::pin(invoke_memory(
+            &core,
+            a,
+            &racing_id,
+            "memory.read",
+            read_input.clone(),
+        ));
+        let mut database = core.database.lock().await;
+        let before: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM memory_access_evidence", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(read.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let mut closed_after_read = false;
+        for _ in 0..12 {
+            let mut next_lock = Box::pin(core.database.lock());
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(next_lock.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            drop(database);
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(read.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            database = next_lock.await;
+            let observed: i64 = database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM memory_access_evidence", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            if observed > before {
+                let tx = database.connection_mut().transaction().unwrap();
+                rovai_core::memory_capability::set(&tx, false).unwrap();
+                tx.commit().unwrap();
+                closed_after_read = true;
+                break;
+            }
+        }
+        assert!(
+            closed_after_read,
+            "must close in the result selection window"
+        );
+        drop(database);
+        let raced = read.await;
+        assert_eq!(
+            raced["envelope"]["error"]["code"],
+            "memory.feature_disabled"
+        );
+        assert!(!raced.to_string().contains(body));
+        {
+            let database = core.database.lock().await;
+            let (phase, evidence_id, operation_id): (String, String, String) = database
+                .connection()
+                .query_row(
+                    "SELECT phase, id, operation_id FROM agent_run_execution_evidence
+                     WHERE agent_run_id=?1 AND kind='tool_result'
+                     ORDER BY sequence DESC LIMIT 1",
+                    [&execution_a.agent_run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            let payload = ExecutionEvidenceService
+                .read_full_payload(
+                    &database,
+                    &ManagedBlobStore::new(&core.data_dir),
+                    &bindings[0].0,
+                    &evidence_id,
+                )
+                .unwrap();
+            assert_eq!(phase, "failed");
+            assert_eq!(payload["status"], "failed");
+            assert_eq!(payload["errorCode"], raced["envelope"]["error"]["code"]);
+            assert_eq!(payload["coreEnvelope"]["ok"], false);
+            assert!(!payload.to_string().contains(body));
+            let outcome: String = database.connection().query_row(
+                "SELECT outcome FROM execution_activity WHERE agent_run_id=?1 AND operation_id=?2",
+                [&execution_a.agent_run_id, &operation_id], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(outcome, "failed");
+        }
         let off = save_memory(&core, false).await;
         for config in [a, b] {
             let context: Value =
