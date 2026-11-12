@@ -1648,3 +1648,5 @@ User 已在范围和文案审阅后授权独立 worktree 实施，见[已确认 
 仅在新输入原有生成路径省略 Memory 入口和技能，旧 Session/Bootstrap/冻结输入不主动处理。
 当前接口见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。实现及自动化验收完成，
 真实模型通用 Gate 尚未执行；范围、结果与限制见[实施记录](implementation-plan.md#rovai-长期记忆实例开关2026-11-11)。
+全部提示词、工具定义/help、关闭错误和回放的前后变化见
+[逐项设计对照](model-context-change-memory-capability.md#完整提示词与工具对照)，沿用 Task 方案的审阅编号。
