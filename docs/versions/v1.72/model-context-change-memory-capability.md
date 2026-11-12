@@ -2,21 +2,23 @@
 document_type: model-context-change
 version: v1.72
 change_id: memory-capability
-revision: 2
+revision: 3
 confirmation_status: confirmed
-confirmed_revision: 2
+confirmed_revision: 3
 confirmed_by: User
-confirmed_at: 2026-11-11
-confirmation_message_id: 1d5d32d6-6b6f-40a0-88bd-2de7062ac1df
+confirmed_at: 2026-11-12
+confirmation_message_id: 2b3bcad2-ac73-41d8-bcb7-076ba5a1b8ab
 authority: proposed-model-input-change-statement
-implementation_status: implemented
+implementation_status: in_progress
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-12
 ---
 
 # Rovai 长期记忆实例开关
 
-本说明记录 User 已确认的 R2 范围和完整文本。R2 在 R1 实例开关上增加通用 CLI Skill 的固定精简，
+本说明累计记录 R1/R2 和 User sequence 25 已给出前后行为并明确授权修改的 R3 五项修正。
+R2 原稿固定保留在 [f0a8380ab](https://github.com/murray17/rovai-ai/blob/f0a8380ab291c97768ea682fb60364c69f147266/docs/versions/v1.72/model-context-change-memory-capability.md)。
+R2 在 R1 实例开关上增加通用 CLI Skill 的固定精简，
 采用 User 已审阅的五处替换，不动态改写开关两态的共享 Skill。R1 原稿固定保留在
 [fb603a168](https://github.com/murray17/rovai-ai/blob/fb603a168198eec5d6486a6aae5c65f5214d804d/docs/versions/v1.72/model-context-change-memory-capability.md)。
 只增加一个默认开启的 Core 实例设置，控制 Rovai Memory
@@ -26,6 +28,36 @@ Companion、Relationship。关闭保留正式记录、修订、审核候选和�
 
 完整提示词、工具定义/help、错误回包与回放差异可直接按文末的
 [逐项审阅清单](#完整提示词与工具对照)阅读；编号与 Task 方案一致，并单列关闭后仍保留的通用文字。
+
+## R3：局部故障隔离与通知/发现收简
+
+User 已审阅 `d7b69cb → f0a8380ab` 的完整实现，消息 `2b3bcad2-ac73-41d8-bcb7-076ba5a1b8ab`
+明确列出五项修正的变更前后行为并要求独立判断后修改，本节先记录该授权范围再实施。
+
+| 位置 | 变更前 | R3 变更后 |
+| --- | --- | --- |
+| 普通输入准备（含 Single Chat） | Memory 设置读取错误导致输入准备失败 | 只省略 Memory Entrypoint 与记忆技能索引；普通输入继续，已冻结输入保持 |
+| `events.subscribe` | Memory 快照失败导致整个事件请求失败 | 事件和自身游标正常返回；`memoryCapability: null` 明确表示局部不可用，Provider 进入读取失败态；字段缺省仍按既有可选字段处理 |
+| 统一 CLI context 与能力发现 | Memory 设置读取失败阻断 Task 投影/能力返回 | 同次读取保留有效 Task 状态，Memory 不可用时仅隐藏其发现入口；不写回设置、不生成替代设置记录 |
+| Memory 工具与设置接口 | 严格读取设置，读取错误不交付正文/不提交新效果 | 保持；错误不伪装为用户关闭，已提交写回执保持 |
+| 已显示通知 | 仅在观察到关闭时清空，新通知按边界过滤 | 边界推进后清除旧审核提示，已有变化只保留 `sequence > headsUpAfterGlobalSequence`；保留边界后的新提示，迟到回调保持顺序隔离 |
+| Hermes CLI | 每条命令先远程查询能力，失败返回两项 false | 仅 help 等发现路径远程查询；实际已知命令直接进入 Core。发现失败明确报不可用，不作为 Task 已关闭 |
+| Memory 快照 | 四字段，事件表最大序号会造成无关更新 | 删除 `observedThroughGlobalSequence`，完整新形状如下；不增加替代字段或数据库结构 |
+| 审核列表刷新 | 全局设置排序时钟变化触发全量请求，多个入口可重复读取 | 由实际启用状态、重新启用边界及 Memory 内容事件触发；在当前 BusinessApp 合并在途读取，排序序号只隔离迟到响应 |
+
+```json
+{"enabled":true,"headsUpAfterGlobalSequence":100,"observedThroughChangeSequence":7}
+```
+
+Memory 设置异常时新输入的 Memory 段为空，`observed_memory_revisions=[]`，授权摘要沿用
+`{"schemaVersion":1,"memoryAccess":"none"}`，预算与实际字节一致，不增加模型提示文案。
+事件 `schemaVersion=9`、工具错误结构、数据库 Migration 224/schema 174 及全部上下文版本轴保持。
+不新增 Memory epoch、会话缓存、后台刷新机制或通用 capability 框架；不重建 Session、作废 Bootstrap、
+补发输入、主动提示旧会话，也不删除已经进入上下文的内容。
+
+验证扩展现有 Core discovery、Bootstrap、CLI 进程、Memory 通知与 Web owners，覆盖缺行/非法设置、
+普通输入与事件继续、Task 投影更新、已有提示跨漏看的关闭→开启边界、Hermes 已知调用零预查询和
+无关全局时钟零审核读取。真实模型 Gate 的既有未执行状态保持，不以受控夹具替代。
 
 ## 用户界面实际改动
 
