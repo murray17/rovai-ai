@@ -76,6 +76,9 @@ User 管理读取覆盖 `memory.list/get/export`、`memory.hearthReviewItems.lis
 新生成 Bootstrap 关闭时不查询 Memory 索引，不输出整个 Memory Entrypoint，也不输出空库搜索教学。
 观察 Revision 集合为空，授权摘要准确表示 `memoryAccess=none`，预算和证据按实际字节生成。
 平台技能索引省略 `memory-stewardship`，保留文件和受管身份。开启恢复正常发现。
+`cli-operations` 始终使用固定精简的通用 description/正文，不提供 Memory 专用选择行和引用；
+对应界面元数据同步精简。旧 Memory reference 保留通用导航短页，文件发布沿用原同步流程。
+开关不动态改写这份共享 Skill；记忆工作流由条件投递的 `memory-stewardship` 拥有。
 
 普通 Runtime 的 CLI context 新增 `memoryEnabled`；统一刷新入口在同一 Core 读取中获取当前 Task、Memory
 状态，再生成完整文件。CLI 列表、说明和 help 按投影过滤；实际调用继续进入 Core，不按本地投影拒绝整组 Memory。
@@ -95,4 +98,4 @@ Memory 导航保留。关闭页只显示停用说明与前往通用设置的入�
 关闭/状态未知时抑制 Memory 行为提示并继续维护既有公共事件游标。重新开启过滤持久化提示边界以前的
 事件；离线重连/重订阅用既有事件水位确定提示起点，不集中补弹。数据与待审核项保留，不批量修改生命周期。
 
-精确已确认文案、前后输入及验证归属见[变更说明 R1](../versions/v1.72/model-context-change-memory-capability.md)。
+精确已确认文案、前后输入及验证归属见[变更说明 R2](../versions/v1.72/model-context-change-memory-capability.md)。

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skills
 authority: current-skills-source-configuration-and-delivery-boundaries
 status: accepted
-last_updated: 2026-11-08
+last_updated: 2026-11-11
 ---
 
 # Skills 来源、配置与模型投递
@@ -20,6 +20,11 @@ Skills 是模型可按需读取的文件指南，不改变工具、权限、消�
 | 旧 Skill Library／Revision／项目投影 | 历史数据、审计和旧 Run 恢复 | `skill`、`skill_revision`、受管 Revision 与 observation 保留；不进入新索引或候选。启动和升级不扫描或清理项目文件；项目入口仅在用户显式操作时按所有权、active Run 和 root access 规则处理。 |
 
 受管文件同步仅操作九个 Rovai 发布目录，且不跟随来源或目标的符号链接。受管根来自执行 Host 的 Core data-dir 规则，不能使用 Renderer 前台路径或模型侧 `~`。旧 Library 的启停和 Runtime group assignment 不转为队员配置；迁移及新建队员只默认选择 `member-studio`。用户显式关闭后，Core 重启不重新开启。
+
+`cli-operations` 在两种 Memory 状态下共用一份不含 Memory 专用教学的通用资源；记忆资格、Scope、
+读取与形成工作流归 `memory-stewardship`，随 Memory capability 决定新索引是否投递。
+旧 `cli-operations/references/memory.md` 路径只保留通用 CLI 导航，不再被该 Skill 的 References 列出。
+发布新版时沿用受管文件同步；开关切换不改写共享文件，不更新已冻结输入或重建 Session。
 
 队员永久移除在同一领域命令事务中删除其全部 `member_toolbox_skill` 当前配置；历史身份和已冻结的 Run 输入保留。
 工具箱名单和保存时的配置版本共用有效队员查询，只排除 `profile_status = 'removed'`，保留暂离队员。

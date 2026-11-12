@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-11
 confirmation_message_id: 1d5d32d6-6b6f-40a0-88bd-2de7062ac1df
 authority: proposed-model-input-change-statement
-implementation_status: in_progress
+implementation_status: implemented
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-11
 ---
@@ -223,6 +223,26 @@ baseline/candidate campaign；检查到的既有计划为 `judge=null`。没有�
 夹具当作真实 Runtime/模型资格，也没有宣称通用 12 Case Gate 通过。本分支只交付实现及自动化验收，
 不创建 PR、不合并或发布；正式模型 Gate 仍按既有通用流程完成，不继承其他任务的豁免。
 
+## R2 实施与验证结果
+
+R2 全文先通过独立提交 `bd6b4acbe` 归档，再修改 Skill 资源。实现只涉及三个文件中的五处位置：
+通用 description、选择表、References、界面 short_description 和旧 Memory reference 正文。
+实际资源与 User 之前审阅的完整替换稿逐字一致。memory-stewardship、Charter、Core 业务代码、数据库
+和全部上下文版本轴没有新增改动。
+
+| R2 复测 | 结果 |
+| --- | --- |
+| `pnpm skills:check` | 12 个 Skill 通过；名称、引用及界面元数据保持合法 |
+| `cargo test --workspace` | 484 passed、1 existing ignored |
+| `cargo test -p rovai-core --features slow-tests --lib managed_skills::` | 3 passed；覆盖 frontmatter/index、资源同步修复及既有配置/回放 owner |
+| `cargo test -p rovai-core --features slow-tests --lib newly_bound_session_bootstraps_on_its_current_generation` | 1 passed；新生成能力分支和已冻结 Bootstrap 保留 |
+| `pnpm test` | Vitest 276 files / 3275 passed、2 skipped；默认 Node 377 passed、2 skipped；文档、Skills 和沙箱门禁通过 |
+| 通用文档门禁、diff-aware gate、`git diff --check` | 通过 |
+
+本轮没有修改 Renderer 生产组件；交互稿只增加评审场景按钮、差异说明及默认的关闭态对比，便于看清
+“开启时管理页原样”与“关闭后管理页停用”。产品中的 UI 差异以上方表格和实际生产组件为准。
+真实模型 12 Case Gate 仍为 `not_run / 证据不足`，不将文本核对、单测或交互稿当作模型行为资格。
+
 ## 完整提示词与工具对照
 
 本清单沿用 [Task 方案](model-context-change-task-capability.md) 的 B/D/S/C 编号和
@@ -419,7 +439,7 @@ References 删除的完整一行：
 - [Memory](references/memory.md): route durable information to `memory-stewardship`.
 ```
 
-不开启时不再从通用协调 Skill 引导选择 Memory。开启时专用 Skill 索引和 Memory Entrypoint
+两种开关状态下都不再从通用协调 Skill 引导选择 Memory。开启时专用 Skill 索引和 Memory Entrypoint
 照常发现，无需把这两行复制到其他通用 Skill。
 
 #### S03.3：旧 reference 保留为通用导航

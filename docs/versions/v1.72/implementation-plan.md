@@ -5241,7 +5241,7 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-memory-capability`；分支 `rovai/memory-capability`。
 - 基线：`d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`；方案独立提交 `50f43ef69`，未要求治理先合主线。
-- 范围与确认：[Memory capability R1](model-context-change-memory-capability.md)；当前合同：[v1](../../contracts/memory-capability-v1.md)。
+- 范围与确认：[Memory capability R2](model-context-change-memory-capability.md)；当前合同：[v1](../../contracts/memory-capability-v1.md)。
 - 复用 Memory 存储、Agent Facade、Core 发现刷新、CLI、Web 失效和 Renderer 现有 owners；不改 Session 生命周期。
 - 验证归属：Memory 存储 owner 覆盖管理停用、回执和水位；现有 Core Task discovery owner 扩展 Memory 全链路；
   Bootstrap owner 覆盖冻结材料和新分支；目录 owner 覆盖两开关组合；Memory UI 生产组件夹具覆盖停用/重试。
@@ -5257,3 +5257,6 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 - 完整命令、后续小范围复测与限制见[变更说明结果](model-context-change-memory-capability.md#实施与验证结果2026-11-11)。
   真实模型 12 Case Gate 为 `not_run / 证据不足`：缺少固定 snapshot Judge 与冻结 campaign，
   不以受控 Hermes/Core/UI 夹具替代真实模型资格。本次没有启动真实 Runtime 或修改日常数据。
+- R2：User 审阅完整五处 Skill 文本后授权实施；cli-operations 的 description、选择表、引用和
+  界面元数据固定精简，旧 Memory reference 保留通用导航。专用记忆 Skill、Charter、Core 业务与
+  所有上下文版本轴保持。新一轮资源、Bootstrap、默认回归与文档结果在 R2 变更说明收口。
