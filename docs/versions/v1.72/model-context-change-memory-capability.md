@@ -2,27 +2,46 @@
 document_type: model-context-change
 version: v1.72
 change_id: memory-capability
-revision: 1
+revision: 2
 confirmation_status: confirmed
-confirmed_revision: 1
+confirmed_revision: 2
 confirmed_by: User
 confirmed_at: 2026-11-11
-confirmation_message_id: 04816bb6-4968-4df3-86bc-ee820c84644e
+confirmation_message_id: 1d5d32d6-6b6f-40a0-88bd-2de7062ac1df
 authority: proposed-model-input-change-statement
-implementation_status: implemented
+implementation_status: in_progress
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-11
 ---
 
 # Rovai 长期记忆实例开关
 
-本说明记录 User 已审阅的收敛范围和文案。只增加一个默认开启的 Core 实例设置，控制 Rovai Memory
+本说明记录 User 已确认的 R2 范围和完整文本。R2 在 R1 实例开关上增加通用 CLI Skill 的固定精简，
+采用 User 已审阅的五处替换，不动态改写开关两态的共享 Skill。R1 原稿固定保留在
+[fb603a168](https://github.com/murray17/rovai-ai/blob/fb603a168198eec5d6486a6aae5c65f5214d804d/docs/versions/v1.72/model-context-change-memory-capability.md)。
+只增加一个默认开启的 Core 实例设置，控制 Rovai Memory
 的业务操作、新生成输入和发现投递，以及 Desktop/Web/Mobile 的管理界面。同一开关覆盖 Hearth、
 Companion、Relationship。关闭保留正式记录、修订、审核候选和已经发生的提交结果；人工管理也暂停。
 不增加每 Thread、每队员、每 Scope 覆盖，不改 Runtime 原生记忆策略，不引入通用 Feature Flag 框架。
 
 完整提示词、工具定义/help、错误回包与回放差异可直接按文末的
 [逐项审阅清单](#完整提示词与工具对照)阅读；编号与 Task 方案一致，并单列关闭后仍保留的通用文字。
+
+## 用户界面实际改动
+
+开启后的记忆管理页沿用当前布局；本次没有重设计列表、详情或审核交互。
+
+| 位置/状态 | 修改前 | 修改后 |
+| --- | --- | --- |
+| 通用设置 → 会话 | 自动打开执行台、会话任务、世界地图 | 在会话任务后新增“Rovai 长期记忆”开关和问号说明；其他行保持 |
+| 记忆管理页，开启 | 列表、详情、搜索、计数、新增、审核与管理可用 | 这些界面和业务照常使用，开启态布局保持 |
+| 记忆管理页，关闭 | 没有此状态 | 保留记忆导航，隐藏列表、详情、搜索、计数、新增、编辑、审核和复核业务，只显示“记忆”标题、停用说明与“前往设置” |
+| 设置状态读取失败 | 没有此状态 | 显示“状态暂不可用”及重试，不加载业务，不显示为确认关闭 |
+| 迟到结果/通知 | 原业务刷新和提示路径 | 关闭时不恢复业务区、不再发起后续读取或补弹旧行为提示；已有提交事实保留 |
+| 重新开启 | 不适用 | 重新读取当前仍有效的数据，恢复原有管理功能，不自动提交本地草稿 |
+
+因此评审需要分别查看“开启时管理页不变”和“关闭后管理页停用”；仅对比开启态看不到管理页的停用变化。
+精确文案见下文“用户界面”；停用不改变已经保存的记录、修订或审核项。
 
 ## 变更前
 
@@ -55,7 +74,7 @@ Single Chat 已省略 Memory Entrypoint，保持该选择。
 [/ROVAI_PLATFORM_SKILLS]
 ```
 
-两个既有 description 的字节保持基线文件 frontmatter 原文；索引顺序、根路径和字段没有其他变化。
+以上是变更前的基线 frontmatter；R2 的通用 description 替换及完整索引对照见 S01/S03。
 
 ### 工具与结果
 
@@ -73,7 +92,8 @@ User Host 的 `memory.list/get/create/revise/retire/reactivate/forget/supersede/
 
 ### 开启
 
-上述 Bootstrap、技能索引、四项 Memory 工具和管理界面正常提供；现有读取授权、Scope、Presence、
+Memory Entrypoint、四项 Memory 工具和管理界面正常提供；平台索引中 cli-operations 使用 S03 的
+统一精简描述，memory-stewardship 正常提供。现有读取授权、Scope、Presence、
 Revision、配额、审核与生命周期规则继续生效。读请求回放通过现有实时读取服务重新判断当前状态，
 不交付陈旧缓存正文。已提交写入仍返回原有、不含记忆正文的回执，不重复产生业务效果。
 
@@ -88,11 +108,12 @@ Revision、配额、审核与生命周期规则继续生效。读请求回放通
 
 ```text
 [ROVAI_PLATFORM_SKILLS]
-{"root":"<managed-root>","skills":[{"name":"cli-operations","desc":"<existing description>"}]}
+{"root":"<managed-root>","skills":[{"name":"cli-operations","desc":"Choose among Rovai messages, Missions and history; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly."}]}
 [/ROVAI_PLATFORM_SKILLS]
 ```
 
-- CLI 目录、操作说明和 help 隐藏 Memory 发现入口。技能源文件保留，`cli-operations` 及其他技能正文不改。
+- CLI 目录、操作说明和 help 隐藏 Memory 发现入口。技能源文件保留；cli-operations 在开启/关闭时
+  共用 S03 的精简正文，其他技能正文保持。
 - 本地投影只控制发现；实际命令仍送 Core，由实时状态裁决，保留已有提交结果的返回能力。
 
 新的 Agent Memory 操作在既有 Core 串行/事务边界停止，错误字段精确为：
@@ -152,8 +173,14 @@ Memory 导航保留；停用页不加载/展示业务内容、计数、审核或
 
 User 在消息 `5666ee22-7c9b-41d5-9002-9485255c539b` 给出收敛边界，随后要求解释 Hermes 和完整文案清单。
 清单已由消息 `5c868cdd-59fd-4a6a-aeed-a106ab17f116` 交付。User 之后通过
-`04816bb6-4968-4df3-86bc-ee820c84644e` 明确要求“那你开启wt执行”，作为本 revision 的实施确认。
-本文件把已审阅的范围和文案归档，不将实现者新增语义视为已确认；语义变化须升级 revision 并另行确认。
+`04816bb6-4968-4df3-86bc-ee820c84644e` 明确要求“那你开启wt执行”，作为 R1 的实施确认。
+
+User 在 `1d843388-cde5-4038-a344-6b3af2b55228` 要求重新评估 S03。完整五处前后差异、替换后的
+SKILL.md、旧 reference 全文和规则去向已通过离线 HTML 交付，见消息
+`919c2ceb-f6a0-418b-8d99-ea3664dab723`。随后 User 在
+`1d5d32d6-6b6f-40a0-88bd-2de7062ac1df` 明确要求“那你动吧，然后再给我一份md”，
+确认该五处方案，作为 R2 的实施授权。R2 不扩大 Core、数据库、Session 或 UI 业务行为。
+本文件的 R2 全文先于 Skill 实现归档；原 R1 通过上述不可变 commit 保留。
 
 ## 验证
 
@@ -199,9 +226,10 @@ baseline/candidate campaign；检查到的既有计划为 `judge=null`。没有�
 ## 完整提示词与工具对照
 
 本清单沿用 [Task 方案](model-context-change-task-capability.md) 的 B/D/S/C 编号和
-“变更前、开启后、关闭后”审阅方式，补齐已实施 R1 的逐项设计。基线固定为
+“变更前、开启后、关闭后”审阅方式，给出 R2 的累计设计。基线固定为
 `d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`，实现快照固定为
-`c0827c4810a4470edbc4f59c03a99a104310af55`；本次追加只整理事实，不改变 R1 语义或确认状态。
+`c0827c4810a4470edbc4f59c03a99a104310af55` 是 R1 实现；R2 的增量严格为 S01/S03 所列的固定
+Skill 精简。其他编号的模型输入、工具和生命周期边界沿用 R1。
 
 代码块中的 `<managed-root>` 是实例 Skills 目录变量；示例 Memory ID、Revision ID、成员名及检索词
 代替业务数据。其他被列出的英文文本为源码原文。“省略”表示不发送相应字节，不是向 Agent 发送
@@ -217,7 +245,7 @@ baseline/candidate campaign；检查到的既有计划为 `judge=null`。没有�
 | D01 | 每 Run 动态输入 | 不增加 Memory 开关字段或关闭提示 |
 | S01 | 平台 Skill 索引 | 关闭只删除 `memory-stewardship` 条目 |
 | S02 | `memory-stewardship` 正文及引用文件 | 内容、文件与受管身份保持；关闭不从平台索引发现 |
-| S03 | 通用 Charter / `cli-operations` 中的 Memory 提及 | 原文保留，下面列明具体位置 |
+| S03 | 通用 Charter / `cli-operations` 中的 Memory 提及 | Charter 优先级句保留；通用 Skill 的 Memory 教学固定移除，旧 reference 留通用导航 |
 | C01 | CLI 根 help | 关闭移除 Memory 一行，Task 独立 |
 | C02 | 四项 Memory 操作的定义、参数和成功结果 | 保持唯一静态定义，发现时按开关筛选 |
 | C03 | 四项精确 help、family help | 关闭不输出精确操作说明；没有新增 family help |
@@ -313,9 +341,10 @@ Agent 在实际调用 Memory 时从 C05 的错误回包得到反馈。
 ### S01：平台 Skill 索引的完整前后文本
 
 来源：[平台索引构建](../../../crates/rovai-core/src/context/claim.rs)、
-[受管 Skills 索引](../../../crates/rovai-core/src/managed_skills.rs)。
+[受管 Skills 索引](../../../crates/rovai-core/src/managed_skills.rs)。R2 的 cli-operations description
+由同一个 frontmatter 读取，两种开关状态使用相同通用文字。
 
-**变更前，以及变更后开启：**
+**变更前：**
 
 ```text
 [ROVAI_PLATFORM_SKILLS]
@@ -323,16 +352,25 @@ Agent 在实际调用 Memory 时从 C05 的错误回包得到反馈。
 [/ROVAI_PLATFORM_SKILLS]
 ```
 
+**变更后，开启：**
+
+```text
+[ROVAI_PLATFORM_SKILLS]
+{"root":"<managed-root>","skills":[{"name":"cli-operations","desc":"Choose among Rovai messages, Missions and history; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly."},{"name":"memory-stewardship","desc":"Maintain durable collaboration preferences, agreements and lessons when the user asks to remember, correct or stop using them, or current evidence warrants capture. Excludes temporary work, project facts, sensitive data and speculation."}]}
+[/ROVAI_PLATFORM_SKILLS]
+```
+
 **变更后，关闭：**
 
 ```text
 [ROVAI_PLATFORM_SKILLS]
-{"root":"<managed-root>","skills":[{"name":"cli-operations","desc":"Choose among Rovai messages, Missions, history and Memory; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly."}]}
+{"root":"<managed-root>","skills":[{"name":"cli-operations","desc":"Choose among Rovai messages, Missions and history; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly."}]}
 [/ROVAI_PLATFORM_SKILLS]
 ```
 
-只移除一项；section 名、root、JSON shape、保留项顺序和 description 字节不变。
-Single Chat 的平台索引也按同一个 Memory 状态过滤，尽管它原本就没有 Memory Entrypoint。
+R2 固定替换通用 description；开关只决定专用记忆 Skill 条目是否出现。
+section 名、root、JSON shape 和保留项顺序保持。Single Chat 也按相同 Memory 状态过滤平台索引，
+尽管它原本就没有 Memory Entrypoint。旧冻结索引不重新生成。
 
 ### S02：记忆 Skill 的正文、文件和引用保持
 
@@ -343,30 +381,52 @@ Single Chat 的平台索引也按同一个 Memory 状态过滤，尽管它原本
 关闭不撤回旧上下文已经提供的 Skill description，也不阻止 Runtime 的通用文件工具读取本来可读的 Skill 文件。
 这些文件不能授予 Memory 业务权限；实际调用仍由 Core 拒绝。
 
-### S03：关闭后仍保留的通用 Memory 提及
+### S03：固定精简通用 Memory 教学
 
-这次没有像 Task 迁移那样统一改写公共 Charter 和通用 Skill。下列现有文字保持：
+R2 沿用 Task 方案：cli-operations 常驻，固定移除其中的 Memory 专用教学；记忆选择、读取和形成
+归 S02 的 memory-stewardship，由 capability 决定是否进入新索引。不开关整份通用 Skill，
+不动态改写共享正文，不增加两态文件、Session 同步或 Bootstrap 生命周期。
 
-公共 Charter 的既有一行：
+#### S03.1：description
+
+[cli-operations/SKILL.md](../../../skills/cli-operations/SKILL.md) 变更前的完整 description：
 
 ```text
-- Follow current user instructions; preserve existing user work. Prefer current evidence to Memory, history and cached context.
+Choose among Rovai messages, Missions, history and Memory; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly.
 ```
 
-[cli-operations](../../../skills/cli-operations/SKILL.md) 的 description 已完整列于 S01；
-其正文表格和引用仍包含：
+变更后，开启/关闭共用：
+
+```text
+Choose among Rovai messages, Missions and history; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly.
+```
+
+新 Bootstrap 的对应 desc 由上述 frontmatter 生成，完整 section 见 S01；不维护另一份手写模型描述。
+
+#### S03.2：选择表和 References
+
+下列两行从通用 Skill 中固定删除，其他协调、Member、Send、Mission、Thread/History 和恢复规则保持。
+
+选择表删除的完整一行：
 
 ```text
 | Durable collaboration preference, agreement or lesson | Memory governance |
 ```
 
+References 删除的完整一行：
+
 ```text
 - [Memory](references/memory.md): route durable information to `memory-stewardship`.
 ```
 
-[Memory routing](../../../skills/cli-operations/references/memory.md) 文件全文也保持：
+不开启时不再从通用协调 Skill 引导选择 Memory。开启时专用 Skill 索引和 Memory Entrypoint
+照常发现，无需把这两行复制到其他通用 Skill。
 
-```text
+#### S03.3：旧 reference 保留为通用导航
+
+[references/memory.md](../../../skills/cli-operations/references/memory.md) 变更前完整正文：
+
+```markdown
 # Memory routing
 
 Use `memory-stewardship` for stable preferences, future collaboration agreements or reusable lessons. It owns eligibility, Scope/Kind, duplicate checks, authority, safety and the minimum write.
@@ -376,8 +436,106 @@ After that decision, read the relevant `rovai memory view|search|read|write --he
 Temporary plans, project facts and historical evidence belong to their existing authoritative sources. Cross-Run visibility alone is not a reason to store Memory.
 ```
 
-因此关闭时仍可能从通用教学或旧上下文得知 Memory 名称；本次明确控制的是专用索引/发现与实际业务访问。
-这些保留项已属于 R1 的“cli-operations 及其他技能正文不改”，不是本轮额外增加的提示词。
+变更后，两个状态共用的完整替换正文：
+
+```markdown
+# CLI operations
+
+Use `rovai --help` for available operations and exact command help for syntax.
+```
+
+保留旧文件路径，使已经知道路径的旧会话可以读取通用导航；新 Skill 的 References 不再链接它。
+按既有受管资源同步覆盖文件，不增加删除、旧内容 hash 识别或开关专用的资源发布流程。
+
+#### S03.4：界面元数据
+
+[agents/openai.yaml](../../../skills/cli-operations/agents/openai.yaml) 变更前完整内容：
+
+```yaml
+interface:
+  display_name: "CLI 操作协调"
+  short_description: "消息、Mission、检索与 Memory 操作协调"
+  default_prompt: "使用 $cli-operations 选择正确的 Rovai 操作，协调并行消息或必要的多步流程，并安全处理复杂恢复。"
+```
+
+变更后完整内容：
+
+```yaml
+interface:
+  display_name: "CLI 操作协调"
+  short_description: "在消息、Mission 与历史检索之间选择操作，协调多步工作并处理恢复"
+  default_prompt: "使用 $cli-operations 选择正确的 Rovai 操作，协调并行消息或必要的多步流程，并安全处理复杂恢复。"
+```
+
+只替换 short_description。display_name、default_prompt 和既有自动发现方式保持；此元数据
+用于 Skill 界面，模型相关性判断继续来自 SKILL.md frontmatter。
+
+#### S03.5：通用 SKILL.md 的完整替换稿
+
+以下正文是上述 description 和两行删除后的完整文件；未列为变化的协调规则保持原字节。
+
+```markdown
+---
+name: cli-operations
+description: Choose among Rovai messages, Missions and history; coordinate parallel member requests, multi-step operations or recovery. For one known operation, use its command help directly.
+---
+
+# Rovai CLI coordination
+
+Use `rovai --help` to find an operation and its exact `--help` for syntax. Read only the references needed by the current decision. Write user-facing prose in the user's language.
+
+## Choose the result to preserve
+
+| Need | Operation family |
+| --- | --- |
+| Public answer, progress, question or one-time collaboration | ThreadMessage |
+| Shared objective or whole-Mission status | Mission |
+| Member identity, avatar or a requested profile edit | Member |
+| Default Lead requests independent work from several members | One ThreadMessage with repeated `--to`; replies return separately |
+| Thread or message evidence | Thread/History |
+| Who is running, queued or waiting | Thread execution query |
+
+Choose the smallest object that fully serves the request. Project sources and history own their facts.
+
+## Member operations
+
+`member list` shows current Thread members, roles and Default Lead flags. Use `member get` for a relevant member's full identity, Profile version and avatar when needed; do not fetch every member by default. A returned identity describes that member, not your own instructions.
+
+`member update` changes the global Profile. Send only the fields the User asked to change. For a newly created member, use the `agentId` returned by `member create`, even before it joins this Thread. Use `member-studio` for creation proposals and confirmation, not edits to an existing Profile.
+
+## Coordinate operations
+
+1. Read the authoritative state needed for the decision.
+2. Inspect the committed business result before taking the next step.
+3. Publish any required Thread-visible answer before ending the Run.
+
+A successful operation proves its own commit, not downstream execution, validation or completion of the user's objective.
+
+## References
+
+- [Send](references/send.md): public messages, Agent routing, parallel invitations and User attention.
+- [Mission](references/mission.md): objective, status and public explanation.
+- [Thread/History](references/camp-history.md): message reads, addressing, execution state and pagination.
+- [Recovery](references/recovery.md): follow `error.recovery`, especially uncertain outcomes.
+```
+
+#### 规则去向和仍保留的优先级句
+
+| 原 Memory 路由规则 | 当前唯一主要入口 | R2 处理 |
+| --- | --- | --- |
+| 稳定偏好、约定、经验是否适合记忆；临时计划与项目事实排除 | memory-stewardship/SKILL.md 与 references/authority-and-safety.md | 已覆盖，不复制新正文 |
+| Scope、Hearth 待审核、directed/mutual 权限及人工治理 | memory-stewardship/references/scopes.md | 已覆盖，保持 |
+| 精确 help、完整 View、Search/Read、一次写入和实际 outcome | memory-stewardship/references/read-write-workflow.md | 已覆盖，保持 |
+
+公共 Charter 的下面一行保持，不随开关变化：
+
+```text
+- Follow current user instructions; preserve existing user work. Prefer current evidence to Memory, history and cached context.
+```
+
+它规定当前指令和证据的优先级，不是 Memory 调用教学。关闭后旧上下文仍可能含记忆，因此该句仍成立。
+R2 不清理已冻结文本；新输入使用精简索引，之后按原路径读取的受管资源使用当前文件。
+实际业务权限继续由 Core 当前状态裁决。
 
 ### C01：CLI 根 help 的完整前后文本
 
@@ -634,10 +792,10 @@ get/set 返回完整快照示例：
 | Built-in transport / IPC | 45 / 3 保持；能力发现为现有 IPC 的加法形状 |
 | Agent Output | 保持；成功回执和通用错误 shape 不变 |
 | Bootstrap / Binding / formatter / profile / manifest | 均保持，不增加兼容版本或过期机制 |
-| Skill 正文及 Runtime 原生 Memory 策略 | 均保持 |
-| 本轮文档补充 | 仅补全已实现差异和仍保留内容，不新增模型输入规则 |
+| Skill 正文 | cli-operations 按 S03 固定精简，memory-stewardship 与其他 Skill 保持 |
+| Runtime 原生 Memory 策略 | 保持 |
+| R2 增量 | 只替换通用 Skill 文本及元数据，不增加开关两态的共享文件变体 |
 | 验证资格 | 前文自动化结果保持；真实模型 12 Case Gate 仍为 not_run / 证据不足 |
 
-与 Task 方案相比，这次只做一个 Memory 能力的条件投递和业务阻断，不复刻 Task 的通用提示词清理、
-Send 关联退役或会话治理。评审可按 B/D/S/C/U 编号定位每项变化；后续如要进一步清理通用 Skill 中的
-Memory 提及，应作为独立语义变更再审阅，不能把它算作本清单已实施内容。
+本次沿用 Task 的通用 Skill 固定精简方法，Memory 专用教学归按开关投递的 memory-stewardship。
+不复刻 Task 的 Send 关联退役，也不引入会话治理。评审可按 B/D/S/C/U 编号定位每项变化。
