@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-11-09
+last_updated: 2026-11-12
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -77,10 +77,11 @@ All Members 候选继续显示广播说明，范围仍是发送时 Thread 中的
 再次选择。规范化不改写编辑器原文、query 或替换范围，拼音不进入 Atom 的 identity 或 fallback label。
 
 智能体查询依据队员的 `runtimeKind`，正式产品名复用产品目录，并兼容 `codex`、`claude`、`copilot`、
-`opencode`、`kiro`、`qoder`、`codebuddy`、`qwen`、`trae`、`kimi`、`minimax`、`hermes`、`grok`、
-`deepseek`／`dsh`、`command`／`commandcode`、`zcode`、`antigravity`、`pi` 等短名。
+`opencode`、`kiro`／`kiro-cli`、`qoder`／`qodercli`、`codebuddy`、`qwen`、`trae`、`kimi`、
+`minimax`／`mcode`、`hermes`、`grok`、`deepseek`／`dsh`、`command`／`commandcode`／`cmdc`、
+`zcode`、`antigravity`／`agy`、`pi` 等短名。
 匹配副本使用 NFKC、小写，并忽略空格、连字符和下划线；支持完整与前缀匹配，不做字符跳跃或任意子串匹配。
-例如 `@com` 返回 Command Code 队员，`@ki` 返回 Kiro 与 Kimi Code 队员，`@claude-code` 返回 Claude Code 队员。
+例如 `@com`、`@cmdc` 返回 Command Code 队员，`@mcode` 返回 MiniMax Code 队员，`@agy` 返回 Antigravity 队员。
 范围沿用当前产品开放范围与队员可提及／邀请资格；模型名和可变展示标签不作为产品归属。
 OpenCode 配置 Claude 模型时仍按 OpenCode 查找，不因此命中 Claude Code。
 
