@@ -2706,7 +2706,7 @@ export function BusinessApp({
     const unsubscribe = client.onEvent?.((event: CoreEvent) => {
       const params = asRecord(event.params)
       if (shuttingDownRef.current) return
-      if (event.method === 'memory.changed' && !activeThreadIdRef.current && memoryCapabilityRef.current.active) {
+      if (event.method === 'memory.changed' && memoryCapabilityRef.current.active) {
         setMemoryRefreshKey(current => current + 1)
       }
       const liveEvent = liveRuntimeEventFromCore(
@@ -2927,9 +2927,8 @@ export function BusinessApp({
             }
           }
         }
-        // Content freshness is independent of the floor suppressing old notices.
-        if (capability?.enabled && memoryCapabilityRef.current.active
-          && (memoryResumed || batch.events.some(event => event.eventType.startsWith('memory.')))) {
+        // Live content uses global memory.changed; this scoped poll only repairs gaps.
+        if (capability?.enabled && memoryCapabilityRef.current.active && memoryResumed) {
           setMemoryRefreshKey(current => current + 1)
         }
         if (batch.schemaVersion !== 9 || batch.resetRequired || batch.events.length > 0) {

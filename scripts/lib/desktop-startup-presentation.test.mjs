@@ -66,6 +66,7 @@ test('the production App presents the full-window brand loader without weakening
     assert.ok(report.cases.includes('Web refresh retains real errors when the Thread still exists'))
     assert.ok(report.cases.includes('The Skill picker loads its catalog on demand'))
     assert.ok(report.cases.includes('Desktop Memory polling recovery refreshes content and pending count once without replaying old notices'))
+    assert.ok(report.cases.includes('Desktop global Memory changes refresh across Threads and user management without duplicate polling reads'))
     assert.ok(report.cases.includes('Pending pushes never enter history and memory normalization cannot supersede newer navigation'))
     assert.ok(report.cases.includes('One-click creation success and failure respect newer navigation intent'))
     assert.ok(report.cases.includes('Member history replay selects the requested editor while retaining new-member drafts'))

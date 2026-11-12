@@ -74,6 +74,28 @@ Memory 页内与父组件的审核读取互斥；初次与内容刷新使用同�
 界面只放开原错误行的既有重试按钮，没有新增说明文案或区块。真实 Runtime/模型 Gate 仍为
 `not_run / 证据不足`；受控 Desktop/网络测试不替代原生 Runtime 或跨平台真机验收。
 
+## Desktop 全局内容刷新补正（2026-11-12）
+
+User sequence 29（`7321ce5b-de3f-432c-b680-044c6cb68a2a`）指出，选中 Thread 时忽略全局 Memory
+失效并依赖该 Thread 的轮询，会漏掉其他 Thread 和 camp_id=NULL 的管理变更。Core 的实际过滤已核对；
+发出端与授权正确，仅修正 Renderer 两处接收条件。
+
+| 路径 | 变更前 | 变更后 |
+| --- | --- | --- |
+| 全局 memory.changed | 只有未选中 Thread 才刷新内容 | Memory active 时统一刷新实例内容和审核数 |
+| 当前 Thread 轮询 | 恢复/缺口及普通 memory.* 都刷新内容 | 仅恢复/缺口补刷新；领域事件继续驱动本会话行为提示 |
+
+沿用 R4 的页内/页外读取分工和通知过滤，不改变事件查询范围、协议字段、Provider、Core、存储、
+模型可见字节、工具定义或任何 Session/Bootstrap 版本轴，本次仅补正 R4 实现，不增加模型输入 revision。
+在现有 Desktop production App owner 中补充：选中 A 时接收 B 的候选与人工管理变化、页外审核计数刷新、
+全局通知和本会话领域事件不重复读取，以及普通领域事件仍显示行为提示；断线/缺口原 owner 保留。
+验证结果：新增 production App 场景在 `b14d20ec9` 的原条件下明确失败，报错为选中 A 时 B 的记忆变化未刷新；
+仅修改上述两处条件后 `pnpm test:startup-presentation` 通过。场景覆盖跨会话候选、人工管理变化、
+页外仅刷新待审核数、本会话领域事件仍产生行为提示，以及全局/轮询不重复读取；原断线/缺口场景保持通过。
+`pnpm typecheck`、`pnpm build:desktop`、`pnpm test` 与通用文档门禁通过；Vitest 3275 passed / 2 skipped，默认 Node 377 passed / 2 skipped。
+该 owner 使用生产 Desktop App、独立 Electron profile 和受控 API/时钟，不启动 Core 或真实 Runtime。
+本次无 Rust/模型输入变更，既有 Core 和真实模型资格记录保持。
+
 ## R3：局部故障隔离与通知/发现收简
 
 User 已审阅 `d7b69cb → f0a8380ab` 的完整实现，消息 `2b3bcad2-ac73-41d8-bcb7-076ba5a1b8ab`

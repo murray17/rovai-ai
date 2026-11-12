@@ -5281,3 +5281,11 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
   验证通过：Rust workspace 484 passed / 1 existing ignored、Memory 29 与确定性并发结果 owner；
   Vitest 3275 passed / 2 skipped、默认 Node 377 passed / 2 skipped；生产 Memory UI、Desktop 轮询/事件缺口恢复、
   真实隔离 Host/Web 内容路由及断网恢复通过。页面仅补原错误行重试，真实 Runtime/模型 Gate 未执行。
+
+- Desktop 全局刷新补正（User sequence 29）：全局 memory.changed 不再受选中 Thread 限制；
+  Thread 轮询只在恢复/缺口时补刷新，普通 Memory 领域事件继续处理行为提示。仅改 Renderer 两处条件，
+  原页内/页外读取分工、Core 授权与所有会话边界保持；不新增查询、游标、队列或持久结构。
+  生产 App 原 owner 已复现修复前失败；两处条件修正后，跨 Thread/人工变化、页内/页外计数、
+  普通事件不重复读取与断线/缺口恢复通过。Typecheck 与 Desktop/Web 构建通过。
+  默认测试通过（Vitest 3275 passed / 2 skipped、Node 377 passed / 2 skipped），通用文档门禁通过。
+  本次没有 Rust、工具输出或模型输入变化，既有 Core 与真实 Runtime 资格记录保持。
