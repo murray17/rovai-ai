@@ -1,7 +1,7 @@
 import { validMemoryCapability } from './MemoryCapabilityProvider'
 import { describe, expect, it } from 'vitest'
 import type { DomainEventView } from '@contracts'
-import { collectMemoryChanges, memoryChangeText, memoryEventsForNotice, resolveMemoryChangeScope } from './memory-change-notice'
+import { collectMemoryChanges, memoryChangesAfter, memoryChangeText, memoryEventsForNotice, resolveMemoryChangeScope } from './memory-change-notice'
 
 const event = (sequence: number, memoryId: string, action = 'revised', scope?: string): DomainEventView => ({
   globalSequence: sequence, eventType: `memory.agent_${action}`, entityType: 'memory', entityId: memoryId,
@@ -11,9 +11,9 @@ const event = (sequence: number, memoryId: string, action = 'revised', scope?: s
 describe('automatic memory change notices', () => {
   it('uses only the Memory event boundary and suppresses disabled, unknown and reconnect history', () => {
     const snapshot = { enabled: true, headsUpAfterGlobalSequence: 100,
-      observedThroughChangeSequence: 1, observedThroughGlobalSequence: 103 }
+      observedThroughChangeSequence: 1 }
     expect(validMemoryCapability(snapshot)).toBe(true)
-    expect(validMemoryCapability({ ...snapshot, observedThroughGlobalSequence: 99 })).toBe(false)
+    expect(validMemoryCapability({ ...snapshot, headsUpAfterGlobalSequence: -1 })).toBe(false)
     expect(validMemoryCapability({ ...snapshot, observedThroughChangeSequence: -1 })).toBe(false)
     const events = [event(99, 'old'), event(100, 'boundary'), event(101, 'new'), event(102, 'review'),
       { ...event(103, 'other'), eventType: 'thread.message_sent' }]
@@ -41,6 +41,14 @@ describe('automatic memory change notices', () => {
       { memoryId: 'b', action: 'updated', scope: null }
     ])
     expect(memoryChangeText(changes)).toBe('新增 1 条 · 更新 1 条记忆')
+    const retained = memoryChangesAfter(changes, 2)
+    expect(retained.map(change => change.memoryId)).toEqual(['b'])
+    // A client can miss disable/re-enable while still displaying the old batch.
+    // Prune before merging, or an old creation would mislabel this revision.
+    const fresh = collectMemoryChanges(memoryChangesAfter(changes, 4), [event(5, 'a')])
+    expect(fresh.map(({memoryId, action}) => ({memoryId, action}))).toEqual([{memoryId:'a',action:'updated'}])
+    expect(memoryChangesAfter(fresh, 4)).toBe(fresh)
+    expect(memoryChangesAfter(fresh, 5)).toEqual([])
   })
 
   it('does not reuse another identity’s scope or let a late lookup revive a dismissed notice', () => {

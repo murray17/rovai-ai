@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-12
 confirmation_message_id: 2b3bcad2-ac73-41d8-bcb7-076ba5a1b8ab
 authority: proposed-model-input-change-statement
-implementation_status: in_progress
+implementation_status: implemented
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
 last_updated: 2026-11-12
 ---
@@ -43,7 +43,7 @@ User 已审阅 `d7b69cb → f0a8380ab` 的完整实现，消息 `2b3bcad2-ac73-4
 | 已显示通知 | 仅在观察到关闭时清空，新通知按边界过滤 | 边界推进后清除旧审核提示，已有变化只保留 `sequence > headsUpAfterGlobalSequence`；保留边界后的新提示，迟到回调保持顺序隔离 |
 | Hermes CLI | 每条命令先远程查询能力，失败返回两项 false | 仅 help 等发现路径远程查询；实际已知命令直接进入 Core。发现失败明确报不可用，不作为 Task 已关闭 |
 | Memory 快照 | 四字段，事件表最大序号会造成无关更新 | 删除 `observedThroughGlobalSequence`，完整新形状如下；不增加替代字段或数据库结构 |
-| 审核列表刷新 | 全局设置排序时钟变化触发全量请求，多个入口可重复读取 | 由实际启用状态、重新启用边界及 Memory 内容事件触发；在当前 BusinessApp 合并在途读取，排序序号只隔离迟到响应 |
+| 审核列表刷新 | 全局设置排序时钟变化触发全量请求，多个入口可重复读取 | 由实际启用状态、重新启用边界及 Memory 内容事件触发；同一 BusinessApp effect 合并同一轮刷新入口，排序序号只隔离设置快照/未知回包，原 effect cleanup 隔离过期列表回复 |
 
 ```json
 {"enabled":true,"headsUpAfterGlobalSequence":100,"observedThroughChangeSequence":7}
@@ -58,6 +58,32 @@ Memory 设置异常时新输入的 Memory 段为空，`observed_memory_revisions
 验证扩展现有 Core discovery、Bootstrap、CLI 进程、Memory 通知与 Web owners，覆盖缺行/非法设置、
 普通输入与事件继续、Task 投影更新、已有提示跨漏看的关闭→开启边界、Hermes 已知调用零预查询和
 无关全局时钟零审核读取。真实模型 Gate 的既有未执行状态保持，不以受控夹具替代。
+
+## R3 实施与验证结果（2026-11-12）
+
+独立核对后采纳五项修正。此前可用性复核覆盖了正常关闭，遗漏了设置单例缺行/损坏时的依赖传播，
+R3 在原有 owners 中补齐这些故障用例。权威读取仍严格；只有可选输入/发现使用省略分支。
+设置中的 enabled 与提示水位同次读取，快照 SQL 从四次降为两次，不再每次查询事件表最大序号。
+BusinessApp 的审核列表读取入口从三处收为一个 effect，以 active、重新启用边界和 Memory 内容刷新信号驱动，
+原 cleanup 隔离旧请求；不新增在途缓存。审核提示由布尔值改为当前提示的事件序号，既清旧提示，也保留边界后的新提示。
+通知数组的边界剪裁和重新合并由纯函数 owner 验证；审核刷新条件通过唯一调用点及 effect 依赖核对，
+Host/Web 夹具验证真实接口与开关同步。旧会话与真实模型行为的资格边界保持独立。
+
+| 复核 | 实际结果 |
+| --- | --- |
+| `cargo test --workspace` | 484 passed / 1 existing ignored |
+| `cargo test -p rovai-core --features slow-tests --lib task_discovery_refresh_scopes_bindings_and_repairs_saved_preferences` | 通过；缺行、非法 enabled、非法提示水位时，设置 get 报错，普通会话打开/事件/成员操作继续，Task 仍可切换和投影，Memory 读取拒绝，既有写回执保持，坏记录未被改写 |
+| `cargo test -p rovai-core --features slow-tests --lib newly_bound_session_bootstraps_on_its_current_generation` | 通过；三个故障下普通/Single Chat 新内容省略 Memory，冻结 evidence ID 与 payload 保持 |
+| `cargo test -p rovai-core --features slow-tests --lib memory` | 29 passed；原权限、生命周期、回执和重启 owners 保持 |
+| `pnpm test` | Vitest 3275 passed / 2 skipped；默认 Node 377 passed / 2 skipped，包含通知边界前剪裁/合并后正确计数的反例 |
+| `pnpm test:send-input-file` | 通过；Hermes help 成功/失败、实际 send/Task/Memory 只发一次 Invoke，失败未转成 Task 已关闭；其隔离子 Home 的 Hermes 进程子矩阵在 Unix 执行，共享命令分类 owner 覆盖全部平台 |
+| `pnpm test:memory-workspace-ui` | 通过；10 组交互 / 18 组视口配色，三字段状态、显式 null 投影、较旧不可用回包和不可用之后同序号旧成功回包隔离、重试与停用业务零读取 |
+| `pnpm test:memory-web-ui` | 通过；真实隔离 Host/Web，三字段接口、远端关闭同步、页内开启、创建/修订内容保留；夹具按现有设置内记忆导航及 Activity 可见性操作 |
+| `pnpm typecheck`、`pnpm build:desktop`、`cargo fmt --all` | 通过；包含 Desktop/Web 构建 |
+| `pnpm docs:test`、`pnpm docs:check`、diff-aware gate、`git diff --check` | 通过 |
+
+本轮未新增数据库结构、持久化记录、会话版本或后台刷新层。真实 Runtime/模型的通用 Gate 仍为
+`not_run / 证据不足`；受控 IPC、Core 与浏览器夹具不能替代真实模型资格。
 
 ## 用户界面实际改动
 
@@ -324,7 +350,7 @@ Desktop/Web 构建及通用文档门禁通过；读取失败仍与已确认关�
 ## 完整提示词与工具对照
 
 本清单沿用 [Task 方案](model-context-change-task-capability.md) 的 B/D/S/C 编号和
-“变更前、开启后、关闭后”审阅方式，给出 R2 的累计设计。基线固定为
+“变更前、开启后、关闭后”审阅方式，给出 R3 的累计设计。基线固定为
 `d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`，实现快照固定为
 `c0827c4810a4470edbc4f59c03a99a104310af55` 是 R1 实现；R2 的增量严格为 S01/S03 所列的固定
 Skill 精简。其他编号的模型输入、工具和生命周期边界沿用 R1。
@@ -803,6 +829,7 @@ Core 内部仍使用既有带 operation/requestId 的错误 Envelope，CLI 只�
 [统一发现刷新入口](../../../crates/rovai-core/src/application.rs)，在一次 Core 读取中取得 Task 和 Memory
 当前状态后写完整 context，避免各刷新路径覆盖对方字段。刷新失败不撤销 lease、停止 Run 或回滚设置，
 同值保存和既有有界重试可修复投影。刷新本地文件不会向旧会话发送新 Bootstrap。
+Memory 设置读取异常时仅将其发现投影隐藏，继续写入有效 Task 状态；不创建或修改权威设置记录。
 
 ### C08：Hermes 的发现路径
 
@@ -823,8 +850,10 @@ Core 按当前权威状态返回：
 {"kind":"capabilities","capabilities":{"tasksEnabled":true,"memoryEnabled":false}}
 ```
 
-随后按同一 C01–C03 逻辑生成 help。无法取得可信能力时保守隐藏两项发现，不能据此修改 Core 设置。
-Core 读取能力状态失败时，IPC 返回以下控制错误；CLI 将其当作发现不可用，不打印为 Memory 业务结果：
+仅 help 等发现路径进行该查询，再按同一 C01–C03 逻辑生成 help。R3 不为普通实际命令预查询能力；
+其参数解析后直接发送 Invoke，由 Core 判断权限。发现查询失败返回已有 `builtin_tool.cli_error`，
+不把 Task 或 Memory 的权威状态设为 false。Memory 局部设置异常时能力响应仍包含有效 Task 状态，
+仅将 Memory 发现隐藏；其他 Core 能力读取失败仍可返回以下控制错误：
 
 ```json
 {"kind":"error","error":{"code":"builtin_tool.internal_error","message":"Capability state is unavailable"}}
@@ -846,14 +875,15 @@ preferences.memory_changed
 get/set 返回完整快照示例：
 
 ```json
-{"enabled":false,"headsUpAfterGlobalSequence":100,"observedThroughChangeSequence":7,"observedThroughGlobalSequence":110}
+{"enabled":false,"headsUpAfterGlobalSequence":100,"observedThroughChangeSequence":7}
 ```
 
 设置变更事件是提交后的失效提示，其 params 为 `{"enabled":false}`，客户端重读权威快照。
 同值保存可修复投影但不推进设置时钟或提示边界。User Host 的这些接口不是 Agent CLI 工具，
 不新增 `rovai memory enable/disable` 命令。
 
-`observedThroughChangeSequence` 只排序设置；两个 GlobalSequence 字段只用于 Memory 事件边界。
+`observedThroughChangeSequence` 只排序设置；`headsUpAfterGlobalSequence` 只用于 Memory 提示边界。
+事件恢复使用 EventBatch 的既有 through/next 游标；快照不再携带单独的事件观察水位。
 快照中的示例特意使用不同数量级，不能将设置序号 7 与记忆事件序号 100/110 直接比较。
 
 ### U02：人工管理接口也停用
@@ -895,6 +925,7 @@ get/set 返回完整快照示例：
 | Skill 正文 | cli-operations 按 S03 固定精简，memory-stewardship 与其他 Skill 保持 |
 | Runtime 原生 Memory 策略 | 保持 |
 | R2 增量 | 只替换通用 Skill 文本及元数据，不增加开关两态的共享文件变体 |
+| R3 增量 | 五项局部修正；快照三字段、事件局部错误为 null、通知边界作用于已显示状态、Hermes 实际调用零能力预查询、审核刷新单一 effect |
 | 验证资格 | 前文自动化结果保持；真实模型 12 Case Gate 仍为 not_run / 证据不足 |
 
 本次沿用 Task 的通用 Skill 固定精简方法，Memory 专用教学归按开关投递的 memory-stewardship。

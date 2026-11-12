@@ -152,7 +152,17 @@ async fn run() -> Result<u8> {
         );
         return Ok(0);
     }
-    let capabilities = discover_capabilities().await;
+    // Hermes has no local context. Known invocations go straight to Core;
+    // capability discovery is presentation only, never an authorization gate.
+    let capabilities =
+        if hermes_session_source().is_some() && !capability_discovery_requested(&args) {
+            rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
+                tasks_enabled: true,
+                memory_enabled: true,
+            }
+        } else {
+            discover_capabilities().await?
+        };
     let tasks_enabled = capabilities.tasks_enabled;
     let memory_enabled = capabilities.memory_enabled;
     if args.first().is_some_and(|value| value == "task") && !tasks_enabled {
@@ -517,14 +527,7 @@ fn operation_help(
     tasks_enabled: bool,
     memory_enabled: bool,
 ) -> Result<Option<BuiltinToolDescription>> {
-    let identity = match args {
-        [command, help] if help == "--help" => builtin_tool_identity_by_command(command, ""),
-        [group, action, help] if help == "--help" => {
-            builtin_tool_identity_by_command(group, action)
-        }
-        _ => None,
-    };
-    identity
+    operation_help_identity(args)
         .map(|identity| {
             rovai_core::builtin_tool_transport::builtin_tool_description_with_memory(
                 identity.operation,
@@ -533,6 +536,24 @@ fn operation_help(
             )
         })
         .transpose()
+}
+
+fn operation_help_identity(args: &[String]) -> Option<BuiltinToolCliIdentity> {
+    match args {
+        [command, help] if help == "--help" => builtin_tool_identity_by_command(command, ""),
+        [group, action, help] if help == "--help" => {
+            builtin_tool_identity_by_command(group, action)
+        }
+        _ => None,
+    }
+}
+
+fn capability_discovery_requested(args: &[String]) -> bool {
+    args.is_empty()
+        || args == ["--help"]
+        || args == ["task", "--help"]
+        || is_family_help(args)
+        || operation_help_identity(args).is_some()
 }
 
 fn invocation_identity(args: &[String]) -> Option<BuiltinToolCliIdentity> {
@@ -558,7 +579,8 @@ fn hermes_session_source() -> Option<String> {
     )
 }
 
-async fn discover_capabilities() -> rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
+async fn discover_capabilities()
+-> Result<rovai_core::builtin_tool_transport::BuiltinToolCapabilities> {
     use rovai_core::builtin_tool_transport::{
         BuiltinToolCapabilities, HermesSessionIpcRequest, HermesSessionSource,
     };
@@ -579,20 +601,17 @@ async fn discover_capabilities() -> rovai_core::builtin_tool_transport::BuiltinT
             }
         }
         .await;
-        return discovered.unwrap_or(BuiltinToolCapabilities {
-            tasks_enabled: false,
-            memory_enabled: false,
-        });
+        return discovered;
     }
     let context = load_context().ok().filter(|context| {
         context.contract_version == BUILTIN_TOOL_CONTRACT_VERSION
             && context.ipc_protocol_version == BUILTIN_TOOL_IPC_PROTOCOL_VERSION
             && context.lease.is_some()
     });
-    BuiltinToolCapabilities {
+    Ok(BuiltinToolCapabilities {
         tasks_enabled: context.as_ref().is_some_and(|c| c.tasks_enabled),
         memory_enabled: context.as_ref().is_some_and(|c| c.memory_enabled),
-    }
+    })
 }
 
 fn load_context() -> Result<BuiltinToolCliContext> {
@@ -2640,6 +2659,22 @@ mod tests {
 
     #[test]
     fn exact_help_surface_covers_the_current_catalog_and_no_family_aliases() {
+        for path in [
+            vec!["send", "--body", "--help"],
+            vec!["task", "list"],
+            vec!["member", "list"],
+            vec!["memory", "read", "--memory-id", "id"],
+            vec!["history", "search", "--query", "query"],
+        ] {
+            let args = path
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>();
+            assert!(
+                !capability_discovery_requested(&args),
+                "actual command must not pre-query Hermes capabilities: {path:?}"
+            );
+        }
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
             &["member", "list", "--help"],
@@ -2677,6 +2712,7 @@ mod tests {
                 .iter()
                 .map(|value| (*value).to_string())
                 .collect::<Vec<_>>();
+            assert!(capability_discovery_requested(&args));
             assert!(
                 operation_help(&args, true, true).unwrap().is_some(),
                 "missing exact help for {path:?}"

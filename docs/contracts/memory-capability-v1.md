@@ -5,7 +5,7 @@ authority: memory-instance-capability
 status: accepted
 version: 1
 source_version: v1.72
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Rovai 长期记忆开关 v1
@@ -35,19 +35,21 @@ User Host 接口：
 {
   "enabled": true,
   "headsUpAfterGlobalSequence": 0,
-  "observedThroughChangeSequence": 0,
-  "observedThroughGlobalSequence": 0
+  "observedThroughChangeSequence": 0
 }
 ```
 
 `observedThroughChangeSequence` 来自既有 Core notification change clock，仅用于同 Host 的快照排序；
-开关真正变化时在事务内推进。另两个 GlobalSequence 字段来自既有 event_log 的 global sequence，
-分别表示最近关闭→开启的提示边界和本次读取水位；不与 Core change sequence 比较。
+开关真正变化时在事务内推进。`headsUpAfterGlobalSequence` 来自既有 event_log，表示最近关闭→开启的
+提示边界，不与 Core change sequence 比较。快照不携带事件观察水位，事件恢复使用 EventBatch 自身游标。
 同值保存与读取不推进持久化提示边界；关闭→开启在设置事务固定事件水位。
-`events.subscribe` 的 User Host 响应附带可选 `memoryCapability` 同锁快照，不改变事件 schema 9。
+`events.subscribe` 的 User Host 响应附带可选 `memoryCapability` 同锁快照；局部设置不可读时为 `null`，
+普通事件与游标继续返回，Provider 进入读取失败态。字段缺省保留旧可选语义，不改变事件 schema 9。
 
 设置提交后才发布事件和刷新发现文件。刷新失败不回滚设置；沿用有界重试，同值保存也修复投影。
 Agent 没有设置写接口。客户端隔离 Host 访问代次，拒绝迟到/较旧快照；状态未知显示不可用和重试。
+Memory 设置读取异常只阻断 Memory 本身：控制接口保留读取错误，实际业务不读取/提交，
+新输入省略 Memory，统一发现仍投影有效的 Task 状态与隐藏的 Memory，不写回替代设置。
 
 ## 执行、关闭错误与回放
 
@@ -84,6 +86,8 @@ User 管理读取覆盖 `memory.list/get/export`、`memory.hearthReviewItems.lis
 状态，再生成完整文件。CLI 列表、说明和 help 按投影过滤；实际调用继续进入 Core，不按本地投影拒绝整组 Memory。
 Hermes 使用既有逻辑 Session 身份及 Core IPC 连接，以 `{"kind":"capabilities"}` 只读请求返回
 `{"kind":"capabilities","capabilities":{"tasksEnabled":boolean,"memoryEnabled":boolean}}`。
+仅 help 等发现路径发起这次远程查询；普通实际命令直接进入 Core，发现失败不当作已确认关闭。
+普通 Runtime 的现有本地 Task 投影检查保留。Memory 局部设置异常不阻断 Task 能力返回。
 该请求不创建操作、回放记录、Session 映射或新通知通道，不能授予业务访问权限。
 
 不处理旧 Session、Binding 或 Bootstrap 生命周期；不增加 Memory epoch，不使旧输入过期，不触发补发或
@@ -98,5 +102,8 @@ Memory 导航保留。通用设置与记忆页提供同一个 Core 总开关，�
 
 关闭/状态未知时抑制 Memory 行为提示并继续维护既有公共事件游标。重新开启过滤持久化提示边界以前的
 事件；离线重连/重订阅用既有事件水位确定提示起点，不集中补弹。数据与待审核项保留，不批量修改生命周期。
+边界推进还作用于已经显示的变化和审核提示，保留 `sequence > headsUpAfterGlobalSequence` 的提示，
+即使客户端未观察到中间关闭态也不合并旧提示。审核列表由启用状态、重新启用边界和 Memory 内容事件刷新，
+不把全局设置排序序号当作内容变化信号；同一 BusinessApp effect 合并这些入口，迟到回包仍受顺序保护。
 
-精确已确认文案、前后输入及验证归属见[变更说明 R2](../versions/v1.72/model-context-change-memory-capability.md)。
+精确已确认文案、前后输入及验证归属见[变更说明 R3](../versions/v1.72/model-context-change-memory-capability.md)。

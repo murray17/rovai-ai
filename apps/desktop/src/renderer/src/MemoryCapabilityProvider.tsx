@@ -9,9 +9,9 @@ interface MemoryCapability extends MemoryCapabilitySnapshot {
   error: 'read' | 'save' | null
   setEnabled(enabled: boolean): Promise<void>
   retry(): Promise<void>
-  acceptSnapshot(snapshot: MemoryCapabilitySnapshot): MemoryCapabilitySnapshot | null
+  acceptSnapshot(snapshot: MemoryCapabilitySnapshot | null, expectedChangeSequence?: number): MemoryCapabilitySnapshot | null
 }
-const initialSnapshot: MemoryCapabilitySnapshot = { enabled: false, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0, observedThroughGlobalSequence: 0 }
+const initialSnapshot: MemoryCapabilitySnapshot = { enabled: false, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 }
 const unavailable: MemoryCapability = { ...initialSnapshot, ready: false, active: false, saving: false, error: null, setEnabled: async () => {}, retry: async () => {}, acceptSnapshot: () => null }
 const Context = createContext<MemoryCapability>(unavailable)
 export const useMemoryCapability = (): MemoryCapability => useContext(Context)
@@ -21,8 +21,6 @@ export function validMemoryCapability(next: MemoryCapabilitySnapshot): boolean {
     && Number.isSafeInteger(next.headsUpAfterGlobalSequence) && next.headsUpAfterGlobalSequence >= 0
     && Number.isSafeInteger(next.observedThroughChangeSequence)
     && next.observedThroughChangeSequence >= 0
-    && Number.isSafeInteger(next.observedThroughGlobalSequence)
-    && next.observedThroughGlobalSequence >= next.headsUpAfterGlobalSequence
 }
 
 /** One Host projection shared by settings and notification responses. The Core
@@ -45,25 +43,34 @@ export function MemoryCapabilityProvider({ client, children }: { client: ThreadC
     saving.current = false
   }
   const generation = clientGeneration.current
-  const acceptSnapshot = useCallback((next: MemoryCapabilitySnapshot): MemoryCapabilitySnapshot | null => {
-    if (!validMemoryCapability(next)) throw new Error('Invalid Memory capability')
+  const acceptSnapshot = useCallback((next: MemoryCapabilitySnapshot | null, expectedChangeSequence?: number): MemoryCapabilitySnapshot | null => {
     if (current.current !== client || generation !== clientGeneration.current) return null
+    if (next === null) {
+      if (expectedChangeSequence !== undefined && latest.current
+        && latest.current.observedThroughChangeSequence > expectedChangeSequence) return latest.current
+      version.current++
+      setState(old => old.error === 'read' && !old.ready ? old : { ...old, ready: false, error: old.error === 'save' ? 'save' : 'read' })
+      return null
+    }
+    if (!validMemoryCapability(next)) throw new Error('Invalid Memory capability')
     if (latest.current && next.observedThroughChangeSequence < latest.current.observedThroughChangeSequence) return latest.current
-    if (latest.current && next.observedThroughChangeSequence === latest.current.observedThroughChangeSequence
-      && next.observedThroughGlobalSequence < latest.current.observedThroughGlobalSequence) return latest.current
     latest.current = next
     version.current++ // A later failure cannot erase this authoritative snapshot.
     setState(old => old.client === client && old.ready
       && old.enabled === next.enabled && old.headsUpAfterGlobalSequence === next.headsUpAfterGlobalSequence
-      && old.observedThroughChangeSequence === next.observedThroughChangeSequence
-      && old.observedThroughGlobalSequence === next.observedThroughGlobalSequence && old.error !== 'read'
+      && old.observedThroughChangeSequence === next.observedThroughChangeSequence && old.error !== 'read'
       ? old : { ...old, client, ...next, ready: true, error: old.error === 'save' ? 'save' : null })
     return next
   }, [client, generation])
   const reload = useCallback(async () => {
     const request = ++version.current
     try {
-      acceptSnapshot(await client.request<MemoryCapabilitySnapshot>('preferences.memory.get', {}))
+      const next = await client.request<MemoryCapabilitySnapshot>('preferences.memory.get', {})
+      // A newer unavailable projection need not advance the setting clock.
+      // Keep an older read from replacing it; accepted snapshots still use
+      // the Core clock for ordering within the current Host.
+      if (request !== version.current) return
+      acceptSnapshot(next)
     } catch {
       if (current.current === client && generation === clientGeneration.current && request === version.current) {
         setState(old => ({ ...old, error: old.error === 'save' ? 'save' : 'read' }))

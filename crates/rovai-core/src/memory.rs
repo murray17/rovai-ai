@@ -1248,6 +1248,14 @@ mod slow_tests {
         assert_eq!(fts_rows, 1);
         let service = MemoryService::default();
         let before = crate::memory_capability::snapshot(database.connection()).unwrap();
+        let event_boundary: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(MAX(global_sequence),0) FROM event_log",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert!(before.enabled);
         let tx = database.connection_mut().transaction().unwrap();
         crate::memory_capability::set(&tx, false).unwrap();
@@ -1308,7 +1316,7 @@ mod slow_tests {
         crate::memory_capability::set(&tx, true).unwrap();
         let on = crate::memory_capability::snapshot(&tx).unwrap();
         assert!(on.enabled);
-        assert!(on.heads_up_after_global_sequence >= off.observed_through_global_sequence);
+        assert!(on.heads_up_after_global_sequence >= event_boundary);
         assert!(!crate::memory_capability::set(&tx, true).unwrap());
         assert_eq!(crate::memory_capability::snapshot(&tx).unwrap(), on);
         tx.commit().unwrap();

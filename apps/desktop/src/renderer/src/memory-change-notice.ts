@@ -9,6 +9,12 @@ export interface MemoryChange {
   sequence: number
 }
 
+/** Apply a re-enable boundary to notices already displayed, before merging. */
+export function memoryChangesAfter(changes: MemoryChange[], afterGlobalSequence: number): MemoryChange[] {
+  return changes.some(change => change.sequence <= afterGlobalSequence)
+    ? changes.filter(change => change.sequence > afterGlobalSequence) : changes
+}
+
 /** Only the existing Memory event clock defines notice freshness. */
 export function memoryEventsForNotice(
   events: readonly DomainEventView[], capability: MemoryCapabilitySnapshot | null,

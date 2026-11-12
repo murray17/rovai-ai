@@ -5241,7 +5241,7 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-memory-capability`；分支 `rovai/memory-capability`。
 - 基线：`d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`；方案独立提交 `50f43ef69`，未要求治理先合主线。
-- 范围与确认：[Memory capability R2](model-context-change-memory-capability.md)；当前合同：[v1](../../contracts/memory-capability-v1.md)。
+- 范围与确认：[Memory capability R3](model-context-change-memory-capability.md)；当前合同：[v1](../../contracts/memory-capability-v1.md)。
 - 复用 Memory 存储、Agent Facade、Core 发现刷新、CLI、Web 失效和 Renderer 现有 owners；不改 Session 生命周期。
 - 验证归属：Memory 存储 owner 覆盖管理停用、回执和水位；现有 Core Task discovery owner 扩展 Memory 全链路；
   Bootstrap owner 覆盖冻结材料和新分支；目录 owner 覆盖两开关组合；Memory UI 生产组件夹具覆盖停用/重试。
@@ -5266,3 +5266,10 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 - 2026-11-12 收尾：统一读取失败提示为“无法读取长期记忆设置，请重试。”，补清旧 Memory reference
   原位覆盖理由；32 项 Core 定向复核通过，确认默认开启、关闭选择持久化、回执和冻结输入保留。
   具体命令与验证边界见[可用性复核](model-context-change-memory-capability.md#收尾与可用性复核2026-11-12)。
+- R3：按 User sequence 25 的五项明确修正实施，设置不可读只停用 Memory 投递/访问；普通输入、
+  事件及 Task 投影继续。事件响应以 `memoryCapability:null` 表达局部不可用，快照收为三字段。
+  通知按自身事件边界过滤已有提示；审核读取合并到既有 effect，Hermes 实际调用不做能力预查询。
+  复用现有 owners 验证缺行、非法值、冻结输入、事件、Task 投影、通知边界和 CLI 请求次数。
+  验证通过：默认 Rust 484 passed / 1 existing ignored，Memory 29、Core discovery 和 Bootstrap owners，
+  Vitest 3275 passed / 2 skipped、默认 Node 377 passed / 2 skipped，以及 CLI 进程、Memory UI 和真实隔离
+  Host/Web。快照查询减为两次 SQL，审核读取合并至单一 effect，真实模型 Gate 仍未执行。

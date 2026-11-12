@@ -23,10 +23,18 @@ test('phone Memory uses production Web navigation and real Host writes', { timeo
     b = await launchAcceptanceBrowser({ executable: process.env.ROVAI_TEST_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args:['--headless=new',`--user-data-dir=${join(fixture,'chrome')}`,'--no-first-run','--disable-background-networking','--remote-debugging-port=0',...(process.platform==='linux'?['--no-sandbox']:[]),'about:blank'] })
     await b.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true})
     await b.send('Emulation.setTouchEmulationEnabled',{enabled:true})
-    const click = selector => b.click(`document.querySelector(${JSON.stringify(selector)})`)
+    const click = selector => b.click(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(element => element.getClientRects().length)`)
     const button = async label => { const target=`[...document.querySelectorAll('button')].find(e=>e.getClientRects().length && e.textContent.trim()===${JSON.stringify(label)})`; await b.wait(`Boolean(${target}) && !(${target}).disabled`); await b.click(target) }
     const fill = async (selector,value) => { await click(selector); await b.evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`); await b.send('Input.insertText',{text:value}) }
-    const page = async label => { await click('[aria-label="打开主菜单"]'); await b.wait('!!document.querySelector("#mobile-app-menu")'); await button(label); await b.wait('!document.querySelector("#mobile-app-menu")') }
+    const page = async label => {
+      if (await b.evaluate('[...document.querySelectorAll("[aria-label=返回设置]")].some(element => element.getClientRects().length)')) await click('[aria-label="返回设置"]')
+      await click('[aria-label="打开主菜单"]'); await b.wait('!!document.querySelector("#mobile-app-menu")')
+      await button(label === '记忆' ? '设置' : label); await b.wait('!document.querySelector("#mobile-app-menu")?.getClientRects().length')
+      if (label === '记忆') {
+        await b.wait('[...document.querySelectorAll("[data-setting=memory]")].some(element => element.getClientRects().length)')
+        await click('[data-setting="memory"]')
+      }
+    }
     await b.send('Page.navigate',{url:service.origin})
     await b.wait('!!document.querySelector("#administrator-token")')
     await fill('#administrator-token',service.administratorToken); await click('.web-login button[type=submit]')
@@ -51,8 +59,17 @@ test('phone Memory uses production Web navigation and real Host writes', { timeo
     await b.capture(join(output,'phone-memory-details.png'))
     await click('[aria-label="返回记忆列表"]'); await b.wait('!document.querySelector(".memory-library[data-mobile-detail]")')
     await b.capture(join(output,'phone-memory-list.png'))
+    const capability = await host.request('preferences.memory.get')
+    assert.deepEqual(Object.keys(capability).sort(), ['enabled','headsUpAfterGlobalSequence','observedThroughChangeSequence'].sort())
+    await host.request('preferences.memory.set',{enabled:false})
+    await b.wait('document.querySelector(".memory-capability-state")?.textContent.includes("已关闭")')
+    assert.equal(await b.evaluate('!!document.querySelector(".memory-catalog,.memory-detail")'),false)
+    await click('.memory-capability-switch')
+    await b.wait('!!document.querySelector(".memory-catalog-item")')
+    assert.equal((await host.request('preferences.memory.get')).enabled,true)
+    assert.ok((await host.request('memory.list')).memories.some(m=>m.currentBody==='手机修订后的完整正文。'))
     assert.deepEqual(b.errors,[])
-    await writeFile(join(output,'report.json'),JSON.stringify({productionWeb:true,realHost:true,runtime:false,create:true,revise:true,revisions:2,backAndReentry:true,noOverflow:true},null,2))
+    await writeFile(join(output,'report.json'),JSON.stringify({productionWeb:true,realHost:true,runtime:false,create:true,revise:true,revisions:2,backAndReentry:true,noOverflow:true,threeFieldCapability:true,remoteDisableAndPageEnable:true},null,2))
   } catch(error) { await b?.capture(join(output,'failure.png')).catch(()=>{}); throw error }
   finally { await b?.close(); await host.close(); await removeEphemeralRuntimeCampFilesRoot(dataDir,{temporaryDirectory:fixture}); await rm(fixture,{recursive:true,force:true}) }
 })

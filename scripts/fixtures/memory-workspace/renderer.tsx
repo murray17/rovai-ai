@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, MemoryRecord, HearthReviewItem } from '@contracts'
 import { MemoryLibrary } from '../../../apps/desktop/src/renderer/src/MemoryLibrary'
+import { useMemoryCapability } from '../../../apps/desktop/src/renderer/src/MemoryCapabilityProvider'
 import { MemoryChangeNotice } from '../../../apps/desktop/src/renderer/src/MemoryChangeNotice'
 import { collectMemoryChanges, memoryChangeText } from '../../../apps/desktop/src/renderer/src/memory-change-notice'
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
@@ -34,7 +35,7 @@ let releaseReview: (() => void) | null = null
 const clearCandidate = (item: HearthReviewItem): void => {
   item.candidateBody = null; item.candidateRetrievalKeys = null; item.candidateKind = null; item.resolvedAt = date
 }
-let memoryCapability = { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0, observedThroughGlobalSequence: 0 }
+let memoryCapability = { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 }
 let capabilityReadFailures = 0
 let capabilitySaveFailures = 0
 let capabilitySaves = 0
@@ -128,6 +129,12 @@ const client = { platform: 'darwin', async request(method: string, params: any =
 const noop = () => {}
 const asyncNoop = async () => {}
 
+function CapabilityProbe() {
+  const capability = useMemoryCapability()
+  ;(window as any).__memoryCapabilityProbe = capability
+  return null
+}
+
 function Fixture() {
   const [platform, setPlatform] = useState<'darwin' | 'win32'>('darwin')
   const mobile = useMobileViewport(platform !== 'win32')
@@ -175,7 +182,7 @@ function Fixture() {
     get: () => ({ target, memories, reviews, calls, longBody })
   } }, [target])
   const changes = collectMemoryChanges([], [{ eventType: 'memory.agent_revised', globalSequence: 1, entityType: 'memory', entityId: 'member-1', actorType: 'agent', actorId: 'member-a', payload: { scope: 'companion' } } as any])
-  return <ThreadClientProvider client={platformClient}><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile}>
+  return <ThreadClientProvider client={platformClient}><CapabilityProbe /><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile}>
     {!mobile && <ThreadNavigation view="memory" state="ready" navigation={null} activeThreadId={null} pendingMemoryCount={pending} onNewConversation={noop} onMembers={noop} onMemory={noop} onSettings={noop} onOpenProject={noop} onThread={noop} onRemoveProject={asyncNoop} onRename={asyncNoop} onDelete={asyncNoop} onError={noop} />}
     {!mobile && <WindowDragStrip page="memory" />}
     <main className="content memory-content"><MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} /></main>

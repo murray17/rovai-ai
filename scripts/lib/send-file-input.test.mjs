@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -20,6 +20,10 @@ test('CLI discovery stays local and Send files preserve requests without waiting
     ? `\\\\.\\pipe\\rovai-ai-${process.pid}-4b812837-7ffc-4ca2-ab62-d5dc89bcd411`
     : join(root, 'cli.sock')
   const requests = []
+  let hermesMode = false
+  const hermesHome = join(root, 'hermes-home')
+  const hermesData = process.platform === 'darwin' ? join(hermesHome, 'Library', 'Application Support') : join(root, 'hermes-data')
+  let capabilityReply = { kind: 'capabilities', capabilities: { tasksEnabled: true, memoryEnabled: true } }
   let rejection = { code: 'message.invalid_input', message: 'Fixture business rejection.', recovery: 'fix_input' }
   const server = createServer(connection => {
     let frame = ''
@@ -29,6 +33,10 @@ test('CLI discovery stays local and Send files preserve requests without waiting
       if (!frame.endsWith('\n')) return
       const request = JSON.parse(frame)
       requests.push(request)
+      if (request.kind === 'capabilities') {
+        connection.end(`${JSON.stringify(capabilityReply)}\n`)
+        return
+      }
       connection.end(`${JSON.stringify({ kind: 'envelope', envelope: {
         contractVersion: 2, ok: false, operation: request.operation,
         requestId: request.request_id, error: rejection
@@ -49,8 +57,15 @@ test('CLI discovery stays local and Send files preserve requests without waiting
   }
   await writeFile(contextPath, JSON.stringify(context))
   async function run(args, stdin, jsonOutput = true) {
+    const childEnv = { ...process.env, ROVAI_CLI_CONTEXT: contextPath, ROVAI_RUN_TMP: root }
+    if (hermesMode) {
+      // Only the child receives this isolated user profile; no daily discovery
+      // file or Hermes process is read or started by this transport fixture.
+      delete childEnv.ROVAI_CLI_CONTEXT
+      Object.assign(childEnv, { HOME: hermesHome, APPDATA: hermesData, XDG_DATA_HOME: hermesData, HERMES_SESSION_PLATFORM: 'local', HERMES_SESSION_CHAT_ID: 'fixture-session' })
+    }
     const child = spawn(cli, args, {
-      cwd: root, env: { ...process.env, ROVAI_CLI_CONTEXT: contextPath, ROVAI_RUN_TMP: root },
+      cwd: root, env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe']
     })
     const timer = setTimeout(() => child.kill(), 5000)
@@ -131,6 +146,35 @@ test('CLI discovery stays local and Send files preserve requests without waiting
       '--body', 'Preserve an already committed memory receipt.', '--retrieval-keys', 'memory receipts'],
       { action: 'add', scope: 'companion', kind: 'agreement', body: 'Preserve an already committed memory receipt.', retrievalKeys: ['memory receipts'] }, undefined, 2)
     rejection = originalRejection
+    // Unix data directories honor the child's isolated home. Windows uses its
+    // Known Folder API; never redirect or overwrite the daily discovery file.
+    if (process.platform !== 'win32') {
+      const discoveryDirectory = join(hermesData, 'Rovai AI', 'builtin-tools')
+      await mkdir(discoveryDirectory, { recursive: true })
+      await writeFile(join(discoveryDirectory, 'connection.json'), JSON.stringify(context.coreEndpoint))
+      hermesMode = true
+      let before = requests.length
+      const hermesHelp = await run(['--help'], undefined, false)
+      assert.equal(hermesHelp.code, 0)
+      assert.ok(hermesHelp.output.includes('rovai task') && hermesHelp.output.includes('rovai memory'))
+      assert.equal(requests.length, before + 1)
+      assert.equal(requests.at(-1).kind, 'capabilities')
+      capabilityReply = { kind: 'error', error: { code: 'builtin_tool.internal_error', message: 'Fixture capability failure.' } }
+      before = requests.length
+      const failedDiscovery = await run(['task', '--help'])
+      assert.equal(failedDiscovery.code, 2)
+      assert.equal(failedDiscovery.output.error.code, 'builtin_tool.cli_error', 'discovery failure must not claim Task is disabled')
+      assert.equal(requests.length, before + 1)
+      await reachesCore(['send', '--public-only', '--body', 'Hermes sends without a capability round trip.'], { body: 'Hermes sends without a capability round trip.', publicOnly: true })
+      assert.equal(requests.at(-1).kind, 'invoke')
+      assert.equal(requests.at(-1).source, 'hermes_native_session')
+      rejection = { code: 'task.feature_disabled', message: 'Tasks are disabled. Continue with messages.', recovery: 'stop' }
+      await reachesCore(['task', 'list'], {}, '{}', 2)
+      rejection = { code: 'memory.feature_disabled', message: 'Rovai long-term memory is disabled.', recovery: 'stop' }
+      await reachesCore(['memory', 'view', '--scope', 'hearth'], { scope: 'hearth' }, undefined, 2)
+      hermesMode = false
+      rejection = originalRejection
+    }
     await writeFile(contextPath, JSON.stringify(context))
     const raw = ' 中文 🌸\r\n# Markdown\n\n"quote" `code` \\n\n'
     await writeFile(join(root, 'reply.md'), raw)

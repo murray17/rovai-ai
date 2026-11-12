@@ -25,7 +25,7 @@ impl BootstrapContents {
             camp_has_active_file_delivery_binding(connection, &snapshot.camp_id)?,
             mission_facts(connection, snapshot)?.is_some(),
         )?;
-        let memory_enabled = crate::memory_capability::enabled(connection)?;
+        let memory_enabled = crate::memory_capability::discoverable(connection);
         let (memory_entrypoint, observed_memory_revisions, authorization_basis_digest) =
             if !memory_enabled || snapshot.invocation_kind == "single_chat" {
                 (

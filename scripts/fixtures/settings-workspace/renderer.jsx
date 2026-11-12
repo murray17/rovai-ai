@@ -27,7 +27,7 @@ const state = {
   hostWeb: { enabled: false }, holdHostStatus: false, loseHostStartReply: false,
   preferences: fixture.preferences(), notifications: fixture.notifications(),
   channels: fixture.channelsSnapshot(), executionWeb: fixture.executionWeb(),
-  memory: { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0, observedThroughGlobalSequence: 0 },
+  memory: { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 },
   startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)

@@ -1194,7 +1194,6 @@ export interface MemoryCapabilitySnapshot {
   enabled: boolean
   headsUpAfterGlobalSequence: number
   observedThroughChangeSequence: number
-  observedThroughGlobalSequence: number
 }
 
 export interface TaskCapabilitySnapshot {
@@ -2911,7 +2910,7 @@ export type MessageDeliveryView = MessageDeliveryBaseView & (
 )
 
 export interface EventBatch {
-  memoryCapability?: MemoryCapabilitySnapshot
+  memoryCapability?: MemoryCapabilitySnapshot | null
   schemaVersion: 9
   requestedAfterGlobalSequence: number
   nextGlobalSequence: number

@@ -6956,9 +6956,9 @@ impl Core {
                         rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
                             tasks_enabled: !single_chat
                                 && rovai_core::task_capability::enabled(database.connection())?,
-                            memory_enabled: rovai_core::memory_capability::enabled(
+                            memory_enabled: rovai_core::memory_capability::discoverable(
                                 database.connection(),
-                            )?,
+                            ),
                         },
                     )
                 })();
@@ -13154,7 +13154,7 @@ impl Core {
                     params.limit.unwrap_or(500),
                 )?)?;
                 batch["memoryCapability"] = serde_json::to_value(
-                    rovai_core::memory_capability::snapshot(database.connection())?,
+                    rovai_core::memory_capability::snapshot(database.connection()).ok(),
                 )?;
                 Ok(batch)
             }
@@ -16930,7 +16930,7 @@ impl Core {
             let database = self.database.lock().await;
             (|| -> Result<_> {
                 let tasks = rovai_core::task_capability::enabled(database.connection())?;
-                let memory = rovai_core::memory_capability::enabled(database.connection())?;
+                let memory = rovai_core::memory_capability::discoverable(database.connection());
                 let enabled_runs = if tasks {
                     database.connection().prepare("SELECT id FROM agent_run WHERE invocation_kind <> 'single_chat' AND status IN ('queued','running','waiting')")?
                         .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<HashSet<String>>>()?
@@ -38040,6 +38040,122 @@ done
                 .execute(
                     "UPDATE conversation SET native_session_id=NULL WHERE id=?1",
                     [&conversation],
+                )
+                .unwrap();
+        }
+        let preference = {
+            let database = core.database.lock().await;
+            rovai_core::memory_capability::snapshot(database.connection()).unwrap()
+        };
+        for invalid_value in [
+            None,
+            Some((2, preference.heads_up_after_global_sequence)),
+            Some((1, -1)),
+        ] {
+            {
+                let database = core.database.lock().await;
+                let connection = database.connection();
+                connection
+                    .execute("DELETE FROM memory_preference", [])
+                    .unwrap();
+                if let Some((value, boundary)) = invalid_value {
+                    connection
+                        .execute_batch("PRAGMA ignore_check_constraints=ON")
+                        .unwrap();
+                    connection
+                        .execute(
+                            "INSERT INTO memory_preference VALUES(1,?1,?2)",
+                            rusqlite::params![value, boundary],
+                        )
+                        .unwrap();
+                    connection
+                        .execute_batch("PRAGMA ignore_check_constraints=OFF")
+                        .unwrap();
+                }
+            }
+            assert!(
+                core.handle(&Request {
+                    client: Default::default(),
+                    id: json!(3),
+                    method: "preferences.memory.get".into(),
+                    params: json!({})
+                })
+                .await
+                .is_err()
+            );
+            let batch = core
+                .handle(&Request {
+                    client: Default::default(),
+                    id: json!(4),
+                    method: "events.subscribe".into(),
+                    params: json!({"threadId":bindings[0].0,"afterGlobalSequence":0}),
+                })
+                .await
+                .unwrap();
+            assert_eq!(batch.get("memoryCapability"), Some(&Value::Null));
+            assert!(
+                batch["events"]
+                    .as_array()
+                    .is_some_and(|events| !events.is_empty())
+            );
+            let ordinary = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "member.list",
+                json!({}),
+            )
+            .await;
+            assert_eq!(ordinary["envelope"]["ok"], true, "{ordinary}");
+            assert!(core.handle(&Request { client: Default::default(), id: json!(5), method: "camps.open".into(), params: json!({"threadId":bindings[0].0,"traceId":uuid::Uuid::new_v4().to_string()}) }).await.is_ok());
+            let denied = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "memory.read",
+                json!({"memoryIds":[memory_id]}),
+            )
+            .await;
+            assert_eq!(denied["envelope"]["ok"], false, "{denied}");
+            assert!(!denied.to_string().contains(body));
+            assert_eq!(
+                invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await,
+                written
+            );
+            save(&core, false).await;
+            assert!(!tasks(a) && !tasks(b));
+            save(&core, true).await;
+            assert!(tasks(a) && tasks(b));
+            let capabilities = serde_json::to_value(
+                core.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+                    ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                    auth: context.auth().unwrap(),
+                    body: BuiltinToolIpcRequestBody::Capabilities,
+                })
+                .await,
+            )
+            .unwrap();
+            assert_eq!(capabilities["capabilities"]["tasksEnabled"], true);
+            assert_eq!(capabilities["capabilities"]["memoryEnabled"], false);
+            let database = core.database.lock().await;
+            let connection = database.connection();
+            // Projection repair must never replace an unreadable preference.
+            let stored: Option<(i64, i64)> = connection
+                .query_row(
+                    "SELECT enabled, heads_up_after_global_sequence FROM memory_preference",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .unwrap();
+            assert_eq!(stored, invalid_value);
+            connection
+                .execute("DELETE FROM memory_preference", [])
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO memory_preference VALUES(1,0,?1)",
+                    [preference.heads_up_after_global_sequence],
                 )
                 .unwrap();
         }
