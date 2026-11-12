@@ -202,16 +202,28 @@ app.whenReady().then(async () => {
     assert.equal(after.opens.length, before.opens.length + 1)
     assert.equal(after.opens.at(-1).rawReference, '../outside/config.toml')
     assert.equal(after.chooseRootCalls, 0)
-    assert.equal(after.notices.at(-1), '文件访问已失效')
+    assert.deepEqual(after.notices, before.notices)
+    assert.equal(after.tabCount, before.tabCount + 1)
+    assert.equal(after.draft, before.draft)
+    assert.equal(await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-recovery p').textContent`), '无法打开文件')
+    assert.equal(await run(`!!document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-recovery button')`), false)
+    assert.equal(await run(`document.querySelector('.file-preview-pane').textContent.includes('内部目录授权原因')`), false)
+    await capture('file-open-failure-zh')
+    await run(`window.navigationTest.language('en')`)
+    assert.equal(await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-recovery p').textContent`), 'Could not open file')
+    await capture('file-open-failure-en')
+    await run(`window.navigationTest.language('zh-CN')`)
+    await click('[role=tab]:first-child')
+    assert.equal((await state()).targetVisible, true)
   })
-  await check('literal HTML remains visible without extra file-link margins in both themes', async () => {
+  await check('sanitized HTML keeps spacing beside visible text in both themes', async () => {
     for (const theme of ['day', 'night']) {
       await run(`window.navigationTest.theme('${theme}')`)
       await run('window.navigationTest.literalSpacingPreview()')
       const current = await state()
       assert.deepEqual(current.literalSpacing, [
-        { text: '文</b>前侧间距', start: '0px', end: '0px' },
-        { text: '后侧间距<b>文', start: '0px', end: '0px' }
+        { text: '文前侧间距', start: '2px', end: '0px' },
+        { text: '后侧间距文', start: '0px', end: '2px' }
       ])
       measurements.literalSpacing = current.literalSpacing
       await capture(`literal-spacing-${theme}`)

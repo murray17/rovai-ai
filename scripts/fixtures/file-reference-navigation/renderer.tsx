@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { createRoot } from 'react-dom/client'
 import type { ThreadSnapshot, FilePreviewApi, NavigationThreadItem, OpenFilePreviewRequest, ResolvedFilePreview } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
@@ -158,13 +160,14 @@ const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => 
 const overflows = (selectors: string) => [...document.querySelectorAll<HTMLElement>(selectors)]
   .filter(node => node.getBoundingClientRect().width > 0 && node.scrollWidth > node.clientWidth + 1)
   .map(node => ({ className: node.className || node.tagName, width: node.clientWidth, scrollWidth: node.scrollWidth }))
-const artifacts = () => [...document.querySelectorAll<HTMLElement>('[data-message-id="message-35"] pre, [data-message-id="message-35"] table')]
+const artifacts = () => [...document.querySelectorAll<HTMLElement>('[data-message-id="message-35"] pre, [data-message-id="message-35"] .markdown-table-scroll')]
 let bookmarkedTimeline: HTMLElement
 let bookmarkedLink: HTMLElement
 let anchorMessageId: string | null = null
 let trace: number[] = []
 Object.assign(window, { navigationTest: {
   settle,
+  async language(value: 'en' | 'zh-CN') { await changeInterfaceLanguage(languageTestApi, value); await settle() },
   async surface(value: FixtureSurface) { setSurface(value); await settle() },
   async scrollArtifacts() { for (const node of artifacts()) node.scrollLeft = node.scrollWidth; await settle() },
   trace() {
@@ -215,7 +218,7 @@ Object.assign(window, { navigationTest: {
     return {
       linkY: link().getBoundingClientRect().top, scrollTop: scroll.scrollTop, width: scroll.clientWidth,
       overflows: overflows('html, body, .camp-workspace, .workspace-grid, .timeline-pane, .camp-timeline, .timeline-track, .conversation-bubble.agent, .message-body, .public-message-readout, .message-surface, .final-copy, .safe-markdown'),
-      artifacts: artifacts().map(node => ({ tag: node.tagName, width: node.clientWidth, scrollWidth: node.scrollWidth,
+      artifacts: artifacts().map(node => ({ tag: node.matches('.markdown-table-scroll') ? 'TABLE' : node.tagName, width: node.clientWidth, scrollWidth: node.scrollWidth,
         scrollLeft: node.scrollLeft, overflowX: getComputedStyle(node).overflowX })),
       timelineScrollLeft: scroll.scrollLeft,
       bottomGap: scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight,

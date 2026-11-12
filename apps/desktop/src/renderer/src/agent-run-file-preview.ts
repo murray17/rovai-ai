@@ -47,7 +47,7 @@ export async function openAgentRunCurrentFilePreview({
       evidenceFileId,
       action: 'open_current'
     }, undefined, { fileName: file.path }, { commitOnSuccess: true, previewOnly: true })
-    if (outcome.kind === 'preview') return true
+    if (outcome.kind === 'preview' || outcome.kind === 'preview_error') return true
   } catch {
     // The public failure stays intentionally stable and does not expose host details.
   }
@@ -117,7 +117,7 @@ export async function openAgentRunActivityFilePreview({
       { fileName: path },
       { commitOnSuccess: true, previewOnly: true }
     )
-    if (outcome.kind === 'preview') return true
+    if (outcome.kind === 'preview' || outcome.kind === 'preview_error') return true
   } catch {
     // The public failure stays intentionally stable and does not expose host details.
   }

@@ -340,7 +340,7 @@ function FileDownloadFeedback({ tab }: { tab: FilePreviewTabModel }): React.JSX.
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const api = useFilePreviewApi()
-  const { reload, retry, changePage, revealInFolder, displayed, toggleHtmlSource, resolvedTheme, activeTabId, paneVisible, isCurrentThread } = useFilePreview()
+  const { reload, changePage, revealInFolder, displayed, toggleHtmlSource, resolvedTheme, activeTabId, paneVisible, isCurrentThread } = useFilePreview()
   const edits = useFileEdits()
   const doc = edits?.get(tab.id)
   const sourceSwitch = tab.content?.kind === 'html' || tab.content?.kind === 'markdown'
@@ -374,6 +374,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   useEffect(() => { if (tab.file && tab.content && tab.content.kind !== 'html') displayed(tab.id, tab.file.handleId) }, [tab.file?.handleId, tab.content, tab.id, displayed])
   const page = tab.content?.kind === 'page' ? tab.content.page : null
   const downloadAvailable = canDownloadFile(tab, api)
+  const downloadFallback = downloadAvailable && api.downloadSource && ['decode_failed', 'file_too_large'].includes(tab.error?.code ?? '')
   const downloadAction = downloadAvailable ? <FileDownloadAction key={tab.id} tab={tab} /> : null
   const showPath = tab.loadState === 'ready' && previewPathIsVisible(tab.presentation)
   const showUpdate = tab.loadState === 'ready' && Boolean(tab.file)
@@ -434,11 +435,10 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
           <div className="file-preview-recovery-stage">
             <div className="file-preview-recovery" role="status" aria-live="polite">
               <ResourceReferenceIcon kind="file" className="file-preview-recovery-icon" />
-              {downloadAvailable && <strong className="file-preview-unavailable-name">{tab.presentation.fileName}</strong>}
-              <p>{api.downloadSource && ['decode_failed', 'file_too_large'].includes(tab.error?.code ?? '')
-                ? uiAttribute('此文件暂不支持在线预览，可下载到本机查看。') : tab.error?.message ?? uiAttribute("暂时无法读取文件")}</p>
-              {downloadAvailable && <FileDownloadAction key={tab.id} tab={tab} full />}
-              {tab.file?.kind === 'html' && <button type="button" onClick={() => void retry(tab.id)}><UiText zh={"重试"} /></button>}
+              {downloadFallback && <strong className="file-preview-unavailable-name">{tab.presentation.fileName}</strong>}
+              <p>{downloadFallback
+                ? uiAttribute('此文件暂不支持在线预览，可下载到本机查看。') : uiAttribute('无法打开文件')}</p>
+              {downloadFallback && <FileDownloadAction key={tab.id} tab={tab} full />}
             </div>
           </div>
         )}

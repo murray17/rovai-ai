@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-11-09
+last_updated: 2026-11-12
 ---
 
 # File Preview Architecture
@@ -46,7 +46,8 @@ explicit local-link click
 
 `Files Changed` 卡片的入口由 Renderer 根据冻结的 `presentationKind` 路由：可靠差异进入不可变 Review，
 `operation_only` 使用同一 Run Evidence 身份打开普通当前文件 Tab。后者仍经过 Core/Main 当前文件映射与具体文件能力
-校验，并采用成功后提交；它不把当前文件内容写回历史 Evidence，也不改变 Runtime 文件变化投影。
+校验，并在首屏结果后提交普通预览或无内容失败页；失败页仅属于 Renderer，不授予文件能力，也不把当前文件内容写回
+历史 Evidence 或改变 Runtime 文件变化投影。当前失败导航见 [File Preview v28](../contracts/file-preview-v28.md#打开失败的预览页)。
 Core 解析 `run_evidence/open_current` 时，以 exact AgentRun + execution epoch + Thread 绑定读取冻结的
 `workspace_json.executionRoot`；有效绝对路径优先于 Thread 项目目录。只有缺少有效 executionRoot 的旧 Run 才回退到
 active directory Thread 的绝对 `project_path`。相对 Evidence 路径仍拒绝父目录跳转并按 Run 根解析；规范化绝对路径按证据

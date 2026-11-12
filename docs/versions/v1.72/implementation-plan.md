@@ -3,10 +3,36 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # v1.72 实施与验收
+
+## 通用提示与分叉反馈（2026-11-12）
+
+- Work item：通用提示顶部居中、文件失败预览与分叉反馈简化；Owner：爱丽丝。
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-toast-preview-v4`；Branch：`rovai/toast-preview-v4`；
+  Base：`origin/main@8bc31ecb3c3c10047e7b7bbc00697ac3895593ef`；Governance：none，同一变更同步当前 UI／合同。
+- Status：ready，本地实施与验证完成，保留 worktree 待合入；按 User 当前偏好只推送分支，不自动建 PR。
+- AppToast：独立 Portal 共用 App 顶部浮层并纵向排列；透明文字动作、细线图标与独立 SVG 关闭点击区，
+  保留普通／danger 色与 live region。未新建触发、后台通知队列或输入框／消息／附件旁错误行。
+- 文件：`preview_error` 仅为 Renderer outcome，首次失败进入既有文件 Tab；保留其他可读内容、来源校验、
+  scope／迟到响应保护、候选句柄释放与 Web 下载降级。底层错误码继续更新附件可用性，不重复发全局 Toast。
+- 分叉：后续 User 指令移除 ready 阶段的完成／标题／Open／打开失败提示及专属标题查询；普通侧栏仍可访问已知副本。
+  loading 延迟 200ms 出现、至少显示 600ms，计时不阻塞命令、busy 或导航；明确拒绝 3.2 秒后关闭，未知结果保持原请求重试。
+- 已通过：`pnpm typecheck`；`TZ=UTC pnpm test`（276 文件，3281 Vitest passed／2 skipped；后续 Node 377 passed／2 skipped，
+  Docs、Skills 与 Electron admission 随同通过）；`pnpm build:desktop`；`pnpm test:rust:pr`（workspace 484 passed／1 ignored）。
+  本项没有新增或调整 Rust 测试。
+- 独立 Electron 验收：`pnpm test:thread-fork` 与 `node --test scripts/lib/file-reference-navigation.test.mjs`。
+  每个夹具使用独立 userData 与声明的 unused Skill Library，不启动 Core／Runtime，也不访问日常数据。
+  覆盖 A→B／A→B→A 静默完成、打开／保存失败无完成提示、普通侧栏打开副本不重建、未知结果重试和刷新回执、
+  拒绝自动关闭、快操作零 loading、可见 loading 满 600ms 且跳转已完成、StrictMode 浮层共用／清理、键盘动作、
+  中英文 × 五套主题、三个桌面尺寸、200% 放大与长文字、触屏及 reduced motion。
+- 文件夹具覆盖中英文失败页、无重复全局错误／内部授权详情、草稿和已有文件保留、阅读锚点、宽代码／表格与调整预览宽度。
+  顺带修正该夹具落后于当前已准入 SafeMarkdown 的 HTML 字面断言与表格滚动容器选择器；基线 `8bc31ecb3` 可复现旧断言失败，
+  没有为此修改生产 Markdown 或渲染规则。原 AppToast 静态 SSR 语义断言迁入真实 Portal 浏览器验收。
+- 文档：当前 App Shell、Thread、File Preview UI、File Preview v28 与 Thread Fork v1 同步，合同索引修正 v28 标签。
+  最终执行 `pnpm docs:test`、`pnpm docs:check` 与 `DOCS_BASE_REF=8bc31ecb3c3c10047e7b7bbc00697ac3895593ef pnpm docs:check:ci`。
 
 ## Thread 分叉（2026-11-11）
 
