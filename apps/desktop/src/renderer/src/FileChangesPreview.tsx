@@ -43,7 +43,7 @@ export function FileChangesPreview({ tab, visible }: { tab: FileChangesPreviewTa
       action: 'open_current'
     }, undefined, { fileName: file.path })
     setOpenCurrentStatus('idle')
-    if (outcome.kind === 'preview') {
+    if (outcome.kind === 'preview' || outcome.kind === 'preview_error') {
       return
     }
     setOpenCurrentError(outcome.kind === 'error'

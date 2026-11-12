@@ -2,15 +2,21 @@ import { useState } from 'react'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { createRoot } from 'react-dom/client'
-import type { ThreadSnapshot, FilePreviewApi, NavigationThreadItem, OpenFilePreviewRequest, ResolvedFilePreview } from '@contracts'
+import type { AgentRunFileChangesView, ThreadSnapshot, FilePreviewApi, NavigationThreadItem, OpenFilePreviewRequest, ResolvedFilePreview } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { ThreadWorkspace, QuickChatWorkspace } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
-import { FilePreviewProvider, useFilePreview } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
+import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
 import { FilePreviewTabs } from '../../../apps/desktop/src/renderer/src/FilePreviewTabs'
 import { visibleTimelineMessageAnchor } from '../../../apps/desktop/src/renderer/src/timeline-reading-anchor'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const threadId = 'camp-file-navigation'
+const changes: AgentRunFileChangesView = {
+  schemaVersion: 2, agentRunId: 'run-current-file', executionEpoch: 1,
+  files: [{ evidenceFileId: 'missing-current', path: 'src/missing-current.ts', changeKind: 'update',
+    presentationKind: 'full_net_diff', operationCount: 1, additions: 1, deletions: 1 }],
+  fileCount: 1, operationCount: 1, additions: 1, deletions: 1, completedAt: '2026-08-31T00:00:00Z'
+}
 const file: ResolvedFilePreview = {
   previewKey: 'report', handleId: 'report', reopenToken: 'report', displayPath: 'src/report/run_report.py',
   pathPresentation: 'project_relative',
@@ -26,6 +32,9 @@ const api: FilePreviewApi = {
   bindThread: async () => {},
   open: async (request) => {
     opens.push(request)
+    if (request.kind === 'run_evidence' && request.evidenceFileId === 'missing-current') {
+      return { ok: false, error: { code: 'file_not_found', message: 'The current file is missing.', retryable: false } }
+    }
     if (request.kind === 'message_reference' && request.rawReference === '../outside/config.toml') {
       return { ok: false, error: {
         code: 'authorization_required', message: '内部目录授权原因不应显示给用户。', retryable: false,
@@ -67,6 +76,11 @@ Object.assign(window, { rovai: {
   request: async (method: string) => {
     if (method.startsWith('camp.composerDraft.')) return draft
     if (method.startsWith('skills.')) return []
+    if (method === 'agentRunFileChanges.get') return {
+      schemaVersion: 2, card: changes, files: changes.files.map(entry => ({ ...entry, blocks: [{
+        sequence: 1, semantics: 'full_net_diff', changeKind: 'update', diff: '@@ -1 +1 @@\n-old\n+new\n'
+      }] }))
+    }
     return unsupported()
   }
 } })
@@ -122,9 +136,11 @@ const recentThreads: NavigationThreadItem[] = ['长'.repeat(80), 'W'.repeat(80),
 }))
 type FixtureSurface = 'history' | 'wide-message' | 'home'
 let setSurface: (surface: FixtureSurface) => void
+let previewController: FilePreviewContextValue
 
 function Workspace({ surface }: { surface: FixtureSurface }): React.JSX.Element {
   const preview = useFilePreview()
+  previewController = preview
   if (surface === 'home') return <div className="app-shell">
     <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
     <AppHeader threadTitle={null} contextLabel="Rovai AI" thread={null} onFocusApprovals={() => {}} />
@@ -167,6 +183,7 @@ let anchorMessageId: string | null = null
 let trace: number[] = []
 Object.assign(window, { navigationTest: {
   settle,
+  async openChanges() { previewController.openFileChanges(threadId, changes); await settle() },
   async language(value: 'en' | 'zh-CN') { await changeInterfaceLanguage(languageTestApi, value); await settle() },
   async surface(value: FixtureSurface) { setSurface(value); await settle() },
   async scrollArtifacts() { for (const node of artifacts()) node.scrollLeft = node.scrollWidth; await settle() },
@@ -256,6 +273,7 @@ Object.assign(window, { navigationTest: {
       webHref: element('[data-message-id="message-12"] a[href^="https:"]')?.getAttribute('href'),
       webText: element('[data-message-id="message-12"] a[href^="https:"]')?.textContent,
       tabCount: document.querySelectorAll('[role="tab"]').length,
+      openCurrentError: element('.agent-run-file-review-current-error')?.textContent ?? null,
       overflow: document.documentElement.scrollWidth > innerWidth
     }
   }

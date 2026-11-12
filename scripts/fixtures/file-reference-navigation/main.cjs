@@ -216,6 +216,29 @@ app.whenReady().then(async () => {
     await click('[role=tab]:first-child')
     assert.equal((await state()).targetVisible, true)
   })
+  await check('failed current-file preview leaves no duplicate error in the preserved Files Changed tab', async () => {
+    const before = await state()
+    await run('window.navigationTest.openChanges()')
+    await run('window.retainedChangesReview = document.querySelector(".agent-run-file-review"); true')
+    assert.equal((await state()).openCurrentError, null)
+    const failed = await click('.agent-run-file-review-open-current')
+    assert.equal(failed.tabCount, before.tabCount + 2)
+    assert.deepEqual(failed.opens.at(-1), {
+      kind: 'run_evidence', threadId: 'camp-file-navigation', agentRunId: 'run-current-file',
+      executionEpoch: 1, evidenceFileId: 'missing-current', action: 'open_current'
+    })
+    assert.equal(await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-recovery p').textContent`), '无法打开文件')
+    assert.equal(failed.openCurrentError, null, 'The inactive Files Changed tab must not retain a second error')
+    assert.deepEqual(failed.notices, before.notices)
+    const restored = await click('[role="tab"][aria-label="File Change·missing-current.ts"]')
+    assert.equal(await run('window.retainedChangesReview === document.querySelector(".file-preview-tab-panel:not([hidden]) .agent-run-file-review")'), true)
+    assert.equal(restored.openCurrentError, null)
+    assert.equal(await run('document.querySelector(".agent-run-file-review-open-current").disabled'), false)
+    await click('[aria-label="关闭 missing-current.ts"]')
+    await click('[aria-label="关闭 File Change·missing-current.ts"]')
+    await click('[role="tab"]:first-child')
+    assert.equal((await state()).tabCount, before.tabCount)
+  })
   await check('sanitized HTML keeps spacing beside visible text in both themes', async () => {
     for (const theme of ['day', 'night']) {
       await run(`window.navigationTest.theme('${theme}')`)
