@@ -1,4 +1,4 @@
-import type { LarkChannel } from '@larksuiteoapi/node-sdk'
+import type { LarkChannel, LarkChannelConnectionCause } from '@larksuiteoapi/node-sdk'
 
 export type BotConnectionStatus = 'unknown' | 'connecting' | 'reconnecting' | 'online' | 'offline'
 export type BotConnectionFailure = { code: string; retryable: boolean; delay?: number }
@@ -47,7 +47,7 @@ export class BotConnection {
       this.#sdkWaiters.clear()
       this.start()
     }), channel.on('error', error => {
-      const cause = error.cause as { connection?: boolean } | undefined
+      const cause = error.cause as Partial<LarkChannelConnectionCause> | undefined
       if (!cause?.connection || this.#stopped || this.terminal) return
       for (const waiter of this.#sdkWaiters) waiter.reject(error)
       this.#sdkWaiters.clear()
@@ -167,19 +167,21 @@ export class BotConnection {
 function safeConnectionCode(code: unknown): string {
   if (code === 514 || code === 403) return 'credential_rejected'
   if (code === 1000040350) return 'connection_limit'
-  if (code === 429) return 'rate_limited'
+  if (code === 429 || code === 99991400) return 'rate_limited'
+  if (code === 99991401) return 'ip_not_allowed'
   if (typeof code === 'number') return code === 1 || code === 1000040343 ? 'service_unavailable' : 'provider_unknown'
   return ['handshake_timeout', 'identity_timeout', 'transport_error', 'client_assertion', 'cancelled'].includes(String(code))
     ? String(code) : 'transport_error'
 }
 
 export function connectionFailure(error: unknown): BotConnectionFailure {
-  const value = error as { code?: string; message?: string; cause?: { code?: unknown; retryable?: boolean; retryAfterMs?: number } }
+  const value = error as { code?: string; message?: string; cause?: Partial<LarkChannelConnectionCause> }
   const local = value?.code ?? value?.message ?? ''
-  const terminal = ['identity_conflict', 'binding_immutable', 'owner_identity.unverified', 'credential_missing', 'brand_moved', 'binding_missing', 'credential_mismatch']
+  const terminal = ['identity_conflict', 'binding_immutable', 'credential_missing', 'brand_moved', 'binding_missing', 'credential_mismatch']
   if (terminal.some(code => local.includes(code))) return { code: terminal.find(code => local.includes(code))!, retryable: false }
-  if (value?.code === 'permission_denied' || value?.cause?.retryable === false) return { code: 'credential_rejected', retryable: false }
+  if (local.includes('member_bot.not_found')) return { code: 'binding_missing', retryable: false }
   const code = value?.code === 'rate_limited' ? 'rate_limited' : safeConnectionCode(value?.cause?.code)
+  if (value?.cause?.retryable === false) return { code, retryable: false }
   const delay = Math.max(code === 'connection_limit' ? 120_000 : code === 'rate_limited' ? 30_000 : 0,
     Math.min(2_147_483_647, Math.max(0, Number(value?.cause?.retryAfterMs) || 0)))
   return { code, retryable: true, delay }

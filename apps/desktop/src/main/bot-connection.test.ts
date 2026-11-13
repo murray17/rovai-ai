@@ -1,6 +1,6 @@
 import type { LarkChannel } from '@larksuiteoapi/node-sdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BotConnection } from './bot-connection'
+import { BotConnection, connectionFailure } from './bot-connection'
 
 function fixture() {
   const handlers = new Map<string, (value?: any) => void>()
@@ -94,6 +94,53 @@ describe('Bot connection responsibility', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(connection.failureCode).toBeNull()
     await connection.stop()
+  })
+
+  it('ends the watchdog at transport readiness even when Core confirmation takes over a minute', async () => {
+    vi.useFakeTimers()
+    const { connection, channel, saved } = fixture()
+    let transportReady!: () => void
+    let confirmationSaved!: () => void
+    channel.connect.mockImplementationOnce(() => new Promise(resolve => { transportReady = () => resolve(undefined) }))
+    saved.mockImplementationOnce(() => new Promise(resolve => { confirmationSaved = () => resolve(undefined) }))
+    const attempt = connection.connect()
+    await vi.advanceTimersByTimeAsync(50_000)
+    channel.getConnectionStatus.mockReturnValue({ state: 'connected' })
+    transportReady()
+    await vi.advanceTimersByTimeAsync(70_000)
+    expect(saved).toHaveBeenCalledOnce()
+    expect(channel.cancelConnect).not.toHaveBeenCalled()
+    expect(channel.disconnect).not.toHaveBeenCalled()
+    confirmationSaved()
+    await attempt
+    expect(connection.status).toBe('online')
+    await connection.stop()
+  })
+
+  it('cancels only a stuck attempt at the watchdog and retries with its HTTP channel intact', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const { connection, channel } = fixture()
+    channel.connect.mockImplementationOnce(() => new Promise(() => {}))
+    const pending = expect(connection.connect()).rejects.toThrow('connection_watchdog_timeout')
+    await vi.advanceTimersByTimeAsync(60_000)
+    await pending
+    expect(connection.terminal).toBe(false)
+    expect(channel.cancelConnect).toHaveBeenCalledOnce()
+    expect(channel.disconnect).not.toHaveBeenCalled()
+    await expect(channel.send()).resolves.toEqual({ messageId: 'om_http' })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(connection.status).toBe('online')
+    await connection.stop()
+  })
+
+  it('uses explicit connection classification and pacing rather than the broad permission error label', () => {
+    expect(connectionFailure({ code: 'permission_denied', cause: { connection: true, code: 99991400, retryable: true, retryAfterMs: 180_000 } }))
+      .toEqual({ code: 'rate_limited', retryable: true, delay: 180_000 })
+    expect(connectionFailure({ code: 'permission_denied' })).toMatchObject({ retryable: true })
+    expect(connectionFailure({ code: 'permission_denied', cause: { connection: true, code: 99991401, retryable: false } }))
+      .toEqual({ code: 'ip_not_allowed', retryable: false })
+    expect(connectionFailure({ code: 'feishu_member_bot.not_found' })).toEqual({ code: 'binding_missing', retryable: false })
   })
 
   it('makes an immutable identity conflict terminal and stops retrying', async () => {

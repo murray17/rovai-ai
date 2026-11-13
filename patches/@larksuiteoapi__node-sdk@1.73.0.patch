@@ -1,16 +1,42 @@
 diff --git a/es/index.js b/es/index.js
-index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e710665e90 100644
+index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6e8874145 100644
 --- a/es/index.js
 +++ b/es/index.js
-@@ -102074,6 +102074,7 @@ class WSClient {
+@@ -102069,11 +102069,33 @@ var HttpStatusCode;
+     HttpStatusCode[HttpStatusCode["internal_server_error"] = 500] = "internal_server_error";
+ })(HttpStatusCode || (HttpStatusCode = {}));
+
++// Connection failures carry only stable classification and pacing, never raw
++// response bodies, credentials or free-form provider messages.
++function larkConnectionCause(error) {
++    if (error && error.cause && error.cause.connection === true) return error.cause;
++    const response = error && error.response;
++    const body = (response && response.data) || (error && error.data) || error || {};
++    const status = (response && response.status) || (error && error.status);
++    const rawCode = !response && error && Number.isSafeInteger(error.code) ? error.code : body.code;
++    const code = Number.isSafeInteger(rawCode) ? rawCode
++        : status === 401 ? 514 : status === 403 ? 403 : status === 429 ? 429 : 'transport_error';
++    const limited = code === 99991400 || code === 429 || status === 429;
++    const headers = (response && response.headers) || (error && error.headers) || {};
++    const after = headers['retry-after'];
++    const numericAfter = Number(after);
++    const standardMs = after == null ? 0 : Number.isFinite(numericAfter) ? numericAfter * 1000 : (Date.parse(after) - Date.now()) || 0;
++    const resetMs = Number(headers['x-ogw-ratelimit-reset']) * 1000 || 0;
++    return { connection: true, code, retryable: limited || !([514, 403, 99991401].includes(code) || status === 401 || status === 403),
++        retryAfterMs: Math.max(0, Math.min(2147483647, Math.max(standardMs, resetMs))) };
++}
++
+ class WSClient {
+     constructor(params) {
          var _a;
          this.wsConfig = new WSConfig();
          this.reconnectGeneration = 0;
 +        this.closed = false;
++        this.endpointAbort = new AbortController();
          this.isConnecting = false;
          this.reconnectInfo = {
              lastConnectTime: 0,
-@@ -102093,7 +102094,7 @@ class WSClient {
+@@ -102093,7 +102115,7 @@ class WSClient {
           * loopReConnect, reset to 0 on a successful connect.
           */
          this.currentReconnectAttempts = 0;
@@ -19,7 +45,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
          this.userAgent = buildUserAgent(source, { extraTags: extraUaTags });
          this.logger = new LoggerProxy(loggerLevel, logger);
          assert(!appId, () => this.logger.error('appId is needed'));
-@@ -102114,6 +102115,8 @@ class WSClient {
+@@ -102114,6 +102136,8 @@ class WSClient {
          this.wsConfig.updateWs({
              autoReconnect
          });
@@ -28,7 +54,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
          this.onReady = onReady;
          this.onError = onError;
          this.onReconnecting = onReconnecting;
-@@ -102136,13 +102139,14 @@ class WSClient {
+@@ -102136,13 +102160,14 @@ class WSClient {
       * connection is fine).
       */
      armLiveness() {
@@ -44,27 +70,50 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
              this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of last ping, terminating to trigger reconnect`);
              try {
                  (_a = this.wsConfig.getWSInstance()) === null || _a === void 0 ? void 0 : _a.terminate();
-@@ -102210,14 +102214,13 @@ class WSClient {
+@@ -102188,6 +102213,7 @@ class WSClient {
+                     // WS endpoint discovery binds the assertion to the OpenAPI domain host.
+                     const aud = extractAudFromUrl(domain);
+                     const assertion = yield clientAssertionProvider.retrieveToken(aud);
++                    if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
+                     if (!assertion || !assertion.value) {
+                         throw new ClientAssertionError(ERR_CODE_CLIENT_ASSERTION_TOKEN_EMPTY, 'client assertion token is empty');
+                     }
+@@ -102201,25 +102227,23 @@ class WSClient {
+                 else {
+                     body.AppSecret = appSecret;
+                 }
+-                const { code, data: { URL, ClientConfig }, msg } = yield this.httpInstance.request({
++                if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
++                const response = yield this.httpInstance.request({
+                     method: "post",
+                     url,
+                     data: body,
+                     headers,
+                     timeout: 15000,
++                    signal: this.endpointAbort.signal,
                  });
++                if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
++                const code = response && response.code;
                  if (code !== ErrorCode.ok) {
-                     const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
+-                    const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
 -                    this.logger.error('[ws]', `code: ${code}, ${reason}`);
 -                    if (code === ErrorCode.internal_error) {
 -                        return { ok: false, retryable: true };
 -                    }
-+                    this.logger.error('[ws]', `endpoint failure code: ${code}`);
-+
-                     return {
-                         ok: false,
+-                    return {
+-                        ok: false,
 -                        retryable: false,
 -                        error: `pullConnectConfig failed: code=${code}, msg=${reason}`,
-+                        retryable: code !== ErrorCode.auth_failed && code !== ErrorCode.forbidden,
-+                        code,
-+                        error: "WebSocket endpoint rejected",
-                     };
+-                    };
++                    this.logger.error('[ws]', 'endpoint rejected');
++                    return Object.assign({ ok: false }, larkConnectionCause(response));
                  }
++                const { URL, ClientConfig } = response.data || {};
++                if (typeof URL !== 'string' || !ClientConfig) return { ok: false, retryable: true, code: 'transport_error' };
                  const { device_id, service_id } = qs.parse(URL);
-@@ -102234,196 +102237,156 @@ class WSClient {
+                 this.wsConfig.updateWs({
+                     connectUrl: URL,
+@@ -102234,196 +102258,156 @@ class WSClient {
                  return { ok: true };
              }
              catch (e) {
@@ -76,13 +125,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 +                    return { ok: false, retryable: false, code: "client_assertion", error: "WebSocket credential configuration rejected" };
                  }
 -                return { ok: false, retryable: true };
-+                const status = e && e.response && e.response.status;
-+                const rawAfter = e && e.response && e.response.headers && e.response.headers['retry-after'];
-+                const after = Number(rawAfter);
-+                const retryAfterMs = rawAfter == null ? 0 : Math.max(0, Math.min(2147483647,
-+                    Number.isFinite(after) ? after * 1000 : (Date.parse(rawAfter) - Date.now()) || 0));
-+                return { ok: false, retryable: status !== 401 && status !== 403,
-+                    code: status === 401 ? 514 : status === 403 ? 403 : status === 429 ? 429 : 'transport_error', retryAfterMs };
++                return Object.assign({ ok: false }, larkConnectionCause(e));
              }
          });
      }
@@ -284,7 +327,13 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 +            return;
 +        }
 +        const config = this.wsConfig.getWS();
-+        if (!config.autoReconnect) { fail({ retryable: true, code: 'transport_error' }); return; }
++        if (!config.autoReconnect) {
++            // Preserve direct WSClient behavior: post-ready disconnects do not
++            // notify onError when automatic recovery was explicitly disabled.
++            if (!this.hasEverConnected) fail({ retryable: true, code: 'transport_error' });
++            else this.isConnecting = false;
++            return;
++        }
 +        if (this.hasEverConnected) this.safeInvoke('onReconnecting', this.onReconnecting);
 +        const schedule = delay => {
 +            if (!current()) return;
@@ -390,7 +439,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
          const { serviceId, pingInterval } = this.wsConfig.getWS();
          const wsInstance = this.wsConfig.getWSInstance();
          if ((wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.readyState) === WebSocket.OPEN) {
-@@ -102444,8 +102407,10 @@ class WSClient {
+@@ -102444,8 +102428,10 @@ class WSClient {
          this.pingInterval = setTimeout(this.pingLoop.bind(this), pingInterval);
      }
      communicate() {
@@ -401,7 +450,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
              // Any inbound frame proves the connection is alive — cancel the pong
              // watchdog (but don't re-arm; it'll be armed again on the next ping).
              this.clearLiveness();
-@@ -102462,6 +102427,7 @@ class WSClient {
+@@ -102462,6 +102448,7 @@ class WSClient {
              this.logger.error('[ws]', 'ws error');
          });
          wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('close', () => {
@@ -409,7 +458,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
              this.logger.debug('[ws]', 'client closed');
              this.clearLiveness();
              this.reConnect();
-@@ -102576,36 +102542,25 @@ class WSClient {
+@@ -102576,36 +102563,26 @@ class WSClient {
       * @param params.force whether force close (use terminate instead of close)
       */
      close(params = {}) {
@@ -426,6 +475,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 -        }
 +        if (this.closed) return;
 +        this.closed = true;
++        this.endpointAbort.abort();
 +        ++this.reconnectGeneration;
 +        clearTimeout(this.pingInterval);
 +        clearTimeout(this.reconnectInterval);
@@ -459,7 +509,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
              const { appId } = this.wsConfig.getClient();
              if (!/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
                  this.logger.error('[ws]', `invalid appId: ${appId}`);
-@@ -102632,7 +102587,9 @@ class WSClient {
+@@ -102632,7 +102609,9 @@ class WSClient {
            ->
          Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)`);
              this.eventDispatcher = eventDispatcher;
@@ -470,7 +520,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
          });
      }
  }
-@@ -104906,10 +104863,17 @@ class OutboundSender {
+@@ -104906,10 +104885,17 @@ class OutboundSender {
       */
      patchCard(messageId, card) {
          return __awaiter(this, void 0, void 0, function* () {
@@ -489,7 +539,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
          });
      }
      /**
-@@ -105469,7 +105433,7 @@ class SafetyPipeline {
+@@ -105469,7 +105455,7 @@ class SafetyPipeline {
              const task = () => __awaiter(this, void 0, void 0, function* () {
                  var _e, _f;
                  try {
@@ -498,7 +548,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
                  }
                  catch (e) {
                      (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
-@@ -105483,10 +105447,10 @@ class SafetyPipeline {
+@@ -105483,10 +105469,10 @@ class SafetyPipeline {
                  }
              });
              if (this.queueEnabled) {
@@ -511,7 +561,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
              }
          });
      }
-@@ -106451,99 +106415,112 @@ class LarkChannel {
+@@ -106451,99 +106437,112 @@ class LarkChannel {
      }
      // ─── lifecycle ──────────────────────────────────────────
      connect() {
@@ -554,7 +604,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 +        this.connectPromise = (async () => {
 +            const identity = await Promise.race([this.fetchBotIdentity(controller.signal), cancelled]);
 +            clearTimeout(timer);
-+            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new LarkChannelError('not_connected', 'connection cancelled', { cause: { connection: true, code: 'cancelled', retryable: true } });
 +            this.botIdentity = identity;
 +            this.safety.setBotIdentity(identity);
 +            if (!this.dispatcherRegistered) {
@@ -564,7 +614,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 -            // webhook transport wiring is external: user plugs this.dispatcher into
 -            // their HTTP handler via the existing adaptor modules.
 +            if ((this.opts.transport || 'websocket') === 'websocket') await this.connectWebSocket(controller.signal);
-+            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new LarkChannelError('not_connected', 'connection cancelled', { cause: { connection: true, code: 'cancelled', retryable: true } });
              this.connected = true;
 +        })().catch(err => {
 +            clearTimeout(timer);
@@ -689,23 +739,23 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 +    cancelConnect() {
 +        if (this.connectAbort) this.connectAbort.abort();
 +        if (this.rawWsClient) this.rawWsClient.close();
-+        ++this.connectGeneration;
++        this.connectGeneration = (this.connectGeneration || 0) + 1;
 +        this.connectPromise = undefined;
 +        this.connected = false;
 +    }
 +    async disconnect() {
 +        if (this.disposed) return;
 +        this.disposed = true;
-+        ++this.connectGeneration;
++        this.connectGeneration = (this.connectGeneration || 0) + 1;
 +        if (this.connectAbort) this.connectAbort.abort();
 +        if (this.rawWsClient) this.rawWsClient.close();
 +        this.connected = false;
 +        this.connectPromise = undefined;
-+        await this.safety.dispose();
++        try { await this.safety.dispose(); } catch (_) { /* best effort final disposal */ }
      }
      /**
       * Snapshot of the WebSocket lifecycle (state, last/next connect times,
-@@ -106744,16 +106721,30 @@ class LarkChannel {
+@@ -106744,35 +106743,53 @@ class LarkChannel {
          return this.safety.getPolicy();
      }
      // ─── internals: bot identity & dispatch wiring ────────
@@ -721,9 +771,19 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
 +                // Identity and its token exchange share the attempt's cancellation
 +                // and request cap. Outbound HTTP keeps the stable rawClient.
 +                const base = this.opts.httpInstance || defaultHttpInstance;
-+                const scoped = { request: options => base.request(Object.assign({}, options, {
-+                    signal, timeout: this.opts.identityTimeoutMs || 15000
-+                })) };
++                const scoped = { request: async options => {
++                    const result = await base.request(Object.assign({}, options, {
++                        signal, timeout: this.opts.identityTimeoutMs || 15000, $return_headers: true
++                    }));
++                    const wrapped = result && result.headers && !Number.isSafeInteger(result.code);
++                    const body = wrapped ? result.data : result;
++                    if (body && Number.isSafeInteger(body.code) && body.code !== 0) {
++                        throw new LarkChannelError('not_connected', 'identity endpoint rejected', {
++                            cause: larkConnectionCause({ data: body, headers: wrapped ? result.headers : undefined })
++                        });
++                    }
++                    return body;
++                } };
 +                for (const method of ['get', 'delete', 'head', 'options']) scoped[method] = (url, options) => scoped.request(Object.assign({}, options, { url, method }));
 +                for (const method of ['post', 'put', 'patch']) scoped[method] = (url, data, options) => scoped.request(Object.assign({}, options, { url, data, method }));
 +                const quiet = { error() {}, warn() {}, info() {}, debug() {}, trace() {} };
@@ -738,7 +798,30 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
                  });
                  const bot = r.bot;
                  if (bot === null || bot === void 0 ? void 0 : bot.open_id) {
-@@ -106829,11 +106820,15 @@ class LarkChannel {
+                     return { openId: bot.open_id, name: (_a = bot.app_name) !== null && _a !== void 0 ? _a : 'bot' };
+                 }
+-                lastError = new Error(`bot/v3/info response missing open_id: ${JSON.stringify(r).slice(0, 200)}`);
++                lastError = new Error('bot identity missing');
+             }
+             catch (e) {
+                 lastError = e;
+             }
+-            // Let the shared error classifier decide: 401/403 / feishu auth codes
+-            // → permission_denied; rate_limited / send_timeout pass through;
+-            // everything else falls back to `not_connected` (the genuine
+-            // "couldn't reach the API" bucket). Without this, all connect
+-            // failures collapse to `not_connected`, making auth errors
+-            // indistinguishable from network errors.
+-            const classified = classifyError(lastError);
+-            const code = classified.code === 'unknown' ? 'not_connected' : classified.code;
+-            throw new LarkChannelError(code, 'could not resolve bot identity via /open-apis/bot/v3/info — required for channel to function', { cause: lastError });
++            const cause = larkConnectionCause(lastError);
++            throw new LarkChannelError(cause.code === 99991400 || cause.code === 429 ? 'rate_limited'
++                : cause.retryable ? 'not_connected' : 'permission_denied', 'could not resolve bot identity', { cause });
+         });
+     }
+     registerDispatcherHandlers() {
+@@ -106829,11 +106846,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
                      return;
@@ -757,7 +840,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
                  }));
              }),
              // Reactions — dedup only
-@@ -106864,6 +106859,21 @@ class LarkChannel {
+@@ -106864,6 +106885,21 @@ class LarkChannel {
                      this.emitError(e);
                  }
              },
@@ -780,18 +863,44 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e7
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/lib/index.js b/lib/index.js
-index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20a570f74d 100644
+index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86f929295e 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -102092,6 +102092,7 @@ class WSClient {
+@@ -102087,11 +102087,33 @@ var HttpStatusCode;
+     HttpStatusCode[HttpStatusCode["internal_server_error"] = 500] = "internal_server_error";
+ })(HttpStatusCode || (HttpStatusCode = {}));
+
++// Connection failures carry only stable classification and pacing, never raw
++// response bodies, credentials or free-form provider messages.
++function larkConnectionCause(error) {
++    if (error && error.cause && error.cause.connection === true) return error.cause;
++    const response = error && error.response;
++    const body = (response && response.data) || (error && error.data) || error || {};
++    const status = (response && response.status) || (error && error.status);
++    const rawCode = !response && error && Number.isSafeInteger(error.code) ? error.code : body.code;
++    const code = Number.isSafeInteger(rawCode) ? rawCode
++        : status === 401 ? 514 : status === 403 ? 403 : status === 429 ? 429 : 'transport_error';
++    const limited = code === 99991400 || code === 429 || status === 429;
++    const headers = (response && response.headers) || (error && error.headers) || {};
++    const after = headers['retry-after'];
++    const numericAfter = Number(after);
++    const standardMs = after == null ? 0 : Number.isFinite(numericAfter) ? numericAfter * 1000 : (Date.parse(after) - Date.now()) || 0;
++    const resetMs = Number(headers['x-ogw-ratelimit-reset']) * 1000 || 0;
++    return { connection: true, code, retryable: limited || !([514, 403, 99991401].includes(code) || status === 401 || status === 403),
++        retryAfterMs: Math.max(0, Math.min(2147483647, Math.max(standardMs, resetMs))) };
++}
++
+ class WSClient {
+     constructor(params) {
          var _a;
          this.wsConfig = new WSConfig();
          this.reconnectGeneration = 0;
 +        this.closed = false;
++        this.endpointAbort = new AbortController();
          this.isConnecting = false;
          this.reconnectInfo = {
              lastConnectTime: 0,
-@@ -102111,7 +102112,7 @@ class WSClient {
+@@ -102111,7 +102133,7 @@ class WSClient {
           * loopReConnect, reset to 0 on a successful connect.
           */
          this.currentReconnectAttempts = 0;
@@ -800,7 +909,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
          this.userAgent = buildUserAgent(source, { extraTags: extraUaTags });
          this.logger = new LoggerProxy(loggerLevel, logger);
          assert(!appId, () => this.logger.error('appId is needed'));
-@@ -102132,6 +102133,8 @@ class WSClient {
+@@ -102132,6 +102154,8 @@ class WSClient {
          this.wsConfig.updateWs({
              autoReconnect
          });
@@ -809,7 +918,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
          this.onReady = onReady;
          this.onError = onError;
          this.onReconnecting = onReconnecting;
-@@ -102154,13 +102157,14 @@ class WSClient {
+@@ -102154,13 +102178,14 @@ class WSClient {
       * connection is fine).
       */
      armLiveness() {
@@ -825,27 +934,50 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
              this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of last ping, terminating to trigger reconnect`);
              try {
                  (_a = this.wsConfig.getWSInstance()) === null || _a === void 0 ? void 0 : _a.terminate();
-@@ -102228,14 +102232,13 @@ class WSClient {
+@@ -102206,6 +102231,7 @@ class WSClient {
+                     // WS endpoint discovery binds the assertion to the OpenAPI domain host.
+                     const aud = extractAudFromUrl(domain);
+                     const assertion = yield clientAssertionProvider.retrieveToken(aud);
++                    if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
+                     if (!assertion || !assertion.value) {
+                         throw new ClientAssertionError(ERR_CODE_CLIENT_ASSERTION_TOKEN_EMPTY, 'client assertion token is empty');
+                     }
+@@ -102219,25 +102245,23 @@ class WSClient {
+                 else {
+                     body.AppSecret = appSecret;
+                 }
+-                const { code, data: { URL, ClientConfig }, msg } = yield this.httpInstance.request({
++                if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
++                const response = yield this.httpInstance.request({
+                     method: "post",
+                     url,
+                     data: body,
+                     headers,
+                     timeout: 15000,
++                    signal: this.endpointAbort.signal,
                  });
++                if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
++                const code = response && response.code;
                  if (code !== ErrorCode.ok) {
-                     const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
+-                    const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
 -                    this.logger.error('[ws]', `code: ${code}, ${reason}`);
 -                    if (code === ErrorCode.internal_error) {
 -                        return { ok: false, retryable: true };
 -                    }
-+                    this.logger.error('[ws]', `endpoint failure code: ${code}`);
-+
-                     return {
-                         ok: false,
+-                    return {
+-                        ok: false,
 -                        retryable: false,
 -                        error: `pullConnectConfig failed: code=${code}, msg=${reason}`,
-+                        retryable: code !== ErrorCode.auth_failed && code !== ErrorCode.forbidden,
-+                        code,
-+                        error: "WebSocket endpoint rejected",
-                     };
+-                    };
++                    this.logger.error('[ws]', 'endpoint rejected');
++                    return Object.assign({ ok: false }, larkConnectionCause(response));
                  }
++                const { URL, ClientConfig } = response.data || {};
++                if (typeof URL !== 'string' || !ClientConfig) return { ok: false, retryable: true, code: 'transport_error' };
                  const { device_id, service_id } = qs__default["default"].parse(URL);
-@@ -102252,196 +102255,156 @@ class WSClient {
+                 this.wsConfig.updateWs({
+                     connectUrl: URL,
+@@ -102252,196 +102276,156 @@ class WSClient {
                  return { ok: true };
              }
              catch (e) {
@@ -857,13 +989,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 +                    return { ok: false, retryable: false, code: "client_assertion", error: "WebSocket credential configuration rejected" };
                  }
 -                return { ok: false, retryable: true };
-+                const status = e && e.response && e.response.status;
-+                const rawAfter = e && e.response && e.response.headers && e.response.headers['retry-after'];
-+                const after = Number(rawAfter);
-+                const retryAfterMs = rawAfter == null ? 0 : Math.max(0, Math.min(2147483647,
-+                    Number.isFinite(after) ? after * 1000 : (Date.parse(rawAfter) - Date.now()) || 0));
-+                return { ok: false, retryable: status !== 401 && status !== 403,
-+                    code: status === 401 ? 514 : status === 403 ? 403 : status === 429 ? 429 : 'transport_error', retryAfterMs };
++                return Object.assign({ ok: false }, larkConnectionCause(e));
              }
          });
      }
@@ -1065,7 +1191,13 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 +            return;
 +        }
 +        const config = this.wsConfig.getWS();
-+        if (!config.autoReconnect) { fail({ retryable: true, code: 'transport_error' }); return; }
++        if (!config.autoReconnect) {
++            // Preserve direct WSClient behavior: post-ready disconnects do not
++            // notify onError when automatic recovery was explicitly disabled.
++            if (!this.hasEverConnected) fail({ retryable: true, code: 'transport_error' });
++            else this.isConnecting = false;
++            return;
++        }
 +        if (this.hasEverConnected) this.safeInvoke('onReconnecting', this.onReconnecting);
 +        const schedule = delay => {
 +            if (!current()) return;
@@ -1171,7 +1303,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
          const { serviceId, pingInterval } = this.wsConfig.getWS();
          const wsInstance = this.wsConfig.getWSInstance();
          if ((wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.readyState) === WebSocket__default["default"].OPEN) {
-@@ -102462,8 +102425,10 @@ class WSClient {
+@@ -102462,8 +102446,10 @@ class WSClient {
          this.pingInterval = setTimeout(this.pingLoop.bind(this), pingInterval);
      }
      communicate() {
@@ -1182,7 +1314,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
              // Any inbound frame proves the connection is alive — cancel the pong
              // watchdog (but don't re-arm; it'll be armed again on the next ping).
              this.clearLiveness();
-@@ -102480,6 +102445,7 @@ class WSClient {
+@@ -102480,6 +102466,7 @@ class WSClient {
              this.logger.error('[ws]', 'ws error');
          });
          wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('close', () => {
@@ -1190,7 +1322,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
              this.logger.debug('[ws]', 'client closed');
              this.clearLiveness();
              this.reConnect();
-@@ -102594,36 +102560,25 @@ class WSClient {
+@@ -102594,36 +102581,26 @@ class WSClient {
       * @param params.force whether force close (use terminate instead of close)
       */
      close(params = {}) {
@@ -1207,6 +1339,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 -        }
 +        if (this.closed) return;
 +        this.closed = true;
++        this.endpointAbort.abort();
 +        ++this.reconnectGeneration;
 +        clearTimeout(this.pingInterval);
 +        clearTimeout(this.reconnectInterval);
@@ -1240,7 +1373,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
              const { appId } = this.wsConfig.getClient();
              if (!/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
                  this.logger.error('[ws]', `invalid appId: ${appId}`);
-@@ -102650,7 +102605,9 @@ class WSClient {
+@@ -102650,7 +102627,9 @@ class WSClient {
            ->
          Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)`);
              this.eventDispatcher = eventDispatcher;
@@ -1251,7 +1384,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
          });
      }
  }
-@@ -104924,10 +104881,17 @@ class OutboundSender {
+@@ -104924,10 +104903,17 @@ class OutboundSender {
       */
      patchCard(messageId, card) {
          return __awaiter(this, void 0, void 0, function* () {
@@ -1270,7 +1403,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
          });
      }
      /**
-@@ -105487,7 +105451,7 @@ class SafetyPipeline {
+@@ -105487,7 +105473,7 @@ class SafetyPipeline {
              const task = () => __awaiter(this, void 0, void 0, function* () {
                  var _e, _f;
                  try {
@@ -1279,7 +1412,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
                  }
                  catch (e) {
                      (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
-@@ -105501,10 +105465,10 @@ class SafetyPipeline {
+@@ -105501,10 +105487,10 @@ class SafetyPipeline {
                  }
              });
              if (this.queueEnabled) {
@@ -1292,7 +1425,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
              }
          });
      }
-@@ -106469,99 +106433,112 @@ class LarkChannel {
+@@ -106469,99 +106455,112 @@ class LarkChannel {
      }
      // ─── lifecycle ──────────────────────────────────────────
      connect() {
@@ -1335,7 +1468,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 +        this.connectPromise = (async () => {
 +            const identity = await Promise.race([this.fetchBotIdentity(controller.signal), cancelled]);
 +            clearTimeout(timer);
-+            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new LarkChannelError('not_connected', 'connection cancelled', { cause: { connection: true, code: 'cancelled', retryable: true } });
 +            this.botIdentity = identity;
 +            this.safety.setBotIdentity(identity);
 +            if (!this.dispatcherRegistered) {
@@ -1345,7 +1478,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 -            // webhook transport wiring is external: user plugs this.dispatcher into
 -            // their HTTP handler via the existing adaptor modules.
 +            if ((this.opts.transport || 'websocket') === 'websocket') await this.connectWebSocket(controller.signal);
-+            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new LarkChannelError('not_connected', 'connection cancelled', { cause: { connection: true, code: 'cancelled', retryable: true } });
              this.connected = true;
 +        })().catch(err => {
 +            clearTimeout(timer);
@@ -1470,23 +1603,23 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 +    cancelConnect() {
 +        if (this.connectAbort) this.connectAbort.abort();
 +        if (this.rawWsClient) this.rawWsClient.close();
-+        ++this.connectGeneration;
++        this.connectGeneration = (this.connectGeneration || 0) + 1;
 +        this.connectPromise = undefined;
 +        this.connected = false;
 +    }
 +    async disconnect() {
 +        if (this.disposed) return;
 +        this.disposed = true;
-+        ++this.connectGeneration;
++        this.connectGeneration = (this.connectGeneration || 0) + 1;
 +        if (this.connectAbort) this.connectAbort.abort();
 +        if (this.rawWsClient) this.rawWsClient.close();
 +        this.connected = false;
 +        this.connectPromise = undefined;
-+        await this.safety.dispose();
++        try { await this.safety.dispose(); } catch (_) { /* best effort final disposal */ }
      }
      /**
       * Snapshot of the WebSocket lifecycle (state, last/next connect times,
-@@ -106762,16 +106739,30 @@ class LarkChannel {
+@@ -106762,35 +106761,53 @@ class LarkChannel {
          return this.safety.getPolicy();
      }
      // ─── internals: bot identity & dispatch wiring ────────
@@ -1502,9 +1635,19 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
 +                // Identity and its token exchange share the attempt's cancellation
 +                // and request cap. Outbound HTTP keeps the stable rawClient.
 +                const base = this.opts.httpInstance || defaultHttpInstance;
-+                const scoped = { request: options => base.request(Object.assign({}, options, {
-+                    signal, timeout: this.opts.identityTimeoutMs || 15000
-+                })) };
++                const scoped = { request: async options => {
++                    const result = await base.request(Object.assign({}, options, {
++                        signal, timeout: this.opts.identityTimeoutMs || 15000, $return_headers: true
++                    }));
++                    const wrapped = result && result.headers && !Number.isSafeInteger(result.code);
++                    const body = wrapped ? result.data : result;
++                    if (body && Number.isSafeInteger(body.code) && body.code !== 0) {
++                        throw new LarkChannelError('not_connected', 'identity endpoint rejected', {
++                            cause: larkConnectionCause({ data: body, headers: wrapped ? result.headers : undefined })
++                        });
++                    }
++                    return body;
++                } };
 +                for (const method of ['get', 'delete', 'head', 'options']) scoped[method] = (url, options) => scoped.request(Object.assign({}, options, { url, method }));
 +                for (const method of ['post', 'put', 'patch']) scoped[method] = (url, data, options) => scoped.request(Object.assign({}, options, { url, data, method }));
 +                const quiet = { error() {}, warn() {}, info() {}, debug() {}, trace() {} };
@@ -1519,7 +1662,30 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
                  });
                  const bot = r.bot;
                  if (bot === null || bot === void 0 ? void 0 : bot.open_id) {
-@@ -106847,11 +106838,15 @@ class LarkChannel {
+                     return { openId: bot.open_id, name: (_a = bot.app_name) !== null && _a !== void 0 ? _a : 'bot' };
+                 }
+-                lastError = new Error(`bot/v3/info response missing open_id: ${JSON.stringify(r).slice(0, 200)}`);
++                lastError = new Error('bot identity missing');
+             }
+             catch (e) {
+                 lastError = e;
+             }
+-            // Let the shared error classifier decide: 401/403 / feishu auth codes
+-            // → permission_denied; rate_limited / send_timeout pass through;
+-            // everything else falls back to `not_connected` (the genuine
+-            // "couldn't reach the API" bucket). Without this, all connect
+-            // failures collapse to `not_connected`, making auth errors
+-            // indistinguishable from network errors.
+-            const classified = classifyError(lastError);
+-            const code = classified.code === 'unknown' ? 'not_connected' : classified.code;
+-            throw new LarkChannelError(code, 'could not resolve bot identity via /open-apis/bot/v3/info — required for channel to function', { cause: lastError });
++            const cause = larkConnectionCause(lastError);
++            throw new LarkChannelError(cause.code === 99991400 || cause.code === 429 ? 'rate_limited'
++                : cause.retryable ? 'not_connected' : 'permission_denied', 'could not resolve bot identity', { cause });
+         });
+     }
+     registerDispatcherHandlers() {
+@@ -106847,11 +106864,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
                      return;
@@ -1538,7 +1704,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
                  }));
              }),
              // Reactions — dedup only
-@@ -106882,6 +106877,21 @@ class LarkChannel {
+@@ -106882,6 +106903,21 @@ class LarkChannel {
                      this.emitError(e);
                  }
              },
@@ -1561,7 +1727,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/types/index.d.ts b/types/index.d.ts
-index 1741e0c90073ec038590131c09952a23c222575d..4e30cd3c7ecdbf62bc96fe4bae5e93cfbf143f5b 100644
+index 1741e0c90073ec038590131c09952a23c222575d..89dc01a05e634195138db9907c63750b39fda139 100644
 --- a/types/index.d.ts
 +++ b/types/index.d.ts
 @@ -321609,6 +321609,9 @@ interface IConstructorParams {
@@ -1589,7 +1755,20 @@ index 1741e0c90073ec038590131c09952a23c222575d..4e30cd3c7ecdbf62bc96fe4bae5e93cf
      reconnecting: () => void;
      reconnected: () => void;
  }
-@@ -322199,6 +322204,8 @@ interface LarkChannelOptions {
+@@ -322157,6 +322162,12 @@ interface CommentEvent {
+     raw?: unknown;
+ }
+ type LarkChannelErrorCode = 'format_error' | 'target_revoked' | 'rate_limited' | 'permission_denied' | 'upload_failed' | 'ssrf_blocked' | 'send_timeout' | 'not_connected' | 'unknown';
++interface LarkChannelConnectionCause {
++    connection: true;
++    code: number | 'transport_error' | 'identity_timeout' | 'handshake_timeout' | 'cancelled' | 'client_assertion';
++    retryable: boolean;
++    retryAfterMs?: number;
++}
+ declare class LarkChannelError extends Error {
+     code: LarkChannelErrorCode;
+     cause?: unknown;
+@@ -322199,6 +322210,8 @@ interface LarkChannelOptions {
       * indefinitely on stuck DNS / proxy / NAT paths.
       */
      handshakeTimeoutMs?: number;
@@ -1598,7 +1777,7 @@ index 1741e0c90073ec038590131c09952a23c222575d..4e30cd3c7ecdbf62bc96fe4bae5e93cf
      /**
       * Optional Node http(s) agent forwarded to the underlying WSClient for
       * the WebSocket transport. Useful for routing the WS through an HTTP(S)
-@@ -322322,6 +322329,7 @@ declare class LarkChannel {
+@@ -322322,6 +322335,7 @@ declare class LarkChannel {
       * corresponding public events.
       */
      private connectWebSocket;
@@ -1606,3 +1785,9 @@ index 1741e0c90073ec038590131c09952a23c222575d..4e30cd3c7ecdbf62bc96fe4bae5e93cf
      disconnect(): Promise<void>;
      /**
       * Snapshot of the WebSocket lifecycle (state, last/next connect times,
+@@ -322589,4 +322603,4 @@ declare class LoggerProxy {
+
+ declare const defaultLogger: Logger;
+
+-export { AESCipher, AccessTokenError, AccessTokenResponse, Aily, ApiMessageItem, AppAddons, AppType, BotAddedEvent, BotIdentity, CAppTicket, CTenantAccessToken, Cache, CardActionEvent, CardActionHandler, CardStreamController, CardStreamProducer, ChatInfo, ChatType, Client, ClientAssertionError, ClientAssertionProvider, ClientAssertionToken, CommentEvent, DefaultCache, Domain, EventDispatcher, IHandles as EventHandles, EventMap, EventName, HttpInstance, HttpRequestOptions, IAuthorizationCodeParams, IRefreshParams, InteractiveCard, InteractiveCardActionEvent, InteractiveCardActionItem, InteractiveCardButtonActionItem, InteractiveCardDatePickerActionItem, InteractiveCardDivElement, InteractiveCardDividerElement, InteractiveCardElement, InteractiveCardField, InteractiveCardImageElement, InteractiveCardImageItem, InteractiveCardLarkMdItem, InteractiveCardMarkdownElement, InteractiveCardNoteElement, InteractiveCardOverflowActionItem, InteractiveCardPlainTextItem, InteractiveCardSelectMenuActionItem, InteractiveCardTextItem, InteractiveCardTitle, InteractiveCardUrlItem, InterfaceCardActionElement, LarkChannel, LarkChannelError, LarkChannelErrorCode, LarkChannelOptions, Logger, LoggerLevel, LoggerProxy, MarkdownStreamController, MarkdownStreamProducer, MediaSource, MentionInfo, NormalizeOptions, NormalizedMessage, OutboundConfig, PolicyConfig, RawBotAddedEvent, RawCardActionEvent, RawCommentEvent, RawMessageEvent, RawReactionEvent, ReactionEvent, RejectEvent, RejectReason, ResourceDescriptor, ResourceType, SafetyConfig, SendInput, SendOptions, SendResult, StreamInput, TargetInfo, WSClient, WSConfigOverrides, WSConnectionState, WSConnectionStatus, WebhookOptions, adaptDefault, adaptExpress, adaptKoa, adaptKoaRouter, createLarkChannel, defaultHttpInstance, defaultLogger, generateChallenge, internalCache, messageCard, normalize, normalizeBotAdded, normalizeCardAction, normalizeComment, normalizeReaction, registerApp, withAll, withHelpDeskCredential, withTenantKey, withTenantToken, withUserAccessToken };
++export { AESCipher, AccessTokenError, AccessTokenResponse, Aily, ApiMessageItem, AppAddons, AppType, BotAddedEvent, BotIdentity, CAppTicket, CTenantAccessToken, Cache, CardActionEvent, CardActionHandler, CardStreamController, CardStreamProducer, ChatInfo, ChatType, Client, ClientAssertionError, ClientAssertionProvider, ClientAssertionToken, CommentEvent, DefaultCache, Domain, EventDispatcher, IHandles as EventHandles, EventMap, EventName, HttpInstance, HttpRequestOptions, IAuthorizationCodeParams, IRefreshParams, InteractiveCard, InteractiveCardActionEvent, InteractiveCardActionItem, InteractiveCardButtonActionItem, InteractiveCardDatePickerActionItem, InteractiveCardDivElement, InteractiveCardDividerElement, InteractiveCardElement, InteractiveCardField, InteractiveCardImageElement, InteractiveCardImageItem, InteractiveCardLarkMdItem, InteractiveCardMarkdownElement, InteractiveCardNoteElement, InteractiveCardOverflowActionItem, InteractiveCardPlainTextItem, InteractiveCardSelectMenuActionItem, InteractiveCardTextItem, InteractiveCardTitle, InteractiveCardUrlItem, InterfaceCardActionElement, LarkChannel, LarkChannelError, LarkChannelErrorCode, LarkChannelConnectionCause, LarkChannelOptions, Logger, LoggerLevel, LoggerProxy, MarkdownStreamController, MarkdownStreamProducer, MediaSource, MentionInfo, NormalizeOptions, NormalizedMessage, OutboundConfig, PolicyConfig, RawBotAddedEvent, RawCardActionEvent, RawCommentEvent, RawMessageEvent, RawReactionEvent, ReactionEvent, RejectEvent, RejectReason, ResourceDescriptor, ResourceType, SafetyConfig, SendInput, SendOptions, SendResult, StreamInput, TargetInfo, WSClient, WSConfigOverrides, WSConnectionState, WSConnectionStatus, WebhookOptions, adaptDefault, adaptExpress, adaptKoa, adaptKoaRouter, createLarkChannel, defaultHttpInstance, defaultLogger, generateChallenge, internalCache, messageCard, normalize, normalizeBotAdded, normalizeCardAction, normalizeComment, normalizeReaction, registerApp, withAll, withHelpDeskCredential, withTenantKey, withTenantToken, withUserAccessToken };

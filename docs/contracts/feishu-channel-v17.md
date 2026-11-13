@@ -63,15 +63,25 @@ Core 必须找到 `published` Bot、逐项匹配冻结绑定，并确认该 App 
 版本不符返回 version conflict。命令只更新 Bot 自身字段；无实际变化时 no-op，不递增版本；有变化时版本加一。
 Owner、绑定、`published_at` 均不变化。首次发布的 upsert 拥有绑定写入，之后身份观测使用本命令。
 历史 disabled 行须先经过原发布状态机恢复为 published，不能通过观测命令激活。
+Owner 验证要求映射行的 `open_id_digest` 和 `verified_at` 均非空，Snapshot 使用相同判定。历史已发布 Bot
+尚未验证 Owner 时，Host 跳过观测与 intent 收尾，保留在线连接，让首条可信 Owner 入站消息执行原
+`owner.verify`；验证后再观测。Core 返回 `owner_identity.unverified` 也按观测暂缓处理，不能关闭连接。
+新的观测尝试使用新的命令标识，不能重放验证之前缓存的拒绝回执。
 
 Host 为每个 App 保留同一 HTTP channel 与 safety cache；单次失败只关闭 WSClient。首个 onReady 之前
 由 Host 调度，之后正常断线由 SDK 调度，SDK 终态退出后才交回 Host；同 App 不并行建连。身份阶段（含
 Token）、endpoint、握手上限分别为 15/15/20 秒。关闭永久使旧生命周期失效，迟到结果不得重启连接。
 `start` 调度后返回；停止和 Core 切代次不等待远端身份请求。
+60 秒防御 watchdog 只覆盖 transport 的 connect，握手结算后立即清除，不覆盖 Core 本地确认。
+传输在线但本地确认暂不可用时保留在线事实，只重试本地保存；绑定缺失进入配置终态。
+endpoint 先判断平台 code，再读取成功 data；HTTP 错误响应使用同一分类。`514/403`、明确配置错误
+不可重试；`99991400` 和 HTTP 429 可重试，遵守 `x-ogw-ratelimit-reset`（剩余秒数）及 Retry-After；
+`99991401` 是 IP 白名单配置终态。不能仅凭通用 permission_denied 标签判定凭据失效。
 
 只差连接验证的最新 exact intent，实际握手和身份持久观测成功后，可在本地 CAS 推进
 `version_published → connection_verified → completed`；`failed_recoverable` 仅在最后完成步骤为
-version_published/connection_verified 时进入此收尾。不能重放远端创建、配置和发布。恢复不补发欢迎卡。
+version_published/connection_verified 时进入此收尾。每轮 CAS 重读最新版本，出现更新的 intent 时停止旧收尾；
+冲突耗尽以可恢复的本地确认失败保留，不能静默成功。不能重放远端创建、配置和发布。恢复不补发欢迎卡。
 
 连接失败不抹去持久 published，不推断 Developer Session 失效。身份冲突、冻结绑定不符、凭据缺失或明确
 拒绝进入需处理终态，并停止该记录的 WS 与 HTTP 外发；可恢复网络故障无限重试，间隔封顶。

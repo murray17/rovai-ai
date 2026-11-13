@@ -803,7 +803,10 @@ function ChannelMemberBotTable({
                   : bot.connectionStatus === 'reconnecting' ? uiAttribute("连接中断，正在重连")
                   : bot.connectionStatus === 'offline' ? uiAttribute("连接离线") : uiAttribute("连接状态未知")}</small>}
                 {bot?.connectionNeedsAttention && <small role="status" className="channel-live-status">{
-                  bot.canReconcile ? uiAttribute("连接需处理，请继续核对")
+                  bot.connectionFailureCode === 'identity_conflict' ? uiAttribute("Bot 身份与已绑定应用不符，请检查凭据")
+                    : bot.connectionFailureCode?.includes('brand_moved') ? uiAttribute("应用所属平台已变更，当前连接已停用")
+                    : bot.connectionFailureCode === 'ip_not_allowed' ? uiAttribute("当前网络不在应用的 IP 白名单内，请检查平台配置")
+                    : bot.canReconcile ? uiAttribute("连接需处理，请继续核对")
                     : bot.connectionFailureCode === 'connection_confirmation_pending' ? uiAttribute("连接已建立，正在保存结果")
                       : uiAttribute("连接暂不可用，请检查网络或代理")
                 }</small>}
@@ -960,6 +963,7 @@ function PublishBotDialog({
     && provisioning.remoteAppId === null
   const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
     || provisioning?.failureCode === 'dingtalk_connection_error'
+  const recoveringConnection = provisioning?.stage === 'connecting_bot' && !busy
   const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号|重新连接/.test(error))
   const awaitingApprover = presentation.approverSelectionFailureCode !== null
     && provisioning?.failureCode === presentation.approverSelectionFailureCode
@@ -1035,7 +1039,9 @@ function PublishBotDialog({
               </p>
             )}
           </AppDialogBody>
-          <AppDialogFooter note={connectionFailed
+          <AppDialogFooter note={recoveringConnection
+            ? uiAttribute("关闭此窗口后，Rovai 会继续维护该 Bot 的连接。")
+            : connectionFailed
             ? effectiveAppId
               ? uiAttribute("已保留原应用绑定；关闭后可以稍后重试。")
               : localizedChannelCopy('{0}连接异常；关闭后可以稍后重试。', channelCopy`${providerName}连接异常；关闭后可以稍后重试。`, providerName)
@@ -1044,7 +1050,7 @@ function PublishBotDialog({
             : effectiveAppId
               ? uiAttribute("重新发布始终复用已绑定应用，不提供换绑入口。")
               : null}>
-            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}><UiText zh={"取消"} /></button>
+            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>{uiAttribute(recoveringConnection ? "关闭" : "取消")}</button>
             {sessionUnavailable && onReconnect ? (
               <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>
                 {localizedChannelCopy('重新连接{0}', channelCopy`重新连接${providerName}`, providerName)}
@@ -1058,7 +1064,7 @@ function PublishBotDialog({
               >
                 {busy ? uiAttribute("正在提交审批…") : uiAttribute("提交审批并继续发布")}
               </button>
-            ) : !retryLocked && (
+            ) : !retryLocked && !recoveringConnection && (
               <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
                 {busy
                   ? effectiveAppId ? uiAttribute("核对中…") : uiAttribute("发布中…")

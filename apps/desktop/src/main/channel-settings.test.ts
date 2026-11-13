@@ -65,7 +65,11 @@ function channelCore(
         const stored = snapshot.publicationIntents as Array<Record<string, unknown>>
         const known = new Set(stored.map(intent => String(intent.publicationIntentId)))
         return { ...snapshot,
-          memberBots: [...rows, ...[...bots.values()].filter(bot => !existing.has(String(bot.agentId)))],
+          memberBots: [...rows.map(bot => {
+            const saved = bots.get(String(bot.agentId))
+            return saved?.appId === bot.appId && saved?.credentialRef === bot.credentialRef
+              ? { ...bot, ownerIdentityStatus: 'verified' } : bot
+          }), ...[...bots.values()].filter(bot => !existing.has(String(bot.agentId)))],
           publicationIntents: [...stored, ...[...intents.values()].filter(intent => !known.has(String(intent.publicationIntentId)))]
         }
       }
@@ -140,7 +144,7 @@ function coreSnapshot(overrides: Record<string, unknown> = {}): Record<string, u
   return {
     ...snapshot,
     memberBots: (snapshot.memberBots as Array<Record<string, unknown>>).map((bot) => ({
-      ownerIdentityStatus: 'verified',
+      ownerIdentityStatus: 'unverified',
       ...bot
     }))
   }
@@ -361,6 +365,139 @@ function normalizedMessage(input: {
 }
 
 describe('channel settings service', () => {
+  it('does not schedule a Bot when stop overtakes the startup snapshot', async () => {
+    const createChannel = fakeCreateChannel()
+    let release!: (value: unknown) => void
+    let reading = false
+    const service = new ChannelSettingsService({
+      ...inertInterval(), createChannel,
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore(method => {
+        if (method.endsWith('.snapshot')) {
+          reading = true
+          return new Promise(resolve => { release = resolve })
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    const starting = service.start()
+    await vi.waitFor(() => expect(reading).toBe(true))
+    await service.stop()
+    release(coreSnapshot({ memberBots: [{ agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a',
+      credentialRef: 'credential-a', brand: 'feishu', status: 'published', version: 1, botDisplayName: 'A' }] }))
+    await starting
+    expect(createChannel).not.toHaveBeenCalled()
+  })
+
+  it.each(['unverified', 'verified'] as const)('keeps a legacy Owner transport online when the snapshot says %s and completes after inbound verification', async initialStatus => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: 'A' } })
+    let ownerVerified = false
+    const requests: string[] = []
+    const rejectedObservations = new Set<string>()
+    let intent = { publicationIntentId: 'intent-a', agentId: 'agent-a', accountId: 'account-1',
+      remoteAppId: 'cli_a', credentialRef: 'credential-a', state: 'failed_recoverable',
+      lastCompletedStep: 'version_published', version: 7, failureCode: 'transport_error',
+      createdAt: '2026-11-13', updatedAt: '2026-11-13' }
+    const create = vi.fn(), reconcile = vi.fn()
+    const service = new ChannelSettingsService({
+      ...inertInterval(), createChannel: harness.createChannel, memberBotProvisioner: { create, reconcile },
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore((method, raw) => {
+        requests.push(method)
+        const envelope = raw as { commandId?: string; command?: Record<string, unknown> }
+        if (method.endsWith('.snapshot')) return coreSnapshot({ memberBots: [{ agentId: 'agent-a',
+          accountId: 'account-1', appId: 'cli_a', brand: 'feishu', credentialRef: 'credential-a',
+          status: 'published', failureCode: null, version: 1, botDisplayName: 'A',
+          ownerIdentityStatus: ownerVerified ? 'verified' : initialStatus }], publicationIntents: [intent] })
+        if (method.endsWith('memberBot.observeConnection') && (!ownerVerified || rejectedObservations.has(envelope.commandId!))) {
+          rejectedObservations.add(envelope.commandId!)
+          return { status: 'rejected', code: 'feishu_owner_identity.unverified', payload: {} }
+        }
+        if (method.endsWith('owner.verify')) {
+          ownerVerified = true
+          return { status: 'applied', payload: { classification: 'owner' } }
+        }
+        if (method.endsWith('publicationIntent.advance')) {
+          expect(envelope.command?.expectedVersion).toBe(intent.version)
+          intent = { ...intent, ...envelope.command, version: intent.version + 1 }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    await vi.waitFor(async () => expect((await service.get()).channels[0].memberBots[0]).toMatchObject({
+      connectionStatus: 'online', connectionFailureCode: null, published: true
+    }))
+    expect(requests.filter(method => method.endsWith('memberBot.observeConnection'))).toHaveLength(initialStatus === 'unverified' ? 0 : 1)
+    const channel = vi.mocked(harness.createChannel).mock.results[0].value
+    expect(channel.disconnect).not.toHaveBeenCalled()
+    expect(intent.state).toBe('failed_recoverable')
+    await harness.handlers.get('cli_a:message')!(normalizedMessage({
+      messageId: 'owner-first-message', senderUserId: 'owner', senderOpenId: 'ou_owner', content: '/new'
+    }))
+    await vi.waitFor(() => expect(intent.state).toBe('completed'))
+    expect(requests.filter(method => method.endsWith('owner.verify'))).toHaveLength(1)
+    expect(channel.disconnect).not.toHaveBeenCalled()
+    expect(requests).not.toContain('channels.feishu.memberBot.upsert')
+    expect(create).not.toHaveBeenCalled()
+    expect(reconcile).not.toHaveBeenCalled()
+    await service.stop()
+  })
+
+  it.each(['success', 'cas', 'newer', 'exhausted'] as const)('automatically finishes only the current local connection intent (%s)', async scenario => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: 'A' } })
+    let intent = { publicationIntentId: 'intent-a', agentId: 'agent-a', accountId: 'account-1',
+      remoteAppId: 'cli_a', credentialRef: 'credential-a', state: 'failed_recoverable',
+      lastCompletedStep: 'version_published', version: 7, failureCode: 'transport_error',
+      createdAt: '2026-11-13', updatedAt: '2026-11-13' }
+    const advances: Array<Record<string, unknown>> = []
+    const requests: string[] = []
+    const create = vi.fn(), reconcile = vi.fn()
+    const service = new ChannelSettingsService({
+      ...inertInterval(), memberBotProvisioner: { create, reconcile },
+      createChannel: options => {
+        const channel = harness.createChannel(options)
+        channel.getConnectionStatus = () => ({ state: 'connected', reconnectAttempts: 0 })
+        return channel
+      },
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore((method, raw) => {
+        requests.push(method)
+        if (method.endsWith('.snapshot')) return coreSnapshot({ memberBots: [{ agentId: 'agent-a',
+          accountId: 'account-1', appId: 'cli_a', brand: 'feishu', credentialRef: 'credential-a',
+          status: 'published', failureCode: null, version: 1, botDisplayName: 'A', ownerIdentityStatus: 'verified' }], publicationIntents: [intent] })
+        if (method.endsWith('publicationIntent.advance')) {
+          const command = (raw as { command: Record<string, unknown> }).command
+          advances.push(command)
+          expect(command.expectedVersion).toBe(intent.version)
+          if (scenario === 'exhausted' || (scenario === 'cas' && advances.length === 1)) {
+            intent = { ...intent, version: intent.version + 1 }
+            return { status: 'rejected', code: 'version_conflict', payload: {} }
+          }
+          intent = { ...intent, ...command, version: intent.version + 1 }
+          if (scenario === 'newer') intent = { ...intent, publicationIntentId: 'intent-newer',
+            state: 'version_published', lastCompletedStep: 'version_published', version: 9 }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    await vi.waitFor(() => expect(advances.length).toBe(scenario === 'exhausted' ? 4 : scenario === 'cas' ? 3 : scenario === 'newer' ? 1 : 2))
+    if (scenario === 'exhausted') {
+      await vi.waitFor(async () => expect((await service.get()).channels[0].memberBots[0]).toMatchObject({
+        connectionFailureCode: 'connection_confirmation_pending', connectionStatus: 'online'
+      }))
+    } else {
+      expect(intent.state).toBe(scenario === 'newer' ? 'version_published' : 'completed')
+      expect(advances.every(command => command.publicationIntentId === 'intent-a')).toBe(true)
+    }
+    expect(requests).not.toContain('channels.feishu.memberBot.upsert')
+    expect(create).not.toHaveBeenCalled()
+    expect(reconcile).not.toHaveBeenCalled()
+    expect(harness.createMessage).not.toHaveBeenCalled()
+    await service.stop()
+  })
+
   it('keeps Core generation changes and stop independent of a never-ready Bot', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: 'A' } })
     const original = harness.createChannel
@@ -414,10 +551,14 @@ describe('channel settings service', () => {
 
   it('makes an observed identity conflict terminal without replacing the App or channel', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_wrong', name: 'Wrong' } })
+    let queued = false
+    let claimed = false
+    const settlements: Array<Record<string, unknown>> = []
+    const attachmentClaims: unknown[] = []
     const service = new ChannelSettingsService({
       ...inertInterval(), createChannel: harness.createChannel,
       credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
-      core: channelCore(method => {
+      core: channelCore((method, raw) => {
         if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: [{
           agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a', brand: 'feishu',
           credentialRef: 'credential-a', status: 'published', failureCode: null, version: 1,
@@ -426,6 +567,17 @@ describe('channel settings service', () => {
         if (method === 'channels.feishu.memberBot.observeConnection') return {
           status: 'rejected', code: 'feishu_member_bot.identity_conflict', payload: { message: 'Identity mismatch' }
         }
+        if (method === 'channels.host.tick') {
+          attachmentClaims.push((raw as { inboundAttachmentAppIds: string[] }).inboundAttachmentAppIds)
+          if (!queued || claimed) return { deliveries: [], inboundAttachments: [] }
+          claimed = true
+          return { deliveries: [{ deliveryId: 'conflict-output', deliveryKind: 'agent_output',
+            targetAppId: 'cli_a', credentialRef: 'credential-a', chatId: 'oc_private',
+            payload: { kind: 'agent_output', presentationVersion: 1, body: 'reply', memberRecipients: [] } }],
+          inboundAttachments: [{ requestId: 'conflict-file', appId: 'cli_a', messageId: 'om_file', attempt: 1,
+            resources: [{ fileKey: 'file_fixture', name: 'fixture.txt', kind: 'file' }] }] }
+        }
+        if (method === 'channels.deliveries.settle') settlements.push((raw as { command: Record<string, unknown> }).command)
         return { status: 'applied', payload: {} }
       })
     })
@@ -434,6 +586,52 @@ describe('channel settings service', () => {
       publicationStatus: 'published', published: true, connectionStatus: 'offline',
       connectionFailureCode: 'identity_conflict', canReconcile: true
     }))
+    expect(harness.createChannel).toHaveBeenCalledOnce()
+    queued = true
+    service.handleCoreEvent({ method: 'agent_run.started', params: {} })
+    await vi.waitFor(() => expect(settlements).toHaveLength(1))
+    expect(settlements[0]).toMatchObject({ outcome: 'failed', failureCode: 'target_bot_not_connected' })
+    expect(attachmentClaims.at(-1)).toEqual([])
+    expect(harness.createMessage).not.toHaveBeenCalled()
+    expect(harness.getResource).not.toHaveBeenCalled()
+    await service.stop()
+  })
+
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('keeps $kind HTTP delivery available during SDK recovery', async profile => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: 'A' } })
+    let queued = false, claimed = false
+    const settlements: Array<Record<string, unknown>> = []
+    const attachmentClaims: unknown[] = []
+    const service = new ChannelSettingsService({
+      profile, ...inertInterval(), createChannel: harness.createChannel,
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }, () => profile.kind),
+      core: channelCore((method, raw) => {
+        if (method.endsWith('.snapshot')) return coreSnapshot({ memberBots: [{ agentId: 'agent-a',
+          accountId: 'account-1', appId: 'cli_a', brand: profile.kind, credentialRef: 'credential-a',
+          status: 'published', failureCode: null, version: 1, botDisplayName: 'A' }] })
+        if (method === `${profile.hostMethodPrefix}host.tick`) {
+          attachmentClaims.push((raw as { inboundAttachmentAppIds: string[] }).inboundAttachmentAppIds)
+          if (!queued || claimed) return { deliveries: [] }
+          claimed = true
+          return { deliveries: [{ deliveryId: 'recovery-output', deliveryKind: 'agent_output',
+            targetAppId: 'cli_a', credentialRef: 'credential-a', chatId: 'oc_private', conversationKind: 'p2p',
+            topicKey: '', requestId: null, attemptCount: 1, updateMessageId: null, recipientOpenId: null,
+            payload: { kind: 'agent_output', presentationVersion: 1, body: 'reply', mentionPrincipal: false, memberRecipients: [] } }] }
+        }
+        if (method === `${profile.hostMethodPrefix}deliveries.settle`) settlements.push((raw as { command: Record<string, unknown> }).command)
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    await vi.waitFor(async () => expect((await service.get()).channels[0].memberBots[0].connectionStatus).toBe('online'))
+    harness.handlers.get('cli_a:reconnecting')!({})
+    queued = true
+    service.handleCoreEvent({ method: 'agent_run.started', params: {} })
+    await vi.waitFor(() => expect(settlements).toHaveLength(1))
+    expect(settlements[0]).toMatchObject({ outcome: 'sent', externalDeliveryMessageId: 'om_output' })
+    expect(attachmentClaims.at(-1)).toEqual(['cli_a'])
+    expect(harness.createMessage).toHaveBeenCalledOnce()
+    expect((await service.get()).channels[0].memberBots[0].connectionStatus).toBe('reconnecting')
     expect(harness.createChannel).toHaveBeenCalledOnce()
     await service.stop()
   })
@@ -1986,7 +2184,9 @@ describe('channel settings service', () => {
       })
     })
 
-    await expect(service.publishMemberBot('agent-a')).rejects.toThrow('handshake_failed')
+    await expect(service.publishMemberBot('agent-a')).resolves.toMatchObject({
+      activeProvisioning: { stage: 'connecting_bot', detail: 'Bot 已发布，正在重连。', failureCode: null }
+    })
     expect(await service.get()).toMatchObject({
       channels: [{ memberBots: [expect.objectContaining({
         agentId: 'agent-a',
@@ -1998,7 +2198,9 @@ describe('channel settings service', () => {
       appId: 'cli-retry',
       appSecret: 'retry-secret'
     })
-    await expect(service.retryMemberBot('agent-a')).rejects.toThrow('handshake_failed')
+    await expect(service.retryMemberBot('agent-a')).resolves.toMatchObject({
+      activeProvisioning: { stage: 'connecting_bot', detail: 'Bot 已发布，正在重连。' }
+    })
     expect(publicationIntent).toMatchObject({
       state: 'failed_recoverable',
       remoteAppId: 'cli-retry',
@@ -2465,6 +2667,7 @@ describe('channel settings service', () => {
       accountId: connectedAccount(owner).accountId,
       brand: 'feishu',
       appId: 'cli-frozen',
+      ownerIdentityStatus: 'verified',
       botDisplayName: '审阅员',
       credentialRef,
       status: 'published',

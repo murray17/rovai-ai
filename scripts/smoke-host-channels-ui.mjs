@@ -40,7 +40,12 @@ const handler = createHostChannelHandler({
     snapshot.channels[1].memberBots = [{ agentId, publicationStatus: 'failed', published: false, connectionStatus: 'unknown', botDisplayName: '测试队员 Bot', appId: 'original-app', managementUrl: null, failureCode: 'dingtalk_approver_selection_required' }]
     return snapshot
   },
-  async retryMemberBot(agentId, kind) { operations.push(['retry', agentId, kind]); return snapshot },
+  async retryMemberBot(agentId, kind) {
+    operations.push(['retry', agentId, kind])
+    snapshot.channels[0].provisioning = { kind, publicationIntentId: 'recovery-publication', agentId, stage: 'connecting_bot', detail: 'Bot 已发布，正在重连。', remoteAppId: 'existing-bot', failureCode: null }
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'reconnecting', connectionFailureCode: 'transport_error', canReconcile: false }
+    return snapshot
+  },
   async selectPublicationApprover(agentId, userId, kind) {
     operations.push(['selectApprover', agentId, userId, kind])
     assert.equal(userId, 'owner-choice'); assert.equal(snapshot.channels[1].provisioning.remoteAppId, 'original-app')
@@ -90,15 +95,25 @@ try {
   await browser.evaluate(`document.documentElement.dataset.theme='day'`)
   snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'offline',
     connectionFailureCode: 'identity_conflict', canReconcile: true }
-  await browser.wait(`document.querySelector('.channel-settings')?.textContent.includes('连接需处理')`)
+  await browser.wait(`document.querySelector('.channel-settings')?.textContent.includes('Bot 身份与已绑定应用不符')`)
   assert.equal(await browser.evaluate(`[...document.querySelectorAll('.channel-member-action button')].some(e=>e.textContent.trim()==='继续核对')`), true)
   await browser.capture(join(output, 'desktop-web-channels-terminal.png'))
   await browser.send('Emulation.setDeviceMetricsOverride', { width: 720, height: 980, deviceScaleFactor: 1, mobile: false })
   await pause(100)
   assert.equal(await browser.evaluate(`document.documentElement.scrollWidth<=window.innerWidth`), true)
+  assert.equal(await browser.evaluate(`[...document.querySelectorAll('.channel-member-bot-row')].every(row=>getComputedStyle(row).gridTemplateColumns.split(' ').length===2 && [...row.children].every(cell=>{const r=cell.getBoundingClientRect(),p=row.getBoundingClientRect();return r.left>=p.left && r.right<=p.right+1}))`), true)
   await browser.capture(join(output, 'desktop-web-channels-narrow.png'))
   await browser.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
 
+  stage = 'background connection recovery'
+  await browser.wait(`[...document.querySelectorAll('.channel-member-action button')].some(e=>e.textContent.trim()==='继续核对')`)
+  await browser.click(`[...document.querySelectorAll('.channel-member-action button')].find(e=>e.textContent.trim()==='继续核对')`)
+  await browser.wait(`document.querySelector('.channel-publish-dialog')?.textContent.includes('Bot 已发布，正在重连。')`)
+  assert.equal(await browser.evaluate(`document.querySelector('.channel-publish-dialog [role=alert]')===null`), true)
+  assert.equal(await browser.evaluate(`document.querySelector('.channel-publish-dialog .primary-button')===null`), true)
+  await browser.capture(join(output, 'desktop-web-publish-recovery.png'))
+  await browser.click(`[...document.querySelectorAll('.channel-publish-dialog button')].find(e=>e.textContent.trim()==='关闭')`)
+  await browser.wait(`document.querySelector('.channel-publish-dialog')===null && document.querySelector('.channel-settings')?.textContent.includes('正在重连')`)
 
   await browser.wait(`[...document.querySelectorAll('.channel-provider-tab')].some(e=>e.textContent.includes('钉钉'))`)
   await browser.click(`[...document.querySelectorAll('.channel-provider-tab')].find(e=>e.textContent.includes('钉钉'))`)
@@ -114,7 +129,7 @@ try {
   await browser.evaluate(`(()=>{const e=document.querySelector('.channel-approver-select select');e.value='owner-choice';e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
   await browser.click(`[...document.querySelectorAll('.channel-publish-dialog button')].find(e=>e.textContent.trim()==='提交审批并继续发布')`)
   await browser.wait(`document.querySelector('.channel-publish-dialog')===null && (${row}).textContent.includes('连接在线')`)
-  assert.deepEqual(operations, [['publish', member.agentId, 'dingtalk'], ['selectApprover', member.agentId, 'owner-choice', 'dingtalk']])
+  assert.deepEqual(operations, [['retry', member.agentId, 'feishu'], ['publish', member.agentId, 'dingtalk'], ['selectApprover', member.agentId, 'owner-choice', 'dingtalk']])
   stage = 'logout'
   await selectSection('远程连接')
   assert.equal(await browser.evaluate(`[...document.querySelectorAll('button')].filter(e=>e.textContent.trim()==='退出登录').length`), 1)
@@ -152,7 +167,7 @@ try {
   await browser.capture(join(output, 'standalone-legacy-channel.png'))
   assert.equal(await browser.evaluate(`document.querySelector('.channel-member-bot-table')===null`), true)
   assert.deepEqual(browser.errors, [])
-  await writeFile(join(output, 'validation.json'), JSON.stringify({ status: 'passed', platform: process.platform, realHost: true, productionWeb: true, productionMainAdapter: true, desktopService: 'fixture', realPlatformPublication: false, electronProcess: false, nativeBridgeInBrowser: false, liveProgressReadback: true, connectionRecoveryVisible: true, terminalReconcileVisible: true, narrowNoOverflow: true, structuredApproverSubmitted: true, originalPublicationIdentity: true, logoutOnlyInRemoteSettings: true, logoutKeepsHost: true, standaloneChannelNavigationHidden: true, standaloneLegacyRouteExplained: true, screenshots: ['desktop-web-channels-day.png', 'desktop-web-channels-night.png', 'desktop-web-channels-terminal.png', 'desktop-web-channels-narrow.png', 'desktop-web-approver.png', 'standalone-legacy-channel.png'] }, null, 2) + '\n')
+  await writeFile(join(output, 'validation.json'), JSON.stringify({ status: 'passed', platform: process.platform, realHost: true, productionWeb: true, productionMainAdapter: true, desktopService: 'fixture', realPlatformPublication: false, electronProcess: false, nativeBridgeInBrowser: false, liveProgressReadback: true, connectionRecoveryVisible: true, backgroundConnectionDialog: true, terminalReconcileVisible: true, narrowNoOverflow: true, narrowCellsContained: true, structuredApproverSubmitted: true, originalPublicationIdentity: true, logoutOnlyInRemoteSettings: true, logoutKeepsHost: true, standaloneChannelNavigationHidden: true, standaloneLegacyRouteExplained: true, screenshots: ['desktop-web-channels-day.png', 'desktop-web-channels-night.png', 'desktop-web-channels-terminal.png', 'desktop-web-channels-narrow.png', 'desktop-web-publish-recovery.png', 'desktop-web-approver.png', 'standalone-legacy-channel.png'] }, null, 2) + '\n')
   console.log(JSON.stringify({ status: 'passed', evidence: output }))
 } catch (error) {
   console.error('Channel UI acceptance failed at', stage)

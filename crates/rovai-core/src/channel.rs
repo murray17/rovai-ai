@@ -1844,6 +1844,8 @@ impl ChannelService {
                        SELECT 1 FROM {owner_app_identity} AS identity
                        WHERE identity.account_id = bot.account_id
                          AND identity.app_id = bot.app_id
+                         AND identity.open_id_digest IS NOT NULL
+                         AND identity.verified_at IS NOT NULL
                    )
             FROM {member_bot} AS bot
             JOIN {account} AS account ON account.id = bot.account_id
@@ -14390,6 +14392,143 @@ mod tests {
                     .unwrap()
             },
         );
+        // This provider owner also exercises observation with the matching Host.
+        // A legacy Owner row without a usable digest is not verified merely
+        // because the row exists; both snapshot and observation must agree.
+        let bot = service
+            .snapshot(database)
+            .unwrap()
+            .member_bots
+            .into_iter()
+            .find(|bot| bot.agent_id == "agent_1")
+            .unwrap();
+        let open_id: String = database
+            .connection()
+            .query_row(
+                &format!(
+                    "SELECT bot_open_id FROM {} WHERE agent_id='agent_1'",
+                    world.spec.member_bot
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let observation = ObserveChannelBotConnectionCommand::<LARK> {
+            account_id: bot.account_id.clone(),
+            agent_id: bot.agent_id.clone(),
+            app_id: bot.app_id.clone(),
+            credential_ref: bot.credential_ref.clone(),
+            expected_version: bot.version,
+            bot_open_id: open_id,
+            bot_display_name: bot.bot_display_name.clone(),
+        };
+        let same = service
+            .observe_member_bot_connection(
+                database,
+                &host_envelope_for(world.spec, "observe-verified", observation.clone()),
+            )
+            .unwrap();
+        assert_eq!(same.result.status, CommandResultStatus::Applied);
+        assert_eq!(same.result.payload["version"], bot.version);
+        let owner: (String, String) = database
+            .connection()
+            .query_row(
+                &format!(
+                    "SELECT open_id_digest, verified_at FROM {} WHERE account_id=?1 AND app_id=?2",
+                    world.spec.owner_app_identity
+                ),
+                params![bot.account_id, bot.app_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        {
+            let field = "open_id_digest";
+            database
+                .connection()
+                .execute(
+                    &format!(
+                        "UPDATE {} SET {field}=NULL WHERE account_id=?1 AND app_id=?2",
+                        world.spec.owner_app_identity
+                    ),
+                    params![bot.account_id, bot.app_id],
+                )
+                .unwrap();
+            assert_eq!(
+                service
+                    .snapshot(database)
+                    .unwrap()
+                    .member_bots
+                    .into_iter()
+                    .find(|bot| bot.agent_id == "agent_1")
+                    .unwrap()
+                    .owner_identity_status,
+                "unverified"
+            );
+            let command_id = format!("{provider}-observe-without-{field}");
+            assert_rejected_without_side_effects(
+                database,
+                &command_id,
+                &world.spec.code("owner_identity.unverified"),
+                |database| {
+                    service
+                        .observe_member_bot_connection(
+                            database,
+                            &host_envelope_for(
+                                world.spec,
+                                &format!("observe-without-{field}"),
+                                observation.clone(),
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            database.connection().execute(
+                &format!("UPDATE {} SET open_id_digest=?3, verified_at=?4 WHERE account_id=?1 AND app_id=?2", world.spec.owner_app_identity),
+                params![bot.account_id, bot.app_id, owner.0, owner.1],
+            ).unwrap();
+        }
+        let mut mismatched = observation.clone();
+        mismatched.credential_ref = "wrong-credential".into();
+        let denied = service
+            .observe_member_bot_connection(
+                database,
+                &host_envelope_for(world.spec, "observe-binding-mismatch", mismatched),
+            )
+            .unwrap();
+        assert_eq!(
+            denied.result.code,
+            world.spec.code("member_bot.binding_immutable")
+        );
+        database
+            .connection()
+            .execute(
+                &format!(
+                    "UPDATE {} SET status='disabled' WHERE agent_id='agent_1'",
+                    world.spec.member_bot
+                ),
+                [],
+            )
+            .unwrap();
+        let disabled = service
+            .observe_member_bot_connection(
+                database,
+                &host_envelope_for(world.spec, "observe-disabled", observation),
+            )
+            .unwrap();
+        assert_eq!(
+            disabled.result.code,
+            world.spec.code("member_bot.binding_immutable")
+        );
+        database
+            .connection()
+            .execute(
+                &format!(
+                    "UPDATE {} SET status='published' WHERE agent_id='agent_1'",
+                    world.spec.member_bot
+                ),
+                [],
+            )
+            .unwrap();
         assert_rejected_without_side_effects(
             database,
             &wrong("commit"),

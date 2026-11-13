@@ -70,11 +70,19 @@ describe('Channel settings', () => {
     expect(render()).toContain('连接中断，正在重连')
     expect(render()).toContain('连接暂不可用，请检查网络或代理')
     expect(render()).toContain('已发布')
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online',
+      connectionFailureCode: 'connection_confirmation_pending', canReconcile: false }
+    expect(render()).toContain('连接已建立，正在保存结果')
+    expect(render()).not.toContain('检查网络或代理')
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'offline',
       connectionFailureCode: 'identity_conflict', canReconcile: true }
     expect(render()).toContain('继续核对')
-    expect(render()).toContain('连接需处理，请继续核对')
+    expect(render()).toContain('Bot 身份与已绑定应用不符，请检查凭据')
     expect(render()).not.toContain('identity_conflict')
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0],
+      connectionFailureCode: 'feishu_brand_moved_to_lark', canReconcile: false }
+    expect(render()).toContain('应用所属平台已变更，当前连接已停用')
+    expect(render()).not.toContain('继续核对')
   })
 
   it('keeps cancellation silent and distinguishes expired login from temporary connection failures', () => {

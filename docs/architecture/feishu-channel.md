@@ -189,6 +189,8 @@ Host 的 `BotConnection` module 保留 stable LarkChannel，管理首连尝试�
 
 Core 的 `memberBot.observeConnection` 是身份补写的窄入口，不重写 Owner 或发布时间；同 App 不同非空
 Bot open ID 拒绝为配置终态。首连恢复后的 exact 最新 intent 可只在本地完成连接验证与收尾。
+历史 Owner 未验证时保持入站连接，暂缓身份观测及 intent 收尾；可信 Owner 入站补验证后继续。传输 ready
+结束 Host watchdog；Core 确认失败不能伪装成断网，也不能关闭已在线的传输。
 精确准入、失败及 delivery 限制见 [Feishu Channel v17 §5](../contracts/feishu-channel-v17.md#5-连接观测与恢复)，
 实施与验证见[连接恢复记录](../versions/v1.72/feishu-ws-recovery.md)。Lark 使用同一 module 和独立 Provider 实例。
 

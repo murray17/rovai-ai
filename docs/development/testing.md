@@ -234,7 +234,8 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 
 飞书/Lark 连接观测扩展既有 `member_bot_app_binding_is_immutable_across_legacy_disabled_reactivation`
 与 `wrong_provider_hosts_are_rejected_by_every_lark_capable_handler`：原 SQLite binding fixture 覆盖填空、no-op、
-显示名更新、身份冲突、版本 CAS 与 Owner/发布时间不变；原 Provider owner 覆盖交叉 Host 拒绝。无新增 Rust
+显示名更新、身份冲突、版本 CAS 与 Owner/发布时间不变；原 Provider owner 覆盖交叉 Host 拒绝、双 Provider 的
+Owner 空 digest、快照与观测判定一致、disabled 和绑定不符拒绝。无新增 Rust
 测试函数或 fixture。SDK 异步错误由真实 ws 子进程覆盖，Host 状态/停止与 Renderer 由相关 Vitest 覆盖，不能
 用纯函数代替 socket 生命周期。命令和证据见[实施记录](../versions/v1.72/feishu-ws-recovery.md)。
 
