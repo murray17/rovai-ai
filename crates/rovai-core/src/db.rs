@@ -10,6 +10,8 @@ mod claim_context;
 mod compact_execution;
 #[path = "db_execution_storage.rs"]
 mod execution_storage;
+#[path = "db_goose.rs"]
+mod goose;
 #[path = "db_hermes.rs"]
 mod hermes;
 #[path = "db_kilo.rs"]
@@ -517,7 +519,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 173;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 174;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1016,6 +1018,7 @@ struct CurrentMigrationState {
     v221: bool,
     v222: bool,
     v223: bool,
+    v224: bool,
 }
 
 impl CurrentMigrationState {
@@ -1037,6 +1040,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v224 {
+            let mut previous = *self;
+            previous.v224 = false;
+            return schema == 174 && previous.admits(contract, 173, classifier);
+        }
         if self.v223 {
             let mut previous = *self;
             previous.v223 = false;
@@ -3865,6 +3873,7 @@ pub(crate) fn classify_database_contract(
                 | 171
                 | 172
                 | 173
+                | 174
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3875,6 +3884,7 @@ pub(crate) fn classify_database_contract(
         )?;
         let valid = completed
             && (marker.projection_schema_version < 173 || kilo::schema_matches(connection)?)
+            && (marker.projection_schema_version < 174 || goose::schema_matches(connection)?)
             && (marker.projection_schema_version < 170
                 || channel_native::schema_matches(connection)?)
             && (marker.projection_schema_version < 168 || quote_text::schema_matches(connection)?)
@@ -6204,7 +6214,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=220),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=221),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=222),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=223)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=224)
         "#,
         [],
         |row| {
@@ -6363,6 +6374,7 @@ fn load_current_migration_state(
                 v221: row.get(151)?,
                 v222: row.get(152)?,
                 v223: row.get(153)?,
+                v224: row.get(154)?,
             })
         },
     )
@@ -9669,6 +9681,9 @@ impl Database {
             if !self.schema_migration_applied(223)? {
                 migration_step!("migration_223", kilo::migrate(self));
             }
+            if !self.schema_migration_applied(224)? {
+                migration_step!("migration_224", goose::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10562,6 +10577,9 @@ impl Database {
         }
         if !self.schema_migration_applied(223)? {
             migration_step!("migration_223", kilo::migrate(self));
+        }
+        if !self.schema_migration_applied(224)? {
+            migration_step!("migration_224", goose::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -41979,6 +41997,14 @@ mod tests {
         type Migrate = fn(&mut Database) -> Result<()>;
         for (version, schema, main_continuation, rewrite, schema_matches, migrate) in [
             (
+                224,
+                173,
+                false,
+                goose::rewrite as Rewrite,
+                goose::schema_matches as Matches,
+                goose::migrate as Migrate,
+            ),
+            (
                 223,
                 172,
                 false,
@@ -42036,8 +42062,10 @@ mod tests {
             ),
         ] {
             let (mut database, directory) = crate::test_support::seeded_runtime_database();
-            if version == 223 {
+            if version == 224 {
                 // The current source has no later transitions to undo.
+            } else if version == 223 {
+                goose::downgrade_for_test(database.connection());
             } else if version == 216 {
                 hermes::downgrade_rules_for_test(database.connection());
             } else if version == 205 {
@@ -42068,12 +42096,12 @@ mod tests {
                     .unwrap();
                 Some((id, content))
             } else {
-                if !matches!(version, 205 | 216 | 223) {
+                if !matches!(version, 205 | 216 | 223 | 224) {
                     mission_description::downgrade_for_test(database.connection());
                 }
                 None
             };
-            if !main_continuation && !matches!(version, 205 | 216 | 223) {
+            if !main_continuation && !matches!(version, 205 | 216 | 223 | 224) {
                 run_continuation::downgrade_for_test(database.connection());
             }
             if version == 184 {
@@ -42353,6 +42381,7 @@ mod tests {
             v221: version >= 221,
             v222: version >= 222,
             v223: version >= 223,
+            v224: version >= 224,
         }
     }
 

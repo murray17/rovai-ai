@@ -31,6 +31,7 @@ export type AdapterKind =
   | 'pi'
   | 'opencode-cli'
   | 'kilo-cli'
+  | 'goose-cli'
   | 'copilot-cli'
   | 'claude-code-cli'
   | 'kiro-cli'

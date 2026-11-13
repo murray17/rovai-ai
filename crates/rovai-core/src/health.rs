@@ -1814,6 +1814,7 @@ async fn acp_probe_at(
         kind,
         AdapterKind::OpencodeCli
             | AdapterKind::KiloCli
+            | AdapterKind::GooseCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -2340,8 +2341,23 @@ async fn run_acp_probe_with_scope(
                 }
                 crate::dsh::annotate_session(&mut session, preparation);
             }
+            if kind == AdapterKind::GooseCli && catalog_only {
+                write_json_line(stdin,&json!({"jsonrpc":"2.0","id":session_request_id+10,"method":"_goose/unstable/providers/list","params":{"providerIds":[]}})).await?;
+                session["_meta"]["rovaiGooseProviders"] =
+                    read_rpc_result(lines, session_request_id + 10).await?;
+            }
             if let Some((model_id, source)) = target {
-                if kind == AdapterKind::MinimaxCodeCli {
+                if kind == AdapterKind::GooseCli {
+                    anyhow::ensure!(source.is_none(), "Goose models do not have a DSH source");
+                    let (provider, model) = crate::goose::model_route(model_id)?;
+                    for (offset, key, value) in [(1, "provider", provider), (2, "model", model)] {
+                        write_json_line(stdin,&json!({"jsonrpc":"2.0","id":session_request_id+offset,"method":"session/set_config_option","params":{"sessionId":session["sessionId"],"configId":key,"value":value}})).await?;
+                        let result = read_rpc_result(lines, session_request_id + offset).await?;
+                        if result["configOptions"].is_array() {
+                            session["configOptions"] = result["configOptions"].clone();
+                        }
+                    }
+                } else if kind == AdapterKind::MinimaxCodeCli {
                     anyhow::ensure!(
                         source.is_none(),
                         "MiniMax target options do not have a DSH source"
@@ -2876,6 +2892,9 @@ pub fn configure_acp_command(
 ) -> Result<()> {
     match kind {
         AdapterKind::KiloCli => crate::kilo::configure_command(command),
+        AdapterKind::GooseCli => {
+            command.arg("acp");
+        }
         AdapterKind::OpencodeCli => {
             crate::opencode_compat::Generation::require(version)?.configure_command(command);
         }
@@ -3171,6 +3190,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
         kind,
         AdapterKind::OpencodeCli
             | AdapterKind::KiloCli
+            | AdapterKind::GooseCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -3796,6 +3816,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
     }
     let (environment_keys, executable_name) = match kind {
         AdapterKind::KiloCli => (&["ROVAI_KILO_BIN"][..], "kilo"),
+        AdapterKind::GooseCli => (&["ROVAI_GOOSE_BIN"][..], "goose"),
         AdapterKind::OpencodeCli => (
             &[
                 "ROVAI_OPENCODE_BIN",

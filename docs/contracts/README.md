@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-12
+last_updated: 2026-11-13
 ---
 
 # 长期接口合同
@@ -179,7 +179,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v89（当前）](runtime-launch-and-verification-v89.md) | 后台解析当前安装入口，旧 Host 不阻止链接换代后的安装版本刷新 |
+| [Runtime Launch and Verification v90（当前）](runtime-launch-and-verification-v90.md) | Goose 官方 ACP、原生 System/Steer、按需 effort 与共享生命周期 |
+| [Runtime Launch and Verification v89（历史）](runtime-launch-and-verification-v89.md) | 后台解析当前安装入口，旧 Host 不阻止链接换代后的安装版本刷新 |
 | [Runtime Launch and Verification v88（历史）](runtime-launch-and-verification-v88.md) | Run 按需限频刷新本机版本、读取顺序围栏与 Host 生命周期解耦 |
 | [Runtime Launch and Verification v87（历史）](runtime-launch-and-verification-v87.md) | 保留执行默认 allow；Kilo 权限展示细节由 UI 规范拥有 |
 | [Runtime Launch and Verification v86（历史）](runtime-launch-and-verification-v86.md) | Kilo 正式执行进程环境默认 allow，具体权限仍由原生裁决；目录、输入与生命周期保持 |

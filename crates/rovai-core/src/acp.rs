@@ -289,7 +289,7 @@ struct AcpActivePrompt {
     prompt_activity_observed: bool,
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
     zcode_input_id: Option<String>,
-    codebuddy_request_id: Option<String>,
+    native_prompt_id: Option<String>,
     prompt_progress: AcpPromptProgress,
 }
 
@@ -604,6 +604,7 @@ fn is_en_us_unsigned_integer(value: &str) -> bool {
 fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool {
     is_session_catalog_update(message)
         || is_known_session_lifecycle_extension(adapter_kind, message)
+        || (adapter_kind == AdapterKind::GooseCli && crate::goose::is_metadata(message))
         || (adapter_kind == AdapterKind::GrokBuild && is_grok_turn_usage_frame(message))
         || (adapter_kind == AdapterKind::KiroCli && is_kiro_context_gauge(message))
         || (adapter_kind == AdapterKind::KimiCodeCli && is_kimi_compaction_completed_frame(message))
@@ -2150,6 +2151,10 @@ impl AcpHost {
                 "version": env!("CARGO_PKG_VERSION")
             }
         });
+        if host.adapter_kind == AdapterKind::GooseCli {
+            initialize_params["clientCapabilities"]["_meta"]["goose"]["customNotifications"] =
+                json!(true);
+        }
         if host.adapter_kind == AdapterKind::CopilotCli {
             // Subscribe to per-call Usage and the native public intent label.
             initialize_params["clientCapabilities"]["_meta"] = json!({
@@ -2325,6 +2330,22 @@ impl AcpHost {
                                 continue;
                             }
                         };
+                        if host.adapter_kind == AdapterKind::GooseCli {
+                            crate::goose::project_tool(&mut message);
+                            if message["method"] == "_goose/unstable/session/update"
+                                && message["params"]["update"]["sessionUpdate"] == "usage_update"
+                                && let Some(session) = message["params"]["sessionId"].as_str()
+                            {
+                                let mut results = host.session_results.write().await;
+                                let result = results
+                                    .entry(session.to_owned())
+                                    .or_insert_with(|| json!({}));
+                                result["_meta"]["rovaiGooseUsage"] = crate::goose::usage_snapshot(
+                                    result.pointer("/_meta/rovaiGooseUsage"),
+                                    &message["params"],
+                                );
+                            }
+                        }
                         if host.adapter_kind == AdapterKind::DeepseekHarness
                             && let Some(root) = host.private_config_root.as_deref()
                             && let Err(error) = crate::dsh::enrich_message(root, &mut message)
@@ -2504,6 +2525,7 @@ impl AcpHost {
                                     AdapterKind::ClineCli
                                         | AdapterKind::CommandCodeCli
                                         | AdapterKind::MinimaxCodeCli
+                                        | AdapterKind::GooseCli
                                 ) {
                                     match host
                                         .enrich_paired_tool_message(
@@ -3600,8 +3622,31 @@ impl AcpHost {
         };
         match &mut route.phase {
             AcpSessionPhase::PromptActive(active_prompt) => {
+                if self.adapter_kind == AdapterKind::GooseCli
+                    && message["method"] == "session/update"
+                    && message["params"]["update"]["sessionUpdate"] == "session_info_update"
+                    && let Some(id) = message
+                        .pointer("/params/update/_meta/goose/activeRunId")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                {
+                    active_prompt.native_prompt_id = Some(id.to_owned());
+                    // Goose publishes its admitted native Run before waiting
+                    // for the first model response. This is its owner receipt,
+                    // unlike catalog/usage updates or a local transport write.
+                    if !active_prompt.acceptance_emitted {
+                        active_prompt.acceptance_emitted = true;
+                        active_prompt.prompt_activity_observed = true;
+                        let _ = self.incoming.send(route.owner.input_accepted(
+                            self.adapter_kind,
+                            &self.host_instance_id,
+                            session_id,
+                            active_prompt,
+                        ));
+                    }
+                }
                 if self.adapter_kind == AdapterKind::CodebuddyCli
-                    && active_prompt.codebuddy_request_id.is_none()
+                    && active_prompt.native_prompt_id.is_none()
                     && crate::runtime::is_root_output(&message["params"])
                     && crate::runtime::is_root_output(&message["params"]["update"])
                     && matches!(
@@ -3616,7 +3661,7 @@ impl AcpHost {
                         )
                     )
                 {
-                    active_prompt.codebuddy_request_id = message
+                    active_prompt.native_prompt_id = message
                         .pointer("/params/update/_meta/codebuddy.ai~1conversationRequestId")
                         .or_else(|| {
                             message.pointer("/params/_meta/codebuddy.ai~1conversationRequestId")
@@ -3658,7 +3703,10 @@ impl AcpHost {
                 // Catalog metadata may report the previous context before a
                 // prompt is accepted. Collect its numbers without treating it
                 // as proof that a rejected input was consumed.
-                if !is_session_catalog_update(message) {
+                if !is_session_catalog_update(message)
+                    && !(self.adapter_kind == AdapterKind::GooseCli
+                        && crate::goose::is_metadata(message))
+                {
                     active_prompt.prompt_activity_observed = true;
                 }
                 // These active-input adapters need the initial native input
@@ -3674,6 +3722,7 @@ impl AcpHost {
                         | AdapterKind::MinimaxCodeCli
                         | AdapterKind::HermesCli
                         | AdapterKind::KiloCli
+                        | AdapterKind::GooseCli
                 ) || (self.adapter_kind == AdapterKind::OpencodeCli
                     && rovai_core::steer::protocol_unavailable(
                         "opencode-cli",
@@ -3869,10 +3918,17 @@ impl AcpHost {
             .await
             .insert(session_id.to_string());
         if let Some(result) = result {
-            self.session_results
-                .write()
-                .await
-                .insert(session_id.to_string(), result.clone());
+            let mut results = self.session_results.write().await;
+            let mut result = result.clone();
+            if self.adapter_kind == AdapterKind::GooseCli
+                && result.pointer("/_meta/rovaiGooseUsage").is_none()
+                && let Some(usage) = results
+                    .get(session_id)
+                    .and_then(|old| old.pointer("/_meta/rovaiGooseUsage"))
+            {
+                result["_meta"]["rovaiGooseUsage"] = usage.clone();
+            }
+            results.insert(session_id.to_string(), result);
         }
     }
 
@@ -4523,7 +4579,7 @@ impl AcpHost {
                 prompt_activity_observed: false,
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
                 zcode_input_id: None,
-                codebuddy_request_id: None,
+                native_prompt_id: None,
                 prompt_progress: AcpPromptProgress::default(),
             });
         }
@@ -4900,6 +4956,12 @@ impl AcpSessionPermissions {
                     })
                     .context("Command Code Runtime requires valid permission_mode")?,
             ),
+            AdapterKind::GooseCli => Some(
+                values["mode"]
+                    .as_str()
+                    .filter(|mode| matches!(*mode, "auto" | "approve" | "smart_approve"))
+                    .context("Goose requires a native mode")?,
+            ),
             AdapterKind::ClineCli => Some(
                 values["mode"]
                     .as_str()
@@ -4989,6 +5051,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
         adapter_kind,
         AdapterKind::OpencodeCli
             | AdapterKind::KiloCli
+            | AdapterKind::GooseCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -5155,6 +5218,10 @@ impl AcpRuntime {
         session_id: &str,
         bootstrap: &str,
     ) -> Result<()> {
+        if self.host.adapter_kind == AdapterKind::GooseCli {
+            self.host.rpc("_goose/unstable/session/system-prompt/set",json!({"sessionId":session_id,"mode":"append","key":crate::goose::BOOTSTRAP_KEY,"text":bootstrap})).await?;
+            return Ok(());
+        }
         if self.host.adapter_kind == AdapterKind::KiloCli {
             let file = self
                 .host
@@ -5298,7 +5365,10 @@ impl AcpRuntime {
                                 .context("ACP Runtime has no bundled CLI")?
                                 .cli_executable(),
                         );
-                    } else if self.host.adapter_kind == AdapterKind::KiloCli {
+                    } else if matches!(
+                        self.host.adapter_kind,
+                        AdapterKind::KiloCli | AdapterKind::GooseCli
+                    ) {
                         crate::runtime_mcp::adapt_acp_stdio_cwd(
                             &mut server,
                             definition,
@@ -5441,7 +5511,10 @@ impl AcpRuntime {
                     &additional_directories,
                     new_session_native_rules,
                 );
-                let result = self.host.rpc("session/new", params).await?;
+                let mut result = self.host.rpc("session/new", params).await?;
+                if self.host.adapter_kind == AdapterKind::GooseCli {
+                    result["_meta"]["rovaiGooseUsage"] = json!({"sessionId":result["sessionId"],"update":{"sessionUpdate":"usage_update","accumulatedInputTokens":0,"accumulatedOutputTokens":0,"accumulatedCost":0}});
+                }
                 *self.session_result.write().await = Some(result.clone());
                 let session_id = result
                     .get("sessionId")
@@ -5570,6 +5643,12 @@ impl AcpRuntime {
             {
                 // This custom model was selected by the host's --model argument.
                 // CodeBuddy omits it from set_config_option's built-in choices.
+            } else if self.host.adapter_kind == AdapterKind::GooseCli {
+                let (provider, native_model) = crate::goose::model_route(model)?;
+                self.set_config_option(&session_id, "provider", provider)
+                    .await?;
+                self.set_config_option(&session_id, "model", native_model)
+                    .await?;
             } else if matches!(
                 self.host.adapter_kind,
                 AdapterKind::KiroCli | AdapterKind::GrokBuild
@@ -5619,6 +5698,36 @@ impl AcpRuntime {
             for (key, value) in options {
                 if let Some(value) = value.as_str() {
                     self.set_config_option(&session_id, key, value).await?;
+                }
+            }
+        }
+        if self.host.adapter_kind == AdapterKind::GooseCli && model_source == "runtime_default" {
+            self.set_config_option(&session_id, "provider", "goose")
+                .await?;
+        }
+        if self.host.adapter_kind == AdapterKind::GooseCli {
+            self.host.rpc("session/set_mode",json!({"sessionId":session_id,"modeId":self.session_permissions.mode.as_deref().context("Goose native mode missing")?})).await?;
+            let extensions = self
+                .host
+                .rpc(
+                    "_goose/unstable/session/extensions/list",
+                    json!({"sessionId":session_id}),
+                )
+                .await?;
+            for extension in extensions["extensions"]
+                .as_array()
+                .context("Goose Session extensions missing")?
+            {
+                if let Some(key) = extension["extensionKey"].as_str().filter(|key| {
+                    key.starts_with(crate::goose::ASSIGNED_MCP_PREFIX)
+                        && !external_mcp_servers.contains_key(*key)
+                }) {
+                    self.host
+                        .rpc(
+                            "_goose/unstable/session/extensions/remove",
+                            json!({"sessionId":session_id,"extensionKey":key}),
+                        )
+                        .await?;
                 }
             }
         }
@@ -5759,7 +5868,10 @@ impl AcpRuntime {
     }
 
     pub async fn observed_model_id(&self) -> Option<String> {
-        if self.adapter_kind() == AdapterKind::CopilotCli {
+        if matches!(
+            self.adapter_kind(),
+            AdapterKind::CopilotCli | AdapterKind::GooseCli
+        ) {
             // The advertised Session default may not
             // be the root call's model. Its validated assistant.usage owns the
             // first actual model observation in Core.
@@ -5838,6 +5950,36 @@ impl AcpRuntime {
             .host
             .prepare_prompt(&session_id, &self.owner, delivery_id)
             .await?;
+        if self.adapter_kind() == AdapterKind::GooseCli
+            && let Some(params) = self
+                .host
+                .session_result(&session_id)
+                .await
+                .and_then(|v| v.pointer("/_meta/rovaiGooseUsage").cloned())
+        {
+            let message = json!({"method":"_goose/unstable/session/update","params":params});
+            if let AcpSessionMessageRoute::Forward {
+                owner,
+                active_prompt,
+                sequence,
+            } = self
+                .host
+                .route_session_message(&session_id, &message, 0)
+                .await
+            {
+                self.host
+                    .incoming
+                    .send(owner.message(
+                        self.adapter_kind(),
+                        &self.host.host_instance_id,
+                        &session_id,
+                        &active_prompt,
+                        sequence,
+                        message,
+                    ))
+                    .context("Goose usage baseline receiver closed")?;
+            }
+        }
         if self.native_usage_selected().await {
             let kind = self.adapter_kind();
             let workspace = self.execution_root.clone();
@@ -6027,11 +6169,15 @@ impl AcpRuntime {
             };
         }
         let kiro = self.adapter_kind() == AdapterKind::KiroCli;
-        let codebuddy_request = routes.get(&session).and_then(|route| match &route.phase {
-            AcpSessionPhase::PromptActive(p) => p.codebuddy_request_id.clone(),
+        let native_request = routes.get(&session).and_then(|route| match &route.phase {
+            AcpSessionPhase::PromptActive(p) => p.native_prompt_id.clone(),
             _ => None,
         });
         let (method, params) = match self.adapter_kind() {
+            AdapterKind::GooseCli => (
+                "_goose/unstable/session/steer",
+                json!({"sessionId":session,"expectedRunId":native_request.as_deref().ok_or(rovai_core::steer::ActiveInputNotAccepted)?,"prompt":[{"type":"text","text":text}]}),
+            ),
             AdapterKind::HermesCli => (
                 "session/prompt",
                 json!({"sessionId":session,"prompt":[{"type":"text","text":format!("/steer {text}")}]}),
@@ -6043,7 +6189,7 @@ impl AcpRuntime {
                 // old versions still answer method-not-found without accepting it.
                 json!({"sessionId":session,"contentBlocks":[{"type":"text","text":text}],
                     "clientUserMessageId":input_id,
-                    "expectedRequestId":codebuddy_request.as_deref().unwrap_or(expected_prompt)}),
+                    "expectedRequestId":native_request.as_deref().unwrap_or(expected_prompt)}),
             ),
             AdapterKind::CodebuddyCli | AdapterKind::KiloCli => (
                 "session/prompt",
@@ -6108,7 +6254,9 @@ impl AcpRuntime {
         );
         // Keep unknown and failed Steer on the existing retirement path. Kilo
         // clears this only after its complete successful aggregate terminal.
-        self.host.retire_after_steer.store(true, Ordering::Release);
+        if self.adapter_kind() != AdapterKind::GooseCli {
+            self.host.retire_after_steer.store(true, Ordering::Release);
+        }
         let written = timeout(
             Duration::from_secs(10),
             self.host
@@ -6118,6 +6266,7 @@ impl AcpRuntime {
         .context("ACP active input write timed out")
         .and_then(|result| result);
         if let Err(error) = written {
+            self.host.retire_after_steer.store(true, Ordering::Release);
             if opencode {
                 self.host.pending.lock().await.remove(&id);
                 self.host.opencode_steering_changed.notify_waiters();
@@ -6165,6 +6314,9 @@ impl AcpRuntime {
             }
         }
         .await;
+        if self.adapter_kind() == AdapterKind::GooseCli && result.is_err() {
+            self.host.retire_after_steer.store(true, Ordering::Release);
+        }
         if opencode {
             // This is a bounded in-flight request, not a receipt tracker. After
             // its original deadline the input stays unknown and is never resent.
@@ -6173,10 +6325,12 @@ impl AcpRuntime {
         }
         let result = match result {
             Err(error)
-                if self.adapter_kind() == AdapterKind::KiloCli
-                    && error.downcast_ref::<AcpRpcError>().is_some_and(|native| {
-                        matches!(native.code, Some(-32600 | -32601 | -32602))
-                    }) =>
+                if matches!(
+                    self.adapter_kind(),
+                    AdapterKind::KiloCli | AdapterKind::GooseCli
+                ) && error.downcast_ref::<AcpRpcError>().is_some_and(|native| {
+                    matches!(native.code, Some(-32600 | -32601 | -32602))
+                }) =>
             {
                 return Err(rovai_core::steer::ActiveInputNotAccepted.into());
             }
@@ -6242,6 +6396,23 @@ impl AcpRuntime {
         {
             bail!("MiniMax Code did not confirm active Turn steering");
         }
+        if self.adapter_kind() == AdapterKind::GooseCli {
+            let receipt = (|| {
+                ensure!(
+                    result["runId"].as_str() == native_request.as_deref(),
+                    "Goose steer returned a different native Run"
+                );
+                result["messageId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .context("Goose steer receipt missing messageId")
+            })();
+            if receipt.is_err() {
+                self.host.retire_after_steer.store(true, Ordering::Release);
+            }
+            return receipt;
+        }
         if self.adapter_kind() == AdapterKind::ZcodeApp {
             if result["inputId"] != input_id || result["accepted"] != true {
                 bail!("ZCode did not confirm steering queue admission");
@@ -6284,7 +6455,7 @@ impl AcpRuntime {
                 }
             } else {
                 if result["steered"] != true
-                    || codebuddy_request
+                    || native_request
                         .as_deref()
                         .is_none_or(|expected| result["ownerRequestId"] != expected)
                 {
@@ -7172,7 +7343,7 @@ impl AcpCliRuntimeAdapter {
         let spawn_compaction_policy = self.compaction_detector_policy;
         if matches!(
             self.kind,
-            AdapterKind::DeepseekHarness | AdapterKind::KiloCli
+            AdapterKind::DeepseekHarness | AdapterKind::KiloCli | AdapterKind::GooseCli
         ) {
             // Retire obsolete Hosts in this Binding before exact resume.
             // DSH also holds a native lock while its previous Host owns the Session.
@@ -7756,6 +7927,9 @@ fn configure_runtime_command(
                 .env("TMPDIR", root)
                 .env("ROVAI_ZCODE_OWNER_REPORT", root.join("owner-cleanup.json"))
                 .env("ROVAI_ZCODE_CLI_CONTEXT_DIR", root.join("cli-contexts"));
+        }
+        AdapterKind::GooseCli => {
+            command.arg("acp");
         }
         AdapterKind::KiloCli => {
             crate::kilo::configure_command(command);
@@ -9046,7 +9220,7 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
         AdapterKind::MinimaxCodeCli => permissions["permission_mode"] == "bypassPermissions",
-        AdapterKind::HermesCli | AdapterKind::KiloCli => false,
+        AdapterKind::HermesCli | AdapterKind::KiloCli | AdapterKind::GooseCli => false,
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli

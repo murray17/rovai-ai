@@ -170,4 +170,3 @@ User 在已收到完整 R1 和简明说明后，于 Thread sequence 117（消息
 
 上述方案是 Research→实施输入，不把 Core Compatible 称为已完成接入。
 需要提前开放的平台必须有新的当前 Version Decision 接受 Preview，不能借用 Kilo 的资格，也不新增常驻 UI 资格说明。
-

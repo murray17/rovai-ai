@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-13",
+  "runtime": "goose-cli",
+  "officialVersion": "1.59.0",
+  "upstreamCommit": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+  "platform": "macos-arm64",
+  "provider": "synthetic-loopback",
+  "qualification": false,
+  "productStage": "Preview",
+  "coreRuns": {
+    "cancelled": 1,
+    "succeeded": 18
+  },
+  "providerRequests": 53,
+  "bootstrap": {
+    "nativeKey": "rovai-session-bootstrap",
+    "bytes": 2818,
+    "verbatim": true,
+    "dynamicOnly": true
+  },
+  "sameWarmHostPidSession": true,
+  "noImplicitNode": true,
+  "commandOutput": {
+    "markerOccurrences": 1
+  },
+  "skills": {
+    "nativeRead": true,
+    "projectGroup": ".goose/skills"
+  },
+  "outputBudget": {
+    "bytes": 7680,
+    "discardedTailAbsent": true
+  },
+  "subagent": {
+    "nativeDelegate": true,
+    "parentWaitsForNativeCompletion": true
+  },
+  "compaction": {
+    "automaticThreshold": true,
+    "overflowRecovery": true
+  },
+  "effort": {
+    "targetModel": "openai/gpt-6.1-sol",
+    "nativeKey": "thinking_effort",
+    "providerEffort": "high",
+    "onDemand": true
+  },
+  "nativeDefaultRestored": true,
+  "approval": {
+    "nativeMode": "approve",
+    "resolved": 2
+  },
+  "steer": {
+    "nativeReceiptBeforeCompletion": true,
+    "sameRun": true,
+    "warmSuccessor": true
+  },
+  "cancel": {
+    "sameHost": true,
+    "samePid": true,
+    "newRun": true,
+    "newLease": true,
+    "oldLeaseRejected": true,
+    "cleanup": "reusable"
+  },
+  "mcp": {
+    "differentCwd": true,
+    "argvVerbatim": true,
+    "saveKeepsHost": true,
+    "replacementSameSession": true,
+    "deletedToolAbsent": true,
+    "obsoleteHostReaped": true,
+    "obsoleteHostNotResurrected": true
+  },
+  "numericSamples": [
+    {
+      "inputTokens": 200,
+      "outputTokens": 40,
+      "estimatedUsd": "0.0000525"
+    },
+    {
+      "inputTokens": 200,
+      "outputTokens": 40,
+      "estimatedUsd": "0.0000525"
+    },
+    {
+      "inputTokens": 400,
+      "outputTokens": 80,
+      "estimatedUsd": "0.0001050000000000001"
+    }
+  ],
+  "contextGauge": {
+    "usedTokens": 120,
+    "windowTokens": 128000,
+    "actualModelIdentity": null
+  },
+  "cost": {
+    "firstWarmEqual": true,
+    "quality": "runtime_estimate",
+    "currency": "USD"
+  },
+  "cold": {
+    "sameSession": true,
+    "newHost": true
+  },
+  "files": {
+    "writeAndEdit": true,
+    "fullDiff": "unsupported-native-metadata"
+  },
+  "unsupported": [
+    "full-file-diff-without-native-preimage",
+    "native-chat-with-mandatory-public-cli"
+  ],
+  "unverified": [
+    "real-account-provider-auth",
+    "remote-http-mcp-core",
+    "multi-binding-concurrency-stress",
+    "full-read-only-deny-and-fault-matrix",
+    "macos-x64",
+    "linux-x64",
+    "windows-x64"
+  ],
+  "reproduction": {
+    "native": "scripts/probe-goose-runtime.mjs",
+    "core": "scripts/smoke-goose-runtime.mjs"
+  }
+}

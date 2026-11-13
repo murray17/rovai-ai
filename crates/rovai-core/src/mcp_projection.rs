@@ -570,7 +570,15 @@ fn materialize_projection(
         let mut entry = McpExposureEntry {
             server_id: metadata.server_id.clone(),
             name: name.clone(),
-            runtime_name: name.clone(),
+            runtime_name: if request.adapter_kind == AdapterKind::GooseCli {
+                format!(
+                    "{}{}",
+                    crate::goose::ASSIGNED_MCP_PREFIX,
+                    metadata.server_id
+                )
+            } else {
+                name.clone()
+            },
             transport: transport.to_string(),
             config_digest: view.config_digest.clone(),
             status: McpExposureStatus::Ready,
@@ -601,8 +609,7 @@ fn materialize_projection(
         } else {
             match resolve_definition(&definition, request.execution_root) {
                 Ok(resolved) => {
-                    let runtime_name = name.clone();
-                    entry.runtime_name = runtime_name.clone();
+                    let runtime_name = entry.runtime_name.clone();
                     servers.insert(runtime_name, resolved);
                 }
                 Err(ResolveError::MissingEnvironment) => {
@@ -1191,6 +1198,25 @@ mod tests {
                 .unwrap()
                 .contains("top-secret")
         );
+        let goose_run = Uuid::new_v4().to_string();
+        let goose = service
+            .prepare(
+                &database,
+                Ok(&store),
+                &request(&goose_run, 1, &root, AdapterKind::GooseCli),
+            )
+            .unwrap();
+        let exposed = goose
+            .snapshot
+            .servers
+            .iter()
+            .find(|s| s.name == "docs")
+            .unwrap();
+        assert_eq!(
+            exposed.runtime_name,
+            format!("rovai_assigned_{}", exposed.server_id)
+        );
+        assert!(goose.servers.contains_key(&exposed.runtime_name));
         #[cfg(unix)]
         assert_eq!(
             fs::metadata(&prepared.canonical_path)

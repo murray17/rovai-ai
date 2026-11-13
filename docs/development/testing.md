@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-11
+last_updated: 2026-11-13
 ---
 
 # 测试与 Smoke Test
@@ -231,6 +231,14 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 环境切换验收遵循 cold-spawn，不把 Warm 的环境快照误判为权限覆盖。结果及失败对照见[简化记录](../versions/v1.72/kilo-simplification.md)。
 
 ## Rust 测试准入与退役门槛
+
+Goose 新接入扩展已有模型目录、数值 parser、权限默认、Skills、MCP 投影、数据库闭集迁移、平台矩阵和 Bootstrap owner，
+不新增 Rust 测试函数。原生协议入口 `scripts/probe-goose-runtime.mjs` 与产品入口 `scripts/smoke-goose-runtime.mjs` 分别保留：
+后者使用新建 Core/data/Skills/MCP/Goose 根、同目录 Core/CLI 和官方 `ROVAI_GOOSE_BIN`，模型为隔离 loopback Provider。
+它不读取其他 Runtime 的认证，不代表真实账号或其他平台资格。失败原始夹具保留，公开结果只导出白名单。
+最小门禁为默认 workspace，及 `--features extended-tests --lib` 的 `grouped_acp_models`、`runtime_parsers`、
+`runtime_catalog_migrations`、`projection_filters_assignment`、`member_permission_defaults` 与 `adapters_declare_their_skill_delivery_groups` owners。
+
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

@@ -508,6 +508,7 @@ export function runtimeAdapterDisplayLabel(kind: string): string {
     'codex-cli': 'Codex',
     'opencode-cli': 'OpenCode',
     'kilo-cli': 'Kilo',
+    'goose-cli': 'Goose',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',

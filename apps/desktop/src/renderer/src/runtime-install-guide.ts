@@ -25,6 +25,7 @@ const npm = (command: string): InstallMethod => ({
 
 // Official installation instructions. Guidance never grants platform admission or executes commands.
 const GUIDES: Partial<Record<AdapterKind, RuntimeInstallGuide>> = {
+  'goose-cli': { docs: 'https://github.com/aaif-goose/goose', launch: 'goose configure', connectModel: true },
   'claude-code-cli': {
     docs: 'https://code.claude.com/docs/en/setup',
     command: 'curl -fsSL https://claude.ai/install.sh | bash', launch: 'claude',

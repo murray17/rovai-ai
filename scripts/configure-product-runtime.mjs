@@ -1,5 +1,5 @@
 export async function configureProductRuntime(request, adapterKind, agentIds) {
-  const allowsExecutionDeferredVerification = ['claude-code-cli', 'trae-cn-cli', 'opencode-cli', 'kilo-cli', 'minimax-code-cli'].includes(adapterKind)
+  const allowsExecutionDeferredVerification = ['claude-code-cli', 'trae-cn-cli', 'opencode-cli', 'kilo-cli', 'minimax-code-cli', 'goose-cli'].includes(adapterKind)
   const acceptedSnapshotStates = allowsExecutionDeferredVerification
     ? ['ready', 'light_ready', 'installed_unverified'] : ['ready']
   for (const agentId of agentIds) {

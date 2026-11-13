@@ -7,6 +7,7 @@ export function runtimeAdapterLabel(kind: string): string {
     pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
     'kilo-cli': 'Kilo',
+    'goose-cli': 'Goose',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',
@@ -35,7 +36,7 @@ export type MemberRuntimeConfigurationPresentation = {
 }
 
 type RuntimeEffortOption = {
-  key: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
+  key: 'thinking_effort' | 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
   label: string
 }
 
@@ -44,6 +45,7 @@ export function runtimeEffortOption(adapterKind: string): RuntimeEffortOption {
     'claude-code-cli': ['effort', '思考强度'],
     'command-code-cli': ['effort', '思考强度'],
     'kilo-cli': ['effort', '推理强度'],
+    'goose-cli': ['thinking_effort', '思考强度'],
     'minimax-code-cli': ['thinkingEffort', '思考强度'],
     pi: ['thinking_level', '思考强度'],
     'codebuddy-cli': ['thought_level', '推理强度']

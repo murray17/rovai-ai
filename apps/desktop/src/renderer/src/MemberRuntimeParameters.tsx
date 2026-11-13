@@ -207,6 +207,8 @@ function runtimeParametersFor(
       return <CodexRuntimeParameters {...props} />
     case 'pi':
       return <PiRuntimeParameters {...props} />
+    case 'goose-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('goose-cli', props)}<PermissionSelect {...props} fieldKey="mode" label={uiAttribute("执行模式")} /></div>
     case 'kilo-cli':
       return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}</div>
     case 'opencode-cli':
@@ -419,6 +421,7 @@ function modelFieldsFor(
   props: RuntimeParameterProps
 ): React.JSX.Element {
   switch (adapterKind) {
+    case 'goose-cli':
     case 'minimax-code-cli':
     case 'command-code-cli':
     case 'claude-code-cli':
@@ -465,7 +468,7 @@ function ModelFields({
   const identity = `${installationIdentity}:${projection.current.scope}`
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
   const isDsh = adapterKind === 'deepseek-harness'
-  const supportsTargetOptions = isDsh || adapterKind === 'minimax-code-cli'
+  const supportsTargetOptions = isDsh || adapterKind === 'minimax-code-cli' || adapterKind === 'goose-cli'
   const isPi = adapterKind === 'pi'
   const target = supportsTargetOptions && explicit
     ? { modelId: explicit.modelId, ...(isDsh ? { dshSource: explicit.dshSource } : {}) } : undefined
@@ -695,7 +698,7 @@ export function explicitSelection(
 }
 
 export function targetModelOptionsResolved(kind: AdapterKind, model: ModelDescriptor | null, source?: 'native' | 'web'): boolean {
-  return kind === 'minimax-code-cli' ? model?.runtimeMetadata?.modelOptionsResolved === true
+  return (kind === 'minimax-code-cli' || kind === 'goose-cli') ? model?.runtimeMetadata?.modelOptionsResolved === true
     : kind === 'deepseek-harness' && dshModelOptionsResolved(model, source)
 }
 

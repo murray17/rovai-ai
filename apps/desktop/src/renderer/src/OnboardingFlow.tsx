@@ -1,3 +1,4 @@
+import gooseLogo from './assets/runtime-logos/goose.svg'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import hermesLogo from './assets/runtime-logos/hermes.png'
 import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
@@ -69,6 +70,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'copilot-cli': copilotLogo,
   'opencode-cli': openCodeLogo,
   'kilo-cli': kiloLogo,
+  'goose-cli': gooseLogo,
   'kiro-cli': kiroLogo,
   'qoder-cli': qoderLogo,
   'codebuddy-cli': codeBuddyLogo,
@@ -93,6 +95,7 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'copilot-cli': 'GitHub Copilot',
   'opencode-cli': 'OpenCode',
     'kilo-cli': 'Kilo',
+    'goose-cli': 'Goose',
   'kiro-cli': 'Kiro',
   'qoder-cli': 'Qoder',
   'codebuddy-cli': 'CodeBuddy',

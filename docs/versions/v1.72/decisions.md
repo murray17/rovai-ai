@@ -3,10 +3,27 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-11
+last_updated: 2026-11-13
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d86"></a>
+## V1.72-D86：Goose 使用原生 Session 扩展和共享 ACP，macOS arm64 开放 Preview
+
+- 状态：accepted
+- 日期：2026-11-13
+- 当前权威：[Runtime Launch v90](../../contracts/runtime-launch-and-verification-v90.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#goose-官方-acp)与[平台准入](../../contracts/runtime-platform-admission-v2.md#goose-macos-arm64-preview)。
+
+User sequence 117 确认 R1 后实施。Goose 官方已提供 keyed System append、带活动 Run 归属的 Steer 接收回执和用量通知，
+因此采用这些薄映射并复用 ACP/Fleet，不复制 Kilo 的文件、第二 prompt 或数据库 reader。
+原生 load 不删除 MCP 的差异，通过稳定分配名和已有扩展移除 API 收口，不建立第二套连接管理。
+
+完整文件 Diff 的前像缺失、原生子代理不继承父 B、目录 effort 只能按需取得，均作为明确原生边界接受。
+相比伪造 Diff、复制父身份进子代理或扫描所有模型，保留原生事实的实现更小且归属清楚。
+原生 chat 跳过所有工具，无法满足必须经 CLI 公开发送的合同，因此只开放三种可执行原生模式；不为此另建自动发布旁路。
+macOS arm64 先开放 Preview；受控官方二进制证据不冒充真实账号或其他平台资格，不宣称 FirstClass。
+输入依据为[已确认 R1](model-context-change-goose-acp.md)，验证事实独立记录在本版实施记录。
 
 <a id="v1-72-d85"></a>
 ## V1.72-D85：Kilo Windows x64 目标机实测后通过资格

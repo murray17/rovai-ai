@@ -422,6 +422,7 @@ pub enum SkillDeliveryGroupKey {
     Pi,
     Opencode,
     Kilo,
+    Goose,
     Copilot,
     ClaudeCompatible,
     Antigravity,
@@ -442,11 +443,12 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
         Self::Kilo,
+        Self::Goose,
         Self::Copilot,
         Self::ClaudeCompatible,
         Self::Antigravity,
@@ -472,6 +474,7 @@ impl SkillDeliveryGroupKey {
             Self::Pi => "pi",
             Self::Opencode => "opencode",
             Self::Kilo => "kilo",
+            Self::Goose => "goose",
             Self::Copilot => "copilot",
             Self::ClaudeCompatible => "claude_compatible",
             Self::Antigravity => "antigravity",
@@ -498,6 +501,7 @@ impl SkillDeliveryGroupKey {
             Self::Pi => Path::new(".pi/skills"),
             Self::Opencode => Path::new(".opencode/skills"),
             Self::Kilo => Path::new(".kilo/skills"),
+            Self::Goose => Path::new(".goose/skills"),
             Self::Copilot => Path::new(".github/skills"),
             Self::ClaudeCompatible => Path::new(".claude/skills"),
             Self::Antigravity => Path::new(".agent/skills"),
@@ -528,6 +532,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "pi" => Ok(Self::Pi),
             "opencode" => Ok(Self::Opencode),
             "kilo" => Ok(Self::Kilo),
+            "goose" => Ok(Self::Goose),
             "copilot" => Ok(Self::Copilot),
             "claude_compatible" => Ok(Self::ClaudeCompatible),
             "antigravity" => Ok(Self::Antigravity),
@@ -824,6 +829,17 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             )
         };
+        if kind == AdapterKind::GooseCli {
+            return if platform == HostPlatformKey::MacosArm64 {
+                RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                )
+            } else {
+                unqualified()
+            };
+        }
         if kind == AdapterKind::KiloCli {
             return match platform {
                 HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
@@ -1009,6 +1025,7 @@ impl AgentRuntimeAdapterRegistry {
                 "approval_policy": "never",
             }),
             AdapterKind::Pi | AdapterKind::KiloCli => json!({}),
+            AdapterKind::GooseCli => json!({"mode":"auto"}),
             AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
             AdapterKind::ClineCli => json!({"mode":"act", "auto_approve":"true"}),
             AdapterKind::CommandCodeCli => json!({"permission_mode":"bypass"}),
@@ -1086,7 +1103,9 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
-            AdapterKind::ClineCli | AdapterKind::KiloCli => resolve_acp_runtime(kind, input),
+            AdapterKind::ClineCli | AdapterKind::KiloCli | AdapterKind::GooseCli => {
+                resolve_acp_runtime(kind, input)
+            }
         }
     }
 
@@ -1112,6 +1131,13 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
                 SkillDiscoveryVerification::Verified,
+            ),
+            AdapterKind::GooseCli => native_skill_discovery(
+                [
+                    SkillDeliveryGroupKey::Goose,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
             ),
             AdapterKind::KiloCli => native_skill_discovery(
                 [
@@ -1171,7 +1197,9 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
             AdapterKind::Pi => unsupported_external_mcp_projection(),
-            AdapterKind::KiloCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
+            AdapterKind::KiloCli | AdapterKind::GooseCli => {
+                additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
+            }
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -1224,6 +1252,9 @@ impl AgentRuntimeAdapterRegistry {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
             AdapterKind::KiloCli => acp_capability_snapshot(observation, Vec::new()),
+            AdapterKind::GooseCli => {
+                acp_capability_snapshot(observation, crate::goose::permission_options())
+            }
             AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
             AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
             AdapterKind::QoderCli => {
@@ -1274,6 +1305,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CodexCli => codex_permission_options(),
             AdapterKind::Pi => pi_permission_options(),
             AdapterKind::KiloCli => Vec::new(),
+            AdapterKind::GooseCli => crate::goose::permission_options(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -2612,6 +2644,7 @@ fn acp_capability_snapshot(
                 | AdapterKind::CommandCodeCli
                 | AdapterKind::ClineCli
                 | AdapterKind::KiloCli
+                | AdapterKind::GooseCli
         ) {
             &[
                 "acp.initialize",
@@ -2901,6 +2934,44 @@ pub fn acp_model_catalog_for_adapter(
     adapter_kind: AdapterKind,
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
+    if adapter_kind == AdapterKind::GooseCli {
+        let mut models =
+            if let Some(inventory) = session_result.pointer("/_meta/rovaiGooseProviders") {
+                crate::goose::model_catalog(inventory, session_result)?
+            } else {
+                let provider = session_result["configOptions"]
+                    .as_array()
+                    .and_then(|options| options.iter().find(|o| o["id"] == "provider"))
+                    .and_then(|o| o["currentValue"].as_str())
+                    .context("Goose current provider missing")?;
+                acp_model_catalog_from_session(session_result)?
+                    .into_iter()
+                    .map(|mut model| {
+                        model.id = format!("{provider}/{}", model.id);
+                        model.options.clear();
+                        model
+                    })
+                    .collect()
+            };
+        let selected = crate::goose::current_model(session_result);
+        let effort = session_result["configOptions"]
+            .as_array()
+            .and_then(|options| options.iter().find(|o| o["id"] == "thinking_effort"))
+            .and_then(acp_model_option);
+        for model in &mut models {
+            let metadata = model.runtime_metadata.get_or_insert_with(|| json!({}));
+            metadata["modelOptionsContext"] =
+                session_result["_meta"]["rovaiModelOptionsContext"].clone();
+            metadata["modelOptionsResolved"] = json!(false);
+            if selected.as_deref() == Some(model.id.as_str()) {
+                model.options = effort.clone().into_iter().collect();
+                metadata["modelOptionsResolved"] = json!(true);
+                metadata["modelOptionsObservedAt"] =
+                    session_result["_meta"]["rovaiModelOptionsObservedAt"].clone();
+            }
+        }
+        return Ok(models);
+    }
     let mut models = acp_model_catalog_from_session(session_result)?;
     if adapter_kind == AdapterKind::KiloCli {
         let current = acp_runtime_model_id_from_session(session_result);
@@ -4145,6 +4216,7 @@ mod tests {
             (AdapterKind::Pi, json!({})),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
             (AdapterKind::KiloCli, json!({})),
+            (AdapterKind::GooseCli, json!({"mode":"auto"})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (
                 AdapterKind::ClaudeCodeCli,
@@ -4189,6 +4261,15 @@ mod tests {
         for (kind, values) in expected {
             assert_eq!(registry.member_permission_defaults(kind), values);
         }
+        assert_eq!(
+            registry.permission_options(AdapterKind::GooseCli)[0]
+                .choices
+                .iter()
+                .map(|choice| choice.value.as_str())
+                .collect::<Vec<_>>(),
+            ["auto", "approve", "smart_approve"],
+            "Native chat cannot call the mandatory public-send CLI"
+        );
         let dsh = dsh_permission_options();
         assert_eq!(
             dsh.iter()
@@ -4205,6 +4286,56 @@ mod tests {
 
     #[test]
     fn grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs() {
+        let goose = json!({
+            "configOptions":[
+                {"id":"provider","currentValue":"native"},
+                {"id":"model","type":"select","currentValue":"org/model", "options":[{"value":"org/model","name":"Native model"}]},
+                {"id":"thinking_effort","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
+            ],
+            "_meta":{"rovaiModelOptionsContext":"fixture-context","rovaiModelOptionsObservedAt":"2026-11-13T00:00:00Z", "rovaiGooseProviders":{"entries":[
+                {"providerId":"native","configured":true,"available":true,"models":[{"id":"org/model","reasoning":true},{"id":"other"}]},
+                {"providerId":"second","configured":true,"available":true,"models":[{"id":"org/model"}]},
+                {"providerId":"unconfigured","configured":false,"available":true,"models":[{"id":"hidden"}]}
+            ]}}
+        });
+        let goose_models = acp_model_catalog_for_adapter(AdapterKind::GooseCli, &goose).unwrap();
+        assert_eq!(goose_models.len(), 3);
+        let selected = goose_models
+            .iter()
+            .find(|m| m.id == "native/org/model")
+            .unwrap();
+        assert!(selected.is_default);
+        assert_eq!(selected.options[0].key, "thinking_effort");
+        assert_eq!(
+            selected.options[0]
+                .values
+                .iter()
+                .map(|v| v.value.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "high"]
+        );
+        for model in &goose_models {
+            assert_eq!(
+                model.runtime_metadata.as_ref().unwrap()["modelOptionsContext"],
+                "fixture-context"
+            );
+            if model.id != "native/org/model" {
+                assert!(model.options.is_empty());
+                assert_eq!(
+                    model.runtime_metadata.as_ref().unwrap()["modelOptionsResolved"],
+                    false
+                );
+            }
+        }
+        assert_eq!(
+            crate::goose::model_route("native/org/model").unwrap(),
+            ("native", "org/model")
+        );
+        assert!(crate::goose::model_route("/model").is_err());
+        assert!(crate::goose::model_route("native/").is_err());
+        let mut empty = goose.clone();
+        empty["_meta"]["rovaiGooseProviders"]["entries"] = json!([]);
+        assert!(acp_model_catalog_for_adapter(AdapterKind::GooseCli, &empty).is_err());
         let acp = json!({"models":{"currentModelId":"absent-default", "availableModels":[
             {"modelId":"auto"}, {"modelId":"auto","name":"Auto","description":"native auto","_meta":{"provider":"native"}},
             {}, {"modelId":""}, {"modelId":"valid"}, {"group":"broken","options":false}
@@ -5917,6 +6048,14 @@ mod tests {
             SkillDiscoveryVerification,
         )] = &[
             (
+                AdapterKind::GooseCli,
+                &[
+                    SkillDeliveryGroupKey::Goose,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            (
                 AdapterKind::KiloCli,
                 &[
                     SkillDeliveryGroupKey::Kilo,
@@ -6053,6 +6192,7 @@ mod tests {
     fn external_mcp_projection_capability_matches_the_verified_matrix() {
         let registry = AgentRuntimeAdapterRegistry::default();
         for kind in [
+            AdapterKind::GooseCli,
             AdapterKind::CodexCli,
             AdapterKind::ClaudeCodeCli,
             AdapterKind::OpencodeCli,

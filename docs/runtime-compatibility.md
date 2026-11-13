@@ -1,10 +1,19 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-11
+last_updated: 2026-11-13
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-13 Goose 官方 ACP Preview
+
+官方完整 CLI 1.59.0 / macOS arm64 经隔离 loopback Provider 验证，沿共享 ACP/Fleet 进入产品目录。
+真实 Core 已验证首次/Warm/精确冷恢复、原生 Bootstrap、按需 effort、审批、文件、Skills、7.5 KiB 输出、
+前台 delegate、自动阈值/overflow 压缩、Steer 接收与 Warm、取消后同 PID 新 lease、MCP 撤回与不同 cwd。
+所有模型均为受控响应；真实账号、HTTP MCP、多 Binding 压力和其他平台未取得资格。
+完整 Diff 原生缺前像，明确 Unsupported；原生子代理不继承父 B。当前范围与失败对照见
+[实施记录](versions/v1.72/goose-acp-implementation.md)，不宣称完整 Golden Flow 或 FirstClass。
 
 ## 2026-11-11 Pi 原地升级与版本生命周期解耦
 

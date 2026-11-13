@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:2b3e5ab84dc5751c28d7b0d83c1687c4b00b459f72c128ec934757d2f0391729";
+    "sha256:8fa6c622759ff0273e36543768e0b9c7a0794699140a76eb523c4e15798ccd36";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -366,6 +366,24 @@ mod tests {
         );
         for runtime_kind in AdapterKind::ALL {
             for platform in HostPlatformKey::ALL {
+                if runtime_kind == AdapterKind::GooseCli {
+                    let admission = registry.platform_admission(runtime_kind, platform);
+                    assert_eq!(
+                        admission.status(),
+                        if platform == HostPlatformKey::MacosArm64 {
+                            RuntimePlatformAdmissionStatus::Preview
+                        } else {
+                            RuntimePlatformAdmissionStatus::NotQualified
+                        }
+                    );
+                    assert_eq!(
+                        admission.allows_runtime_use(),
+                        platform == HostPlatformKey::MacosArm64
+                    );
+                    assert!(!admission.is_qualified());
+                    assert!(admission.evidence_revision().is_none());
+                    continue;
+                }
                 if platform == HostPlatformKey::LinuxX64 {
                     let admission = registry.platform_admission(runtime_kind, platform);
                     match runtime_kind {
@@ -509,6 +527,7 @@ mod tests {
                 runtime_kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
+                    | AdapterKind::GooseCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
                     | AdapterKind::HermesCli
@@ -633,6 +652,7 @@ mod tests {
                 kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
+                    | AdapterKind::GooseCli
                     | AdapterKind::KiloCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli

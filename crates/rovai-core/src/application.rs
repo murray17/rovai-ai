@@ -2711,6 +2711,7 @@ struct Core {
     pi: PiRpcRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
     kilo_cli: AcpCliRuntimeAdapter,
+    goose_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
     kiro_cli: AcpCliRuntimeAdapter,
     qoder_cli: AcpCliRuntimeAdapter,
@@ -3070,6 +3071,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::Pi => "Pi",
         AdapterKind::OpencodeCli => "OpenCode",
         AdapterKind::KiloCli => "Kilo",
+        AdapterKind::GooseCli => "Goose",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
         AdapterKind::KiroCli => "Kiro CLI",
@@ -6550,6 +6552,13 @@ impl Core {
             return Some(AgentRunRuntime::Acp(runtime));
         }
         if let Some(runtime) = self
+            .goose_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
             .opencode_cli
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -6759,6 +6768,7 @@ impl Core {
             self.cline_cli.shutdown_all(),
             self.opencode_cli.shutdown_all(),
             self.kilo_cli.shutdown_all(),
+            self.goose_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
             self.qoder_cli.shutdown_all(),
@@ -6787,6 +6797,7 @@ impl Core {
                 self.cline_cli.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
                 self.kilo_cli.shutdown_all(),
+                self.goose_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
                 self.qoder_cli.shutdown_all(),
@@ -6818,6 +6829,7 @@ impl Core {
         match kind {
             rovai_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
             AdapterKind::KiloCli => Some(&self.kilo_cli),
+            AdapterKind::GooseCli => Some(&self.goose_cli),
             rovai_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
             rovai_core::agent_profile::AdapterKind::KiroCli => Some(&self.kiro_cli),
             rovai_core::agent_profile::AdapterKind::QoderCli => Some(&self.qoder_cli),
@@ -13239,7 +13251,9 @@ impl Core {
                     anyhow::ensure!(
                         matches!(
                             params.runtime_kind,
-                            AdapterKind::DeepseekHarness | AdapterKind::MinimaxCodeCli
+                            AdapterKind::DeepseekHarness
+                                | AdapterKind::MinimaxCodeCli
+                                | AdapterKind::GooseCli
                         ),
                         "Runtime does not support target-model option discovery"
                     );
@@ -13645,6 +13659,7 @@ impl Core {
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | AdapterKind::KiloCli
+            | AdapterKind::GooseCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -13675,7 +13690,7 @@ impl Core {
                         reported_version: probe.result.reported_version,
                         executable_fingerprint: probe.result.executable_fingerprint,
                         authentication_status: if kind == AdapterKind::ClineCli
-                            || (kind == AdapterKind::KiloCli
+                            || (matches!(kind, AdapterKind::KiloCli | AdapterKind::GooseCli)
                                 && probe.result.status
                                     != health::AgentRuntimeProbeStatus::AuthenticationRequired)
                         {
@@ -20253,6 +20268,7 @@ impl Core {
                 | AdapterKind::CommandCodeCli
                 | AdapterKind::ClineCli
                 | AdapterKind::KiloCli
+                | AdapterKind::GooseCli
         ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
@@ -20678,6 +20694,7 @@ impl Core {
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | AdapterKind::KiloCli
+            | AdapterKind::GooseCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -21610,6 +21627,13 @@ async fn run_core(
             AdapterKind::KiloCli,
             acp_tx.clone(),
             data_dir.join("runtime/kilo"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        ),
+        goose_cli: AcpCliRuntimeAdapter::deferred(
+            AdapterKind::GooseCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/goose"),
             runtime_fleet.clone(),
             CompactionDetectorPolicy::Disabled,
         ),
@@ -30448,6 +30472,13 @@ mod tests {
                 AdapterKind::KiloCli,
                 acp_tx.clone(),
                 data_dir.join("runtime/kilo"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
+            goose_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::GooseCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/goose"),
                 runtime_fleet.clone(),
                 CompactionDetectorPolicy::Disabled,
             )?,

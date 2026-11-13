@@ -3,16 +3,16 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-12
+last_updated: 2026-11-13
 ---
 
 # v1.72 实施与验收
 
-## Goose 官方 ACP（2026-11-12，研究与提案）
+## Goose 官方 ACP（2026-11-13）
 
 - Work item：User sequence 109，基于 Kilo 经验调研接入 Goose；Owner：爱丽丝。
 - Worktree：`../rovai-ai-goose-acp`；Branch：`rovai/goose-acp`；Status：active。
-  Base：`origin/main@c7295e2b0b4667a5434c855cd2dd456bcf637e4c`；Governance：User sequence 117 已确认[模型输入 R1](model-context-change-goose-acp.md)，先记录确认再实施。
+  Base：研究起点 `origin/main@c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`；Governance：User sequence 117 已确认[模型输入 R1](model-context-change-goose-acp.md)，先记录确认再实施。
 - 已完成：[原生研究和 14 轴矩阵](../../research/goose-runtime/README.md)、[R1 完整前后说明](goose-acp-proposal.md)、
   [可复现脚本](../../../scripts/probe-goose-runtime.mjs)及[白名单结果](../../research/goose-runtime/native-probe-1.59.0-macos-arm64.json)。
 - 原生官方 1.59.0 / macOS arm64 / 隔离 loopback Provider：new/warm/exact cold、88,099 字节完整 Bootstrap、
@@ -23,10 +23,10 @@ last_updated: 2026-11-12
   以及固定基线 `DOCS_BASE_REF=c7295e2b0b4667a5434c855cd2dd456bcf637e4c pnpm docs:check:ci`。
 - 明确缺口：完整 write 前像不可得；原生子代理不继承父 B；压缩未见逐消息用量，需共享累计基线；
   MCP load 的空列表不删旧工具，需官方 list/remove。没有为此增加执行框架或私有监控。
-- 待确认后：提取已确认模型输入说明，完成新 identity 与共享接线，再按 14 轴／9 Flow 做 Core 和真实模型验收。
-  本轮证据不替代正式 CLI lease/epoch、public send、7.5 KiB 持久化预算、不同 cwd、HTTP MCP 或其他平台资格。
+- 实施：已记录 seq117 的 R1 确认；产品 identity、共享接线与现有表单已加入。实际 Core、用量与生命周期结果见[实施记录](goose-acp-implementation.md)。
+  原生证据不能替代 Core；现已补齐 CLI lease、public send、输出预算与不同 cwd，HTTP MCP 和其他平台仍未验证。
 - 九范围：Version lifecycle 保持 v1.72；Documentation routing 增加研究/提案入口；
-  Decisions、Contracts、Architecture、Runtime compatibility、UI、Runtime Activity 和 Root README 均未改变产品语义。
+  Decisions、Contracts、Architecture、Runtime compatibility、UI 与 Runtime Activity 同步当前 Goose 语义；Root README 无需复制具体产品矩阵。
   当前版本已有 model_context_change=true；Goose 的独立说明记录真实 User 确认，不增加 gate 例外。
 
 ## 通用提示与分叉反馈（2026-11-12）

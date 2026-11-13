@@ -2100,9 +2100,10 @@ fn eligible_mask(runtime: AdapterKind, _runtime_version: Option<&str>) -> i64 {
         | AdapterKind::Pi
         | AdapterKind::GrokBuild
         | AdapterKind::AntigravityApp => full_tokens,
-        AdapterKind::ClaudeCodeCli | AdapterKind::CopilotCli | AdapterKind::KiloCli => {
-            full_tokens | ELIGIBLE_COST
-        }
+        AdapterKind::ClaudeCodeCli
+        | AdapterKind::CopilotCli
+        | AdapterKind::KiloCli
+        | AdapterKind::GooseCli => full_tokens | ELIGIBLE_COST,
         AdapterKind::CodebuddyCli => (full_tokens & !ELIGIBLE_CACHE_WRITE) | ELIGIBLE_COST,
         AdapterKind::QwenCode => {
             (full_tokens & !(ELIGIBLE_UNCACHED_INPUT | ELIGIBLE_CACHE_WRITE)) | ELIGIBLE_COST
@@ -3019,7 +3020,7 @@ fn string_at_any(value: &Value, pointers: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn cost_from_value(
+pub(crate) fn cost_from_value(
     value: Option<&Value>,
     currency: &str,
     quality: &str,
@@ -3201,6 +3202,9 @@ pub fn parse_acp_usage_message(
     method: &str,
     params: &Value,
 ) -> Vec<ParsedRuntimeUsage> {
+    if adapter_kind == AdapterKind::GooseCli {
+        return crate::goose::usage(method, params);
+    }
     if adapter_kind == AdapterKind::KiroCli && method == "_kiro.dev/metadata" {
         let Some(ratio) = params
             .get("contextUsagePercentage")
@@ -5154,6 +5158,43 @@ mod tests {
 
     #[test]
     fn runtime_parsers_emit_sparse_usage_without_antigravity_inference() {
+        let known_zero = json!({"sessionId":"goose","update":{"sessionUpdate":"usage_update","accumulatedCost":0}});
+        let sparse = json!({"sessionId":"goose","update":{"sessionUpdate":"usage_update","accumulatedInputTokens":0,"accumulatedCost":null}});
+        let snapshot = crate::goose::usage_snapshot(Some(&known_zero), &sparse);
+        assert_eq!(snapshot["update"]["accumulatedCost"], 0);
+        assert!(crate::goose::usage_snapshot(None, &sparse)["update"]["accumulatedCost"].is_null());
+        let live = crate::goose::usage("_goose/unstable/session/update", &sparse);
+        assert!(
+            live.iter().all(|observation| observation.cost.is_none()),
+            "A dispatch checkpoint must not turn missing live cost into a reported zero"
+        );
+        let totals = parse_acp_usage_message(
+            AdapterKind::GooseCli,
+            Some("1.59.0"),
+            "_goose/unstable/session/update",
+            &json!({"sessionId":"goose","update":{"sessionUpdate":"usage_update","used":120,"contextLimit":200000,"accumulatedInputTokens":300,"accumulatedOutputTokens":60,"accumulatedCost":0.00001}}),
+        );
+        assert_eq!(totals.len(), 3);
+        assert_eq!(totals[0].fields.input_tokens, Some(300));
+        assert_eq!(totals[1].fields.context_used_tokens, Some(120));
+        assert_eq!(totals[1].counter_mode, RuntimeUsageCounterMode::Gauge);
+        assert!(totals[0].cost.is_none());
+        assert!(totals[2].fields.is_empty());
+        assert_eq!(totals[2].cost.as_ref().unwrap().amount, "0.00001");
+        assert_eq!(totals[2].cost.as_ref().unwrap().quality, "runtime_estimate");
+        assert_ne!(totals[0].identity_suffix, totals[1].identity_suffix);
+        let cache = parse_acp_usage_message(
+            AdapterKind::GooseCli,
+            None,
+            "_goose/unstable/session/update",
+            &json!({"sessionId":"goose","update":{"sessionUpdate":"message_usage","messageId":"call","usage":{"inputTokens":100,"outputTokens":20,"cacheReadTokens":10}}}),
+        );
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache[0].fields.cache_read_input_tokens, Some(10));
+        assert!(cache[0].fields.input_tokens.is_none() && cache[0].cost.is_none());
+        assert_eq!(cache[0].counter_mode, RuntimeUsageCounterMode::Delta);
+        assert!(parse_acp_usage_message(AdapterKind::GooseCli,None,"session/update",&json!({"sessionId":"goose","update":{"sessionUpdate":"usage_update","accumulatedInputTokens":300}})).is_empty());
+        assert!(parse_acp_usage_message(AdapterKind::GooseCli,None,"_goose/unstable/session/update",&json!({"sessionId":"goose","update":{"sessionUpdate":"message_usage","usage":{"cacheReadTokens":10}}})).is_empty());
         let hermes = parse_acp_usage_message(
             AdapterKind::HermesCli,
             Some("0.22.4"),

@@ -73,6 +73,7 @@ pub(super) fn project_model(
     };
     let effort_key = match adapter_kind {
         "claude-code-cli" | "command-code-cli" | "kilo-cli" => "effort",
+        "goose-cli" => "thinking_effort",
         "pi" => "thinking_level",
         "codebuddy-cli" => "thought_level",
         "minimax-code-cli" => "thinkingEffort",

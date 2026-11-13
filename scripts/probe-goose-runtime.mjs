@@ -36,7 +36,6 @@ const provider=createServer(async(req,res)=>{
   }
   let raw='';for await(const b of req)raw+=b
   const body=JSON.parse(raw);requests.push(body)
-  await writeFile(join(fixture,'evidence','provider-requests.json'),JSON.stringify(requests,null,2))
   const lastUser=[...(body.messages??[])].reverse().find(m=>m.role==='user')
   const text=typeof lastUser?.content==='string'?lastUser.content:JSON.stringify(lastUser?.content)
   if(body.tools?.length&&text?.includes('PROBE_OVERFLOW')&&!overflowInjected){
@@ -421,6 +420,7 @@ try{
 }finally{
  releaseSteer();releaseCancel();releaseChild();releaseChildCancel()
  for(const h of hosts)await h.close()
+ await writeFile(join(fixture,'evidence','provider-requests.json'),JSON.stringify(requests,null,2))
  await writeFile(join(fixture,'evidence','frames.json'),JSON.stringify(frames,null,2))
  await writeFile(join(fixture,'evidence','stderr.log'),hosts.map(h=>h.stderr).join('\n'))
  await new Promise(r=>provider.close(r))

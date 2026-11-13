@@ -26,7 +26,7 @@ pub(crate) fn metadata_keys(kind: AdapterKind) -> Option<MetadataKeys> {
             context: "dshOptionsContext",
             observed_at: "dshOptionsObservedAt",
         }),
-        AdapterKind::MinimaxCodeCli => Some(MetadataKeys {
+        AdapterKind::GooseCli | AdapterKind::MinimaxCodeCli => Some(MetadataKeys {
             resolved: "modelOptionsResolved",
             context: "modelOptionsContext",
             observed_at: "modelOptionsObservedAt",
@@ -36,6 +36,15 @@ pub(crate) fn metadata_keys(kind: AdapterKind) -> Option<MetadataKeys> {
 }
 
 pub(crate) fn context(kind: AdapterKind, executable: &Path) -> Result<String> {
+    if kind == AdapterKind::GooseCli {
+        return Ok(format!(
+            "goose:{}:{}",
+            executable.display(),
+            crate::runtime_discovery::runtime_environment_variable(kind, "GOOSE_PATH_ROOT")
+                .unwrap_or_default()
+                .to_string_lossy()
+        ));
+    }
     if kind == AdapterKind::DeepseekHarness {
         return crate::dsh::model_options_context(executable);
     }

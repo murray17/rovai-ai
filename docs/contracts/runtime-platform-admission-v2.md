@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-11-11
+last_updated: 2026-11-13
 ---
 
 # Runtime Platform Admission v2
@@ -204,3 +204,12 @@ Core 允许发现、检查、安装配置、成员选择和普通执行，并执
 Core 允许常规发现、检查、安装配置、成员选择和执行，并执行现有的机器安装、原生认证、版本、模型和能力检查。
 目标机与用量采样范围见 [Windows x64 验收](../research/kilo-runtime/README.md#windows-x64-目标机验收)与
 [V1.72-D85](../versions/v1.72/decisions.md#v1-72-d85)。
+
+<a id="goose-macos-arm64-preview"></a>
+## Goose macOS arm64 Preview
+
+新增 `goose-cli × macos-arm64 = preview`，reasonCode 为 `runtime_platform.qualification_evidence_missing`，
+evidenceRevision 为 null。其他三平台均保持 NotQualified，不产生本机检查或普通执行。
+官方 1.59.0 macOS arm64 二进制和隔离受控 Provider 支持实现验收；不等同真实账号、Intel/Linux/Windows 或完整平台资格。
+原生完整 Diff 与父 Bootstrap 不进入原生子代理的差异按 [D86](../versions/v1.72/decisions.md#v1-72-d86) 接受。
+普通原生权限、认证和执行检查继续生效，界面不另加 Preview 提示或平台白名单。
