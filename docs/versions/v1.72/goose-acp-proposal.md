@@ -2,17 +2,17 @@
 document_type: implementation-proposal
 version: v1.72
 authority: proposed-runtime-integration
-status: proposed
+status: accepted
 revision: 1
-confirmation_status: pending
-last_updated: 2026-11-12
+confirmation_status: confirmed
+last_updated: 2026-11-13
 ---
 
 # Goose 官方 ACP 接入提案 R1
 
 User sequence 109 要求基于 Kilo 经验深入调研并开启 worktree 接入 Goose。
 研究和原生探测已经完成，见 [14 轴矩阵及原生证据](../../research/goose-runtime/README.md)。
-本文件是可供二次确认的 R1 提案，尚未授权修改模型输入实现、Schema 或当前合同。
+User sequence 117 已确认本 R1 并要求实施；[独立模型输入说明](model-context-change-goose-acp.md)记录相同输入合同和真实确认。
 
 ## 最小接入结构
 
@@ -172,13 +172,8 @@ Native setter ACK 只证明 API 调用成功；实际模型可见证据由隔离
 
 ### 二次确认
 
-当前 `revision: 1`，`confirmation_status: pending`；没有 confirmed_by/confirmed_at，实施未开始。
-按[核心模型上下文变更治理](../../development/model-context-change-governance.md#二次确认门槛)：
-“未取得确认时可以继续调查和编辑提案文档，但不得修改实现、Schema、当前合同或执行 clean break。”
-
-User 查看并明确同意本 R1 后，先把本节完整输入说明提取到当前版本的独立
-`model-context-change-goose-acp.md`，记录真实 confirmed_by、confirmed_at、revision 和 confirmed_revision，
-通过通用文档门禁，再开始实现；不替 User 自动确认，也不为未确认提案增加 checker 例外。
+User sequence 117 已明确要求实施 revision 1；完整确认记录见
+[独立模型输入说明](model-context-change-goose-acp.md#二次确认)。
 
 ## 需要批准的上游差异与小型映射
 
@@ -286,4 +281,4 @@ new 的明确 0、cold load 的累计末值、warm Host 的已观察末值在 di
 
 分支 `rovai/goose-acp`，worktree `../rovai-ai-goose-acp`，状态 active。
 已完成固定源码核查、官方二进制原生探测、14 轴矩阵、可复现脚本和本 R1。
-尚未修改产品身份、Schema、当前合同、UI 或启动代码；确认后继续在同一分支／worktree 实施。
+User sequence 117 后进入实施；继续在同一分支／worktree 修改产品接线并逐项验收。

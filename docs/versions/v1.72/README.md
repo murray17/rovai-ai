@@ -15,7 +15,8 @@ last_updated: 2026-11-12
 
 User sequence 109 的独立 worktree `rovai/goose-acp` 已完成官方 1.59.0 固定源码与真实二进制探测。
 结论、14 轴矩阵和复现脚本见[原生研究](../../research/goose-runtime/README.md)；
-[接入及模型输入 R1](goose-acp-proposal.md)等待二次确认，再提取独立输入说明并进入实现。
+User sequence 117 已确认[接入及模型输入 R1](goose-acp-proposal.md)，
+[独立输入说明](model-context-change-goose-acp.md)先于实现记录确认，继续在同一 worktree 实施。
 候选复用共享 ACP/Fleet；采用原生 keyed System append、独立 Steer 回执和用量通知，
 不复制 Kilo 的 instructions 文件、第二 prompt、SQLite reader 或已退役权限 Hook。
 MCP 原生恢复不删除旧项、write 缺完整前像等差异已明示。

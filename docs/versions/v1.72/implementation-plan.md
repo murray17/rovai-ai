@@ -12,7 +12,7 @@ last_updated: 2026-11-12
 
 - Work item：User sequence 109，基于 Kilo 经验调研接入 Goose；Owner：爱丽丝。
 - Worktree：`../rovai-ai-goose-acp`；Branch：`rovai/goose-acp`；Status：active。
-  Base：`origin/main@c7295e2b0b4667a5434c855cd2dd456bcf637e4c`；Governance：模型输入 R1 待二次确认，产品实现未开始。
+  Base：`origin/main@c7295e2b0b4667a5434c855cd2dd456bcf637e4c`；Governance：User sequence 117 已确认[模型输入 R1](model-context-change-goose-acp.md)，先记录确认再实施。
 - 已完成：[原生研究和 14 轴矩阵](../../research/goose-runtime/README.md)、[R1 完整前后说明](goose-acp-proposal.md)、
   [可复现脚本](../../../scripts/probe-goose-runtime.mjs)及[白名单结果](../../research/goose-runtime/native-probe-1.59.0-macos-arm64.json)。
 - 原生官方 1.59.0 / macOS arm64 / 隔离 loopback Provider：new/warm/exact cold、88,099 字节完整 Bootstrap、
@@ -27,7 +27,7 @@ last_updated: 2026-11-12
   本轮证据不替代正式 CLI lease/epoch、public send、7.5 KiB 持久化预算、不同 cwd、HTTP MCP 或其他平台资格。
 - 九范围：Version lifecycle 保持 v1.72；Documentation routing 增加研究/提案入口；
   Decisions、Contracts、Architecture、Runtime compatibility、UI、Runtime Activity 和 Root README 均未改变产品语义。
-  当前版本已有 model_context_change=true；Goose 未确认的提案不伪装为 confirmed 说明，不增加 gate 例外。
+  当前版本已有 model_context_change=true；Goose 的独立说明记录真实 User 确认，不增加 gate 例外。
 
 ## 通用提示与分叉反馈（2026-11-12）
 

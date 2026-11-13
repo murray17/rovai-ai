@@ -12,7 +12,7 @@ Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收
 这三处可以比 Kilo 更薄。MCP 恢复的追加语义、write 缺少完整前像、压缩用量范围是必须正面处理的差异。
 
 当前仅完成研究和真实官方二进制的受控探测；Rovai 产品目录、Schema、实现和当前合同均未增加 Goose。
-[实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)等待开发者二次确认。
+[实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。
 以下 `Verified` 指原生能力，不代表 Rovai 已接线、真实账号已登录或目标平台已取得产品资格。
 
 ## 固定基线与复现
