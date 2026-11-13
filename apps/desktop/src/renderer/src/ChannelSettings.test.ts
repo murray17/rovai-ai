@@ -58,6 +58,25 @@ describe('Channel settings', () => {
     expectTypeOf<ChannelsApi['connect']>().parameters.toEqualTypeOf<[kind?: ChannelKind]>()
   })
 
+  it('keeps published transport recovery distinct and retains reconciliation for terminal failures', () => {
+    const snapshot = unavailableSnapshot()
+    snapshot.channels[0].hostStatus = 'ready'
+    snapshot.channels[0].memberBots = [{ agentId: 'agent-a', publicationStatus: 'published', published: true,
+      connectionStatus: 'reconnecting', connectionFailureCode: 'transport_error', connectionNeedsAttention: true,
+      botDisplayName: 'Bot', appId: 'cli_a', managementUrl: 'https://open.feishu.cn/app/cli_a/baseinfo', failureCode: null }]
+    const render = () => renderToStaticMarkup(createElement(ChannelSettingsView, {
+      snapshot, agents: [agent('agent-a', 0)], busy: null
+    }))
+    expect(render()).toContain('连接中断，正在重连')
+    expect(render()).toContain('连接暂不可用，请检查网络或代理')
+    expect(render()).toContain('已发布')
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'offline',
+      connectionFailureCode: 'identity_conflict', canReconcile: true }
+    expect(render()).toContain('继续核对')
+    expect(render()).toContain('连接需处理，请继续核对')
+    expect(render()).not.toContain('identity_conflict')
+  })
+
   it('keeps cancellation silent and distinguishes expired login from temporary connection failures', () => {
     expect(channelErrorMessage(new Error('dingtalk_operation_cancelled'))).toBeNull()
     expect(channelErrorMessage(new Error('dingtalk_developer_session_expired'))).toBe('登录已失效，请重新连接。')

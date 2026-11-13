@@ -3401,7 +3401,10 @@ export interface ChannelMemberBotView {
   /** Durable Bot publication fact, even if a later connection/retry failed. */
   published?: boolean
   /** Live transport observation, independent of durable publication status. */
-  connectionStatus?: 'online' | 'offline' | 'unknown'
+  connectionStatus?: 'online' | 'offline' | 'unknown' | 'connecting' | 'reconnecting'
+  connectionFailureCode?: string | null
+  connectionNeedsAttention?: boolean
+  canReconcile?: boolean
   agentId: string
   publicationStatus: ChannelPublicationStatus
   botDisplayName: string | null
@@ -4548,6 +4551,7 @@ export type CoreMethod =
   | 'channels.feishu.publicationIntent.advance'
   | 'channels.feishu.publicationIntent.storeCredential'
   | 'channels.feishu.memberBot.upsert'
+  | 'channels.feishu.memberBot.observeConnection'
   | 'channels.feishu.owner.verify'
   | 'channels.feishu.dm.startNew'
   | 'channels.feishu.pendingBinding.resolve'
@@ -4560,6 +4564,7 @@ export type CoreMethod =
   | 'channels.lark.publicationIntent.advance'
   | 'channels.lark.publicationIntent.storeCredential'
   | 'channels.lark.memberBot.upsert'
+  | 'channels.lark.memberBot.observeConnection'
   | 'channels.lark.owner.verify'
   | 'channels.lark.dm.startNew'
   | 'channels.lark.pendingBinding.resolve'

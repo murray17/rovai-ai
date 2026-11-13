@@ -13,6 +13,7 @@ import {
 } from '@larksuiteoapi/node-sdk'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
+import { ChannelHostLifecycle } from './channel-host-lifecycle'
 import { FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE } from './channel-provider-profile'
 import {
   ChannelSettingsService,
@@ -33,8 +34,43 @@ import type { PendingFeishuAttachments } from './feishu-inbound-attachments'
 function channelCore(
   handler: (method: string, params: unknown) => unknown | Promise<unknown>
 ): ChannelHostDependencies['core'] {
+  // Model the local write/read contract: publication now observes its binding
+  // through snapshot before connecting, instead of issuing a second upsert.
+  const bots = new Map<string, Record<string, unknown>>()
+  const intents = new Map<string, Record<string, unknown>>()
   return {
-    request: (method, params) => Promise.resolve(handler(method, params))
+    request: async (method: string, params: unknown) => {
+      const result = await handler(method, params)
+      const command = (params as { command?: Record<string, unknown> } | undefined)?.command
+      if (command && (result as { status?: string })?.status === 'applied') {
+        if (method.endsWith('memberBot.upsert')) bots.set(String(command.agentId), {
+          ...command, brand: method.includes('.lark.') ? 'lark' : 'feishu', status: 'published',
+          botDisplayName: command.botDisplayName, failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        })
+        if (method.endsWith('publicationIntent.create')) intents.set(String(command.publicationIntentId), {
+          ...command, state: 'created', version: 1, remoteAppId: null, credentialRef: null,
+          lastCompletedStep: null, failureCode: null, createdAt: '2026-11-13', updatedAt: '2026-11-13'
+        })
+        const intent = intents.get(String(command.publicationIntentId))
+        if (intent && method.endsWith('publicationIntent.advance')) Object.assign(intent, command, { version: Number(command.expectedVersion) + 1 })
+        if (intent && method.endsWith('publicationIntent.storeCredential')) Object.assign(intent, {
+          state: 'credentials_read', lastCompletedStep: 'credentials_read', remoteAppId: command.remoteAppId,
+          credentialRef: command.credentialRef, version: Number(command.expectedIntentVersion) + 1
+        })
+      }
+      if (method.endsWith('.snapshot') && result && typeof result === 'object') {
+        const snapshot = result as Record<string, unknown>
+        const rows = snapshot.memberBots as Array<Record<string, unknown>>
+        const existing = new Set(rows.map(bot => String(bot.agentId)))
+        const stored = snapshot.publicationIntents as Array<Record<string, unknown>>
+        const known = new Set(stored.map(intent => String(intent.publicationIntentId)))
+        return { ...snapshot,
+          memberBots: [...rows, ...[...bots.values()].filter(bot => !existing.has(String(bot.agentId)))],
+          publicationIntents: [...stored, ...[...intents.values()].filter(intent => !known.has(String(intent.publicationIntentId)))]
+        }
+      }
+      return result
+    }
   } as ChannelHostDependencies['core']
 }
 
@@ -104,7 +140,7 @@ function coreSnapshot(overrides: Record<string, unknown> = {}): Record<string, u
   return {
     ...snapshot,
     memberBots: (snapshot.memberBots as Array<Record<string, unknown>>).map((bot) => ({
-      ownerIdentityStatus: 'unverified',
+      ownerIdentityStatus: 'verified',
       ...bot
     }))
   }
@@ -325,6 +361,83 @@ function normalizedMessage(input: {
 }
 
 describe('channel settings service', () => {
+  it('keeps Core generation changes and stop independent of a never-ready Bot', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: 'A' } })
+    const original = harness.createChannel
+    const neverReady = vi.fn((options: Parameters<NonNullable<ChannelHostDependencies['createChannel']>>[0]) => {
+      const channel = original(options)
+      channel.connect = vi.fn(() => new Promise<void>(() => {}))
+      return channel
+    }) as NonNullable<ChannelHostDependencies['createChannel']>
+    const requests: string[] = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(), createChannel: neverReady,
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore(method => {
+        requests.push(method)
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a', brand: 'feishu',
+          credentialRef: 'credential-a', status: 'published', failureCode: null, version: 1,
+          botDisplayName: 'A', ownerIdentityStatus: 'verified'
+        }] })
+        return { status: 'applied', payload: {} }
+      })
+    })
+    const lifecycle = new ChannelHostLifecycle(service)
+    const ready = (generation: number) => ({ generation, fullCoreState: 'ready' as const,
+      capabilities: { authoritativeWorkspace: true, coreRequests: true } })
+    await lifecycle.update(ready(1))
+    expect(neverReady).toHaveBeenCalledOnce()
+    expect(requests).toContain('channels.host.tick')
+    await lifecycle.update(ready(2))
+    expect(neverReady).toHaveBeenCalledTimes(2)
+    expect((await service.get()).channels[0].memberBots[0]).toMatchObject({
+      published: true, publicationStatus: 'published', connectionStatus: 'connecting'
+    })
+    await lifecycle.stop()
+  })
+
+  it('preserves reconciliation when a published App still has an unresolved publication intent', async () => {
+    const service = new ChannelSettingsService({
+      credentialStore: memoryCredentialStore(), ...inertInterval(),
+      core: channelCore(() => coreSnapshot({ memberBots: [{ agentId: 'agent-a', accountId: 'account-1',
+        appId: 'cli_a', credentialRef: 'credential-a', brand: 'feishu', status: 'published', version: 1,
+        botDisplayName: 'A', failureCode: null }], publicationIntents: [{ publicationIntentId: 'intent-a',
+        agentId: 'agent-a', accountId: 'account-1', remoteAppId: 'cli_a', credentialRef: 'credential-a',
+        state: 'failed_unknown_remote_state', lastCompletedStep: 'app_created', failureCode: 'remote_outcome_unknown',
+        version: 4, createdAt: '2026-11-13', updatedAt: '2026-11-13' }] }))
+    })
+    expect((await service.get()).channels[0].memberBots[0]).toMatchObject({
+      published: true, publicationStatus: 'failed', connectionStatus: 'unknown', canReconcile: true
+    })
+  })
+
+  it('makes an observed identity conflict terminal without replacing the App or channel', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_wrong', name: 'Wrong' } })
+    const service = new ChannelSettingsService({
+      ...inertInterval(), createChannel: harness.createChannel,
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore(method => {
+        if (method === 'channels.feishu.snapshot') return coreSnapshot({ memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a', brand: 'feishu',
+          credentialRef: 'credential-a', status: 'published', failureCode: null, version: 1,
+          botDisplayName: 'A', ownerIdentityStatus: 'verified'
+        }] })
+        if (method === 'channels.feishu.memberBot.observeConnection') return {
+          status: 'rejected', code: 'feishu_member_bot.identity_conflict', payload: { message: 'Identity mismatch' }
+        }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    await vi.waitFor(async () => expect((await service.get()).channels[0].memberBots[0]).toMatchObject({
+      publicationStatus: 'published', published: true, connectionStatus: 'offline',
+      connectionFailureCode: 'identity_conflict', canReconcile: true
+    }))
+    expect(harness.createChannel).toHaveBeenCalledOnce()
+    await service.stop()
+  })
+
   it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('submits native answers with trusted platform identity and retains forms on failure ($kind)', async profile => {
     const harness = controlledChannels({ cli_a: { openId: 'bot-a', name: '审阅员' } })
     const requests: Array<{ method: string; params: unknown }> = []
@@ -683,7 +796,7 @@ describe('channel settings service', () => {
       expect(createChannel).not.toHaveBeenCalled()
       const provider = (await service.get()).channels[0]
       expect(provider.connection.status).toBe('session_expired')
-      expect(provider.memberBots[0]).toMatchObject({ agentId: 'agent-a', failureCode: 'feishu_brand_moved_to_lark' })
+      expect(provider.memberBots[0]).toMatchObject({ agentId: 'agent-a', connectionFailureCode: 'feishu_brand_moved_to_lark' })
     } finally {
       await service.stop()
     }
@@ -1142,17 +1255,12 @@ describe('channel settings service', () => {
       provider: 'feishu', remoteAppId: 'cli-normal',
       credential: { appSecret: 'normal-secret' }
     }))
-    expect(memberBotUpserts).toHaveLength(2)
+    expect(memberBotUpserts).toHaveLength(1)
     expect(memberBotUpserts).toEqual([
       expect.objectContaining({
         appId: 'cli-normal',
         ownerOpenId: 'ou_owner_normal',
         botOpenId: null
-      }),
-      expect.objectContaining({
-        appId: 'cli-normal',
-        ownerOpenId: 'ou_owner_normal',
-        botOpenId: 'bot-open-id'
       })
     ])
     expect(channels.createMessage).toHaveBeenCalledOnce()
@@ -1883,7 +1991,7 @@ describe('channel settings service', () => {
       channels: [{ memberBots: [expect.objectContaining({
         agentId: 'agent-a',
         appId: 'cli-retry',
-        publicationStatus: 'failed'
+        publicationStatus: 'published', connectionStatus: 'reconnecting'
       })] }]
     })
     expect([...credentialStore.values.values()]).toContainEqual({
@@ -2188,16 +2296,16 @@ describe('channel settings service', () => {
 
     const snapshot = await service.get()
 
-    expect(snapshot.channels[0].memberBots).toContainEqual({
+    expect(snapshot.channels[0].memberBots).toContainEqual(expect.objectContaining({
       agentId: 'agent-a',
       publicationStatus: 'failed',
       botDisplayName: '审阅员',
       appId: 'cli-frozen',
-      connectionStatus: 'offline',
+      connectionStatus: 'unknown',
       published: false,
       managementUrl: 'https://open.feishu.cn/app/cli-frozen/baseinfo',
       failureCode: 'feishu_console_event_verification_failed'
-    })
+    }))
   })
 
   it('reconciles the frozen remote app on an explicit retry without creating another app', async () => {
@@ -2284,7 +2392,7 @@ describe('channel settings service', () => {
             accountId: connectedAccount(owner).accountId,
             appId: 'cli-published-remotely',
             botDisplayName: '审阅员',
-            credentialRef: 'feishu-member-agent-a',
+            credentialRef: params.command?.credentialRef,
             status: 'published',
             failureCode: null,
             version: 1
@@ -2437,7 +2545,7 @@ describe('channel settings service', () => {
     })
     await service.start()
     expect(harness.createChannel).toHaveBeenCalledTimes(1)
-    expect(executionPreview.connected).toHaveBeenCalledWith('agent-a', 'cli_a', expect.anything())
+    await vi.waitFor(() => expect(executionPreview.connected).toHaveBeenCalledWith('agent-a', 'cli_a', expect.anything()))
     const result = await harness.handlers.get('cli_a:cardAction')!({
       messageId: 'om_preview', chatId: 'oc_preview', operator: { openId: 'ou_owner' },
       action: { tag: 'button', value: { action: 'execution_console_page', agentRunId: 'feishu-preview:fixture', pageIndex: 1, snapshotSequence: 1 } }
@@ -2887,7 +2995,10 @@ describe('channel settings service', () => {
         })
       })
       await service.start()
-      await vi.waitFor(() => expect(requests).toContain('channels.host.tick'))
+      await vi.waitFor(async () => {
+        expect(requests).toContain('channels.host.tick')
+        expect((await service.get()).channels[0].memberBots[0].connectionStatus).toBe('online')
+      })
       const tickCount = requests.filter(method => method === 'channels.host.tick').length
       vi.useFakeTimers()
       try {

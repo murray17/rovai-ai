@@ -779,7 +779,7 @@ function ChannelMemberBotTable({
           const bot = bots.get(agent.agentId)
           const status = bot?.publicationStatus ?? 'unpublished'
           const published = status === 'published'
-          const failed = status === 'failed'
+          const failed = status === 'failed' || bot?.canReconcile === true
           const disabled = status === 'disabled'
           const provisioning = status === 'provisioning'
           const action = failed ? onRetryPublish : onPublish
@@ -798,10 +798,18 @@ function ChannelMemberBotTable({
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
                 <span>{bot?.published && status !== 'published' ? uiAttribute("已发布 · {0}", String(publicationLabel(status))) : publicationLabel(status)}</span>
-                {bot?.appId && <small className="channel-live-status">{bot.connectionStatus === 'online' ? uiAttribute("连接在线") : bot.connectionStatus === 'offline' ? uiAttribute("连接离线") : uiAttribute("连接状态未知")}</small>}
+                {bot?.appId && <small className="channel-live-status">{bot.connectionStatus === 'online' ? uiAttribute("连接在线")
+                  : bot.connectionStatus === 'connecting' ? uiAttribute("正在连接")
+                  : bot.connectionStatus === 'reconnecting' ? uiAttribute("连接中断，正在重连")
+                  : bot.connectionStatus === 'offline' ? uiAttribute("连接离线") : uiAttribute("连接状态未知")}</small>}
+                {bot?.connectionNeedsAttention && <small role="status" className="channel-live-status">{
+                  bot.canReconcile ? uiAttribute("连接需处理，请继续核对")
+                    : bot.connectionFailureCode === 'connection_confirmation_pending' ? uiAttribute("连接已建立，正在保存结果")
+                      : uiAttribute("连接暂不可用，请检查网络或代理")
+                }</small>}
               </span>
               <div className="channel-member-action" role="cell">
-                {published && bot?.managementUrl ? (
+                {published && bot?.managementUrl && (
                   <a
                     className="channel-row-action"
                     href={bot.managementUrl}
@@ -811,16 +819,17 @@ function ChannelMemberBotTable({
                   >
                     {localizedChannelCopy('{0}管理', channelCopy`${providerName}管理`, providerName)}
                   </a>
-                ) : (
+                )}
+                {(!published || bot?.canReconcile || !bot?.managementUrl) && (
                   <button
                     className="channel-row-action"
                     type="button"
-                    disabled={!connected || busy !== null || provisioning || !action || published}
+                    disabled={!connected || busy !== null || provisioning || !action || (published && !bot?.canReconcile)}
                     onClick={() => action?.(channel, agent)}
                   >
                     {actionBusy || provisioning
                       ? uiAttribute("处理中…")
-                      : published
+                      : published && !bot?.canReconcile
                         ? uiAttribute("管理不可用")
                         : failed
                           ? bot?.appId ? uiAttribute("继续核对") : uiAttribute("重试")

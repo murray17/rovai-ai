@@ -390,8 +390,13 @@ responses are fenced by authentication generation. Read failure shows unavailabl
 stored publication facts. Each provider's `provisioning` retains its original publication progress independently;
 the legacy aggregate cannot hide another provider's in-flight work or approver choices.
 `connection.sessionStatus` is the latest runtime inspection (`valid`, `invalid`, `unavailable`,
-`unknown`), distinct from account connection records. Bot `connectionStatus` is `online`, `offline` or `unknown`, separate
+`unknown`), distinct from account connection records. Bot `connectionStatus` is `online`, `offline`, `unknown`, `connecting` or `reconnecting`, separate
 from publication status. `published` retains the durable Bot publication fact when a later retry/connection failed. Absent live fields are unknown; persisted records alone cannot establish current connectivity.
+`connectionFailureCode` is an optional safe classification, `connectionNeedsAttention` requests local inline feedback,
+and `canReconcile` preserves the existing retry action for terminal configuration failures. These fields are projected
+explicitly by Desktop; raw SDK errors and external identity values are never forwarded. An App with no live observation
+is `unknown`; `offline` requires an observed disconnect or terminal failure. A recovery timer or active SDK loop is
+required before displaying `reconnecting`.
 
 Only known expired/mismatched sessions produce `channel_session_expired` and the instruction:
 “请在运行此服务的 Rovai Desktop 中重新连接账号，完成后返回本页重试。” Timeouts, platform approval and ordinary

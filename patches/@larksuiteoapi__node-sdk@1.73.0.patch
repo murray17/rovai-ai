@@ -1,8 +1,476 @@
 diff --git a/es/index.js b/es/index.js
-index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a24c855ab 100644
+index c5d5c57488d414e3078f19a235e4db7afebeda80..581dd62bf1f4c922dad1f7dab15653e710665e90 100644
 --- a/es/index.js
 +++ b/es/index.js
-@@ -104906,10 +104906,17 @@ class OutboundSender {
+@@ -102074,6 +102074,7 @@ class WSClient {
+         var _a;
+         this.wsConfig = new WSConfig();
+         this.reconnectGeneration = 0;
++        this.closed = false;
+         this.isConnecting = false;
+         this.reconnectInfo = {
+             lastConnectTime: 0,
+@@ -102093,7 +102094,7 @@ class WSClient {
+          * loopReConnect, reset to 0 on a successful connect.
+          */
+         this.currentReconnectAttempts = 0;
+-        const { appId, appSecret, clientAssertionProvider, agent, domain = Domain.Feishu, httpInstance = defaultHttpInstance, loggerLevel = LoggerLevel.info, logger = defaultLogger, autoReconnect = true, source, extraUaTags, onReady, onError, onReconnecting, onReconnected, handshakeTimeoutMs, wsConfig: userWsConfig, } = params;
++        const { appId, appSecret, clientAssertionProvider, agent, domain = Domain.Feishu, httpInstance = defaultHttpInstance, loggerLevel = LoggerLevel.info, logger = defaultLogger, autoReconnect = true, source, extraUaTags, onReady, onError, onReconnecting, onReconnected, onReconnectAttemptFailed, initialConnectRetry = true, handshakeTimeoutMs, wsConfig: userWsConfig, } = params;
+         this.userAgent = buildUserAgent(source, { extraTags: extraUaTags });
+         this.logger = new LoggerProxy(loggerLevel, logger);
+         assert(!appId, () => this.logger.error('appId is needed'));
+@@ -102114,6 +102115,8 @@ class WSClient {
+         this.wsConfig.updateWs({
+             autoReconnect
+         });
++        this.initialConnectRetry = initialConnectRetry;
++        this.onReconnectAttemptFailed = onReconnectAttemptFailed;
+         this.onReady = onReady;
+         this.onError = onError;
+         this.onReconnecting = onReconnecting;
+@@ -102136,13 +102139,14 @@ class WSClient {
+      * connection is fine).
+      */
+     armLiveness() {
+-        if (!this.pingTimeoutSec)
++        if (this.closed || !this.pingTimeoutSec)
+             return;
+         if (this.livenessTimer)
+             clearTimeout(this.livenessTimer);
+         this.livenessTimer = setTimeout(() => {
+             var _a;
+             this.livenessTimer = undefined;
++            if (this.closed) return;
+             this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of last ping, terminating to trigger reconnect`);
+             try {
+                 (_a = this.wsConfig.getWSInstance()) === null || _a === void 0 ? void 0 : _a.terminate();
+@@ -102210,14 +102214,13 @@ class WSClient {
+                 });
+                 if (code !== ErrorCode.ok) {
+                     const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
+-                    this.logger.error('[ws]', `code: ${code}, ${reason}`);
+-                    if (code === ErrorCode.internal_error) {
+-                        return { ok: false, retryable: true };
+-                    }
++                    this.logger.error('[ws]', `endpoint failure code: ${code}`);
++
+                     return {
+                         ok: false,
+-                        retryable: false,
+-                        error: `pullConnectConfig failed: code=${code}, msg=${reason}`,
++                        retryable: code !== ErrorCode.auth_failed && code !== ErrorCode.forbidden,
++                        code,
++                        error: "WebSocket endpoint rejected",
+                     };
+                 }
+                 const { device_id, service_id } = qs.parse(URL);
+@@ -102234,196 +102237,156 @@ class WSClient {
+                 return { ok: true };
+             }
+             catch (e) {
+-                this.logger.error('[ws]', (e === null || e === void 0 ? void 0 : e.message) || 'system busy');
++                this.logger.error('[ws]', 'endpoint transport failure');
+                 // A credential/config problem (e.g. empty assertion) is not retryable.
+                 if (e instanceof ClientAssertionError) {
+-                    return { ok: false, retryable: false, error: e.message };
++                    return { ok: false, retryable: false, code: "client_assertion", error: "WebSocket credential configuration rejected" };
+                 }
+-                return { ok: false, retryable: true };
++                const status = e && e.response && e.response.status;
++                const rawAfter = e && e.response && e.response.headers && e.response.headers['retry-after'];
++                const after = Number(rawAfter);
++                const retryAfterMs = rawAfter == null ? 0 : Math.max(0, Math.min(2147483647,
++                    Number.isFinite(after) ? after * 1000 : (Date.parse(rawAfter) - Date.now()) || 0));
++                return { ok: false, retryable: status !== 401 && status !== 403,
++                    code: status === 401 ? 514 : status === 403 ? 403 : status === 429 ? 429 : 'transport_error', retryAfterMs };
+             }
+         });
+     }
+-    connect() {
+-        const connectUrl = this.wsConfig.getWS('connectUrl');
+-        let wsInstance;
+-        try {
+-            const { agent } = this;
+-            wsInstance = new WebSocket(connectUrl, { agent });
+-        }
+-        catch (e) {
+-            this.logger.error('[ws]', 'new WebSocket error');
+-        }
+-        if (!wsInstance) {
+-            return Promise.resolve(false);
+-        }
+-        return new Promise((resolve) => {
++    stopSocket(socket) {
++        if (!socket) return;
++        socket.removeAllListeners('open');
++        // terminate() emits asynchronously while CONNECTING. Keep an error sink
++        // until close, including on sockets whose attempt has already settled.
++        socket.on('error', () => {});
++        try { socket.terminate(); } catch (_) { /* already closed */ }
++    }
++    connect(generation = this.reconnectGeneration) {
++        if (this.closed) return Promise.resolve(false);
++        let socket;
++        try { socket = new WebSocket(this.wsConfig.getWS('connectUrl'), { agent: this.agent }); }
++        catch (_) { this.lastConnectFailure = 'transport_error'; return Promise.resolve(false); }
++        this.pendingSocket = socket;
++        return new Promise(resolve => {
+             let settled = false;
+             let timer;
+-            const settleOnce = (ok) => {
+-                if (settled)
+-                    return;
++            const finish = ok => {
++                if (settled) return;
+                 settled = true;
+-                if (timer)
+-                    clearTimeout(timer);
++                clearTimeout(timer);
++                if (this.pendingSocket === socket) {
++                    this.pendingSocket = undefined;
++                    this.cancelPending = undefined;
++                }
++                if (!ok) this.stopSocket(socket);
+                 resolve(ok);
+             };
+-            // Optional handshake watchdog: if neither 'open' nor 'error' fires
+-            // within the configured window (stuck DNS / proxy / NAT path), abort
+-            // the attempt and let tryConnect treat it as a retryable failure.
+-            if (this.handshakeTimeoutMs && this.handshakeTimeoutMs > 0) {
+-                timer = setTimeout(() => {
+-                    this.logger.error('[ws]', `handshake timeout after ${this.handshakeTimeoutMs}ms`);
+-                    wsInstance.removeAllListeners();
+-                    try {
+-                        wsInstance.terminate();
+-                    }
+-                    catch ( /* best effort */_a) { /* best effort */ }
+-                    settleOnce(false);
+-                }, this.handshakeTimeoutMs);
+-            }
+-            wsInstance.on('open', () => {
+-                this.logger.debug('[ws]', 'ws connect success');
+-                this.wsConfig.setWSInstance(wsInstance);
+-                this.pingLoop();
+-                settleOnce(true);
++            this.cancelPending = () => finish(false);
++            socket.on('error', () => {
++                this.lastConnectFailure = this.lastConnectFailure || 'transport_error';
++                finish(false);
+             });
+-            wsInstance.on('error', () => {
+-                this.logger.error('[ws]', 'ws connect failed');
+-                settleOnce(false);
++            socket.once('close', () => finish(false));
++            socket.once('open', () => {
++                if (settled || this.closed || generation !== this.reconnectGeneration) {
++                    this.stopSocket(socket);
++                    return;
++                }
++                this.wsConfig.setWSInstance(socket);
++                this.pingLoop();
++                finish(true);
+             });
++            if (this.handshakeTimeoutMs > 0) timer = setTimeout(() => {
++                this.lastConnectFailure = 'handshake_timeout';
++                finish(false);
++            }, this.handshakeTimeoutMs);
+         });
+     }
+-    reConnect(isStart = false) {
+-        return __awaiter(this, void 0, void 0, function* () {
+-            if (this.isConnecting && !isStart) {
+-                this.logger.debug('[ws]', 'repeat connection');
+-                return;
+-            }
+-            this.isConnecting = true;
+-            // Invalidate any in-flight reconnect loops from previous sessions
+-            const currentGeneration = ++this.reconnectGeneration;
+-            const tryConnect = () => __awaiter(this, void 0, void 0, function* () {
+-                this.reconnectInfo.lastConnectTime = Date.now();
+-                const pullResult = yield this.pullConnectConfig();
+-                if (!pullResult.ok)
+-                    return pullResult;
+-                const connected = yield this.connect();
+-                if (!connected)
+-                    return { ok: false, retryable: true };
+-                this.communicate();
+-                return { ok: true };
++    async reConnect(isStart = false) {
++        if (this.closed || (this.isConnecting && !isStart)) return;
++        this.isConnecting = true;
++        const generation = ++this.reconnectGeneration;
++        const current = () => !this.closed && generation === this.reconnectGeneration;
++        clearTimeout(this.pingInterval);
++        clearTimeout(this.reconnectInterval);
++        this.clearLiveness();
++        const previous = this.wsConfig.getWSInstance();
++        this.wsConfig.setWSInstance(null);
++        this.stopSocket(previous);
++        const fail = result => {
++            if (!current()) return;
++            this.isConnecting = false;
++            this.terminalError = true;
++            const error = Object.assign(new Error('WebSocket connection failed'), {
++                code: result.code || 'transport_error', retryable: result.retryable !== false, retryAfterMs: result.retryAfterMs || 0
+             });
+-            if (this.pingInterval) {
+-                clearTimeout(this.pingInterval);
+-            }
+-            if (this.reconnectInterval) {
+-                clearTimeout(this.reconnectInterval);
+-            }
+-            const wsInstance = this.wsConfig.getWSInstance();
+-            if (isStart) {
+-                if (wsInstance) {
+-                    wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.terminate();
+-                }
+-                let result = { ok: false, retryable: true };
+-                try {
+-                    result = yield tryConnect();
+-                }
+-                finally {
+-                    this.isConnecting = false;
+-                }
+-                if (result.ok) {
+-                    this.hasEverConnected = true;
+-                    this.safeInvoke('onReady', this.onReady);
+-                }
+-                else if (!result.retryable) {
+-                    // Non-recoverable error from pullConnectConfig — bail out without retry.
+-                    // Reset hasEverConnected so a subsequent start() is treated as a fresh
+-                    // session (onReady fires, not onReconnected).
+-                    this.hasEverConnected = false;
+-                    this.terminalError = true;
+-                    this.safeInvoke('onError', this.onError, new Error(result.error));
+-                    return;
+-                }
+-                else {
+-                    this.logger.error('[ws]', 'connect failed');
+-                    yield this.reConnect();
+-                }
+-                this.logger.info('[ws]', 'ws client ready');
+-                return;
+-            }
+-            const { autoReconnect, reconnectNonce, reconnectCount, reconnectInterval } = this.wsConfig.getWS();
+-            if (!autoReconnect) {
+-                if (!this.hasEverConnected) {
+-                    this.terminalError = true;
+-                    this.safeInvoke('onError', this.onError, new Error('WebSocket connect failed and autoReconnect is disabled'));
+-                }
++            this.safeInvoke('onError', this.onError, error);
++        };
++        const tryConnect = async () => {
++            if (!current()) return { ok: false, retryable: false, code: 'cancelled' };
++            this.reconnectInfo.lastConnectTime = Date.now();
++            const result = await this.pullConnectConfig();
++            if (!current()) return { ok: false, retryable: false, code: 'cancelled' };
++            if (!result.ok) return result;
++            this.lastConnectFailure = undefined;
++            const connected = await this.connect(generation);
++            if (!current()) return { ok: false, retryable: false, code: 'cancelled' };
++            if (!connected) return { ok: false, retryable: true, code: this.lastConnectFailure || 'transport_error' };
++            this.communicate();
++            return { ok: true };
++        };
++        if (isStart) {
++            const result = await tryConnect();
++            if (!current()) return;
++            this.isConnecting = false;
++            if (result.ok) {
++                this.hasEverConnected = true;
++                this.safeInvoke('onReady', this.onReady);
++            } else if (!result.retryable || !this.initialConnectRetry) fail(result);
++            else if (current()) await this.reConnect();
++            return;
++        }
++        const config = this.wsConfig.getWS();
++        if (!config.autoReconnect) { fail({ retryable: true, code: 'transport_error' }); return; }
++        if (this.hasEverConnected) this.safeInvoke('onReconnecting', this.onReconnecting);
++        const schedule = delay => {
++            if (!current()) return;
++            this.reconnectInfo.nextConnectTime = Date.now() + delay;
++            this.reconnectInterval = setTimeout(() => {
++                this.reconnectInfo.nextConnectTime = 0;
++                void attempt().catch(() => fail({ retryable: true, code: 'transport_error' }));
++            }, delay);
++        };
++        const attempt = async () => {
++            if (!current()) return;
++            const count = ++this.currentReconnectAttempts;
++            const result = await tryConnect();
++            if (!current()) return;
++            if (result.ok) {
++                this.currentReconnectAttempts = 0;
++                this.isConnecting = false;
++                this.terminalError = false;
++                const previouslyConnected = this.hasEverConnected;
++                this.hasEverConnected = true;
++                this.safeInvoke(previouslyConnected ? 'onReconnected' : 'onReady',
++                    previouslyConnected ? this.onReconnected : this.onReady);
+                 return;
+             }
+-            this.logger.info('[ws]', 'reconnect');
+-            if (this.hasEverConnected) {
+-                this.safeInvoke('onReconnecting', this.onReconnecting);
++            const exhausted = config.reconnectCount >= 0 && count >= config.reconnectCount;
++            if (result.retryable && !exhausted) {
++                const delay = result.code === ErrorCode.exceed_conn_limit
++                    ? Math.max(120000, config.reconnectInterval) : config.reconnectInterval;
++                schedule(Math.max(delay, result.retryAfterMs || 0));
+             }
+-            if (wsInstance) {
+-                wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.terminate();
+-            }
+-            this.wsConfig.setWSInstance(null);
+-            const reconnectNonceTime = reconnectNonce ? reconnectNonce * Math.random() : 0;
+-            this.reconnectInterval = setTimeout(() => __awaiter(this, void 0, void 0, function* () {
+-                (function loopReConnect(count) {
+-                    return __awaiter(this, void 0, void 0, function* () {
+-                        // Stale loop — a newer reConnect session has started
+-                        if (currentGeneration !== this.reconnectGeneration) {
+-                            return;
+-                        }
+-                        count++;
+-                        this.currentReconnectAttempts = count;
+-                        const result = yield tryConnect();
+-                        // Re-check after async operation in case a new session started
+-                        if (currentGeneration !== this.reconnectGeneration) {
+-                            return;
+-                        }
+-                        // if reconnectCount < 0, the reconnect time is infinite
+-                        if (result.ok) {
+-                            this.logger.debug('[ws]', 'reconnect success');
+-                            this.currentReconnectAttempts = 0;
+-                            if (this.hasEverConnected) {
+-                                this.safeInvoke('onReconnected', this.onReconnected);
+-                            }
+-                            else {
+-                                this.hasEverConnected = true;
+-                                this.safeInvoke('onReady', this.onReady);
+-                            }
+-                            this.isConnecting = false;
+-                            return;
+-                        }
+-                        if (!result.retryable) {
+-                            // Non-recoverable error — abort the loop, do not schedule another attempt.
+-                            // Reset hasEverConnected so a subsequent start() is treated as a fresh
+-                            // session (onReady fires, not onReconnected).
+-                            this.isConnecting = false;
+-                            this.hasEverConnected = false;
+-                            this.terminalError = true;
+-                            this.safeInvoke('onError', this.onError, new Error(result.error));
+-                            return;
+-                        }
+-                        this.logger.info('ws', `unable to connect to the server after trying ${count} times")`);
+-                        if (reconnectCount >= 0 && count >= reconnectCount) {
+-                            this.isConnecting = false;
+-                            this.terminalError = true;
+-                            this.safeInvoke('onError', this.onError, new Error(`WebSocket reconnect exhausted after ${count} attempts`));
+-                            return;
+-                        }
+-                        this.reconnectInterval = setTimeout(() => {
+-                            loopReConnect.bind(this)(count);
+-                        }, reconnectInterval);
+-                        this.reconnectInfo.nextConnectTime = Date.now() + reconnectInterval;
+-                    });
+-                }).bind(this)(0);
+-            }), reconnectNonceTime);
+-            this.reconnectInfo.nextConnectTime = Date.now() + reconnectNonceTime;
+-        });
++            if (this.hasEverConnected) this.safeInvoke('onReconnectAttemptFailed', this.onReconnectAttemptFailed, {
++                attempt: count, nextConnectTime: this.reconnectInfo.nextConnectTime || null,
++                code: result.code || 'transport_error', retryable: result.retryable !== false
++            });
++            if (!result.retryable || exhausted) fail(result);
++        };
++        schedule(config.reconnectNonce ? config.reconnectNonce * Math.random() : 0);
+     }
+     pingLoop() {
++        if (this.closed) return;
+         const { serviceId, pingInterval } = this.wsConfig.getWS();
+         const wsInstance = this.wsConfig.getWSInstance();
+         if ((wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.readyState) === WebSocket.OPEN) {
+@@ -102444,8 +102407,10 @@ class WSClient {
+         this.pingInterval = setTimeout(this.pingLoop.bind(this), pingInterval);
+     }
+     communicate() {
++        if (this.closed) return;
+         const wsInstance = this.wsConfig.getWSInstance();
+         wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('message', (buffer) => __awaiter(this, void 0, void 0, function* () {
++            if (this.closed || wsInstance !== this.wsConfig.getWSInstance()) return;
+             // Any inbound frame proves the connection is alive — cancel the pong
+             // watchdog (but don't re-arm; it'll be armed again on the next ping).
+             this.clearLiveness();
+@@ -102462,6 +102427,7 @@ class WSClient {
+             this.logger.error('[ws]', 'ws error');
+         });
+         wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('close', () => {
++            if (this.closed || wsInstance !== this.wsConfig.getWSInstance()) return;
+             this.logger.debug('[ws]', 'client closed');
+             this.clearLiveness();
+             this.reConnect();
+@@ -102576,36 +102542,25 @@ class WSClient {
+      * @param params.force whether force close (use terminate instead of close)
+      */
+     close(params = {}) {
+-        const { force = false } = params;
+-        // Invalidate any in-flight reconnect loops
+-        this.reconnectGeneration++;
+-        if (this.pingInterval) {
+-            clearTimeout(this.pingInterval);
+-            this.pingInterval = undefined;
+-        }
+-        if (this.reconnectInterval) {
+-            clearTimeout(this.reconnectInterval);
+-            this.reconnectInterval = undefined;
+-        }
++        if (this.closed) return;
++        this.closed = true;
++        ++this.reconnectGeneration;
++        clearTimeout(this.pingInterval);
++        clearTimeout(this.reconnectInterval);
+         this.clearLiveness();
+         this.dataCache.destroy();
+         this.isConnecting = false;
+-        this.currentReconnectAttempts = 0;
+-        const wsInstance = this.wsConfig.getWSInstance();
+-        if (wsInstance) {
+-            wsInstance.removeAllListeners();
+-            if (force) {
+-                wsInstance.terminate();
+-            }
+-            else {
+-                wsInstance.close();
+-            }
+-            this.wsConfig.setWSInstance(null);
+-        }
+-        this.logger.info('[ws]', `ws client closed manually${force ? ' (force)' : ''}`);
++        this.reconnectInfo.nextConnectTime = 0;
++        if (this.cancelPending) this.cancelPending();
++        this.stopSocket(this.pendingSocket);
++        this.pendingSocket = undefined;
++        const active = this.wsConfig.getWSInstance();
++        this.wsConfig.setWSInstance(null);
++        this.stopSocket(active);
+     }
+     start(params) {
+         return __awaiter(this, void 0, void 0, function* () {
++            if (this.closed) return;
+             const { appId } = this.wsConfig.getClient();
+             if (!/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
+                 this.logger.error('[ws]', `invalid appId: ${appId}`);
+@@ -102632,7 +102587,9 @@ class WSClient {
+           ->
+         Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)`);
+             this.eventDispatcher = eventDispatcher;
+-            this.reConnect(true);
++            void this.reConnect(true).catch(() => {
++                if (!this.closed) this.safeInvoke('onError', this.onError, Object.assign(new Error('WebSocket connection failed'), { code: 'transport_error', retryable: true }));
++            });
+         });
+     }
+ }
+@@ -104906,10 +104863,17 @@ class OutboundSender {
       */
      patchCard(messageId, card) {
          return __awaiter(this, void 0, void 0, function* () {
@@ -21,7 +489,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a
          });
      }
      /**
-@@ -105469,7 +105476,7 @@ class SafetyPipeline {
+@@ -105469,7 +105433,7 @@ class SafetyPipeline {
              const task = () => __awaiter(this, void 0, void 0, function* () {
                  var _e, _f;
                  try {
@@ -30,7 +498,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a
                  }
                  catch (e) {
                      (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
-@@ -105483,10 +105490,10 @@ class SafetyPipeline {
+@@ -105483,10 +105447,10 @@ class SafetyPipeline {
                  }
              });
              if (this.queueEnabled) {
@@ -43,7 +511,234 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a
              }
          });
      }
-@@ -106829,11 +106836,15 @@ class LarkChannel {
+@@ -106451,99 +106415,112 @@ class LarkChannel {
+     }
+     // ─── lifecycle ──────────────────────────────────────────
+     connect() {
+-        return __awaiter(this, void 0, void 0, function* () {
+-            if (this.connectPromise)
+-                return this.connectPromise;
+-            this.connectPromise = this.doConnect().catch((err) => {
+-                this.connectPromise = undefined;
+-                throw err;
+-            });
+-            return this.connectPromise;
++        if (this.disposed) return Promise.reject(new LarkChannelError('not_connected', 'channel disposed', {
++            cause: { connection: true, code: 'cancelled', retryable: false }
++        }));
++        if (this.connectPromise) return this.connectPromise;
++        const generation = (this.connectGeneration || 0) + 1;
++        this.connectGeneration = generation;
++        const controller = new AbortController();
++        this.connectAbort = controller;
++        const identityTimeout = this.opts.identityTimeoutMs || 15000;
++        let timer;
++        const cancelled = new Promise((_, reject) => {
++            controller.signal.addEventListener('abort', () => reject(new LarkChannelError('not_connected', 'connection cancelled', {
++                cause: { connection: true, code: 'cancelled', retryable: true }
++            })), { once: true });
++            timer = setTimeout(() => reject(new LarkChannelError('not_connected', 'identity request timeout', {
++                cause: { connection: true, code: 'identity_timeout', retryable: true }
++            })), identityTimeout);
+         });
+-    }
+-    doConnect() {
+-        var _a;
+-        return __awaiter(this, void 0, void 0, function* () {
+-            this.botIdentity = yield this.fetchBotIdentity();
+-            this.safety.setBotIdentity(this.botIdentity);
+-            this.registerDispatcherHandlers();
+-            const transport = (_a = this.opts.transport) !== null && _a !== void 0 ? _a : 'websocket';
+-            if (transport === 'websocket') {
+-                yield this.connectWebSocket(15000);
++        this.connectPromise = (async () => {
++            const identity = await Promise.race([this.fetchBotIdentity(controller.signal), cancelled]);
++            clearTimeout(timer);
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
++            this.botIdentity = identity;
++            this.safety.setBotIdentity(identity);
++            if (!this.dispatcherRegistered) {
++                this.registerDispatcherHandlers();
++                this.dispatcherRegistered = true;
+             }
+-            // webhook transport wiring is external: user plugs this.dispatcher into
+-            // their HTTP handler via the existing adaptor modules.
++            if ((this.opts.transport || 'websocket') === 'websocket') await this.connectWebSocket(controller.signal);
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
+             this.connected = true;
++        })().catch(err => {
++            clearTimeout(timer);
++            controller.abort();
++            if (generation === this.connectGeneration) {
++                if (this.rawWsClient) this.rawWsClient.close();
++                this.connectPromise = undefined;
++                this.connected = false;
++            }
++            throw err;
+         });
++        return this.connectPromise;
+     }
+-    /**
+-     * Construct the underlying WSClient and wait for its `onReady` callback —
+-     * so `connect()` only resolves after the first WebSocket handshake
+-     * actually succeeds. Rejects on `onError` or if the handshake doesn't
+-     * complete within `timeoutMs`.
+-     *
+-     * Also wires `onReconnecting` / `onReconnected` callbacks to emit the
+-     * corresponding public events.
+-     */
+-    connectWebSocket(timeoutMs) {
++    connectWebSocket(signal) {
+         return new Promise((resolve, reject) => {
+-            var _a;
+             let settled = false;
+-            const timer = setTimeout(() => {
+-                if (settled)
+-                    return;
++            const end = error => {
++                if (settled) return;
+                 settled = true;
+-                reject(new LarkChannelError('not_connected', `WebSocket handshake did not complete within ${timeoutMs}ms`));
+-            }, timeoutMs);
+-            this.rawWsClient = new WSClient({
+-                appId: this.opts.appId,
+-                appSecret: this.opts.appSecret,
+-                domain: (_a = this.opts.domain) !== null && _a !== void 0 ? _a : Domain.Feishu,
+-                logger: this.opts.logger,
+-                loggerLevel: this.opts.loggerLevel,
+-                httpInstance: this.opts.httpInstance,
+-                autoReconnect: true,
+-                source: this.opts.source,
+-                extraUaTags: ['channel'],
+-                agent: this.opts.agent,
+-                wsConfig: this.opts.wsConfig,
+-                handshakeTimeoutMs: this.opts.handshakeTimeoutMs,
+-                onReady: () => {
+-                    if (settled)
+-                        return;
+-                    settled = true;
+-                    clearTimeout(timer);
+-                    resolve();
+-                },
+-                onError: (err) => {
+-                    if (settled)
+-                        return;
+-                    settled = true;
+-                    clearTimeout(timer);
+-                    reject(new LarkChannelError('not_connected', `WebSocket connect failed: ${err.message}`, { cause: err }));
++                signal.removeEventListener('abort', abort);
++                if (error) {
++                    if (this.rawWsClient) this.rawWsClient.close();
++                    reject(error);
++                } else resolve();
++            };
++            const abort = () => end(new LarkChannelError('not_connected', 'connection cancelled', {
++                cause: { connection: true, code: 'cancelled', retryable: true }
++            }));
++            if (signal.aborted) { abort(); return; }
++            signal.addEventListener('abort', abort, { once: true });
++            const transport = new WSClient({
++                appId: this.opts.appId, appSecret: this.opts.appSecret,
++                domain: this.opts.domain || Domain.Feishu,
++                logger: this.opts.logger, loggerLevel: this.opts.loggerLevel,
++                httpInstance: this.opts.httpInstance, autoReconnect: true,
++                initialConnectRetry: this.opts.initialConnectRetry !== false,
++                source: this.opts.source, extraUaTags: ['channel'], agent: this.opts.agent,
++                wsConfig: this.opts.wsConfig, handshakeTimeoutMs: this.opts.handshakeTimeoutMs,
++                onReady: () => end(),
++                onError: err => {
++                    const error = new LarkChannelError('not_connected', 'WebSocket connection failed', {
++                        cause: { connection: true, code: err.code || 'transport_error', retryable: err.retryable !== false, retryAfterMs: err.retryAfterMs || 0 }
++                    });
++                    if (!settled) end(error);
++                    else if (!this.disposed && this.rawWsClient === transport) {
++                        transport.close();
++                        if (this.connectAbort) this.connectAbort.abort();
++                        this.connected = false;
++                        this.connectPromise = undefined;
++                        this.emitError(error);
++                    }
+                 },
+-                onReconnecting: () => { var _a, _b; return (_b = (_a = this.handlers).reconnecting) === null || _b === void 0 ? void 0 : _b.call(_a); },
+-                onReconnected: () => { var _a, _b; return (_b = (_a = this.handlers).reconnected) === null || _b === void 0 ? void 0 : _b.call(_a); },
++                onReconnecting: () => { if (this.handlers.reconnecting) this.handlers.reconnecting(); },
++                onReconnected: () => { if (this.handlers.reconnected) this.handlers.reconnected(); },
++                onReconnectAttemptFailed: info => { if (this.handlers.reconnectAttemptFailed) this.handlers.reconnectAttemptFailed(info); }
+             });
+-            this.rawWsClient.start({ eventDispatcher: this.dispatcher });
++            this.rawWsClient = transport;
++            void transport.start({ eventDispatcher: this.dispatcher }).catch(error => end(error));
+         });
+     }
+-    disconnect() {
+-        var _a;
+-        return __awaiter(this, void 0, void 0, function* () {
+-            if (!this.connected)
+-                return;
+-            try {
+-                (_a = this.rawWsClient) === null || _a === void 0 ? void 0 : _a.close({});
+-            }
+-            catch ( /* best effort */_b) { /* best effort */ }
+-            try {
+-                yield this.safety.dispose();
+-            }
+-            catch ( /* best effort */_c) { /* best effort */ }
+-            this.connected = false;
+-            this.connectPromise = undefined;
+-        });
++    cancelConnect() {
++        if (this.connectAbort) this.connectAbort.abort();
++        if (this.rawWsClient) this.rawWsClient.close();
++        ++this.connectGeneration;
++        this.connectPromise = undefined;
++        this.connected = false;
++    }
++    async disconnect() {
++        if (this.disposed) return;
++        this.disposed = true;
++        ++this.connectGeneration;
++        if (this.connectAbort) this.connectAbort.abort();
++        if (this.rawWsClient) this.rawWsClient.close();
++        this.connected = false;
++        this.connectPromise = undefined;
++        await this.safety.dispose();
+     }
+     /**
+      * Snapshot of the WebSocket lifecycle (state, last/next connect times,
+@@ -106744,16 +106721,30 @@ class LarkChannel {
+         return this.safety.getPolicy();
+     }
+     // ─── internals: bot identity & dispatch wiring ────────
+-    fetchBotIdentity() {
++    fetchBotIdentity(signal) {
+         var _a;
+         return __awaiter(this, void 0, void 0, function* () {
+             // Standard Feishu API: GET /open-apis/bot/v3/info
+             // Returns: { code, msg, bot: { open_id, app_name, avatar_url, ... } }
+             let lastError;
+             try {
+-                const r = yield this.rawClient.request({
++                // Identity and its token exchange share the attempt's cancellation
++                // and request cap. Outbound HTTP keeps the stable rawClient.
++                const base = this.opts.httpInstance || defaultHttpInstance;
++                const scoped = { request: options => base.request(Object.assign({}, options, {
++                    signal, timeout: this.opts.identityTimeoutMs || 15000
++                })) };
++                for (const method of ['get', 'delete', 'head', 'options']) scoped[method] = (url, options) => scoped.request(Object.assign({}, options, { url, method }));
++                for (const method of ['post', 'put', 'patch']) scoped[method] = (url, data, options) => scoped.request(Object.assign({}, options, { url, data, method }));
++                const quiet = { error() {}, warn() {}, info() {}, debug() {}, trace() {} };
++                const client = new Client({ appId: this.opts.appId, appSecret: this.opts.appSecret,
++                    domain: this.opts.domain || Domain.Feishu, httpInstance: scoped, cache: this.opts.cache,
++                    logger: quiet, loggerLevel: this.opts.loggerLevel, source: this.opts.source });
++                const r = yield client.request({
+                     url: '/open-apis/bot/v3/info',
+                     method: 'GET',
++                    timeout: this.opts.identityTimeoutMs || 15000,
++                    signal,
+                 });
+                 const bot = r.bot;
+                 if (bot === null || bot === void 0 ? void 0 : bot.open_id) {
+@@ -106829,11 +106820,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
                      return;
@@ -62,7 +757,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a
                  }));
              }),
              // Reactions — dedup only
-@@ -106864,6 +106875,21 @@ class LarkChannel {
+@@ -106864,6 +106859,21 @@ class LarkChannel {
                      this.emitError(e);
                  }
              },
@@ -85,10 +780,478 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..9944ffc4d188bf73b7472eb042266a1a
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/lib/index.js b/lib/index.js
-index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812966eeaa2 100644
+index 0728b1d97ddac688b17642924e359c152dd52fd5..b073a5633235ab9c7a2548eff20d5a20a570f74d 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -104924,10 +104924,17 @@ class OutboundSender {
+@@ -102092,6 +102092,7 @@ class WSClient {
+         var _a;
+         this.wsConfig = new WSConfig();
+         this.reconnectGeneration = 0;
++        this.closed = false;
+         this.isConnecting = false;
+         this.reconnectInfo = {
+             lastConnectTime: 0,
+@@ -102111,7 +102112,7 @@ class WSClient {
+          * loopReConnect, reset to 0 on a successful connect.
+          */
+         this.currentReconnectAttempts = 0;
+-        const { appId, appSecret, clientAssertionProvider, agent, domain = exports.Domain.Feishu, httpInstance = defaultHttpInstance, loggerLevel = exports.LoggerLevel.info, logger = defaultLogger, autoReconnect = true, source, extraUaTags, onReady, onError, onReconnecting, onReconnected, handshakeTimeoutMs, wsConfig: userWsConfig, } = params;
++        const { appId, appSecret, clientAssertionProvider, agent, domain = exports.Domain.Feishu, httpInstance = defaultHttpInstance, loggerLevel = exports.LoggerLevel.info, logger = defaultLogger, autoReconnect = true, source, extraUaTags, onReady, onError, onReconnecting, onReconnected, onReconnectAttemptFailed, initialConnectRetry = true, handshakeTimeoutMs, wsConfig: userWsConfig, } = params;
+         this.userAgent = buildUserAgent(source, { extraTags: extraUaTags });
+         this.logger = new LoggerProxy(loggerLevel, logger);
+         assert(!appId, () => this.logger.error('appId is needed'));
+@@ -102132,6 +102133,8 @@ class WSClient {
+         this.wsConfig.updateWs({
+             autoReconnect
+         });
++        this.initialConnectRetry = initialConnectRetry;
++        this.onReconnectAttemptFailed = onReconnectAttemptFailed;
+         this.onReady = onReady;
+         this.onError = onError;
+         this.onReconnecting = onReconnecting;
+@@ -102154,13 +102157,14 @@ class WSClient {
+      * connection is fine).
+      */
+     armLiveness() {
+-        if (!this.pingTimeoutSec)
++        if (this.closed || !this.pingTimeoutSec)
+             return;
+         if (this.livenessTimer)
+             clearTimeout(this.livenessTimer);
+         this.livenessTimer = setTimeout(() => {
+             var _a;
+             this.livenessTimer = undefined;
++            if (this.closed) return;
+             this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of last ping, terminating to trigger reconnect`);
+             try {
+                 (_a = this.wsConfig.getWSInstance()) === null || _a === void 0 ? void 0 : _a.terminate();
+@@ -102228,14 +102232,13 @@ class WSClient {
+                 });
+                 if (code !== ErrorCode.ok) {
+                     const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
+-                    this.logger.error('[ws]', `code: ${code}, ${reason}`);
+-                    if (code === ErrorCode.internal_error) {
+-                        return { ok: false, retryable: true };
+-                    }
++                    this.logger.error('[ws]', `endpoint failure code: ${code}`);
++
+                     return {
+                         ok: false,
+-                        retryable: false,
+-                        error: `pullConnectConfig failed: code=${code}, msg=${reason}`,
++                        retryable: code !== ErrorCode.auth_failed && code !== ErrorCode.forbidden,
++                        code,
++                        error: "WebSocket endpoint rejected",
+                     };
+                 }
+                 const { device_id, service_id } = qs__default["default"].parse(URL);
+@@ -102252,196 +102255,156 @@ class WSClient {
+                 return { ok: true };
+             }
+             catch (e) {
+-                this.logger.error('[ws]', (e === null || e === void 0 ? void 0 : e.message) || 'system busy');
++                this.logger.error('[ws]', 'endpoint transport failure');
+                 // A credential/config problem (e.g. empty assertion) is not retryable.
+                 if (e instanceof ClientAssertionError) {
+-                    return { ok: false, retryable: false, error: e.message };
++                    return { ok: false, retryable: false, code: "client_assertion", error: "WebSocket credential configuration rejected" };
+                 }
+-                return { ok: false, retryable: true };
++                const status = e && e.response && e.response.status;
++                const rawAfter = e && e.response && e.response.headers && e.response.headers['retry-after'];
++                const after = Number(rawAfter);
++                const retryAfterMs = rawAfter == null ? 0 : Math.max(0, Math.min(2147483647,
++                    Number.isFinite(after) ? after * 1000 : (Date.parse(rawAfter) - Date.now()) || 0));
++                return { ok: false, retryable: status !== 401 && status !== 403,
++                    code: status === 401 ? 514 : status === 403 ? 403 : status === 429 ? 429 : 'transport_error', retryAfterMs };
+             }
+         });
+     }
+-    connect() {
+-        const connectUrl = this.wsConfig.getWS('connectUrl');
+-        let wsInstance;
+-        try {
+-            const { agent } = this;
+-            wsInstance = new WebSocket__default["default"](connectUrl, { agent });
+-        }
+-        catch (e) {
+-            this.logger.error('[ws]', 'new WebSocket error');
+-        }
+-        if (!wsInstance) {
+-            return Promise.resolve(false);
+-        }
+-        return new Promise((resolve) => {
++    stopSocket(socket) {
++        if (!socket) return;
++        socket.removeAllListeners('open');
++        // terminate() emits asynchronously while CONNECTING. Keep an error sink
++        // until close, including on sockets whose attempt has already settled.
++        socket.on('error', () => {});
++        try { socket.terminate(); } catch (_) { /* already closed */ }
++    }
++    connect(generation = this.reconnectGeneration) {
++        if (this.closed) return Promise.resolve(false);
++        let socket;
++        try { socket = new WebSocket__default["default"](this.wsConfig.getWS('connectUrl'), { agent: this.agent }); }
++        catch (_) { this.lastConnectFailure = 'transport_error'; return Promise.resolve(false); }
++        this.pendingSocket = socket;
++        return new Promise(resolve => {
+             let settled = false;
+             let timer;
+-            const settleOnce = (ok) => {
+-                if (settled)
+-                    return;
++            const finish = ok => {
++                if (settled) return;
+                 settled = true;
+-                if (timer)
+-                    clearTimeout(timer);
++                clearTimeout(timer);
++                if (this.pendingSocket === socket) {
++                    this.pendingSocket = undefined;
++                    this.cancelPending = undefined;
++                }
++                if (!ok) this.stopSocket(socket);
+                 resolve(ok);
+             };
+-            // Optional handshake watchdog: if neither 'open' nor 'error' fires
+-            // within the configured window (stuck DNS / proxy / NAT path), abort
+-            // the attempt and let tryConnect treat it as a retryable failure.
+-            if (this.handshakeTimeoutMs && this.handshakeTimeoutMs > 0) {
+-                timer = setTimeout(() => {
+-                    this.logger.error('[ws]', `handshake timeout after ${this.handshakeTimeoutMs}ms`);
+-                    wsInstance.removeAllListeners();
+-                    try {
+-                        wsInstance.terminate();
+-                    }
+-                    catch ( /* best effort */_a) { /* best effort */ }
+-                    settleOnce(false);
+-                }, this.handshakeTimeoutMs);
+-            }
+-            wsInstance.on('open', () => {
+-                this.logger.debug('[ws]', 'ws connect success');
+-                this.wsConfig.setWSInstance(wsInstance);
+-                this.pingLoop();
+-                settleOnce(true);
++            this.cancelPending = () => finish(false);
++            socket.on('error', () => {
++                this.lastConnectFailure = this.lastConnectFailure || 'transport_error';
++                finish(false);
+             });
+-            wsInstance.on('error', () => {
+-                this.logger.error('[ws]', 'ws connect failed');
+-                settleOnce(false);
++            socket.once('close', () => finish(false));
++            socket.once('open', () => {
++                if (settled || this.closed || generation !== this.reconnectGeneration) {
++                    this.stopSocket(socket);
++                    return;
++                }
++                this.wsConfig.setWSInstance(socket);
++                this.pingLoop();
++                finish(true);
+             });
++            if (this.handshakeTimeoutMs > 0) timer = setTimeout(() => {
++                this.lastConnectFailure = 'handshake_timeout';
++                finish(false);
++            }, this.handshakeTimeoutMs);
+         });
+     }
+-    reConnect(isStart = false) {
+-        return __awaiter(this, void 0, void 0, function* () {
+-            if (this.isConnecting && !isStart) {
+-                this.logger.debug('[ws]', 'repeat connection');
+-                return;
+-            }
+-            this.isConnecting = true;
+-            // Invalidate any in-flight reconnect loops from previous sessions
+-            const currentGeneration = ++this.reconnectGeneration;
+-            const tryConnect = () => __awaiter(this, void 0, void 0, function* () {
+-                this.reconnectInfo.lastConnectTime = Date.now();
+-                const pullResult = yield this.pullConnectConfig();
+-                if (!pullResult.ok)
+-                    return pullResult;
+-                const connected = yield this.connect();
+-                if (!connected)
+-                    return { ok: false, retryable: true };
+-                this.communicate();
+-                return { ok: true };
++    async reConnect(isStart = false) {
++        if (this.closed || (this.isConnecting && !isStart)) return;
++        this.isConnecting = true;
++        const generation = ++this.reconnectGeneration;
++        const current = () => !this.closed && generation === this.reconnectGeneration;
++        clearTimeout(this.pingInterval);
++        clearTimeout(this.reconnectInterval);
++        this.clearLiveness();
++        const previous = this.wsConfig.getWSInstance();
++        this.wsConfig.setWSInstance(null);
++        this.stopSocket(previous);
++        const fail = result => {
++            if (!current()) return;
++            this.isConnecting = false;
++            this.terminalError = true;
++            const error = Object.assign(new Error('WebSocket connection failed'), {
++                code: result.code || 'transport_error', retryable: result.retryable !== false, retryAfterMs: result.retryAfterMs || 0
+             });
+-            if (this.pingInterval) {
+-                clearTimeout(this.pingInterval);
+-            }
+-            if (this.reconnectInterval) {
+-                clearTimeout(this.reconnectInterval);
+-            }
+-            const wsInstance = this.wsConfig.getWSInstance();
+-            if (isStart) {
+-                if (wsInstance) {
+-                    wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.terminate();
+-                }
+-                let result = { ok: false, retryable: true };
+-                try {
+-                    result = yield tryConnect();
+-                }
+-                finally {
+-                    this.isConnecting = false;
+-                }
+-                if (result.ok) {
+-                    this.hasEverConnected = true;
+-                    this.safeInvoke('onReady', this.onReady);
+-                }
+-                else if (!result.retryable) {
+-                    // Non-recoverable error from pullConnectConfig — bail out without retry.
+-                    // Reset hasEverConnected so a subsequent start() is treated as a fresh
+-                    // session (onReady fires, not onReconnected).
+-                    this.hasEverConnected = false;
+-                    this.terminalError = true;
+-                    this.safeInvoke('onError', this.onError, new Error(result.error));
+-                    return;
+-                }
+-                else {
+-                    this.logger.error('[ws]', 'connect failed');
+-                    yield this.reConnect();
+-                }
+-                this.logger.info('[ws]', 'ws client ready');
+-                return;
+-            }
+-            const { autoReconnect, reconnectNonce, reconnectCount, reconnectInterval } = this.wsConfig.getWS();
+-            if (!autoReconnect) {
+-                if (!this.hasEverConnected) {
+-                    this.terminalError = true;
+-                    this.safeInvoke('onError', this.onError, new Error('WebSocket connect failed and autoReconnect is disabled'));
+-                }
++            this.safeInvoke('onError', this.onError, error);
++        };
++        const tryConnect = async () => {
++            if (!current()) return { ok: false, retryable: false, code: 'cancelled' };
++            this.reconnectInfo.lastConnectTime = Date.now();
++            const result = await this.pullConnectConfig();
++            if (!current()) return { ok: false, retryable: false, code: 'cancelled' };
++            if (!result.ok) return result;
++            this.lastConnectFailure = undefined;
++            const connected = await this.connect(generation);
++            if (!current()) return { ok: false, retryable: false, code: 'cancelled' };
++            if (!connected) return { ok: false, retryable: true, code: this.lastConnectFailure || 'transport_error' };
++            this.communicate();
++            return { ok: true };
++        };
++        if (isStart) {
++            const result = await tryConnect();
++            if (!current()) return;
++            this.isConnecting = false;
++            if (result.ok) {
++                this.hasEverConnected = true;
++                this.safeInvoke('onReady', this.onReady);
++            } else if (!result.retryable || !this.initialConnectRetry) fail(result);
++            else if (current()) await this.reConnect();
++            return;
++        }
++        const config = this.wsConfig.getWS();
++        if (!config.autoReconnect) { fail({ retryable: true, code: 'transport_error' }); return; }
++        if (this.hasEverConnected) this.safeInvoke('onReconnecting', this.onReconnecting);
++        const schedule = delay => {
++            if (!current()) return;
++            this.reconnectInfo.nextConnectTime = Date.now() + delay;
++            this.reconnectInterval = setTimeout(() => {
++                this.reconnectInfo.nextConnectTime = 0;
++                void attempt().catch(() => fail({ retryable: true, code: 'transport_error' }));
++            }, delay);
++        };
++        const attempt = async () => {
++            if (!current()) return;
++            const count = ++this.currentReconnectAttempts;
++            const result = await tryConnect();
++            if (!current()) return;
++            if (result.ok) {
++                this.currentReconnectAttempts = 0;
++                this.isConnecting = false;
++                this.terminalError = false;
++                const previouslyConnected = this.hasEverConnected;
++                this.hasEverConnected = true;
++                this.safeInvoke(previouslyConnected ? 'onReconnected' : 'onReady',
++                    previouslyConnected ? this.onReconnected : this.onReady);
+                 return;
+             }
+-            this.logger.info('[ws]', 'reconnect');
+-            if (this.hasEverConnected) {
+-                this.safeInvoke('onReconnecting', this.onReconnecting);
++            const exhausted = config.reconnectCount >= 0 && count >= config.reconnectCount;
++            if (result.retryable && !exhausted) {
++                const delay = result.code === ErrorCode.exceed_conn_limit
++                    ? Math.max(120000, config.reconnectInterval) : config.reconnectInterval;
++                schedule(Math.max(delay, result.retryAfterMs || 0));
+             }
+-            if (wsInstance) {
+-                wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.terminate();
+-            }
+-            this.wsConfig.setWSInstance(null);
+-            const reconnectNonceTime = reconnectNonce ? reconnectNonce * Math.random() : 0;
+-            this.reconnectInterval = setTimeout(() => __awaiter(this, void 0, void 0, function* () {
+-                (function loopReConnect(count) {
+-                    return __awaiter(this, void 0, void 0, function* () {
+-                        // Stale loop — a newer reConnect session has started
+-                        if (currentGeneration !== this.reconnectGeneration) {
+-                            return;
+-                        }
+-                        count++;
+-                        this.currentReconnectAttempts = count;
+-                        const result = yield tryConnect();
+-                        // Re-check after async operation in case a new session started
+-                        if (currentGeneration !== this.reconnectGeneration) {
+-                            return;
+-                        }
+-                        // if reconnectCount < 0, the reconnect time is infinite
+-                        if (result.ok) {
+-                            this.logger.debug('[ws]', 'reconnect success');
+-                            this.currentReconnectAttempts = 0;
+-                            if (this.hasEverConnected) {
+-                                this.safeInvoke('onReconnected', this.onReconnected);
+-                            }
+-                            else {
+-                                this.hasEverConnected = true;
+-                                this.safeInvoke('onReady', this.onReady);
+-                            }
+-                            this.isConnecting = false;
+-                            return;
+-                        }
+-                        if (!result.retryable) {
+-                            // Non-recoverable error — abort the loop, do not schedule another attempt.
+-                            // Reset hasEverConnected so a subsequent start() is treated as a fresh
+-                            // session (onReady fires, not onReconnected).
+-                            this.isConnecting = false;
+-                            this.hasEverConnected = false;
+-                            this.terminalError = true;
+-                            this.safeInvoke('onError', this.onError, new Error(result.error));
+-                            return;
+-                        }
+-                        this.logger.info('ws', `unable to connect to the server after trying ${count} times")`);
+-                        if (reconnectCount >= 0 && count >= reconnectCount) {
+-                            this.isConnecting = false;
+-                            this.terminalError = true;
+-                            this.safeInvoke('onError', this.onError, new Error(`WebSocket reconnect exhausted after ${count} attempts`));
+-                            return;
+-                        }
+-                        this.reconnectInterval = setTimeout(() => {
+-                            loopReConnect.bind(this)(count);
+-                        }, reconnectInterval);
+-                        this.reconnectInfo.nextConnectTime = Date.now() + reconnectInterval;
+-                    });
+-                }).bind(this)(0);
+-            }), reconnectNonceTime);
+-            this.reconnectInfo.nextConnectTime = Date.now() + reconnectNonceTime;
+-        });
++            if (this.hasEverConnected) this.safeInvoke('onReconnectAttemptFailed', this.onReconnectAttemptFailed, {
++                attempt: count, nextConnectTime: this.reconnectInfo.nextConnectTime || null,
++                code: result.code || 'transport_error', retryable: result.retryable !== false
++            });
++            if (!result.retryable || exhausted) fail(result);
++        };
++        schedule(config.reconnectNonce ? config.reconnectNonce * Math.random() : 0);
+     }
+     pingLoop() {
++        if (this.closed) return;
+         const { serviceId, pingInterval } = this.wsConfig.getWS();
+         const wsInstance = this.wsConfig.getWSInstance();
+         if ((wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.readyState) === WebSocket__default["default"].OPEN) {
+@@ -102462,8 +102425,10 @@ class WSClient {
+         this.pingInterval = setTimeout(this.pingLoop.bind(this), pingInterval);
+     }
+     communicate() {
++        if (this.closed) return;
+         const wsInstance = this.wsConfig.getWSInstance();
+         wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('message', (buffer) => __awaiter(this, void 0, void 0, function* () {
++            if (this.closed || wsInstance !== this.wsConfig.getWSInstance()) return;
+             // Any inbound frame proves the connection is alive — cancel the pong
+             // watchdog (but don't re-arm; it'll be armed again on the next ping).
+             this.clearLiveness();
+@@ -102480,6 +102445,7 @@ class WSClient {
+             this.logger.error('[ws]', 'ws error');
+         });
+         wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('close', () => {
++            if (this.closed || wsInstance !== this.wsConfig.getWSInstance()) return;
+             this.logger.debug('[ws]', 'client closed');
+             this.clearLiveness();
+             this.reConnect();
+@@ -102594,36 +102560,25 @@ class WSClient {
+      * @param params.force whether force close (use terminate instead of close)
+      */
+     close(params = {}) {
+-        const { force = false } = params;
+-        // Invalidate any in-flight reconnect loops
+-        this.reconnectGeneration++;
+-        if (this.pingInterval) {
+-            clearTimeout(this.pingInterval);
+-            this.pingInterval = undefined;
+-        }
+-        if (this.reconnectInterval) {
+-            clearTimeout(this.reconnectInterval);
+-            this.reconnectInterval = undefined;
+-        }
++        if (this.closed) return;
++        this.closed = true;
++        ++this.reconnectGeneration;
++        clearTimeout(this.pingInterval);
++        clearTimeout(this.reconnectInterval);
+         this.clearLiveness();
+         this.dataCache.destroy();
+         this.isConnecting = false;
+-        this.currentReconnectAttempts = 0;
+-        const wsInstance = this.wsConfig.getWSInstance();
+-        if (wsInstance) {
+-            wsInstance.removeAllListeners();
+-            if (force) {
+-                wsInstance.terminate();
+-            }
+-            else {
+-                wsInstance.close();
+-            }
+-            this.wsConfig.setWSInstance(null);
+-        }
+-        this.logger.info('[ws]', `ws client closed manually${force ? ' (force)' : ''}`);
++        this.reconnectInfo.nextConnectTime = 0;
++        if (this.cancelPending) this.cancelPending();
++        this.stopSocket(this.pendingSocket);
++        this.pendingSocket = undefined;
++        const active = this.wsConfig.getWSInstance();
++        this.wsConfig.setWSInstance(null);
++        this.stopSocket(active);
+     }
+     start(params) {
+         return __awaiter(this, void 0, void 0, function* () {
++            if (this.closed) return;
+             const { appId } = this.wsConfig.getClient();
+             if (!/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
+                 this.logger.error('[ws]', `invalid appId: ${appId}`);
+@@ -102650,7 +102605,9 @@ class WSClient {
+           ->
+         Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)`);
+             this.eventDispatcher = eventDispatcher;
+-            this.reConnect(true);
++            void this.reConnect(true).catch(() => {
++                if (!this.closed) this.safeInvoke('onError', this.onError, Object.assign(new Error('WebSocket connection failed'), { code: 'transport_error', retryable: true }));
++            });
+         });
+     }
+ }
+@@ -104924,10 +104881,17 @@ class OutboundSender {
       */
      patchCard(messageId, card) {
          return __awaiter(this, void 0, void 0, function* () {
@@ -107,7 +1270,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812
          });
      }
      /**
-@@ -105487,7 +105494,7 @@ class SafetyPipeline {
+@@ -105487,7 +105451,7 @@ class SafetyPipeline {
              const task = () => __awaiter(this, void 0, void 0, function* () {
                  var _e, _f;
                  try {
@@ -116,7 +1279,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812
                  }
                  catch (e) {
                      (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
-@@ -105501,10 +105508,10 @@ class SafetyPipeline {
+@@ -105501,10 +105465,10 @@ class SafetyPipeline {
                  }
              });
              if (this.queueEnabled) {
@@ -129,7 +1292,234 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812
              }
          });
      }
-@@ -106847,11 +106854,15 @@ class LarkChannel {
+@@ -106469,99 +106433,112 @@ class LarkChannel {
+     }
+     // ─── lifecycle ──────────────────────────────────────────
+     connect() {
+-        return __awaiter(this, void 0, void 0, function* () {
+-            if (this.connectPromise)
+-                return this.connectPromise;
+-            this.connectPromise = this.doConnect().catch((err) => {
+-                this.connectPromise = undefined;
+-                throw err;
+-            });
+-            return this.connectPromise;
++        if (this.disposed) return Promise.reject(new LarkChannelError('not_connected', 'channel disposed', {
++            cause: { connection: true, code: 'cancelled', retryable: false }
++        }));
++        if (this.connectPromise) return this.connectPromise;
++        const generation = (this.connectGeneration || 0) + 1;
++        this.connectGeneration = generation;
++        const controller = new AbortController();
++        this.connectAbort = controller;
++        const identityTimeout = this.opts.identityTimeoutMs || 15000;
++        let timer;
++        const cancelled = new Promise((_, reject) => {
++            controller.signal.addEventListener('abort', () => reject(new LarkChannelError('not_connected', 'connection cancelled', {
++                cause: { connection: true, code: 'cancelled', retryable: true }
++            })), { once: true });
++            timer = setTimeout(() => reject(new LarkChannelError('not_connected', 'identity request timeout', {
++                cause: { connection: true, code: 'identity_timeout', retryable: true }
++            })), identityTimeout);
+         });
+-    }
+-    doConnect() {
+-        var _a;
+-        return __awaiter(this, void 0, void 0, function* () {
+-            this.botIdentity = yield this.fetchBotIdentity();
+-            this.safety.setBotIdentity(this.botIdentity);
+-            this.registerDispatcherHandlers();
+-            const transport = (_a = this.opts.transport) !== null && _a !== void 0 ? _a : 'websocket';
+-            if (transport === 'websocket') {
+-                yield this.connectWebSocket(15000);
++        this.connectPromise = (async () => {
++            const identity = await Promise.race([this.fetchBotIdentity(controller.signal), cancelled]);
++            clearTimeout(timer);
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
++            this.botIdentity = identity;
++            this.safety.setBotIdentity(identity);
++            if (!this.dispatcherRegistered) {
++                this.registerDispatcherHandlers();
++                this.dispatcherRegistered = true;
+             }
+-            // webhook transport wiring is external: user plugs this.dispatcher into
+-            // their HTTP handler via the existing adaptor modules.
++            if ((this.opts.transport || 'websocket') === 'websocket') await this.connectWebSocket(controller.signal);
++            if (controller.signal.aborted || this.disposed || generation !== this.connectGeneration) throw new Error('connection cancelled');
+             this.connected = true;
++        })().catch(err => {
++            clearTimeout(timer);
++            controller.abort();
++            if (generation === this.connectGeneration) {
++                if (this.rawWsClient) this.rawWsClient.close();
++                this.connectPromise = undefined;
++                this.connected = false;
++            }
++            throw err;
+         });
++        return this.connectPromise;
+     }
+-    /**
+-     * Construct the underlying WSClient and wait for its `onReady` callback —
+-     * so `connect()` only resolves after the first WebSocket handshake
+-     * actually succeeds. Rejects on `onError` or if the handshake doesn't
+-     * complete within `timeoutMs`.
+-     *
+-     * Also wires `onReconnecting` / `onReconnected` callbacks to emit the
+-     * corresponding public events.
+-     */
+-    connectWebSocket(timeoutMs) {
++    connectWebSocket(signal) {
+         return new Promise((resolve, reject) => {
+-            var _a;
+             let settled = false;
+-            const timer = setTimeout(() => {
+-                if (settled)
+-                    return;
++            const end = error => {
++                if (settled) return;
+                 settled = true;
+-                reject(new LarkChannelError('not_connected', `WebSocket handshake did not complete within ${timeoutMs}ms`));
+-            }, timeoutMs);
+-            this.rawWsClient = new WSClient({
+-                appId: this.opts.appId,
+-                appSecret: this.opts.appSecret,
+-                domain: (_a = this.opts.domain) !== null && _a !== void 0 ? _a : exports.Domain.Feishu,
+-                logger: this.opts.logger,
+-                loggerLevel: this.opts.loggerLevel,
+-                httpInstance: this.opts.httpInstance,
+-                autoReconnect: true,
+-                source: this.opts.source,
+-                extraUaTags: ['channel'],
+-                agent: this.opts.agent,
+-                wsConfig: this.opts.wsConfig,
+-                handshakeTimeoutMs: this.opts.handshakeTimeoutMs,
+-                onReady: () => {
+-                    if (settled)
+-                        return;
+-                    settled = true;
+-                    clearTimeout(timer);
+-                    resolve();
+-                },
+-                onError: (err) => {
+-                    if (settled)
+-                        return;
+-                    settled = true;
+-                    clearTimeout(timer);
+-                    reject(new LarkChannelError('not_connected', `WebSocket connect failed: ${err.message}`, { cause: err }));
++                signal.removeEventListener('abort', abort);
++                if (error) {
++                    if (this.rawWsClient) this.rawWsClient.close();
++                    reject(error);
++                } else resolve();
++            };
++            const abort = () => end(new LarkChannelError('not_connected', 'connection cancelled', {
++                cause: { connection: true, code: 'cancelled', retryable: true }
++            }));
++            if (signal.aborted) { abort(); return; }
++            signal.addEventListener('abort', abort, { once: true });
++            const transport = new WSClient({
++                appId: this.opts.appId, appSecret: this.opts.appSecret,
++                domain: this.opts.domain || exports.Domain.Feishu,
++                logger: this.opts.logger, loggerLevel: this.opts.loggerLevel,
++                httpInstance: this.opts.httpInstance, autoReconnect: true,
++                initialConnectRetry: this.opts.initialConnectRetry !== false,
++                source: this.opts.source, extraUaTags: ['channel'], agent: this.opts.agent,
++                wsConfig: this.opts.wsConfig, handshakeTimeoutMs: this.opts.handshakeTimeoutMs,
++                onReady: () => end(),
++                onError: err => {
++                    const error = new LarkChannelError('not_connected', 'WebSocket connection failed', {
++                        cause: { connection: true, code: err.code || 'transport_error', retryable: err.retryable !== false, retryAfterMs: err.retryAfterMs || 0 }
++                    });
++                    if (!settled) end(error);
++                    else if (!this.disposed && this.rawWsClient === transport) {
++                        transport.close();
++                        if (this.connectAbort) this.connectAbort.abort();
++                        this.connected = false;
++                        this.connectPromise = undefined;
++                        this.emitError(error);
++                    }
+                 },
+-                onReconnecting: () => { var _a, _b; return (_b = (_a = this.handlers).reconnecting) === null || _b === void 0 ? void 0 : _b.call(_a); },
+-                onReconnected: () => { var _a, _b; return (_b = (_a = this.handlers).reconnected) === null || _b === void 0 ? void 0 : _b.call(_a); },
++                onReconnecting: () => { if (this.handlers.reconnecting) this.handlers.reconnecting(); },
++                onReconnected: () => { if (this.handlers.reconnected) this.handlers.reconnected(); },
++                onReconnectAttemptFailed: info => { if (this.handlers.reconnectAttemptFailed) this.handlers.reconnectAttemptFailed(info); }
+             });
+-            this.rawWsClient.start({ eventDispatcher: this.dispatcher });
++            this.rawWsClient = transport;
++            void transport.start({ eventDispatcher: this.dispatcher }).catch(error => end(error));
+         });
+     }
+-    disconnect() {
+-        var _a;
+-        return __awaiter(this, void 0, void 0, function* () {
+-            if (!this.connected)
+-                return;
+-            try {
+-                (_a = this.rawWsClient) === null || _a === void 0 ? void 0 : _a.close({});
+-            }
+-            catch ( /* best effort */_b) { /* best effort */ }
+-            try {
+-                yield this.safety.dispose();
+-            }
+-            catch ( /* best effort */_c) { /* best effort */ }
+-            this.connected = false;
+-            this.connectPromise = undefined;
+-        });
++    cancelConnect() {
++        if (this.connectAbort) this.connectAbort.abort();
++        if (this.rawWsClient) this.rawWsClient.close();
++        ++this.connectGeneration;
++        this.connectPromise = undefined;
++        this.connected = false;
++    }
++    async disconnect() {
++        if (this.disposed) return;
++        this.disposed = true;
++        ++this.connectGeneration;
++        if (this.connectAbort) this.connectAbort.abort();
++        if (this.rawWsClient) this.rawWsClient.close();
++        this.connected = false;
++        this.connectPromise = undefined;
++        await this.safety.dispose();
+     }
+     /**
+      * Snapshot of the WebSocket lifecycle (state, last/next connect times,
+@@ -106762,16 +106739,30 @@ class LarkChannel {
+         return this.safety.getPolicy();
+     }
+     // ─── internals: bot identity & dispatch wiring ────────
+-    fetchBotIdentity() {
++    fetchBotIdentity(signal) {
+         var _a;
+         return __awaiter(this, void 0, void 0, function* () {
+             // Standard Feishu API: GET /open-apis/bot/v3/info
+             // Returns: { code, msg, bot: { open_id, app_name, avatar_url, ... } }
+             let lastError;
+             try {
+-                const r = yield this.rawClient.request({
++                // Identity and its token exchange share the attempt's cancellation
++                // and request cap. Outbound HTTP keeps the stable rawClient.
++                const base = this.opts.httpInstance || defaultHttpInstance;
++                const scoped = { request: options => base.request(Object.assign({}, options, {
++                    signal, timeout: this.opts.identityTimeoutMs || 15000
++                })) };
++                for (const method of ['get', 'delete', 'head', 'options']) scoped[method] = (url, options) => scoped.request(Object.assign({}, options, { url, method }));
++                for (const method of ['post', 'put', 'patch']) scoped[method] = (url, data, options) => scoped.request(Object.assign({}, options, { url, data, method }));
++                const quiet = { error() {}, warn() {}, info() {}, debug() {}, trace() {} };
++                const client = new Client({ appId: this.opts.appId, appSecret: this.opts.appSecret,
++                    domain: this.opts.domain || exports.Domain.Feishu, httpInstance: scoped, cache: this.opts.cache,
++                    logger: quiet, loggerLevel: this.opts.loggerLevel, source: this.opts.source });
++                const r = yield client.request({
+                     url: '/open-apis/bot/v3/info',
+                     method: 'GET',
++                    timeout: this.opts.identityTimeoutMs || 15000,
++                    signal,
+                 });
+                 const bot = r.bot;
+                 if (bot === null || bot === void 0 ? void 0 : bot.open_id) {
+@@ -106847,11 +106838,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
                      return;
@@ -148,7 +1538,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812
                  }));
              }),
              // Reactions — dedup only
-@@ -106882,6 +106893,21 @@ class LarkChannel {
+@@ -106882,6 +106877,21 @@ class LarkChannel {
                      this.emitError(e);
                  }
              },
@@ -171,10 +1561,20 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..5917a59a5376eb330308ee73ce85b812
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/types/index.d.ts b/types/index.d.ts
-index 1741e0c90073ec038590131c09952a23c222575d..983dd3e6d39ab7b930c9c1146250dc183c0ed6da 100644
+index 1741e0c90073ec038590131c09952a23c222575d..4e30cd3c7ecdbf62bc96fe4bae5e93cfbf143f5b 100644
 --- a/types/index.d.ts
 +++ b/types/index.d.ts
-@@ -322076,9 +322076,10 @@ interface CardStreamController {
+@@ -321609,6 +321609,9 @@ interface IConstructorParams {
+     onReconnecting?: () => void;
+     /** Fires after the reconnect loop successfully re-establishes the connection. */
+     onReconnected?: () => void;
++    /** Disable SDK initial retries when a Host owns initial attempts. */
++    initialConnectRetry?: boolean;
++    onReconnectAttemptFailed?: (info: { attempt: number; nextConnectTime: number | null; code: number | string; retryable: boolean }) => void;
+     /**
+      * Milliseconds. Maximum time to wait for a WebSocket handshake (`open` /
+      * `error` event) before aborting the attempt and letting the retry loop
+@@ -322076,11 +322079,13 @@ interface CardStreamController {
  interface EventMap {
      message: (msg: NormalizedMessage) => void | Promise<void>;
      reject: (evt: RejectEvent) => void;
@@ -185,4 +1585,24 @@ index 1741e0c90073ec038590131c09952a23c222575d..983dd3e6d39ab7b930c9c1146250dc18
 +    botRemoved: (evt: BotAddedEvent) => void;
      comment: (evt: CommentEvent) => void | Promise<void>;
      error: (err: LarkChannelError) => void;
++    reconnectAttemptFailed: (info: { attempt: number; nextConnectTime: number | null; code: number | string; retryable: boolean }) => void;
      reconnecting: () => void;
+     reconnected: () => void;
+ }
+@@ -322199,6 +322204,8 @@ interface LarkChannelOptions {
+      * indefinitely on stuck DNS / proxy / NAT paths.
+      */
+     handshakeTimeoutMs?: number;
++    identityTimeoutMs?: number;
++    initialConnectRetry?: boolean;
+     /**
+      * Optional Node http(s) agent forwarded to the underlying WSClient for
+      * the WebSocket transport. Useful for routing the WS through an HTTP(S)
+@@ -322322,6 +322329,7 @@ declare class LarkChannel {
+      * corresponding public events.
+      */
+     private connectWebSocket;
++    cancelConnect(): void;
+     disconnect(): Promise<void>;
+     /**
+      * Snapshot of the WebSocket lifecycle (state, last/next connect times,
