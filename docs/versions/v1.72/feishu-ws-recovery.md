@@ -71,11 +71,14 @@ Runtime 兼容矩阵与根 README 无需更新。本地 SDK/Host 夹具不替代
 | TypeScript / Desktop build | 通过；构建只有既有 chunk size 等提示 |
 | 通用文档门禁 | docs:test、docs:check 与以初始基线为 base 的 docs:check:ci 通过 |
 | 隔离浏览器验收 | 真实 Host + 生产 Web/Main adapter，恢复 Dialog 无失败 alert/重复提交、终态准确说明、双主题、720px 两列重排且单元格不越界、审批与 Server 边界通过 |
+| 独立实现复审 | 响子对代码提交 `975ddd998` 复审通过，SDK 与 Host/Core 恢复闭环无剩余阻塞；独立重跑三个连接相关测试文件，106 项通过 |
 
 浏览器仅注入 Provider 服务夹具，使用各自临时 data、Skills、MCP 与 Chrome profile，不访问日常数据；
 不执行真实租户发布，也不启动 Electron 或调用模型。验收脚本同步修复既有 TS adapter 加载、登录按钮选择器、
 缺省 presentation preference 假设和 viewport 切换时的等待。截图与 validation.json 位于本次 Thread 附件目录的
 `feishu-ws-recovery-review-ui/`，生成物不进入 Git。日常安装版未替换。
+真实租户、Electron 进程和 Windows 尚未验收。独立复审建议合并前在隔离 userData 下使用真实飞书或 Lark Bot
+完成一次断网后恢复冒烟，并确认没有未捕获异常；已有自动验收不能替代这项结果。分支保留为 ready，尚未合并。
 
 Core 切代次回归还发现旧 Host stop 未清除 started 标记，已修正；停止时旧发布进度清空，新的状态从持久事实恢复。
 本地确认暂不可用时保留已观察到的在线传输并重试保存；SDK 循环中的 connect 等待真实 ready，不能提前报告成功。
