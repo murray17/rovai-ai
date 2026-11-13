@@ -3567,7 +3567,6 @@
   "权限": "Permissions",
   "{0}的模型信息": "Model info for {0}",
   "关闭模型信息": "Close model info",
-  "模型未记录": "Model not recorded",
   "自定义 API": "Custom API",
   "接口地址": "Base URL",
   "保存后清除": "Clear when saved",
