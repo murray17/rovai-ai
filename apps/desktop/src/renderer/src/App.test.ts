@@ -8509,6 +8509,7 @@ function runtimeAdmissionRows(
 
 const taskCapability = vi.hoisted(() => ({ enabled: true }))
 vi.mock('./TaskCapabilityProvider', () => ({ useTaskCapability: () => taskCapability }))
+vi.mock('./MemoryCapabilityProvider', () => ({ useMemoryCapability: () => ({ enabled: true, active: true, ready: true, observedThroughChangeSequence: 0, headsUpAfterGlobalSequence: 0 }) }))
 afterEach(() => { taskCapability.enabled = true })
 
 

@@ -1,8 +1,9 @@
 import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
-import { useEffect, useMemo, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, MemoryRecord, HearthReviewItem } from '@contracts'
 import { MemoryLibrary } from '../../../apps/desktop/src/renderer/src/MemoryLibrary'
+import { useMemoryCapability } from '../../../apps/desktop/src/renderer/src/MemoryCapabilityProvider'
 import { MemoryChangeNotice } from '../../../apps/desktop/src/renderer/src/MemoryChangeNotice'
 import { collectMemoryChanges, memoryChangeText } from '../../../apps/desktop/src/renderer/src/memory-change-notice'
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
@@ -34,12 +35,59 @@ let releaseReview: (() => void) | null = null
 const clearCandidate = (item: HearthReviewItem): void => {
   item.candidateBody = null; item.candidateRetrievalKeys = null; item.candidateKind = null; item.resolvedAt = date
 }
+let memoryCapability = { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 }
+let capabilityReadFailures = 0
+let capabilitySaveFailures = 0
+let capabilitySaves = 0
+let heldCapabilitySave: Promise<void> | null = null
+let releaseCapabilitySave: (() => void) | null = null
+let memoryBusinessReads = 0
+let memoryLibraryReads = 0
+let reviewListReads = 0
+const invalidationListeners = new Set<(change: any) => void>()
+const capabilityListeners = new Set<(event: any) => void>()
+let heldCapabilityRead: Promise<void> | null = null
+let releaseCapabilityRead: (() => void) | null = null
+let heldMemoryRead: Promise<void> | null = null
+let releaseMemoryRead: (() => void) | null = null
+let capabilityReadWaiting = false
+let memoryReadWaiting = false
+let heldMutationReceipt: Promise<void> | null = null
+let releaseMutationReceipt: (() => void) | null = null
+let mutationReceiptWaiting = false
+const invalidateCapability = () => capabilityListeners.forEach(listener => listener({ method: 'preferences.memory_changed', params: {} }))
+const setMemoryEnabled = (enabled: boolean) => {
+  if (memoryCapability.enabled !== enabled) memoryCapability = { ...memoryCapability, enabled, observedThroughChangeSequence: memoryCapability.observedThroughChangeSequence + 1 }
+  invalidateCapability()
+}
 const calls: Array<{ method: string; command: any }> = []
 const client = { platform: 'darwin', async request(method: string, params: any = {}) {
+  if (method === 'preferences.memory.get') {
+    if (capabilityReadFailures > 0) { capabilityReadFailures--; throw new Error('capability read unavailable') }
+    const reply = structuredClone(memoryCapability)
+    if (heldCapabilityRead) { const held = heldCapabilityRead; heldCapabilityRead = null; capabilityReadWaiting = true; await held; capabilityReadWaiting = false }
+    return reply
+  }
+  if (method === 'preferences.memory.set') {
+    capabilitySaves++
+    if (heldCapabilitySave) { const held = heldCapabilitySave; heldCapabilitySave = null; await held }
+    if (capabilitySaveFailures > 0) { capabilitySaveFailures--; throw new Error('Setting save unavailable') }
+    setMemoryEnabled(params.enabled)
+    return structuredClone(memoryCapability)
+  }
+  if (method.startsWith('memory.')) {
+    memoryBusinessReads++
+    if (!memoryCapability.enabled) throw new Error('memory.feature_disabled')
+  }
   if (method === 'preferences.tasks.get') return { enabled: false, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
   if (method === 'memory.list' && failedReads > 0) { failedReads--; throw new Error('演示刷新失败。') }
-  if (method === 'memory.list') return structuredClone({ memories, capacities: [] })
-  if (method === 'memory.hearthReviewItems.list') return structuredClone(reviews)
+  if (method === 'memory.list') {
+    memoryLibraryReads++
+    const reply = structuredClone({ memories, capacities: [] })
+    if (heldMemoryRead) { const held = heldMemoryRead; heldMemoryRead = null; memoryReadWaiting = true; await held; memoryReadWaiting = false }
+    return reply
+  }
+  if (method === 'memory.hearthReviewItems.list') { reviewListReads++; return structuredClone(reviews) }
   if (method === 'memory.get') return structuredClone(memories.find(m => m.id === params.memoryId))
   const c = params.command
   if (!c) throw new Error(`Unexpected fixture request: ${method}`)
@@ -79,10 +127,17 @@ const client = { platform: 'darwin', async request(method: string, params: any =
     clearCandidate(item)
     if (failAfterReview) { failedReads++; failAfterReview = false }
   } else throw new Error(`Unexpected fixture mutation: ${method}`)
+  if (heldMutationReceipt) { const held = heldMutationReceipt; heldMutationReceipt = null; mutationReceiptWaiting = true; await held; mutationReceiptWaiting = false }
   return { status: 'applied', code: 'ok', payload: { memoryId } }
-} } as ThreadClient
+}, onInvalidated(listener: (change: any) => void) { invalidationListeners.add(listener); return () => { invalidationListeners.delete(listener) } }, onEvent(listener: (event: any) => void) { capabilityListeners.add(listener); return () => { capabilityListeners.delete(listener) } } } as ThreadClient
 const noop = () => {}
 const asyncNoop = async () => {}
+
+function CapabilityProbe() {
+  const capability = useMemoryCapability()
+  ;(window as any).__memoryCapabilityProbe = capability
+  return null
+}
 
 function Fixture() {
   const [platform, setPlatform] = useState<'darwin' | 'win32'>('darwin')
@@ -90,12 +145,27 @@ function Fixture() {
   const platformClient = useMemo(() => ({ ...client, platform }), [platform])
   const [target, setTarget] = useState<MemoryNavigationTarget>({ kind: 'memory', memoryId: null })
   const [pending, setPending] = useState(1)
+  const [memoryPageMounted, setMemoryPageMounted] = useState(true)
   const [notice, setNotice] = useState(true)
   const [refresh, setRefresh] = useState(0)
   const [theme, setTheme] = useState('day')
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => { document.documentElement.dataset.rovaiPlatform = platform; document.documentElement.dataset.platform = platform }, [platform])
   useEffect(() => { (window as any).__memoryFixture = {
+    setMemoryEnabled, setMemoryPageMounted, setPendingCount: setPending, refreshCapability: invalidateCapability,
+    invalidate: (change: any) => invalidationListeners.forEach(listener => listener(change)),
+    advanceCapabilitySequence: () => { memoryCapability = { ...memoryCapability, observedThroughChangeSequence: memoryCapability.observedThroughChangeSequence + 1 } },
+    failCapabilitySave: () => { capabilitySaveFailures++ },
+    holdCapabilitySave: () => { heldCapabilitySave = new Promise(resolve => { releaseCapabilitySave = resolve }) },
+    releaseCapabilitySave: () => { releaseCapabilitySave?.(); releaseCapabilitySave = null },
+    holdMutationReceipt: () => { heldMutationReceipt = new Promise(resolve => { releaseMutationReceipt = resolve }) },
+    releaseMutationReceipt: () => { releaseMutationReceipt?.(); releaseMutationReceipt = null },
+    failCapabilityRead: () => { capabilityReadFailures++; invalidateCapability() },
+    holdCapabilityRead: () => { heldCapabilityRead = new Promise(resolve => { releaseCapabilityRead = resolve }); invalidateCapability() },
+    releaseCapabilityRead: () => { releaseCapabilityRead?.(); releaseCapabilityRead = null },
+    holdMemoryRead: () => { heldMemoryRead = new Promise(resolve => { releaseMemoryRead = resolve }); setRefresh(n => n + 1) },
+    releaseMemoryRead: () => { releaseMemoryRead?.(); releaseMemoryRead = null },
+    capabilityStats: () => ({ memoryBusinessReads, memoryLibraryReads, reviewListReads, capabilitySaves, capabilityReadWaiting, memoryReadWaiting, mutationReceiptWaiting, enabled: memoryCapability.enabled }),
     navigate: setTarget, setTheme, setNotice, setPlatform, setLanguage: (language: 'en' | 'zh-CN') => changeInterfaceLanguage(languageTestApi, language),
     failNext: () => { failNext = true },
     failReads: () => { failedReads++ },
@@ -116,16 +186,16 @@ function Fixture() {
     },
     conflict: () => { const m = memories.find(m => m.id === target.memoryId)!; m.version++; m.currentRevisionId = `${m.id}-external`; m.currentBody = '来自另一操作的最新正文。' },
     stale: () => { reviews[0].stale = true; setRefresh(n => n + 1) },
-    get: () => ({ target, memories, reviews, calls, longBody })
-  } }, [target])
+    get: () => ({ target, memories, reviews, calls, longBody, pending })
+  } }, [target, pending])
   const changes = collectMemoryChanges([], [{ eventType: 'memory.agent_revised', globalSequence: 1, entityType: 'memory', entityId: 'member-1', actorType: 'agent', actorId: 'member-a', payload: { scope: 'companion' } } as any])
-  return <ThreadClientProvider client={platformClient}><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile}>
+  return <ThreadClientProvider client={platformClient}><CapabilityProbe /><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile}>
     {!mobile && <ThreadNavigation view="memory" state="ready" navigation={null} activeThreadId={null} pendingMemoryCount={pending} onNewConversation={noop} onMembers={noop} onMemory={noop} onSettings={noop} onOpenProject={noop} onThread={noop} onRemoveProject={asyncNoop} onRename={asyncNoop} onDelete={asyncNoop} onError={noop} />}
     {!mobile && <WindowDragStrip page="memory" />}
-    <main className="content memory-content"><MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} /></main>
+    <main className="content memory-content">{memoryPageMounted && <MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} />}</main>
   </NavigationShell></MobileLayoutProvider></ThreadClientProvider>
 }
 document.documentElement.dataset.platform = 'darwin'
 document.documentElement.dataset.rovaiPlatform = 'darwin'
 document.documentElement.dataset.rovaiSurface = 'desktop'
-createRoot(document.getElementById('root')!).render(<Fixture />)
+createRoot(document.getElementById('root')!).render(<StrictMode><Fixture /></StrictMode>)

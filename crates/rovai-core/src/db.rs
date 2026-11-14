@@ -22,6 +22,8 @@ mod member_creation;
 mod member_environment;
 #[path = "db_member_routing.rs"]
 mod member_routing;
+#[path = "db_memory_capability.rs"]
+mod memory_capability;
 #[path = "db_message_mentions.rs"]
 mod message_mentions;
 #[path = "db_message_senders.rs"]
@@ -517,7 +519,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 173;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 174;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1016,6 +1018,7 @@ struct CurrentMigrationState {
     v221: bool,
     v222: bool,
     v223: bool,
+    v224: bool,
 }
 
 impl CurrentMigrationState {
@@ -1037,6 +1040,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v224 {
+            let mut previous = *self;
+            previous.v224 = false;
+            return schema == 174 && previous.admits(contract, 173, classifier);
+        }
         if self.v223 {
             let mut previous = *self;
             previous.v223 = false;
@@ -3865,6 +3873,7 @@ pub(crate) fn classify_database_contract(
                 | 171
                 | 172
                 | 173
+                | 174
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3874,6 +3883,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 174
+                || memory_capability::schema_matches(connection)?)
             && (marker.projection_schema_version < 173 || kilo::schema_matches(connection)?)
             && (marker.projection_schema_version < 170
                 || channel_native::schema_matches(connection)?)
@@ -6204,7 +6215,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=220),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=221),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=222),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=223)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=224)
         "#,
         [],
         |row| {
@@ -6363,6 +6375,7 @@ fn load_current_migration_state(
                 v221: row.get(151)?,
                 v222: row.get(152)?,
                 v223: row.get(153)?,
+                v224: row.get(154)?,
             })
         },
     )
@@ -9669,6 +9682,9 @@ impl Database {
             if !self.schema_migration_applied(223)? {
                 migration_step!("migration_223", kilo::migrate(self));
             }
+            if !self.schema_migration_applied(224)? {
+                migration_step!("migration_224", memory_capability::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10562,6 +10578,9 @@ impl Database {
         }
         if !self.schema_migration_applied(223)? {
             migration_step!("migration_223", kilo::migrate(self));
+        }
+        if !self.schema_migration_applied(224)? {
+            migration_step!("migration_224", memory_capability::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -42037,7 +42056,7 @@ mod tests {
         ] {
             let (mut database, directory) = crate::test_support::seeded_runtime_database();
             if version == 223 {
-                // The current source has no later transitions to undo.
+                memory_capability::downgrade_for_test(database.connection());
             } else if version == 216 {
                 hermes::downgrade_rules_for_test(database.connection());
             } else if version == 205 {
@@ -42353,6 +42372,7 @@ mod tests {
             v221: version >= 221,
             v222: version >= 222,
             v223: version >= 223,
+            v224: version >= 224,
         }
     }
 
@@ -56504,7 +56524,8 @@ mod tests {
     fn current_schema_contains_required_contract_objects() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-schema-test-{}", Uuid::new_v4()));
-        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        memory_capability::assert_upgrade(&mut database);
         let connection = database.connection();
 
         assert_schema_objects(
@@ -56517,6 +56538,7 @@ mod tests {
                 "team",
                 "creation_preferences",
                 "thread_team_bootstrap",
+                "memory_preference",
             ],
             true,
         );

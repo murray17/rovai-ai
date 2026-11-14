@@ -13,7 +13,8 @@ related_targets:
 ## User goal and first view
 
 Read and manage durable memories with minimal scanning effort. Preserve the shared App rail and typography.
-The header has the title, “查看、搜索和管理长期记忆。” subtitle, review/history entry, and neutral primary Add action.
+The header has the title, a “Rovai 长期记忆” switch, “查看、搜索和管理长期记忆。” subtitle, review/history entry, and neutral primary Add action.
+The page switch and General → 会话 control the same Core preference through the shared Provider.
 Three quiet inline counts show active memories, active agent-origin memories, and memories due for review.
 Loading counts use a dash. A compact dismissible change notice remains visible on the Memory page and in the Thread.
 No capacity meters or separate lifecycle/source filter row is shown.
@@ -21,6 +22,28 @@ No capacity meters or separate lifecycle/source filter row is shown.
 Use the achromatic `--memory-*` family under every App palette, according to its day/night mode. Add and Revise use dark neutral primary actions in day and
 inverse light actions at night. Amber means attention; red means error or permanent forgetting. Do not add blue
 selection, badges, borders or decoration. Scope neutral overrides to Memory content and portals. The shared sidebar, logo and identity avatars keep their production theme; its pending dot is vertically centered.
+
+## Instance disabled and unavailable
+
+The navigation remains available. When Core confirms Memory is disabled, follow the MCP first-connection
+empty-state composition: a narrow 460px content column, generous top spacing, the existing neutral brain glyph,
+“Rovai 长期记忆已关闭” heading, “已保存的记忆会保留，重新开启后可继续使用和管理。” description,
+and the same “Rovai 长期记忆” switch to re-enable directly. Use the existing Memory neutral tokens, without a warning card.
+Do not load or render the business list/detail, counts, review dialogs, reminders or automatic notices.
+An unavailable setting shows “无法读取长期记忆设置，请重试。” with Retry; initial loading uses
+“正在读取记忆设置…”. Do not infer a confirmed disable from a failed read. Late business responses cannot
+restore content or notices. Re-enable reads current data without automatically submitting retained drafts.
+Disable the switch during initial loading, unavailable reads and saving; keep the confirmed value until Core replies.
+Show save errors beside the control with Retry, retaining its failed intent. The entire labeled control is a keyboard
+operable switch with at least a 44px touch height; narrow layouts wrap header actions without horizontal overflow.
+Existing list/detail labels and review copy below remain unchanged. Authority and replay boundaries belong to
+[Memory Capability v1](../../contracts/memory-capability-v1.md).
+
+Content refreshes on Memory changes and connection recovery, independently of whether historical behavior
+notices are suppressed. Unrelated Web invalidations do not reload the two full lists. The mounted page reports
+its pending count through the existing callback; the App reads that list only outside this page.
+A failed list refresh retains the current list and selection, with Retry in the existing error row even when old
+content is available. Add no extra status panel or explanatory copy.
 
 ## Scope, search and workbench
 

@@ -79,7 +79,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::Current(ref marker) if marker.projection_schema_version == 173
+                DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 173
             ),
             "Kilo catalog migration failed schema admission"
         );
@@ -94,6 +94,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::memory_capability::downgrade_for_test(c);
     let applied: bool = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=223)",
