@@ -119,11 +119,24 @@ test('public history bounds mounting and preserves reading, selection, focus and
       await b.evaluate('document.querySelector(".timeline-scroll").scrollTop=0')
       await pause(200)
       const before = await anchor()
+      if (loaded === 112) await b.evaluate(`(() => {
+        window.thresholdMessage=document.querySelector('[data-message-id=${before.id}]');thresholdMessage.focus({preventScroll:true});
+        const range=document.createRange();range.selectNodeContents(thresholdMessage.querySelector('.message-surface'));
+        getSelection().removeAllRanges();getSelection().addRange(range);window.thresholdSelection=getSelection().toString();
+        if(document.activeElement !== thresholdMessage) throw Error('threshold fixture did not establish keyboard focus');
+      })()`)
       await b.evaluate('document.querySelector(".camp-history-text-button").click()')
       await b.wait(`__presence.getState().snapshot.messages.length === ${loaded} && !document.querySelector('.camp-history-loader.is-loading')`)
       await pause(350)
       const after = await offset(before.id)
-      assert.ok(after !== null && Math.abs(after - before.offset) < 2, `${loaded}: prepending displaced ${before.id} from ${before.offset} to ${after}`)
+      const thresholdState = loaded === 112 ? await b.evaluate('({ sameNode:thresholdMessage === document.querySelector("[data-message-id="+thresholdMessage.dataset.messageId+"]"), focus:document.activeElement === thresholdMessage, text:getSelection().toString(), expected:thresholdSelection })') : null
+      assert.ok(after !== null && Math.abs(after - before.offset) < 2, `${loaded}: prepending displaced ${before.id} from ${before.offset} to ${after}; ${JSON.stringify(thresholdState)}`)
+      if (loaded === 112) {
+        const retained = thresholdState
+        assert.ok(retained.sameNode && retained.focus && retained.text === retained.expected,
+          'crossing the threshold must retain selected DOM and focus: '+JSON.stringify(retained))
+        await b.evaluate('getSelection().removeAllRanges();document.activeElement.blur()')
+      }
       report.push({ loaded, anchor: before, after })
     }
     // Search mounts an already-loaded offscreen match without another history request.

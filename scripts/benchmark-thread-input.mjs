@@ -48,11 +48,13 @@ window.__inputPerfModel = {
    const tool = evidence(run)[1];
    const executionEvidence = ${JSON.stringify(contentProfile)} === 'tool-steps' ? Array.from({length:1000},(_,i)=>({...tool,id:'perf-tool-'+i,sequence:i+1,changeSequence:i+1,phase:'completed',payload:{item:{...tool.payload.item,id:'perf-tool-'+i,status:'completed',command:'echo step-'+i,aggregatedOutput:'Tool step '+i+' completed.'}}})) : [];
    run.executionEvidenceCount=executionEvidence.length;run.executionEvidenceChangeSequence=executionEvidence.length;
+   if(${JSON.stringify(contentProfile)} === 'tool-steps') state.version=Math.max(state.version,1000);
    update({generation:state.generation+1,snapshot:{...state.snapshot,thread:{...state.snapshot.thread,id},messages,agentRuns:[run],turns:[],tasks:[],executionEvidence,messageDeliveries:[],agentRunFileChanges:[],agentRunImages:[],memberCreations:[]},draft:{...state.draft,threadId:id,body:'',content:{version:2,segments:[]},quotes:[],attachments:[],replyIntent:null,continuationIntent:null}});
  },
  emit(sequence,other,planned) {
    window.__inputPerf.received.push({sequence,lag:Date.now()-planned});
-   const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:${contentProfile === 'tool-steps' ? 1001 : 1},revision:sequence,changeSequence:sequence,payload:{blockId:'perf-text',status:'streaming',text:'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:30}}};
+   if(${JSON.stringify(contentProfile)} === 'tool-steps'&&!other) state.version=Math.max(state.version,1000+sequence);
+   const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:${contentProfile === 'tool-steps' ? 1001 : 1},revision:sequence,changeSequence:${contentProfile === 'tool-steps' ? '1000+sequence' : 'sequence'},payload:{blockId:'perf-text',status:'streaming',text:'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:30}}};
    for(const listener of perfListeners) listener(event);
  },
  legacySubscribe(listener) { perfListeners.add(listener); return ()=>perfListeners.delete(listener) }
@@ -137,7 +139,7 @@ try {
    await browser.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65})
    await pause(800)
    if(trace){await browser.send('Tracing.end');await writeFile(join(out,'calibration.trace.json'),JSON.stringify({traceEvents:await trace}))}
-   const raw=await browser.evaluate(`({...window.__inputPerf,keys:window.__perfKeys,eventTiming:window.__perfEvents,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll('.timeline-track [data-message-id]').length,elements:document.getElementsByTagName('*').length,text:document.querySelector('[contenteditable=true]').textContent,activity:document.querySelector('.run-presence-preview')?.textContent})`)
+   const raw=await browser.evaluate(`({...window.__inputPerf,keys:window.__perfKeys,eventTiming:window.__perfEvents,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll('.timeline-track [data-message-id]').length,retainedRows:document.querySelectorAll('.timeline-track [data-retained="true"]').length,elements:document.getElementsByTagName('*').length,text:document.querySelector('[contenteditable=true]').textContent,activity:document.querySelector('.run-presence-preview')?.textContent})`)
    assert.equal(raw.keys.length,samples,'all scheduled key events must arrive')
    assert.equal(raw.text,'x'+'a'.repeat(samples),'all input characters must survive')
    if(load==='current')assert.match(raw.activity,/已处理第/,'the measured active region must update')

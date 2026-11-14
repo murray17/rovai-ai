@@ -36,6 +36,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   const frame = useRef(0)
   const userScrollPending = useRef(false)
   const virtual = items.length > PUBLIC_TIMELINE_VIRTUAL_THRESHOLD
+  const committedVirtual = useRef(virtual)
   const current = useRef({ followingLatest, preserveReadingPosition })
   current.current = { followingLatest, preserveReadingPosition }
   const previousItems = useRef(items)
@@ -78,14 +79,14 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
       const surface = readingSurface(row)
       const bounds = surface.getBoundingClientRect()
       const id = row.dataset.timelineKey ?? row.dataset.messageId ?? `run-presence:${row.dataset.presenceRun}`
-      if (!root.current) heights.current.set(id, bounds.height + 14)
+      if (!virtual) heights.current.set(id, row.getBoundingClientRect().height)
       if (bounds.bottom <= top || bounds.top >= top + viewport.clientHeight) continue
       const next = { id, offset: bounds.top - top }
       if (surface.dataset.messageId) { anchor.current = next; return }
       fallback ??= next
     }
     anchor.current = fallback
-  }, [viewportRef])
+  }, [viewportRef, virtual])
   const restoreAnchor = useCallback(() => {
     const viewport = viewportRef.current
     if (!viewport || !root.current || !current.current.preserveReadingPosition()) return
@@ -148,15 +149,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   }), [virtual, indexesById, findNode, restoreAnchor, rememberAnchor])
 
   useLayoutEffect(() => {
-    if (virtual) return
-    const viewport = viewportRef.current
-    rememberAnchor()
-    viewport?.addEventListener('scroll', rememberAnchor, { passive: true })
-    return () => viewport?.removeEventListener('scroll', rememberAnchor)
-  }, [virtual, viewportRef, items, rememberAnchor])
-
-  useLayoutEffect(() => {
-    if (!virtual) return
+    if (!items.length) return
     const viewport = viewportRef.current, element = root.current
     if (!viewport || !element) return
     const observe = new ResizeObserver(entries => {
@@ -169,7 +162,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
         if (Math.abs(height - (heights.current.get(id) ?? 160)) < .5) continue
         heights.current.set(id, height); dirty = true
       }
-      if (dirty) {
+      if (dirty && virtual) {
         if (!userScrollPending.current) pendingAnchor.current ??= current.current.followingLatest() ? 'latest' : anchor.current
         measured(value => value + 1)
       }
@@ -206,6 +199,20 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   }, [virtual, viewportRef, range.start, range.end, retained, target, items, schedule])
   useLayoutEffect(() => {
     if (!virtual) return
+    // Reconcile newly mounted rows before remembering a new reading position.
+    // Their real height can move a still-focused message before ResizeObserver
+    // delivers its first entries; recording that intermediate offset loses it.
+    let dirty = false
+    if (viewportRef.current?.clientHeight) for (const row of root.current?.querySelectorAll<HTMLElement>(':scope > [data-timeline-key]') ?? []) {
+      const height = row.getBoundingClientRect().height, id = row.dataset.timelineKey!
+      if (Math.abs(height - (heights.current.get(id) ?? 160)) < .5) continue
+      heights.current.set(id, height); dirty = true
+    }
+    if (dirty) {
+      if (!userScrollPending.current) pendingAnchor.current ??= current.current.followingLatest() ? 'latest' : anchor.current
+      measured(value => value + 1)
+      return
+    }
     const viewport = viewportRef.current, saved = pendingAnchor.current
     if (saved && saved !== 'latest' && current.current.preserveReadingPosition()
       && indexesById.has(saved.id) && !root.current?.querySelector(`[data-timeline-key="${CSS.escape(saved.id)}"]`)) {
@@ -233,7 +240,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     }
     rememberAnchor()
     schedule()
-  }, [virtual, measurement, items, target, findNode, rememberAnchor, schedule, viewportRef])
+  }, [virtual, measurement, items, target, range, retained, findNode, rememberAnchor, schedule, viewportRef])
   useLayoutEffect(() => {
     const keys = new Set(items.map(item => item.id))
     for (const id of heights.current.keys()) if (!keys.has(id)) heights.current.delete(id)
@@ -247,12 +254,36 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     pendingMount.current = null
   }, [])
 
-  if (!virtual) return <>{items.map(children)}</>
-  const start = range.key ? indexesById.get(range.key) ?? range.start : range.start
-  const end = Math.min(items.length, start + range.end - range.start)
+  // Capture interaction owners before the first windowed commit can remove
+  // them; focus/selection events may arrive in the same frame as a 50-row page.
+  const transitionRetained: string[] = []
+  if (virtual && !committedVirtual.current && root.current) {
+    const selection = document.getSelection()
+    for (const row of root.current.querySelectorAll<HTMLElement>(':scope > [data-timeline-key]')) {
+      if (row.contains(document.activeElement)
+        || row.querySelector('[aria-expanded="true"], [data-state="open"]')
+        || selection && !selection.isCollapsed && (row.contains(selection.anchorNode)
+          || row.contains(selection.focusNode) || selection.containsNode(row, true))) {
+        transitionRetained.push(row.dataset.timelineKey!)
+      }
+    }
+  }
+  useLayoutEffect(() => {
+    if (transitionRetained.length) setRetained(previous => {
+      const next = [...new Set([...previous, ...transitionRetained])].sort()
+      return previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next
+    })
+    committedVirtual.current = virtual
+  }, [virtual])
+
+  if (!items.length) return null
+  // Keep the same keyed wrappers below and above the threshold. A threshold
+  // crossing must not remount focused/selected messages or moving Run rows.
+  const start = virtual ? range.key ? indexesById.get(range.key) ?? range.start : range.start : 0
+  const end = virtual ? Math.min(items.length, start + range.end - range.start) : items.length
   const indexes = new Set<number>()
   for (let index = start; index < end; index++) indexes.add(index)
-  for (const id of [...retained, ...(target ? [target] : [])]) {
+  for (const id of [...retained, ...transitionRetained, ...(target ? [target] : [])]) {
     const index = indexesById.get(id)
     if (index !== undefined) for (let neighbor = Math.max(0, index - 1); neighbor <= Math.min(items.length - 1, index + 1); neighbor++) indexes.add(neighbor)
   }
@@ -268,5 +299,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     cursor = index + 1
   }
   if (cursor < items.length) rows.push(<div key="space:end" aria-hidden="true" style={{ height: positions.at(-1)! - positions[cursor] }} />)
-  return <div ref={root} className="timeline-virtual-list" data-retained-count={retained.length} style={{ overflowAnchor: 'none' }}>{rows}</div>
+  return <div ref={root} className="timeline-virtual-list"
+    data-retained-count={[...indexes].filter(index => index < start || index >= end).length}
+    style={{ overflowAnchor: 'none' }}>{rows}</div>
 }
