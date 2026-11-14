@@ -851,7 +851,8 @@ function BotConnectionIndicator({ bot }: { bot: ChannelMemberBotView }): React.J
     : code?.includes('brand_moved') ? uiAttribute('应用所属平台已变更，当前连接已停用')
       : code === 'ip_not_allowed' ? uiAttribute('当前网络不在应用的 IP 白名单内，请检查平台配置')
         : state === 'online' ? code === 'connection_confirmation_pending' ? uiAttribute('连接已建立，正在保存结果') : uiAttribute('连接在线')
-          : state === 'reconnecting' ? uiAttribute('连接不畅，正在重连')
+          : state === 'reconnecting' ? bot.connectionNeedsAttention
+            ? uiAttribute('连接暂不可用，请检查网络或代理') : uiAttribute('连接不畅，正在重连')
             : state === 'connecting' ? uiAttribute('正在连接')
               : state === 'offline' ? bot.connectionNeedsAttention && bot.canReconcile
                 ? uiAttribute('连接需处理，请继续核对') : uiAttribute('连接离线')
@@ -897,7 +898,7 @@ function BotConnectionIndicator({ bot }: { bot: ChannelMemberBotView }): React.J
   return <>
     <button ref={trigger} type="button" className={`channel-connection-indicator${attention ? ' needs-attention' : ''}`}
       data-connection-state={state} aria-label={`${bot.botDisplayName ?? 'Bot'} · ${label}`}
-      aria-describedby={position ? id : undefined} onMouseEnter={show} onMouseLeave={leave}
+      onMouseEnter={show} onMouseLeave={leave}
       onFocus={show} onBlur={close} onClick={show}>
       <svg viewBox="0 0 20 20" aria-hidden="true" data-signal-strength={strength}>
         {[4, 7, 10, 13].map((height, index) => <rect key={height} x={2 + index * 4} y={17 - height}

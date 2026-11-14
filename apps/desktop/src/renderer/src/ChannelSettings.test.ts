@@ -68,11 +68,16 @@ describe('Channel settings', () => {
       snapshot, agents: [agent('agent-a', 0)], busy: null
     }))
     expect(render()).toContain('class="channel-connection-indicator needs-attention"')
-    expect(render()).toContain('aria-label="Bot · 连接不畅，正在重连"')
+    expect(render()).toContain('aria-label="Bot · 连接暂不可用，请检查网络或代理"')
+    expect(render()).not.toContain('aria-describedby=')
     expect(render()).toContain('data-signal-strength="2"')
     expect(render()).not.toContain('channel-live-status')
     expect(render()).not.toContain('role="tooltip"')
     expect(render()).toContain('已发布')
+    snapshot.channels[0].memberBots[0].connectionNeedsAttention = false
+    expect(render()).toContain('aria-label="Bot · 连接不畅，正在重连"')
+    expect(render()).not.toContain('检查网络或代理')
+    snapshot.channels[0].memberBots[0].connectionNeedsAttention = true
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online',
       connectionFailureCode: 'connection_confirmation_pending', canReconcile: false }
     expect(render()).toContain('连接已建立，正在保存结果')
