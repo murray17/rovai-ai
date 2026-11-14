@@ -3,6 +3,7 @@
 在仓库根目录运行 `node scripts/benchmark-thread-input.mjs <绝对输出目录>`。
 这是生产组件的离线自动验收：Vite production/minify、1440×920，固定混合消息，20/200/1,000 条，
 静止/当前 Run 更新/其他 Thread 更新，默认每场景三轮、每轮 80 次普通键盘输入。
+每条消息复用固定的文字／列表／表格／代码内容，用户与队员交替；命令步骤另设独立场景。
 独立进程、临时 profile；不启动 Core、Runtime 或访问日常数据。
 
 `ROVAI_PERF_SURFACE=desktop` 使用 Electron；默认使用独立 Chrome headless。
@@ -22,7 +23,9 @@ Fixture 按生产 BusinessApp 是否仍持有执行正文状态选择同语义�
 
 `ROVAI_PERF_COUNTS`、`ROVAI_PERF_LOADS`、`ROVAI_PERF_ROUNDS`、`ROVAI_PERF_SAMPLES` 可缩小检查范围。
 `ROVAI_PERF_CONTENT=long-reply` 在末条消息放入 150 份相同混合 Markdown；`tool-steps` 放入 1,000 个
-已完成工具步骤并展开对应 Run，默认 `mixed` 的基准样本保持不变。不同内容场景分别报告，不与默认样本混算。
+已完成命令步骤并打开对应 Run 的生产分页执行窗口，确认实际 DOM 窗口与活动尾部更新；夹具只提供相同协议的固定
+page/changes 事实，不将完整工具记录作为 Renderer props。默认 `mixed` 的基准样本保持不变。
+不同内容场景分别报告，不与默认样本混算。旧完整快照诊断结果不能充当分页窗口的性能验收。
 `ROVAI_PERF_REPLY_ARRIVAL=1` 在输入中点发布一条新的大回复，用于区分大正文初次呈现与稳定内容更新成本。
 输出记录设备、浏览器、源码提交、样本数与逐轮原始样本；小样本 p99 只作观察，不声称稳定尾延迟。
 真实操作系统中文 IME 必须另行验收；CDP 字符注入或合成 composition 事件不能替代该结论。

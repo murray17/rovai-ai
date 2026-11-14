@@ -37,6 +37,23 @@ const modelExtension = `
 clearInterval(streamingTimer);
 const perfListeners = new Set();
 let perfPublicBody = '';
+let perfToolBlocks=[], perfTail=null, perfTailTemplate=null, perfWatermark=1000;
+const fixtureRequest=model.client.request.bind(model.client);
+if(${JSON.stringify(contentProfile)}==='tool-steps') model.client.request=async(method,input={})=>{
+ if(!['agentRunExecution.page','agentRunExecution.changes'].includes(method)) return fixtureRequest(method,input);
+ const common={schemaVersion:3,threadId:state.snapshot.thread.id,agentRunId:input.agentRunId,
+   throughSequence:perfTail?1001:1000,throughChangeSequence:perfWatermark};
+ if(method==='agentRunExecution.changes'){
+   const changed=[...(input.afterChangeSequence<1000?perfToolBlocks.filter(b=>b.changeSequence>input.afterChangeSequence):[]),...(perfTail&&perfTail.changeSequence>input.afterChangeSequence?[perfTail]:[])];
+   const page=changed.slice(0,input.limit??64),hasMore=page.length<changed.length;
+   return {...common,requestedAfterChangeSequence:input.afterChangeSequence,blocks:page,refreshedBlocks:[],hasMore,
+     nextAfterChangeSequence:hasMore?page.at(-1).changeSequence:perfWatermark};
+ }
+ const before=input.beforeSequence??null,blocks=perfTail?[...perfToolBlocks,perfTail]:perfToolBlocks;
+ const eligible=before===null?blocks:blocks.filter(b=>b.sequence<before),page=eligible.slice(-(input.limit??24));
+ const hasMore=page.length<eligible.length;
+ return {...common,requestedBeforeSequence:before,blocks:page,hasMore,nextBeforeSequence:hasMore?page[0].sequence:null};
+};
 model.client.onEvent = listener => { perfListeners.add(listener); return () => perfListeners.delete(listener) };
 window.__inputPerfModel = {
  load(count) {
@@ -51,6 +68,9 @@ window.__inputPerfModel = {
    const tool = evidence(run)[1];
    const executionEvidence = ${JSON.stringify(contentProfile)} === 'tool-steps' ? Array.from({length:1000},(_,i)=>({...tool,id:'perf-tool-'+i,sequence:i+1,changeSequence:i+1,phase:'completed',payload:{item:{...tool.payload.item,id:'perf-tool-'+i,status:'completed',command:'echo step-'+i,aggregatedOutput:'Tool step '+i+' completed.'}}})) : [];
    run.executionEvidenceCount=executionEvidence.length;run.executionEvidenceChangeSequence=executionEvidence.length;
+   perfTail=null;perfWatermark=1000;perfTailTemplate=evidence(run)[2];
+   perfToolBlocks=executionEvidence.map(e=>({key:e.id,kind:'toolGroup',sequence:e.sequence,lastSequence:e.sequence,
+     changeSequence:e.sequence,toolCount:1,counts:{completed:1,failed:0,stopped:0,recorded:0,running:0,waiting:0},evidence:[e]}));
    if(${JSON.stringify(contentProfile)} === 'tool-steps') state.version=Math.max(state.version,1000);
    update({generation:state.generation+1,snapshot:{...state.snapshot,thread:{...state.snapshot.thread,id},messages,agentRuns:[run],turns:[],tasks:[],executionEvidence,messageDeliveries:[],agentRunFileChanges:[],agentRunImages:[],memberCreations:[]},draft:{...state.draft,threadId:id,body:'',content:{version:2,segments:[]},quotes:[],attachments:[],replyIntent:null,continuationIntent:null}});
  },
@@ -60,7 +80,13 @@ window.__inputPerfModel = {
  },
  emit(sequence,other,planned) {
    window.__inputPerf.received.push({sequence,lag:Date.now()-planned});
-   if(${JSON.stringify(contentProfile)} === 'tool-steps'&&!other) state.version=Math.max(state.version,1000+sequence);
+   if(${JSON.stringify(contentProfile)} === 'tool-steps'&&!other){
+     perfWatermark=1000+sequence;
+     const e={...perfTailTemplate,id:'perf-text',sequence:1001,revision:sequence,changeSequence:perfWatermark,
+       payload:{itemId:'perf-text',delta:'已处理第 '+sequence+' 批测试内容。'}};
+     perfTail={key:e.id,kind:'item',sequence:1001,lastSequence:1001,changeSequence:perfWatermark,toolCount:0,
+       counts:{completed:0,failed:0,stopped:0,recorded:0,running:0,waiting:0},evidence:[e]};
+   }
    const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:${contentProfile === 'tool-steps' ? 1001 : 1},revision:sequence,changeSequence:${contentProfile === 'tool-steps' ? '1000+sequence' : 'sequence'},payload:{blockId:'perf-text',status:'streaming',text:'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:30}}};
    for(const listener of perfListeners) listener(event);
  },
@@ -105,7 +131,7 @@ try {
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
  browser=await launchAcceptanceBrowser({executable,args,env})
  await browser.send('Emulation.setFocusEmulationEnabled',{enabled:true})
- await browser.send('Page.navigate',{url:pathToFileURL(html).href+'?pure=1'})
+ await browser.send('Page.navigate',{url:pathToFileURL(html).href+'?pure=1'+(contentProfile==='tool-steps'?'&windowed=1':'')})
  await browser.wait('!!window.__inputPerfModel && !!document.querySelector("[contenteditable=true]")')
  const version=await browser.send('Browser.getVersion')
  await browser.evaluate(`
@@ -125,6 +151,7 @@ try {
    if(contentProfile==='tool-steps') {
      await browser.click('document.querySelector(".run-presence-open")')
      await browser.wait('!!document.querySelector(".execution-process-stage")')
+     await browser.wait('!!document.querySelector("[data-execution-virtual-key]")')
      await pause(500)
    }
    await browser.click('document.querySelector("[contenteditable=true]")')
@@ -152,17 +179,21 @@ try {
    await browser.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65})
    await pause(800)
    if(trace){await browser.send('Tracing.end');await writeFile(join(out,'calibration.trace.json'),JSON.stringify({traceEvents:await trace}))}
-   const raw=await browser.evaluate(`({...window.__inputPerf,keys:window.__perfKeys,eventTiming:window.__perfEvents,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll('.timeline-track [data-message-id]').length,retainedRows:document.querySelectorAll('.timeline-track [data-retained="true"]').length,elements:document.getElementsByTagName('*').length,text:document.querySelector('[contenteditable=true]').textContent,activity:document.querySelector('.run-presence-preview')?.textContent})`)
+   const raw=await browser.evaluate(`({...window.__inputPerf,keys:window.__perfKeys,eventTiming:window.__perfEvents,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll('.timeline-track [data-message-id]').length,retainedRows:document.querySelectorAll('.timeline-track [data-retained="true"]').length,executionRows:document.querySelectorAll('[data-execution-virtual-key]').length,executionTailVisible:document.querySelector('.execution-process-stage')?.textContent.includes('已处理第'),elements:document.getElementsByTagName('*').length,text:document.querySelector('[contenteditable=true]').textContent,activity:document.querySelector('.run-presence-preview')?.textContent})`)
    assert.equal(raw.keys.length,samples,'all scheduled key events must arrive')
    assert.equal(raw.text,'x'+'a'.repeat(samples),'all input characters must survive')
    if(load==='current')assert.match(raw.activity,/已处理第/,'the measured active region must update')
+   if(contentProfile==='tool-steps'){
+     assert.ok(raw.executionRows>0&&raw.executionRows<100,'execution steps must use the production DOM window');
+     if(load==='current')assert.equal(raw.executionTailVisible,true,'the opened execution window must receive the active tail');
+   }
    const timings=raw.keys.map(key=>raw.eventTiming.find(e=>Math.abs(e.start-key.start)<2)?.duration??0)
    const eventStats=Object.fromEntries([['p50',.5],['p95',.95],['p99',.99]].map(([name,p])=>[name,percentile(timings,p)||'<16ms']))
    const proxies=raw.keys.map(k=>k.afterFrameTaskMs).filter(Number.isFinite)
    const result={count,load,round:round+1,samples,durationMs:Date.now()-origin,setup,eventTimingMs:eventStats,eventTimingReported:raw.eventTiming.length,afterFrameTaskApproxMs:{p50:percentile(proxies,.5),p95:percentile(proxies,.95),p99:percentile(proxies,.99)},eventArrivalLagMs:{p50:percentile(raw.received.map(x=>x.lag),.5),p95:percentile(raw.received.map(x=>x.lag),.95)},...raw}
    delete result.text
    results.push(result)
-   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,contentProfile,replyArrival,surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
+   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,contentProfile,replyArrival,executionWindowed:contentProfile==='tool-steps',surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
    console.log(JSON.stringify({count,load,round:round+1,eventTimingMs:eventStats,approx:result.afterFrameTaskApproxMs,workspaceRenders:raw.workspaceRenders,historyRows:raw.historyRows,markdownParses:raw.markdownParses,mountedMessages:raw.mountedMessages,longTasks:raw.longTasks.length}))
  }
  assert.deepEqual(browser.errors,[])
