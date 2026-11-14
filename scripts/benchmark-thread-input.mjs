@@ -26,6 +26,7 @@ const legacyIngress = appSource.includes('const [liveRuntimeEvents, setLiveRunti
 const desktop = process.env.ROVAI_PERF_SURFACE === 'desktop'
 const contentProfile = process.env.ROVAI_PERF_CONTENT ?? 'mixed'
 assert.ok(['mixed', 'long-reply', 'tool-steps'].includes(contentProfile), 'known content profile required')
+const replyArrival = process.env.ROVAI_PERF_REPLY_ARRIVAL === '1'
 const samples = Number(process.env.ROVAI_PERF_SAMPLES ?? 80)
 const rounds = Number(process.env.ROVAI_PERF_ROUNDS ?? 3)
 const counts = (process.env.ROVAI_PERF_COUNTS ?? '20,200,1000').split(',').map(Number)
@@ -35,12 +36,14 @@ const initCounters = 'window.__inputPerf ??= {workspaceRenders:0,historyRows:0,m
 const modelExtension = `
 clearInterval(streamingTimer);
 const perfListeners = new Set();
+let perfPublicBody = '';
 model.client.onEvent = listener => { perfListeners.add(listener); return () => perfListeners.delete(listener) };
 window.__inputPerfModel = {
  load(count) {
    halt(); timers.forEach(clearTimeout); timers.clear(); streams.clear();
    const id = 'input-performance-' + count + '-' + Date.now();
    const text = '会话输入与执行进展核对。\\n\\n- 保留草稿和选区\\n- 保留消息顺序\\n\\n| 项目 | 状态 |\\n| --- | --- |\\n| 草稿 | 已保存 |\\n\\n~~~ts\\nconst sample = { count: 42, active: true };\\nconsole.log(sample);\\n~~~';
+   perfPublicBody = text.repeat(150);
    const messages = Array.from({length:count}, (_,i)=>makeMessage('perf-message-'+i,i+1,text,i%2 ? 0 : -1));
    if(${JSON.stringify(contentProfile)} === 'long-reply') messages[count-1] = makeMessage('perf-message-'+(count-1),count,text.repeat(150),0);
    const run = {...makeRun('perf-current-run',0,'running',[messages.at(-2).id]),executionEvidenceCount:0,executionEvidenceChangeSequence:0,anchorMessageId:messages.at(-2).id,publicTailSequenceAtStart:count-2};
@@ -50,6 +53,10 @@ window.__inputPerfModel = {
    run.executionEvidenceCount=executionEvidence.length;run.executionEvidenceChangeSequence=executionEvidence.length;
    if(${JSON.stringify(contentProfile)} === 'tool-steps') state.version=Math.max(state.version,1000);
    update({generation:state.generation+1,snapshot:{...state.snapshot,thread:{...state.snapshot.thread,id},messages,agentRuns:[run],turns:[],tasks:[],executionEvidence,messageDeliveries:[],agentRunFileChanges:[],agentRunImages:[],memberCreations:[]},draft:{...state.draft,threadId:id,body:'',content:{version:2,segments:[]},quotes:[],attachments:[],replyIntent:null,continuationIntent:null}});
+ },
+ appendPublicReply(planned) {
+   const message=makeMessage('perf-large-reply',state.snapshot.messages.at(-1).sequence+1,perfPublicBody+'\\n\\n'+planned,0,'perf-current-run');
+   update({snapshot:{...state.snapshot,messages:[...state.snapshot.messages,message]}});
  },
  emit(sequence,other,planned) {
    window.__inputPerf.received.push({sequence,lag:Date.now()-planned});
@@ -110,6 +117,8 @@ try {
  const percentile=(values,p)=>values.length?values.slice().sort((a,b)=>a-b)[Math.min(values.length-1,Math.floor(values.length*p))]:null
  for(const count of counts) for(const load of loads) for(let round=0;round<rounds;round++){
    console.log(JSON.stringify({phase:'sampling',count,load,round:round+1,samples,surface:desktop?'desktop-electron':'web-chrome'}))
+   await browser.evaluate('Object.assign(window.__inputPerf,{workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0});window.__perfLongTasks=[];true')
+   const setupStart=Date.now()
    await browser.evaluate(`window.__inputPerfModel.load(${count});true`)
    await browser.wait('!!document.querySelector("[contenteditable=true]")')
    await pause(700)
@@ -121,6 +130,9 @@ try {
    await browser.click('document.querySelector("[contenteditable=true]")')
    await browser.send('Input.insertText',{text:'x'})
    await pause(500)
+   const setup=await browser.evaluate('({...window.__inputPerf,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll(".timeline-track [data-message-id]").length})')
+   delete setup.received
+   setup.durationIncludingWarmupMs=Date.now()-setupStart
    await browser.evaluate('Object.assign(window.__inputPerf,{workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0,received:[]});window.__perfKeys=[];window.__perfEvents=[];window.__perfLongTasks=[];true')
    let trace
    if(process.env.ROVAI_PERF_TRACE==='1'&&count===1000&&load==='current'&&round===0){
@@ -134,6 +146,7 @@ try {
    const scheduled=[]
    for(let i=0;i<samples;i++)scheduled.push(schedule(origin+i*keyInterval,()=>browser.send('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',windowsVirtualKeyCode:65,text:'a',timestamp:(origin+i*keyInterval)/1000})))
    if(load!=='idle')for(let i=0;i<Math.ceil(samples*keyInterval/eventInterval);i++)scheduled.push(schedule(origin+i*eventInterval,()=>browser.evaluate(`window.__inputPerfModel.emit(${i+1},${load==='other'},${origin+i*eventInterval});true`)))
+   if(replyArrival)scheduled.push(schedule(origin+Math.floor(samples/2)*keyInterval,()=>browser.evaluate(`window.__inputPerfModel.appendPublicReply(${origin+Math.floor(samples/2)*keyInterval});true`)))
    await Promise.all(scheduled)
    await Promise.all(pending)
    await browser.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65})
@@ -146,10 +159,10 @@ try {
    const timings=raw.keys.map(key=>raw.eventTiming.find(e=>Math.abs(e.start-key.start)<2)?.duration??0)
    const eventStats=Object.fromEntries([['p50',.5],['p95',.95],['p99',.99]].map(([name,p])=>[name,percentile(timings,p)||'<16ms']))
    const proxies=raw.keys.map(k=>k.afterFrameTaskMs).filter(Number.isFinite)
-   const result={count,load,round:round+1,samples,durationMs:Date.now()-origin,eventTimingMs:eventStats,eventTimingReported:raw.eventTiming.length,afterFrameTaskApproxMs:{p50:percentile(proxies,.5),p95:percentile(proxies,.95),p99:percentile(proxies,.99)},eventArrivalLagMs:{p50:percentile(raw.received.map(x=>x.lag),.5),p95:percentile(raw.received.map(x=>x.lag),.95)},...raw}
+   const result={count,load,round:round+1,samples,durationMs:Date.now()-origin,setup,eventTimingMs:eventStats,eventTimingReported:raw.eventTiming.length,afterFrameTaskApproxMs:{p50:percentile(proxies,.5),p95:percentile(proxies,.95),p99:percentile(proxies,.99)},eventArrivalLagMs:{p50:percentile(raw.received.map(x=>x.lag),.5),p95:percentile(raw.received.map(x=>x.lag),.95)},...raw}
    delete result.text
    results.push(result)
-   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,contentProfile,surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
+   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,contentProfile,replyArrival,surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
    console.log(JSON.stringify({count,load,round:round+1,eventTimingMs:eventStats,approx:result.afterFrameTaskApproxMs,workspaceRenders:raw.workspaceRenders,historyRows:raw.historyRows,markdownParses:raw.markdownParses,mountedMessages:raw.mountedMessages,longTasks:raw.longTasks.length}))
  }
  assert.deepEqual(browser.errors,[])

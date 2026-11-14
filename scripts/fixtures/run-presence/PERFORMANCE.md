@@ -11,6 +11,8 @@ Electron 使用隐藏的隔离窗口与 focus emulation；该数字也不等于�
 Fixture 按生产 BusinessApp 是否仍持有执行正文状态选择同语义的事件接入代理；消息组件直接来自当前源码。
 事件在 Node 进程按固定时间轴每 32ms 注入，按键间隔 100ms，不等待上一次渲染再继续注入；结果保存实际事件延迟。
 这不是生产事件频率的断言。
+每场景加载后等待 700ms，先输入一个 `x`，再等待 500ms 才重置计数并采样；输入分位数描述连续输入，
+不包含首次空转非空与历史初次挂载。`setup` 单独保留包含上述预热的渲染／解析计数与长任务，不能当作纯加载耗时。
 
 结果区分组件执行、历史项 JSX 创建、react-markdown 实际解析、DOM 挂载和长任务。
 输入主指标为 [Event Timing](https://www.w3.org/TR/event-timing/) 的 keydown 到后续渲染完成，
@@ -21,5 +23,6 @@ Fixture 按生产 BusinessApp 是否仍持有执行正文状态选择同语义�
 `ROVAI_PERF_COUNTS`、`ROVAI_PERF_LOADS`、`ROVAI_PERF_ROUNDS`、`ROVAI_PERF_SAMPLES` 可缩小检查范围。
 `ROVAI_PERF_CONTENT=long-reply` 在末条消息放入 150 份相同混合 Markdown；`tool-steps` 放入 1,000 个
 已完成工具步骤并展开对应 Run，默认 `mixed` 的基准样本保持不变。不同内容场景分别报告，不与默认样本混算。
+`ROVAI_PERF_REPLY_ARRIVAL=1` 在输入中点发布一条新的大回复，用于区分大正文初次呈现与稳定内容更新成本。
 输出记录设备、浏览器、源码提交、样本数与逐轮原始样本；小样本 p99 只作观察，不声称稳定尾延迟。
 真实操作系统中文 IME 必须另行验收；CDP 字符注入或合成 composition 事件不能替代该结论。
