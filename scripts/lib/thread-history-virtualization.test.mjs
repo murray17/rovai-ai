@@ -67,6 +67,17 @@ test('public history bounds mounting and preserves reading, selection, focus and
       assert.ok(Math.abs((await offset(before.id)) - before.offset) < 2, 'new messages must preserve an older reading position')
       report.push({ count, mounted, anchor: before })
     }
+    const imageAnchor = await anchor()
+    await b.evaluate(`(() => {
+      const v=document.querySelector('.timeline-scroll'),top=v.getBoundingClientRect().top;
+      const row=[...v.querySelectorAll('[data-message-id]')].find(e=>e.getBoundingClientRect().bottom<top);
+      if(!row) throw Error('a buffered row is required for image-height acceptance');
+      const image=document.createElement('img');image.alt='异步图片夹具';
+      image.src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="180"><rect width="60" height="180" fill="green"/></svg>');
+      row.querySelector('.message-surface').append(image);
+    })()`)
+    await pause(350)
+    assert.ok(Math.abs((await offset(imageAnchor.id)) - imageAnchor.offset) < 2, 'image growth above the viewport must preserve the reading anchor')
     // Focus and a native DOM selection retain old rows while the viewport moves.
     const selected = await b.evaluate(`(() => {
       const v=document.querySelector('.timeline-scroll'), rows=[...v.querySelectorAll('[data-message-id^=long-]')];
@@ -80,10 +91,27 @@ test('public history bounds mounting and preserves reading, selection, focus and
     await wheel(100_000)
     assert.equal(await b.evaluate('savedSelectedRows.every(e=>e.isConnected) && getSelection().toString() === savedSelection'), true)
     assert.ok(await b.evaluate('Number(document.querySelector(".timeline-virtual-list").dataset.retainedCount)') >= 2)
+    assert.equal(await b.evaluate(`(() => {
+      const v=document.querySelector('.timeline-scroll'),r=v.getBoundingClientRect();
+      const visible=new Set([...v.querySelectorAll('[data-message-id]')].filter(e=>{const b=e.getBoundingClientRect();return b.bottom>r.top&&b.top<r.bottom}).map(e=>e.dataset.messageId));
+      const acknowledged=__presence.controls.visibleSources.at(-1)?.messageIds;
+      return acknowledged?.length>0 && acknowledged.every(id=>visible.has(id));
+    })()`), true, 'retained or buffered DOM must not acknowledge offscreen messages')
     await b.evaluate('getSelection().removeAllRanges(); document.activeElement.blur()')
     await pause(300)
     assert.equal(await b.evaluate('savedSelectedRows.every(e=>!e.isConnected)'), true, 'released rows must leave the DOM')
     report.push({ selection: selected.ids, released: true })
+
+    await click('[data-message-id=long-999] .message-author-name-trigger')
+    await b.wait('!!document.querySelector(".mention-profile-popover")')
+    await b.evaluate('void (window.expandedHistoryRow=document.querySelector("[data-message-id=long-999]"))')
+    await b.evaluate('document.querySelector(".timeline-scroll").scrollTop=0')
+    await pause(250)
+    assert.equal(await b.evaluate('expandedHistoryRow.isConnected'), true, 'an open profile must keep its owner mounted')
+    await b.key('Escape')
+    await click('[contenteditable=true]')
+    await pause(250)
+    assert.equal(await b.evaluate('expandedHistoryRow.isConnected'), false)
 
     // 50-message paging crosses the virtualization threshold without moving the old anchor.
     await open(200, false)

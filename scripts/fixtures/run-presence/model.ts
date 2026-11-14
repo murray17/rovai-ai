@@ -254,7 +254,7 @@ const controls = { holdExportImage: false, steerReview: false, holdContinue: fal
   holdExecutionChanges: false, liveEvidence: false,
   holdSourceRead: false, failNextSourceRead: false, wrongSourceOwner: false,
   persistServer: false, continuationMode: 'normal', stopError: false,
-  executionReads: [] as any[], hiddenMessages: [] as any[],
+  executionReads: [] as any[], hiddenMessages: [] as any[], visibleSources: [] as any[],
   exportHistory: null as any[] | null, exportReadDelay: 0, failNextExportPage: false, exportReads: [] as any[],
   exportImageGroups: [] as any[],
   continueAttempts: [] as any[], stopAttempts: [] as any[], receipts: new Map<string, any>() }
@@ -782,6 +782,21 @@ const historyScale = Number(new URLSearchParams(location.search).get('historySca
 if (Number.isInteger(historyScale) && historyScale >= 20 && historyScale <= 1000) {
   model.showReplyCase(true, true, false, true, historyScale)
   model.showNarration('持续执行与中文组合输入检查')
+  const record = (value: any) => console.log('ROVAI_NATIVE_IME ' + JSON.stringify({ at: performance.now(), ...value }))
+  for (const name of ['compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input', 'keydown']) {
+    document.addEventListener(name, (event: any) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[contenteditable="true"]')) return
+      record({ type: name, data: event.data, key: event.key, inputType: event.inputType,
+        isComposing: event.isComposing, text: event.target.closest('[contenteditable="true"]').textContent })
+    }, true)
+  }
+  let lastMessageId = state.snapshot.messages.at(-1)?.id
+  model.subscribe(() => {
+    const last = state.snapshot.messages.at(-1)
+    if (last?.id === lastMessageId) return
+    lastMessageId = last?.id
+    record({ type: 'published', body: last?.body, authorType: last?.authorType })
+  })
   let revision = 10_000
   const nativeStream = setInterval(() => model.emitCoreEvent({ method: 'agent.text.block', params: {
     threadId: state.snapshot.thread.id, agentRunId: 'run-alice', executionEpoch: 1,

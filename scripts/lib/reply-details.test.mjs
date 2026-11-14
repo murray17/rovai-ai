@@ -35,30 +35,23 @@ async function runReplyDetails(t, splittersOnly = false) {
     await b.send('Emulation.setFocusEmulationEnabled', { enabled: true })
     const click = selector => b.click(`document.querySelector(${JSON.stringify(selector)})`)
     let scenarioNumber = 0
-    const open = async ({ width = 1440, loaded = false, full = false, reduced = false, scrollAfterOpen = false, wrapped = false, grouped = false }) => {
+    const open = async ({ width = 1440, loaded = false, full = false, reduced = false, scrollAfterOpen = false, wrapped = false, grouped = false, messageCount = 120 }) => {
       await b.send('Emulation.setDeviceMetricsOverride', { width, height: 920, deviceScaleFactor: 1, mobile: false })
       const search = `?pure=1&scenario=${++scenarioNumber}`
       await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + search })
       await b.wait(`location.search === ${JSON.stringify(search)} && !!window.__presence && !!document.querySelector("[contenteditable=true]")`)
-      await b.evaluate(`__presence.showReplyCase(true, ${loaded}, ${wrapped}, ${grouped}); document.documentElement.dataset.motionPreference = '${reduced ? 'reduce' : 'full'}'`)
-      await b.wait('!!document.querySelector("[data-message-id=long-120]")')
+      await b.evaluate(`__presence.showReplyCase(true, ${loaded}, ${wrapped}, ${grouped}, ${messageCount}); document.documentElement.dataset.motionPreference = '${reduced ? 'reduce' : 'full'}'`)
+      await b.wait(`!!document.querySelector("[data-message-id=long-${messageCount}]")`)
       await click('[contenteditable=true]')
       await b.send('Input.insertText', { text: '跳转时保留草稿。' })
       const draft = await b.evaluate('document.querySelector("[contenteditable=true]").textContent')
       if (scrollAfterOpen) {
         const point = await b.evaluate(`(() => { const e = document.querySelector('.timeline-scroll'), r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, deltaY: -e.scrollHeight } })()`)
+        await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x:point.x, y:point.y })
         await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0 })
-        if (scrollAfterOpen !== 'middle') for (let attempt = 0; attempt < 8; attempt++) {
-          await pause(150)
-          if (await b.evaluate('(() => { const e=document.querySelector(".timeline-scroll");return e.scrollHeight-e.clientHeight-e.scrollTop<2 })()')) break
-          // New rows can replace estimated heights as a user scrolls. Continue
-          // native scrolling until the measured tail is reached.
-          const next = await b.evaluate(`(() => {const e=document.querySelector('.timeline-scroll'),r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,deltaY:e.scrollHeight}})()`)
-          await b.send('Input.dispatchMouseEvent', { type:'mouseWheel', ...next, deltaX:0 })
-        }
         await b.wait('!!document.querySelector("[data-message-id=reply-b]") && document.querySelector(".timeline-scroll").scrollTop < 2')
       }
-      await click(`[data-message-id=${scrollAfterOpen ? 'reply-b' : 'long-120'}] .reply-parent-quote`)
+      await click(`[data-message-id=${scrollAfterOpen ? 'reply-b' : `long-${messageCount}`}] .reply-parent-quote`)
       await b.wait('!!document.querySelector("[data-reply-message-id=reply-a]")')
       if (full) await click('.reply-detail-expand')
       await pause(300)
@@ -66,7 +59,16 @@ async function runReplyDetails(t, splittersOnly = false) {
         'narrow long messages must start above the grouping height threshold')
       if (scrollAfterOpen) {
         const point = await b.evaluate(`(() => { const e = document.querySelector('.timeline-scroll'), r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, deltaY: ${scrollAfterOpen === 'middle' ? 1800 : 'e.scrollHeight'} } })()`)
+        await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x:point.x, y:point.y })
         await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0 })
+        if (scrollAfterOpen !== 'middle') for (let attempt = 0; attempt < 8; attempt++) {
+          await pause(150)
+          if (await b.evaluate('(() => { const e=document.querySelector(".timeline-scroll");return e.scrollHeight-e.clientHeight-e.scrollTop<2 })()')) break
+          // New rows replace estimated heights as a user scrolls. Continue
+          // native scrolling until the measured tail is reached.
+          const next = await b.evaluate(`(() => {const e=document.querySelector('.timeline-scroll'),r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,deltaY:e.scrollHeight}})()`)
+          await b.send('Input.dispatchMouseEvent', { type:'mouseWheel', ...next, deltaX:0 })
+        }
         await b.wait(`(() => { const e = document.querySelector('.timeline-scroll'); return ${scrollAfterOpen === 'middle' ? 'e.scrollTop >= 1800' : 'e.scrollHeight - e.clientHeight - e.scrollTop < 2'} })()`)
         await pause(300)
       }
@@ -109,7 +111,7 @@ async function runReplyDetails(t, splittersOnly = false) {
     }
     for (const scenario of [
       { width: 1920, full: false }, { width: 1440, full: true }, { width: 1040, full: false }
-    ]) {
+    ].filter(() => !process.env.ROVAI_REPLY_CASE)) {
       await open({ ...scenario, loaded: true })
       for (const tab of ['execution', 'members']) {
         await click(`.camp-detail-entry[data-detail="${tab}"]`)
@@ -160,7 +162,7 @@ async function runReplyDetails(t, splittersOnly = false) {
       { name: 'loaded-full', loaded: true, full: true }, { name: 'history-full', full: true },
       { name: 'loaded-compact', loaded: true, width: 1040 }, { name: 'history-compact', width: 1040 },
       { name: 'reduced-motion', loaded: true, reduced: true }
-    ]) {
+    ].filter(scenario => !process.env.ROVAI_REPLY_CASE || scenario.name === process.env.ROVAI_REPLY_CASE)) {
       t.diagnostic('Reply scenario: ' + scenario.name)
       const expectedDraft = await open(scenario)
       const messageId = scenario.target ?? 'reply-a'
@@ -194,7 +196,7 @@ async function runReplyDetails(t, splittersOnly = false) {
       assert.equal(afterReveal.draft, expectedDraft)
       assert.equal(afterResize.visible, true, `${name}: subsequent resize must preserve the destination`)
     }
-    await open({ loaded: true, wrapped: true, grouped: true })
+    await open({ loaded: true, wrapped: true, grouped: true, messageCount: 80 })
     const beforeNavigation = await b.evaluate('document.querySelector(".timeline-scroll").scrollTop')
     await click('[data-reply-message-id=reply-a] [aria-label="回到原文"]')
     await b.wait(`(() => { const e = document.querySelector('.timeline-scroll'); return e.scrollTop > 800 && e.scrollTop < ${beforeNavigation} - 800 })()`)

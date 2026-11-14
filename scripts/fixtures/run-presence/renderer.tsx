@@ -181,6 +181,7 @@ function Workbench() {
             workspaceEntrySnapshotReady={!model.controls.holdEntrySnapshot}
             messageHistory={params.has('virtualHistory') ? model.historyCoverage() : undefined}
             onLoadEarlierMessages={params.has('virtualHistory') ? model.loadEarlierHistory : undefined}
+            onVisibleNotificationSources={params.has('virtualHistory') ? sources => model.controls.visibleSources.push(sources) : undefined}
             openCoverage={params.has('windowed') ? openCoverage : null} projectName="rovai-ai" agents={profiles.map((profile, index) => index === 0 ? { ...profile, ...identityFields } : profile) as any}
             installations={installations as any} initialComposerDraft={state.draft} busy={state.busy}
             onSend={model.send} onWithdrawMessage={model.withdrawMessage} onReconcileDelivery={async () => 'delivery_unknown'} onChangeLead={model.changeLead} onTasksChanged={async () => {}}

@@ -24,6 +24,8 @@ const appSource = baselineSources.get(join(root, 'apps/desktop/src/renderer/src/
 // Read the production owner to select its existing path; the benchmark source is unchanged across batches.
 const legacyIngress = appSource.includes('const [liveRuntimeEvents, setLiveRuntimeEvents]')
 const desktop = process.env.ROVAI_PERF_SURFACE === 'desktop'
+const contentProfile = process.env.ROVAI_PERF_CONTENT ?? 'mixed'
+assert.ok(['mixed', 'long-reply', 'tool-steps'].includes(contentProfile), 'known content profile required')
 const samples = Number(process.env.ROVAI_PERF_SAMPLES ?? 80)
 const rounds = Number(process.env.ROVAI_PERF_ROUNDS ?? 3)
 const counts = (process.env.ROVAI_PERF_COUNTS ?? '20,200,1000').split(',').map(Number)
@@ -40,12 +42,17 @@ window.__inputPerfModel = {
    const id = 'input-performance-' + count + '-' + Date.now();
    const text = '会话输入与执行进展核对。\\n\\n- 保留草稿和选区\\n- 保留消息顺序\\n\\n| 项目 | 状态 |\\n| --- | --- |\\n| 草稿 | 已保存 |\\n\\n~~~ts\\nconst sample = { count: 42, active: true };\\nconsole.log(sample);\\n~~~';
    const messages = Array.from({length:count}, (_,i)=>makeMessage('perf-message-'+i,i+1,text,i%2 ? 0 : -1));
+   if(${JSON.stringify(contentProfile)} === 'long-reply') messages[count-1] = makeMessage('perf-message-'+(count-1),count,text.repeat(150),0);
    const run = {...makeRun('perf-current-run',0,'running',[messages.at(-2).id]),executionEvidenceCount:0,executionEvidenceChangeSequence:0,anchorMessageId:messages.at(-2).id,publicTailSequenceAtStart:count-2};
-   update({generation:state.generation+1,snapshot:{...state.snapshot,thread:{...state.snapshot.thread,id},messages,agentRuns:[run],turns:[],tasks:[],executionEvidence:[],messageDeliveries:[],agentRunFileChanges:[],agentRunImages:[],memberCreations:[]},draft:{...state.draft,threadId:id,body:'',content:{version:2,segments:[]},quotes:[],attachments:[],replyIntent:null,continuationIntent:null}});
+   if(${JSON.stringify(contentProfile)} !== 'mixed') Object.assign(run,{inputMessageIds:[messages.at(-1).id],anchorMessageId:messages.at(-1).id,publicTailSequenceAtStart:count});
+   const tool = evidence(run)[1];
+   const executionEvidence = ${JSON.stringify(contentProfile)} === 'tool-steps' ? Array.from({length:1000},(_,i)=>({...tool,id:'perf-tool-'+i,sequence:i+1,changeSequence:i+1,phase:'completed',payload:{item:{...tool.payload.item,id:'perf-tool-'+i,status:'completed',command:'echo step-'+i,aggregatedOutput:'Tool step '+i+' completed.'}}})) : [];
+   run.executionEvidenceCount=executionEvidence.length;run.executionEvidenceChangeSequence=executionEvidence.length;
+   update({generation:state.generation+1,snapshot:{...state.snapshot,thread:{...state.snapshot.thread,id},messages,agentRuns:[run],turns:[],tasks:[],executionEvidence,messageDeliveries:[],agentRunFileChanges:[],agentRunImages:[],memberCreations:[]},draft:{...state.draft,threadId:id,body:'',content:{version:2,segments:[]},quotes:[],attachments:[],replyIntent:null,continuationIntent:null}});
  },
  emit(sequence,other,planned) {
    window.__inputPerf.received.push({sequence,lag:Date.now()-planned});
-   const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:1,revision:sequence,changeSequence:sequence,payload:{blockId:'perf-text',status:'streaming',text:'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:30}}};
+   const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:${contentProfile === 'tool-steps' ? 1001 : 1},revision:sequence,changeSequence:sequence,payload:{blockId:'perf-text',status:'streaming',text:'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:30}}};
    for(const listener of perfListeners) listener(event);
  },
  legacySubscribe(listener) { perfListeners.add(listener); return ()=>perfListeners.delete(listener) }
@@ -104,6 +111,11 @@ try {
    await browser.evaluate(`window.__inputPerfModel.load(${count});true`)
    await browser.wait('!!document.querySelector("[contenteditable=true]")')
    await pause(700)
+   if(contentProfile==='tool-steps') {
+     await browser.click('document.querySelector(".run-presence-open")')
+     await browser.wait('!!document.querySelector(".execution-process-stage")')
+     await pause(500)
+   }
    await browser.click('document.querySelector("[contenteditable=true]")')
    await browser.send('Input.insertText',{text:'x'})
    await pause(500)
@@ -135,7 +147,7 @@ try {
    const result={count,load,round:round+1,samples,durationMs:Date.now()-origin,eventTimingMs:eventStats,eventTimingReported:raw.eventTiming.length,afterFrameTaskApproxMs:{p50:percentile(proxies,.5),p95:percentile(proxies,.95),p99:percentile(proxies,.99)},eventArrivalLagMs:{p50:percentile(raw.received.map(x=>x.lag),.5),p95:percentile(raw.received.map(x=>x.lag),.95)},...raw}
    delete result.text
    results.push(result)
-   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
+   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,contentProfile,surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
    console.log(JSON.stringify({count,load,round:round+1,eventTimingMs:eventStats,approx:result.afterFrameTaskApproxMs,workspaceRenders:raw.workspaceRenders,historyRows:raw.historyRows,markdownParses:raw.markdownParses,mountedMessages:raw.mountedMessages,longTasks:raw.longTasks.length}))
  }
  assert.deepEqual(browser.errors,[])

@@ -2074,10 +2074,14 @@ export function ThreadWorkspace({
   const workspaceShellRef = useRef<HTMLElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const timelineVirtualRef = useRef<TimelineVirtualListHandle>(null)
-  const ensureTimelineMessageMounted = useCallback((id: string) => timelineVirtualRef.current?.ensureMounted(id)
-    ?? Promise.resolve(null), [])
+  const ensureTimelineMessageMounted = useCallback((id: string) => {
+    const current = timelineReadingPosition.current
+    if (current) timelineReadingPosition.current = { ...current, position: { ...current.position, followingLatest: false } }
+    return timelineVirtualRef.current?.ensureMounted(id) ?? Promise.resolve(null)
+  }, [])
   const runSourceNavigation = useRunSourceNavigation(snapshot.thread.id, snapshot.messages, timelineScrollRef, ensureTimelineMessageMounted)
   const historyLoaderRef = useRef<HTMLDivElement>(null)
+  const timelineTouchStartY = useRef<number | null>(null)
   const earlierMessageLoadInFlightRef = useRef(false)
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
@@ -2739,6 +2743,12 @@ export function ThreadWorkspace({
     && (timelineReadingPosition.current?.threadId !== snapshot.thread.id
       || timelineReadingPosition.current.position.followingLatest !== false),
   [conversationFind.open, snapshot.thread.id])
+  const stopFollowingForEarlierInput = useCallback(() => {
+    const current = timelineReadingPosition.current
+    if (current?.threadId === snapshot.thread.id) timelineReadingPosition.current = {
+      threadId: current.threadId, position: { ...current.position, followingLatest: false }
+    }
+  }, [snapshot.thread.id])
   useEffect(() => {
     if (conversationView !== 'conversation' || notificationFocus?.active) {
       cancelReplyReveal()
@@ -3695,6 +3705,7 @@ export function ThreadWorkspace({
       timelineLayoutAnchorRef.current = { threadId, width: timelineViewportWidth(scroll), hidden: false,
         scrollTop: scroll.scrollTop, anchor: captureTimelineReadingAnchor(scroll) }
       timelineReadingPosition.current = { threadId, position: { scrollTop: scroll.scrollTop, followingLatest: false } }
+      timelineVirtualRef.current?.rememberAnchor()
       timelineViewportGeometry.current = { threadId,
         geometry: { scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight } }
     }
@@ -3704,7 +3715,9 @@ export function ThreadWorkspace({
       scroll.scrollTo({ top: scroll.scrollTop, behavior: 'instant' })
     }
     const top = destination()
-    if (Math.abs(top - scroll.scrollTop) <= 1 || prefersReducedMotion()) finish()
+    // Traversing unmeasured virtual rows changes the destination during a smooth
+    // animation. Mount then locate directly; short, fully mounted history keeps it.
+    if (timelineVirtualRef.current?.virtual || Math.abs(top - scroll.scrollTop) <= 1 || prefersReducedMotion()) finish()
     else scroll.scrollTo({ top, behavior: 'smooth' })
   }
 
@@ -5567,9 +5580,21 @@ export function ThreadWorkspace({
               onWheelCapture={(event) => {
                 cancelReplyReveal()
                 captureFilePreviewAnchor()
-                if (event.deltaY < 0) checkHistoryAfterUserInput()
+                if (event.deltaY < 0) {
+                  stopFollowingForEarlierInput()
+                  checkHistoryAfterUserInput()
+                }
               }}
-              onTouchStartCapture={() => { cancelReplyReveal(); captureFilePreviewAnchor() }}
+              onTouchStartCapture={(event) => {
+                timelineTouchStartY.current = event.touches[0]?.clientY ?? null
+                cancelReplyReveal(); captureFilePreviewAnchor()
+              }}
+              onTouchMoveCapture={(event) => {
+                const y = event.touches[0]?.clientY
+                if (y !== undefined && timelineTouchStartY.current !== null && y > timelineTouchStartY.current + 2) {
+                  stopFollowingForEarlierInput()
+                }
+              }}
               onPointerDownCapture={cancelReplyReveal}
               onKeyDownCapture={(event) => {
                 if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
@@ -5577,6 +5602,7 @@ export function ThreadWorkspace({
                   captureFilePreviewAnchor()
                 }
                 if (campHistoryKeyboardInputMovesEarlier(event.key, event.shiftKey)) {
+                  stopFollowingForEarlierInput()
                   checkHistoryAfterUserInput()
                 }
               }}

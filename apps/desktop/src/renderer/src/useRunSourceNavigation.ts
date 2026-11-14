@@ -68,7 +68,7 @@ export function useRunSourceNavigation(threadId: string, messages: readonly Thre
       const top = viewport.scrollTop + bounds.top - viewport.getBoundingClientRect().top
         - Math.max(18, (viewport.clientHeight - bounds.height) / 2)
       target.focus({ preventScroll: true })
-      viewport.scrollTo({ top: Math.max(0, top), behavior: prefersReducedMotion() ? 'instant' : 'smooth' })
+      viewport.scrollTo({ top: Math.max(0, top), behavior: prefersReducedMotion() || target.closest('[data-timeline-key]') ? 'instant' : 'smooth' })
       setState(value => ({ ...value, loading: null }))
     } catch {
       if (valid()) setState(value => ({ ...value, loading: null, error: messageId }))

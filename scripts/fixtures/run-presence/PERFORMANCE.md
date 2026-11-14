@@ -19,5 +19,7 @@ Fixture 按生产 BusinessApp 是否仍持有执行正文状态选择同语义�
 [Performance 时间线](https://developer.chrome.com/docs/devtools/performance/reference/)，用于核对渲染/呈现延迟。
 
 `ROVAI_PERF_COUNTS`、`ROVAI_PERF_LOADS`、`ROVAI_PERF_ROUNDS`、`ROVAI_PERF_SAMPLES` 可缩小检查范围。
+`ROVAI_PERF_CONTENT=long-reply` 在末条消息放入 150 份相同混合 Markdown；`tool-steps` 放入 1,000 个
+已完成工具步骤并展开对应 Run，默认 `mixed` 的基准样本保持不变。不同内容场景分别报告，不与默认样本混算。
 输出记录设备、浏览器、源码提交、样本数与逐轮原始样本；小样本 p99 只作观察，不声称稳定尾延迟。
 真实操作系统中文 IME 必须另行验收；CDP 字符注入或合成 composition 事件不能替代该结论。
