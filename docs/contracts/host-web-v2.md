@@ -392,9 +392,9 @@ the legacy aggregate cannot hide another provider's in-flight work or approver c
 `connection.sessionStatus` is the latest runtime inspection (`valid`, `invalid`, `unavailable`,
 `unknown`), distinct from account connection records. Bot `connectionStatus` is `online`, `offline`, `unknown`, `connecting` or `reconnecting`, separate
 from publication status. `published` retains the durable Bot publication fact when a later retry/connection failed. Absent live fields are unknown; persisted records alone cannot establish current connectivity.
-`connectionFailureCode` is an optional safe classification, `connectionNeedsAttention` requests local inline feedback,
+`connectionFailureCode` is an optional safe classification; `connectionNeedsAttention` marks a persistent connection issue on the compact signal icon,
 and `canReconcile` preserves the existing retry action for terminal configuration failures. These fields are projected
-with accurate failure-specific guidance; a legacy brand mismatch disables reconciliation on the wrong provider.
+with failure-specific guidance in its hover/focus/click tooltip, without permanent connection descriptions in the row; a legacy brand mismatch disables reconciliation on the wrong provider.
 An initial publication whose only remaining work is connection recovery returns its ongoing provisioning snapshot,
 not an action error. Its Dialog can close while the Host continues; an online transport with pending local confirmation
 remains online and reports `connection_confirmation_pending` if that confirmation fails. Fields are projected

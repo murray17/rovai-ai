@@ -67,17 +67,22 @@ describe('Channel settings', () => {
     const render = () => renderToStaticMarkup(createElement(ChannelSettingsView, {
       snapshot, agents: [agent('agent-a', 0)], busy: null
     }))
-    expect(render()).toContain('连接中断，正在重连')
-    expect(render()).toContain('连接暂不可用，请检查网络或代理')
+    expect(render()).toContain('class="channel-connection-indicator needs-attention"')
+    expect(render()).toContain('aria-label="Bot · 连接不畅，正在重连"')
+    expect(render()).toContain('data-signal-strength="2"')
+    expect(render()).not.toContain('channel-live-status')
+    expect(render()).not.toContain('role="tooltip"')
     expect(render()).toContain('已发布')
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online',
       connectionFailureCode: 'connection_confirmation_pending', canReconcile: false }
     expect(render()).toContain('连接已建立，正在保存结果')
+    expect(render()).toContain('data-signal-strength="4"')
     expect(render()).not.toContain('检查网络或代理')
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'offline',
       connectionFailureCode: 'identity_conflict', canReconcile: true }
     expect(render()).toContain('继续核对')
     expect(render()).toContain('Bot 身份与已绑定应用不符，请检查凭据')
+    expect(render()).toContain('data-signal-strength="0"')
     expect(render()).not.toContain('identity_conflict')
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0],
       connectionFailureCode: 'feishu_brand_moved_to_lark', canReconcile: false }
