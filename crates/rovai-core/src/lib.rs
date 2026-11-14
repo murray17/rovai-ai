@@ -94,6 +94,7 @@ pub mod member_environment;
 pub mod member_studio;
 pub mod member_tool;
 pub mod memory;
+pub mod memory_capability;
 pub mod memory_retrieval;
 pub mod memory_secret;
 pub mod memory_tool;

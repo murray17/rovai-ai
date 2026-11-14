@@ -1664,3 +1664,22 @@ Pi 默认不设升级例外，使用隔离真实安装与模型核验原地升�
 逐模型事务合并与现有 Renderer 请求代次。保留 MiniMax thinkingEffort 与正式执行边界。
 合同见 [Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)，
 取舍见 [V1.72-D76](decisions.md#v1-72-d76)，验证见[实施记录](implementation-plan.md#minimax-参数按需读取2026-11-10)。
+
+## Rovai 长期记忆实例开关（2026-11-11）
+
+User 已在范围和文案审阅后授权独立 worktree 实施，当前为[已确认 R4](model-context-change-memory-capability.md)。
+默认开启一个 Core 实例开关；关闭暂停 Agent 和用户管理业务并保留所有数据及已有提交回执。
+仅在新输入原有生成路径省略 Memory 入口和技能，旧 Session/Bootstrap/冻结输入不主动处理。
+R2 沿用 Task 的固定精简方式，从 cli-operations 移除 Memory 专用教学，记忆工作流归条件投递的
+memory-stewardship；通用 CLI 协调始终提供。
+R3 隔离 Memory 设置异常，清理跨重新启用边界的既有提示，删除无业务消费者的快照字段，
+收窄 Hermes 能力查询和审核列表刷新，不增加会话治理或后台状态。
+User sequence 17 的界面跟进已将关闭态调整为 MCP 首次空状态的布局，并在记忆页增加与通用设置同步的总开关。
+R4 收口 Provider 的同序号观察顺序与读取失败状态，分开恢复内容刷新与旧提示过滤，
+在成功活动证据之前统一最终读取结果；页内/页外审核读取互斥，Web 使用既有失效通道的内容标记，
+管理批量读取不再逐条查询开关。保持三字段快照、现有锁和旧会话边界，不增加存储或后台层。
+原有管理功能与 R2 模型输入语义保持，验证见[界面跟进](model-context-change-memory-capability.md#界面跟进与验证user-sequence-17)。
+当前接口见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。实现及自动化验收完成，
+真实模型通用 Gate 尚未执行；范围、结果与限制见[实施记录](implementation-plan.md#rovai-长期记忆实例开关2026-11-11)。
+全部提示词、工具定义/help、关闭错误和回放的前后变化见
+[逐项设计对照](model-context-change-memory-capability.md#完整提示词与工具对照)，沿用 Task 方案的审阅编号。

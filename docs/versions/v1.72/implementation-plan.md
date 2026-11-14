@@ -5320,3 +5320,65 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
 - `TZ=UTC pnpm test`：Vitest 3264 passed／2 skipped，后续 Node 矩阵通过。本机 Honolulu 时区运行时，
   未改动的 AboutUpdatesSettings 两个既有发布日期断言会落到前一天；本次没有修改该日期逻辑。
 - `pnpm docs:check` 通过；文档单测随 `pnpm test` 通过。当前合同为 Runtime Launch v77，取舍为 V1.72-D76。
+
+## Rovai 长期记忆实例开关（2026-11-11）
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-memory-capability`；分支 `rovai/memory-capability`。
+- 基线：`d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633`；方案独立提交 `50f43ef69`，未要求治理先合主线。
+- 范围与确认：[Memory capability R3](model-context-change-memory-capability.md)；当前合同：[v1](../../contracts/memory-capability-v1.md)。
+- 复用 Memory 存储、Agent Facade、Core 发现刷新、CLI、Web 失效和 Renderer 现有 owners；不改 Session 生命周期。
+- 验证归属：Memory 存储 owner 覆盖管理停用、回执和水位；现有 Core Task discovery owner 扩展 Memory 全链路；
+  Bootstrap owner 覆盖冻结材料和新分支；目录 owner 覆盖两开关组合；Memory UI 生产组件夹具覆盖停用/重试。
+- 状态：实现与自动化验收完成；按 User 既有分支交付偏好提交并推送，不自动创建 PR。
+- Core：Migration 224 / schema 174 默认开启，重启保留 false；设置提交后通知和修复发现投影。
+  Agent 读写、读缓存与全部人工管理受实时状态约束，已提交写回执保持；Task 与 Memory 独立。
+- 新生成 Bootstrap 省略 Memory 入口/技能，旧冻结输入逐字保留；CLI 与 Hermes 使用现有发现通路。
+  停用界面不发业务请求，隔离迟到响应，保留草稿但不自动提交；通知水位独立于设置排序序号。
+- 验证：Rust workspace 484 passed / 1 existing ignored，Memory 定向 29 passed；Core discovery、
+  Hermes 逻辑路由、Bootstrap、迁移回滚及重启 owners 通过。`pnpm test` 为 Vitest 3275 passed /
+  2 skipped、默认 Node 377 passed / 2 skipped；typecheck、Desktop/Web 构建、CLI 进程夹具、隔离
+  Electron 设置与 Memory UI（10 组交互 / 18 组视口主题）、文档与格式门禁通过。
+- 完整命令、后续小范围复测与限制见[变更说明结果](model-context-change-memory-capability.md#实施与验证结果2026-11-11)。
+  真实模型 12 Case Gate 为 `not_run / 证据不足`：缺少固定 snapshot Judge 与冻结 campaign，
+  不以受控 Hermes/Core/UI 夹具替代真实模型资格。本次没有启动真实 Runtime 或修改日常数据。
+- R2：User 审阅完整五处 Skill 文本后授权实施；cli-operations 的 description、选择表、引用和
+  界面元数据固定精简，旧 Memory reference 保留通用导航。专用记忆 Skill、Charter、Core 业务与
+  所有上下文版本轴保持。新一轮资源、Bootstrap、默认回归与文档结果在 R2 变更说明收口。
+- User sequence 17：关闭页按真实 MCP 首次空状态重做，记忆页在开启和停用态均提供与通用设置同步的总开关。
+  生产 UI owner 覆盖保存/重试、防重复和停用零业务读取；194 个 Renderer 定向用例、Desktop/Web 构建与
+  五套配色/桌面/移动/横屏核对通过。模型 R2、Core 和会话生命周期保持，详见[界面验证](model-context-change-memory-capability.md#界面跟进与验证user-sequence-17)。
+- 2026-11-12 收尾：统一读取失败提示为“无法读取长期记忆设置，请重试。”，补清旧 Memory reference
+  原位覆盖理由；32 项 Core 定向复核通过，确认默认开启、关闭选择持久化、回执和冻结输入保留。
+  具体命令与验证边界见[可用性复核](model-context-change-memory-capability.md#收尾与可用性复核2026-11-12)。
+- R3：按 User sequence 25 的五项明确修正实施，设置不可读只停用 Memory 投递/访问；普通输入、
+  事件及 Task 投影继续。事件响应以 `memoryCapability:null` 表达局部不可用，快照收为三字段。
+  通知按自身事件边界过滤已有提示；审核读取合并到既有 effect，Hermes 实际调用不做能力预查询。
+  复用现有 owners 验证缺行、非法值、冻结输入、事件、Task 投影、通知边界和 CLI 请求次数。
+  验证通过：默认 Rust 484 passed / 1 existing ignored，Memory 29、Core discovery 和 Bootstrap owners，
+  Vitest 3275 passed / 2 skipped、默认 Node 377 passed / 2 skipped，以及 CLI 进程、Memory UI 和真实隔离
+  Host/Web。快照查询减为两次 SQL，审核读取合并至单一 effect，真实模型 Gate 仍未执行。
+
+- R4：按 User sequence 27 的局部收口范围实施。get/事件快照与失败统一观察顺序；
+  读取失败明确不可用，Core 设置序号优先。恢复连接刷新内容但不补旧提示；页内计数复用页面读取，
+  页面外才读审核列表，Web 全量读取限定内容失效/resync。最终 Memory 读取结果在活动证据前选择，
+  不在记录后改判；管理 list/export 不逐条重复检查开关。未增加持久结构、后台刷新或会话版本。
+  验证通过：Rust workspace 484 passed / 1 existing ignored、Memory 29 与确定性并发结果 owner；
+  Vitest 3275 passed / 2 skipped、默认 Node 377 passed / 2 skipped；生产 Memory UI、Desktop 轮询/事件缺口恢复、
+  真实隔离 Host/Web 内容路由及断网恢复通过。页面仅补原错误行重试，真实 Runtime/模型 Gate 未执行。
+
+- Desktop 全局刷新补正（User sequence 29）：全局 memory.changed 不再受选中 Thread 限制；
+  Thread 轮询只在恢复/缺口时补刷新，普通 Memory 领域事件继续处理行为提示。仅改 Renderer 两处条件，
+  原页内/页外读取分工、Core 授权与所有会话边界保持；不新增查询、游标、队列或持久结构。
+  生产 App 原 owner 已复现修复前失败；两处条件修正后，跨 Thread/人工变化、页内/页外计数、
+  普通事件不重复读取与断线/缺口恢复通过。Typecheck 与 Desktop/Web 构建通过。
+  默认测试通过（Vitest 3275 passed / 2 skipped、Node 377 passed / 2 skipped），通用文档门禁通过。
+  本次没有 Rust、工具输出或模型输入变化，既有 Core 与真实 Runtime 资格记录保持。
+
+- Memory 页异步生命周期补正（User sequence 31，2026-11-13）：当前分支已包含 1c889a25c 的 Desktop
+  全局刷新修正，本轮仅在 MemoryLibrary 拦住过期访问的回执后读取和父计数发布。保留原列表乱序序号，
+  不取消已提交写入或阻止离页；setup/cleanup 重放与客户端切换均按当前组件访问处理，不扩展 Core 或会话机制。
+  新增场景先复现原代码卸载后的两次读取，修正后 Memory UI 11 组交互 / 18 组视口通过，包含
+  菜单及接受/拒绝回执、旧父计数、客户端切换和实际 development StrictMode setup/cleanup 重放。
+  既有 Desktop 跨会话刷新、普通事件去重及恢复回归通过；类型检查通过。仅组件内存标记，无新增界面信息。
+  Desktop/Web 构建、真实隔离 Host/Web 回归及通用文档门禁通过；默认 Vitest 3275 passed / 2 skipped，
+  Node 377 passed / 2 skipped。本轮 Rust/模型代码未变，未重复 Rust 测试或真实模型验收，沿用既有资格边界。

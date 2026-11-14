@@ -472,6 +472,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp History Retrieval v3（历史）](camp-history-v3.md) | v2 Agent projection/授权/读取语义不变；所有显式 target 与输出只接受唯一 canonical Camp ID |
 | [Camp History Retrieval v2（历史）](camp-history-v2.md) | v1 查询、授权、publication fence 与附件边界不变；Agent body/snippet/offset 使用 `agent_v1` Principal 投影，并为 `@Principal` 提供结构化候选路径 |
 | [Camp History Retrieval v1（历史）](camp-history-v1.md) | `camp.search/read/history.search` 的 single-Camp target、Manifest/live authorization、Public A2A publication fence 与旧 Human-body Agent 投影 |
+| [Rovai Memory Capability v1（当前）](memory-capability-v1.md) | Core 实例总开关、默认开启、Agent/用户业务停用、实时读回放、提交回执保留及发现/通知同步 |
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
