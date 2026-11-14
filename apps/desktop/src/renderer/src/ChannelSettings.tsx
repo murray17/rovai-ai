@@ -859,7 +859,6 @@ function BotConnectionIndicator({ bot }: { bot: ChannelMemberBotView }): React.J
               : state === 'offline' ? bot.connectionNeedsAttention && bot.canReconcile
                 ? uiAttribute('连接需处理，请继续核对') : uiAttribute('连接离线')
                 : uiAttribute('连接状态未知')
-  const strength = state === 'online' ? 4 : state === 'connecting' || state === 'reconnecting' ? 2 : 0
   const attention = bot.connectionNeedsAttention && state !== 'online'
   const clearTimer = (): void => { clearTimeout(closeTimer.current) }
   const close = (): void => { clearTimer(); setPosition(null) }
@@ -902,11 +901,9 @@ function BotConnectionIndicator({ bot }: { bot: ChannelMemberBotView }): React.J
       data-connection-state={state} aria-label={`${bot.botDisplayName ?? 'Bot'} · ${label}`}
       onMouseEnter={show} onMouseLeave={leave}
       onFocus={show} onBlur={close} onClick={show}>
-      <svg viewBox="0 0 20 20" aria-hidden="true" data-signal-strength={strength}>
-        {[4, 7, 10, 13].map((height, index) => <rect key={height} x={2 + index * 4} y={17 - height}
-          width="2.2" height={height} rx=".6" fill={index < strength ? 'currentColor' : 'none'}
-          opacity={index < strength || strength === 0 ? 1 : .3} />)}
-        {state === 'offline' && <path d="m2 3 16 14" />}
+      <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true" data-connection-icon="link-off">
+        <path d="M9 7H7a5 5 0 0 0 0 10h2M15 7h2a5 5 0 0 1 4.5 7.17M15 17h2a5 5 0 0 0 1.9-.37M8 12h4M2 2l20 20" />
       </svg>
     </button>
     {position && createPortal(<span id={id} role="tooltip" className="channel-connection-tooltip"

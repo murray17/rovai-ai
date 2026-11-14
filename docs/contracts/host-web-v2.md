@@ -5,7 +5,7 @@ authority: shared-host-web-transport
 status: accepted
 version: 2
 source_version: v1.59
-last_updated: 2026-09-16
+last_updated: 2026-11-14
 ---
 
 # Host Web v2
@@ -392,7 +392,7 @@ the legacy aggregate cannot hide another provider's in-flight work or approver c
 `connection.sessionStatus` is the latest runtime inspection (`valid`, `invalid`, `unavailable`,
 `unknown`), distinct from account connection records. Bot `connectionStatus` is `online`, `offline`, `unknown`, `connecting` or `reconnecting`, separate
 from publication status. `published` retains the durable Bot publication fact when a later retry/connection failed. Absent live fields are unknown; persisted records alone cannot establish current connectivity.
-`connectionFailureCode` is an optional safe classification; `connectionNeedsAttention` marks a persistent connection issue on the compact signal icon,
+`connectionFailureCode` is an optional safe classification; `connectionNeedsAttention` marks a persistent connection issue on the compact disconnected-link icon,
 and `canReconcile` preserves the existing retry action for terminal configuration failures. These fields are projected
 with failure-specific guidance in its hover/focus/click tooltip, without permanent connection descriptions in the row.
 The icon appears only for `reconnecting` or observed `offline` states; `online` (including pending local confirmation),

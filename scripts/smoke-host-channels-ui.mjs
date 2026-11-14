@@ -84,6 +84,7 @@ try {
   await browser.click(`document.querySelector('.sidebar-settings-entry button[aria-label^="设置"]')`)
   await selectSection('渠道')
   await browser.wait(`document.querySelector('.channel-connection-indicator[data-connection-state=reconnecting]')!==null`)
+  assert.equal(await browser.evaluate(`document.querySelector('.channel-connection-indicator [data-connection-icon=link-off]')!==null`), true)
   assert.equal(await browser.evaluate(`document.querySelector('.channel-settings').textContent.includes('运行此服务的 Rovai Desktop')`), true)
   assert.equal(await browser.evaluate(`document.querySelector('.channel-connection-actions')===null`), true)
   assert.equal(await browser.evaluate(`document.querySelector('.execution-web-settings')===null`), true)
@@ -91,7 +92,7 @@ try {
   const signalPoint = await browser.evaluate(`(()=>{const r=document.querySelector('.channel-connection-indicator').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
   await browser.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...signalPoint })
   await browser.wait(`document.querySelector('.channel-connection-tooltip')?.textContent==='连接暂不可用，请检查网络或代理'`)
-  await browser.capture(join(output, 'desktop-web-signal-tooltip.png'))
+  await browser.capture(join(output, 'desktop-web-link-off-tooltip.png'))
   await browser.key('Escape')
   await browser.wait(`document.querySelector('.channel-connection-tooltip')===null`)
   const signal = `document.querySelector('.channel-connection-indicator')`
@@ -224,7 +225,7 @@ try {
   await browser.capture(join(output, 'standalone-legacy-channel.png'))
   assert.equal(await browser.evaluate(`document.querySelector('.channel-member-bot-table')===null`), true)
   assert.deepEqual(browser.errors, [])
-  await writeFile(join(output, 'validation.json'), JSON.stringify({ status: 'passed', platform: process.platform, realHost: true, productionWeb: true, productionMainAdapter: true, desktopService: 'fixture', realPlatformPublication: false, electronProcess: false, nativeBridgeInBrowser: false, liveProgressReadback: true, connectionRecoveryVisible: true, compactSignalIndicator: true, healthySignalHidden: true, recoveryRemovesOpenTooltip: true, hoverTooltipVerified: true, focusClickTooltipVerified: true, blurOutsideScrollResizeDismissed: true, rightEdgeTooltipVerified: true, singleAccessibleReason: true, backgroundConnectionDialog: true, terminalReconcileVisible: true, narrowNoOverflow: true, narrowCellsContained: true, structuredApproverSubmitted: true, originalPublicationIdentity: true, logoutOnlyInRemoteSettings: true, logoutKeepsHost: true, standaloneChannelNavigationHidden: true, standaloneLegacyRouteExplained: true, screenshots: ['desktop-web-channels-recovered.png', 'desktop-web-signal-tooltip.png', 'desktop-web-channels-narrow-tooltip.png', 'desktop-web-channels-day.png', 'desktop-web-channels-night.png', 'desktop-web-channels-terminal.png', 'desktop-web-channels-narrow.png', 'desktop-web-publish-recovery.png', 'desktop-web-approver.png', 'standalone-legacy-channel.png'] }, null, 2) + '\n')
+  await writeFile(join(output, 'validation.json'), JSON.stringify({ status: 'passed', platform: process.platform, realHost: true, productionWeb: true, productionMainAdapter: true, desktopService: 'fixture', realPlatformPublication: false, electronProcess: false, nativeBridgeInBrowser: false, liveProgressReadback: true, connectionRecoveryVisible: true, compactSignalIndicator: true, connectionIcon: 'link-off', healthySignalHidden: true, recoveryRemovesOpenTooltip: true, hoverTooltipVerified: true, focusClickTooltipVerified: true, blurOutsideScrollResizeDismissed: true, rightEdgeTooltipVerified: true, singleAccessibleReason: true, backgroundConnectionDialog: true, terminalReconcileVisible: true, narrowNoOverflow: true, narrowCellsContained: true, structuredApproverSubmitted: true, originalPublicationIdentity: true, logoutOnlyInRemoteSettings: true, logoutKeepsHost: true, standaloneChannelNavigationHidden: true, standaloneLegacyRouteExplained: true, screenshots: ['desktop-web-channels-recovered.png', 'desktop-web-link-off-tooltip.png', 'desktop-web-channels-narrow-tooltip.png', 'desktop-web-channels-day.png', 'desktop-web-channels-night.png', 'desktop-web-channels-terminal.png', 'desktop-web-channels-narrow.png', 'desktop-web-publish-recovery.png', 'desktop-web-approver.png', 'standalone-legacy-channel.png'] }, null, 2) + '\n')
   console.log(JSON.stringify({ status: 'passed', evidence: output }))
 } catch (error) {
   console.error('Channel UI acceptance failed at', stage)

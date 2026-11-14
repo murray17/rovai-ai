@@ -70,7 +70,8 @@ describe('Channel settings', () => {
     expect(render()).toContain('class="channel-connection-indicator needs-attention"')
     expect(render()).toContain('aria-label="Bot · 连接暂不可用，请检查网络或代理"')
     expect(render()).not.toContain('aria-describedby=')
-    expect(render()).toContain('data-signal-strength="2"')
+    expect(render()).toContain('data-connection-icon="link-off"')
+    expect(render()).not.toContain('data-signal-strength')
     expect(render()).not.toContain('channel-live-status')
     expect(render()).not.toContain('role="tooltip"')
     expect(render()).toContain('已发布')
@@ -94,7 +95,7 @@ describe('Channel settings', () => {
       connectionFailureCode: 'identity_conflict', canReconcile: true }
     expect(render()).toContain('继续核对')
     expect(render()).toContain('Bot 身份与已绑定应用不符，请检查凭据')
-    expect(render()).toContain('data-signal-strength="0"')
+    expect(render()).toContain('data-connection-icon="link-off"')
     expect(render()).not.toContain('identity_conflict')
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0],
       connectionFailureCode: 'feishu_brand_moved_to_lark', canReconcile: false }

@@ -1,7 +1,7 @@
 ---
 document_type: implementation-record
 version: v1.72
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # 飞书与 Lark 长连接恢复
@@ -36,7 +36,7 @@ Host 不再以通用 permission_denied 标签推断凭据被拒。SDK 导出 con
 显示需处理并保留“继续核对”。合法 channel 在 WS 重建期间仍可 HTTP 外发及下载附件；身份冲突停止该记录的
 所有传输。Core 原有最多五次 delivery 尝试仍适用，终结的 delivery 不因网络恢复自动重放，不保证入站全部补发。
 首发只差连接时返回“Bot 已发布，正在重连。”进度，不返回普通发布错误；Dialog 可关闭，隐藏重复提交。
-仅在自动重连或已观察到离线时于发布文字旁显示小信号图标，原因通过悬浮、聚焦或点击提示；恢复后图标消失。
+仅在自动重连或已观察到离线时于发布文字旁显示用户选定的 A 断链图标，原因通过悬浮、聚焦或点击提示；恢复后图标消失。
 正常在线、首次连接中、运行期未知和本地确认未完成不显示图标或连接描述。
 普通超时、断网和限频合并呈现自动恢复；持续不可用时仅在 Tooltip 中提示检查网络或代理。
 只有明确配置终态保留核对动作。读屏原因只由按钮名称播报一次。
@@ -79,11 +79,12 @@ Runtime 兼容矩阵与根 README 无需更新。本地 SDK/Host 夹具不替代
 | UI 定向复审 | 响子对 `c89ef5b76` 复审通过，无阻塞；独立重跑 Renderer 21 项通过。收尾保留持续故障指引、去除重复描述关联，并扩展正式 smoke 的聚焦/点击/失焦/外部点击/滚动/resize/右侧夹取断言 |
 | 信号图标呈现 | Renderer/Host adapter 定向 38 项、typecheck、Desktop build 通过；生产 Host/Web 验证悬浮提示与恢复动作，离线交互稿 18 项通过，含聚焦、点击、Escape、视口边界；SDK/Core 未变化 |
 | 仅连接异常显示 | 正常在线、首次连接中、未知与本地确认等待均隐藏图标；自动重连/离线显示。上述 38 项、类型与构建通过；生产 Host/Web 验证恢复后图标和已打开的 Tooltip 一同消失，发布事实与动作保留 |
+| A 断链图标定稿 | 用户选定的 A 图形落入正式组件，替换信号强度柱；Renderer 21 项、typecheck、Desktop build 与生产 Host/Web 浏览器验收通过，原 Tooltip 与恢复后隐藏规则保留；SDK/Core 未变化 |
 
 浏览器仅注入 Provider 服务夹具，使用各自临时 data、Skills、MCP 与 Chrome profile，不访问日常数据；
 不执行真实租户发布，也不启动 Electron 或调用模型。验收脚本同步修复既有 TS adapter 加载、登录按钮选择器、
 缺省 presentation preference 假设和 viewport 切换时的等待。截图与 validation.json 位于本次 Thread 附件目录的
-`feishu-ws-recovery-issues-only-ui/`；新版单文件交互稿位于 `feishu-ws-recovery-prototype-v3/`，生成物不进入 Git。日常安装版未替换。
+`feishu-ws-recovery-link-off-ui/`；新版单文件交互稿位于 `feishu-ws-recovery-prototype-link-off/`，生成物不进入 Git。日常安装版未替换。
 真实租户、Electron 进程和 Windows 尚未验收。独立复审建议合并前在隔离 userData 下使用真实飞书或 Lark Bot
 完成一次断网后恢复冒烟，并确认没有未捕获异常；已有自动验收不能替代这项结果。分支保留为 ready，尚未合并。
 
