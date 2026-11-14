@@ -2,12 +2,16 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # Thread 会话工作区
 
 ## Public Thread 当前边界
+
+普通连续文字输入留在当前编辑器内。执行正文增量只更新所属 Run 的活动预览、执行内容或可见活动地图，
+不通过工作区外壳重复生成稳定历史正文。运行身份包含 execution epoch；释放界面订阅不删除事实，重开沿用
+既有执行窗口补读。审批、失败、停止、完成与公开消息变化继续走原业务状态和通知链路。
 
 - 公开执行列表按 [Thread Open v31](../../contracts/camp-open-projection-v32.md) 只读取直接 Thread 归属。
   旧 Turn-only 执行卡片不再显示；消息接收者缺少关联 Run 和 Delivery 事实时，不显示处理回执，不推导为“待处理”。

@@ -3,10 +3,15 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-12
+last_updated: 2026-11-14
 ---
 
 # v1.72 实施与验收
+
+## 长会话输入性能（2026-11-14）
+
+在独立 worktree 按三批实施；基线数据、执行局部订阅、公共历史挂载和条件性大内容优化分别记录状态。
+见[长会话输入性能实施与验收](long-thread-input-performance.md)。
 
 ## 通用提示与分叉反馈（2026-11-12）
 

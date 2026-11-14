@@ -161,11 +161,7 @@ import {
   applyAppearanceSnapshot,
   initialAppearanceSnapshot
 } from './theme'
-import {
-  allNavigationThreads,
-  liveRuntimeEventFromCore,
-  type LiveRuntimeEvent
-} from './ui-model'
+import { allNavigationThreads } from './ui-model'
 import { restoredMemberId, startupTargetFromSnapshot } from './startup-location'
 import {
   OnboardingFlow,
@@ -192,7 +188,6 @@ import {
 import { type NavigationRefreshTrigger } from './navigation-refresh-coordinator'
 import { createNavigationWindowReader, type NavigationGroupLimits } from './navigation-window-reader'
 import { createMemberRosterReader } from './member-roster-reader'
-import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 
 export { allNavigationThreads }
 
@@ -1201,7 +1196,6 @@ export function BusinessApp({
   }, [])
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
   const [runtimeRecovery, setRuntimeRecovery] = useState<ThreadRuntimeRecovery | null>(null)
-  const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
   const campOpenFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1226,7 +1220,6 @@ export function BusinessApp({
   const onboardingRuntimeRequest = useRef<Promise<void> | null>(null)
   const startupTraceId = useRef(newCommandId())
   const startupStartedAt = useRef(startupStartedAtMs ?? performance.now())
-  const liveRuntimeEventSequence = useRef(0)
   const membersViewRef = useRef<MembersViewHandle>(null)
   const [commonEnvironmentReturn, setCommonEnvironmentReturn] = useState<{ kind: AdapterKind; memberId: string; memberName: string } | null>(null)
   const commonEnvironmentReturnRef = useRef(commonEnvironmentReturn); commonEnvironmentReturnRef.current = commonEnvironmentReturn
@@ -2686,21 +2679,11 @@ export function BusinessApp({
   ])
 
   useEffect(() => {
-    const liveEvents = createLiveRuntimeEventBuffer((batch) => {
-      setLiveRuntimeEvents((current) => appendLiveRuntimeEventBatch(current, batch))
-    })
     const unsubscribe = client.onEvent?.((event: CoreEvent) => {
       const params = asRecord(event.params)
       if (shuttingDownRef.current) return
       if (event.method === 'memory.changed' && memoryCapabilityRef.current.active) {
         setMemoryRefreshKey(current => current + 1)
-      }
-      const liveEvent = liveRuntimeEventFromCore(
-        event,
-        `live-${++liveRuntimeEventSequence.current}`
-      )
-      if (liveEvent) {
-        liveEvents.push(liveEvent)
       }
       if (event.method === 'preferences.new_conversation_changed') {
         void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
@@ -2708,7 +2691,6 @@ export function BusinessApp({
       if (event.method === 'members.invalidated' && (viewRef.current === 'members' || viewRef.current === 'camp')) {
         void loadAgents().catch((nextError) => setError(errorMessage(nextError)))
       }
-      if (event.method === 'agent_run.terminal') liveEvents.flush()
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
         if (runtimeStatus === 'shutting_down') {
@@ -2777,7 +2759,7 @@ export function BusinessApp({
         })
       }
     })
-    return () => { unsubscribe?.(); liveEvents.dispose() }
+    return () => { unsubscribe?.() }
   }, [
     activeThreadRefreshCoordinator,
     loadRuntime,
@@ -4647,7 +4629,6 @@ export function BusinessApp({
             projectName={activeThreadProject?.name ?? null}
             agents={agents}
             installations={installations}
-            liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy === 'camp-membership' || busy?.startsWith('action-approval-') === true}
             onSend={sendThreadMessage}
             onReconcileDelivery={async deliveryId => {

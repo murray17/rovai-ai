@@ -65,6 +65,7 @@ import { collapsedMessageProjection } from './conversation-message-collapse'
 import { samePublicMessageSegment } from './public-message-grouping'
 import { messageTimeParts, useMessageTimeDate } from './message-time'
 import { usePublicMessageLayout } from './usePublicMessageLayout'
+import { useRunLiveEvents } from './useRunLiveEvents'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -213,7 +214,7 @@ import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { composerSkillsFromCandidates } from './composer-skill-picker'
 import { createStructuredMessageClipboardData } from './structured-message-clipboard'
-import { ThreadWorldMap } from './ThreadWorldMap'
+import { LiveThreadWorldMap } from './LiveThreadWorldMap'
 import {
   AppDialogBody,
   AppDialogContent,
@@ -222,7 +223,6 @@ import {
   AppDialogImpact,
   AppDialogImpactList
 } from './AppDialog'
-import { projectThreadWorldMap } from './camp-world-map-model'
 import {
   campTimelineContentChanged,
   campTimelineFollowingLatestAfterScroll,
@@ -2854,10 +2854,6 @@ export function ThreadWorkspace({
     ])),
     [executionEventsByRunId, snapshot.agentRuns, openCoverage]
   )
-  const worldMapProjection = useMemo(
-    () => projectThreadWorldMap(snapshot.members, snapshot.agentRuns, executionProgressByRunId),
-    [executionProgressByRunId, snapshot.agentRuns, snapshot.members]
-  )
   const truncatedEvidenceByRunId = useMemo(() => {
     const grouped = new Map<string, AgentRunExecutionEvidenceView[]>()
     for (const evidence of snapshot.executionEvidence) {
@@ -5254,7 +5250,6 @@ export function ThreadWorkspace({
       progressByRunId={executionProgressByRunId}
       windowedEvidence={openCoverage !== null}
       executionEventsByRunId={executionEventsByRunId}
-      liveRuntimeEvents={liveRuntimeEvents}
       threadId={snapshot.thread.id}
       truncatedEvidenceByRunId={truncatedEvidenceByRunId}
       loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
@@ -6142,10 +6137,9 @@ export function ThreadWorkspace({
             />
             {worldMapEnabled && (
               <div className="camp-world-map-panel" hidden={conversationView !== 'world'}>
-                <ThreadWorldMap
-                  threadId={snapshot.thread.id}
-                  agents={worldMapProjection.agents}
-                  rendezvous={worldMapProjection.rendezvous}
+                <LiveThreadWorldMap
+                  snapshot={snapshot}
+                  eventsByRunId={executionEventsByRunId}
                   routesVisible={worldMapRoutesVisible}
                   active={conversationView === 'world'}
                   onOpenExecutionProcess={(agentId, trigger) => openExecutionProcess(agentId, trigger)}
@@ -7471,8 +7465,10 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
 }): JSX.Element {
   // Reuse the conversation preview's bounded tail reader while the empty card
   // is collapsed. Web snapshots may only invalidate evidence, without live events.
-  const tail = useExecutionWindow(starting && windowedEvidence, threadId, run, liveRevision, null, true)
-  const tailHasActivity = agentRunHasCurrentActivity(run, tail.evidence.map(liveRuntimeEventFromExecutionEvidence))
+  const currentEvents = useRunLiveEvents(threadId, run, Array.isArray(liveRevision) ? liveRevision : undefined)
+  const tail = useExecutionWindow(starting && windowedEvidence, threadId, run, currentEvents, null, true)
+  const tailHasActivity = agentRunHasCurrentActivity(run, currentEvents)
+    || agentRunHasCurrentActivity(run, tail.evidence.map(liveRuntimeEventFromExecutionEvidence))
   useEffect(() => {
     if (hasCurrentActivity || tailHasActivity) onActivity(run.id, run.executionEpoch)
   }, [hasCurrentActivity, tailHasActivity, run.id, run.executionEpoch, onActivity])
@@ -7618,7 +7614,6 @@ function ExecutionDrawer({
   progressByRunId,
   windowedEvidence,
   executionEventsByRunId,
-  liveRuntimeEvents,
   threadId,
   truncatedEvidenceByRunId,
   loadedEvidenceCountByRunId,
@@ -7647,7 +7642,6 @@ function ExecutionDrawer({
   progressByRunId: Map<string, LiveExecutionProgress>
   windowedEvidence: boolean
   executionEventsByRunId: Map<string, LiveRuntimeEvent[]>
-  liveRuntimeEvents: readonly LiveRuntimeEvent[]
   threadId: string
   truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
   loadedEvidenceCountByRunId: Map<string, number>
@@ -11399,8 +11393,8 @@ function RunExecutionContent({
 export function RunExecutionDisclosure({
   run,
   windowedEvidence = false,
-  liveRevision,
-  progress,
+  liveRevision: initialLiveRevision,
+  progress: initialProgress,
   threadId,
   truncatedEvidence = [],
   loadedEvidenceCount = 0,
@@ -11427,6 +11421,10 @@ export function RunExecutionDisclosure({
 }): JSX.Element | null {
   const client = useThreadClient()
   const mobile = useMobileLayout()
+  const liveRevision = useRunLiveEvents(threadId, run, Array.isArray(initialLiveRevision) ? initialLiveRevision : undefined)
+  const progress = useMemo(() => liveRevision.length
+    ? buildLiveExecutionProgress(windowedEvidence ? liveRevision.slice(-48) : liveRevision, run.id, { includePublicResults: false })
+    : initialProgress, [liveRevision, initialProgress, run.id, windowedEvidence])
   const restoredPhase = useRuntimePhase(threadId, run, windowedEvidence)
   // Current feedback is shared by the summary and content. An empty restored
   // phase must also clear old feedback, including after Core reconnection.
