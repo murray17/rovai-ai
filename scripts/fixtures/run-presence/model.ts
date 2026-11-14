@@ -495,6 +495,11 @@ export const model = {
     update({ snapshot: { ...state.snapshot, messages: state.snapshot.messages.filter((m: any) => m.id !== message.id),
       messageDeliveries: state.snapshot.messageDeliveries.filter((d: any) => d.messageId !== message.id) } })
   },
+  setHistoryModel(runtimeModel: any) {
+    update({ streamPaused: true, snapshot: { ...state.snapshot,
+      messages: state.snapshot.messages.map((message: any) => message.id === 'history-alice' ? { ...message, runtimeModel } : message)
+    } })
+  },
   setRunModel(runtimeModel: any) {
     update({ streamPaused: true, snapshot: { ...state.snapshot,
       agentRuns: state.snapshot.agentRuns.map((run: any) => run.id === 'run-alice' ? { ...run, runtimeModel } : run)
