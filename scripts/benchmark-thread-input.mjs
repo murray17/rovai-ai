@@ -13,8 +13,13 @@ import { launchAcceptanceBrowser, pause } from './lib/host-web-browser.mjs'
 const root = resolve(import.meta.dirname, '..')
 const out = resolve(process.argv[2] ?? 'docs/prototypes/thread-input-performance')
 const fixture = await mkdtemp(join(tmpdir(), 'rovai-thread-input-performance-'))
-const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
-const appSource = await readFile(join(root, 'apps/desktop/src/renderer/src/BusinessApp.tsx'), 'utf8')
+const baseRef = process.env.ROVAI_PERF_BASE_REF
+const sourceCommit = execFileSync('git', ['rev-parse', baseRef ?? 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const baselineSources = new Map()
+if (baseRef) for (const file of execFileSync('git', ['diff', '--diff-filter=MRT', '--name-only', baseRef, '--', 'apps/desktop/src', 'apps/web/src', 'packages'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
+  baselineSources.set(join(root, file), execFileSync('git', ['show', `${baseRef}:${file}`], { cwd: root, encoding: 'utf8' }))
+}
+const appSource = baselineSources.get(join(root, 'apps/desktop/src/renderer/src/BusinessApp.tsx')) ?? await readFile(join(root, 'apps/desktop/src/renderer/src/BusinessApp.tsx'), 'utf8')
 // The fixture proxies only BusinessApp's execution-event ownership, not the whole App.
 // Read the production owner to select its existing path; the benchmark source is unchanged across batches.
 const legacyIngress = appSource.includes('const [liveRuntimeEvents, setLiveRuntimeEvents]')
@@ -60,7 +65,7 @@ const results = []
 try {
  await mkdir(out,{recursive:true})
  const built=await build({configFile:false,root:join(root,'scripts/fixtures/run-presence'),base:'./',logLevel:'error',
-   plugins:[{name:'thread-input-performance',enforce:'pre',transform(code,id){
+   plugins:[{name:'thread-input-performance',enforce:'pre',load(id){return baselineSources.get(id)},transform(code,id){
      if(id.endsWith('/ThreadWorkspace.tsx')) return code.replace('  const taskCapability = useTaskCapability()',initCounters+'window.__inputPerf.workspaceRenders++;\n  const taskCapability = useTaskCapability()').replace('const timelineItem = presenceTimeline[timelineIndex]','window.__inputPerf.historyRows++; const timelineItem = presenceTimeline[timelineIndex]');
      if(id.endsWith('/SafeMarkdown.tsx')) return code.replace('  const rootRef = useRef<HTMLDivElement>(null)',initCounters+'window.__inputPerf.markdownRenders++;\n  const rootRef = useRef<HTMLDivElement>(null)');
      if(id.includes('/react-markdown/')&&id.endsWith('/lib/index.js')) return code.replaceAll('processor.parse(file)','(window.__inputPerf.markdownParses++,processor.parse(file))');

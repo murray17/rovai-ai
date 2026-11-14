@@ -6,10 +6,16 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-12
+last_updated: 2026-11-14
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 长会话输入性能（2026-11-14）
+
+按 User 确认方案分批实施：固定可复跑基线、隔离执行更新、控制公共历史挂载，最后依据复测决定大内容优化。
+第一批已移出工作区的高频执行正文状态，复用现有 Run 窗口与 transport-scoped 局部订阅；公共历史虚拟化尚未交付。
+范围、同负载数据、功能回归与未验收项见[实施记录](long-thread-input-performance.md)。
 
 ## 通用提示与分叉反馈（2026-11-12）
 

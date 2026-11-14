@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-14
 ---
 
 # Thread Open Read Path 架构
@@ -239,6 +239,17 @@ Snapshot/Open 在同一读事务内按当前 Thread 索引读取 `member_creatio
 Evidence/Canonical operation index 在读取事务中计算块边界、完整组计数与代表项；无新增表或后台投影维护。
 Renderer 的 ExecutionWindow 拥有主线块游标，ExecutionGroupWindow 拥有单组子窗口，公开输出仍由既有
 content cache 与精确详情请求拥有。两个窗口同用 Run 原生滚动容器，缓存、展开、内容和 DOM 窗口分别有界。
+
+### Renderer 实时执行订阅
+
+Desktop 公开执行增量由 transport-scoped `RunLiveEvents` 按 Thread、Run、execution epoch 定向合批，
+不进入 BusinessApp 的整页正文状态。只有挂载的执行预览、Run 卡或活动地图订阅对应运行；
+无关运行不积累界面正文。重复或过期增量保持快照引用，多个可见区域共享同一运行的订阅与 32ms 合批。
+最后一个订阅释放时清理该运行与计时器；预览仅保留有界尾部，不拥有完整事实。
+
+收到终态时先提交已到达的本地批次，再结束该 epoch 的实时接纳；不等待完整记录补读才呈现终态。
+关闭重开、失效和重连仍由现有 ExecutionWindow page/changes 与内容读取恢复，Core 保持唯一持久真源。
+Web 保持授权 invalidation 与既有窗口补读，不把 SSE 失效解释成原始 Core 正文事件。
 
 薄索引保留全 Run 元数据扫描与有序候选索引成本，折叠组传输量与子项数脱钩；不把这项优化声称为常数时间数据库查询。初次短内容
 有界自动补齐，失败原位恢复，历史阅读锚点优先于后台更新。协议和预算见
