@@ -89,9 +89,18 @@ Renderer 仅在内存记录，save／切换／正常退出时写盘。保存期�
 并报告观察到的速率；配置的 32ms 只是夹具上游间隔。
 
 `{"op":"software-plain","label":"current-software","samples":180,"rounds":3}` 另提供完整可见 App 的
-普通按键自动化对照。Node 按固定 100ms 时间轴发出带时间戳的 CDP 按键，不随 Renderer 完成速度降载；
-记录器重新标记为 `timestamped-CDP-software-keys`，与原生按键／中文轮次分开。完整文本、实际焦点和后台事件
-仍须通过验证。该入口不能证明操作系统按键、中文候选浮层或物理键盘到像素的延迟。
+普通按键自动化对照。Node 按固定 100ms 时间轴发出 CDP 按键，不随 Renderer 完成速度降载。
+默认 `timestampMode: browser-arrival` 省略外部 timestamp，由浏览器给事件取当前单调时钟；
+[Chromium 实现](https://github.com/chromium/chromium/blob/main/content/browser/devtools/protocol/input_handler.cc#L124)
+在缺少该参数时使用 TimeTicks::Now。该口径从浏览器收到输入计时，Node 驱动等待另存为 dispatch 原始记录与分位数，
+同时保存每轮两侧时钟快照。`timestampMode: planned` 仅作诊断：把计划时刻当作事件时刻会混入外部驱动等待与时钟映射，
+不能把这些时间都归因于 Renderer。两种口径分开保存，旧的带计划时间戳结果保留，不与浏览器起点混算。
+记录器标记为 `CDP-software-keys`，与原生按键／中文轮次分开。完整文本、实际焦点和后台事件仍须通过验证。
+该入口不能证明操作系统按键、中文候选浮层或物理键盘到像素的延迟。
+
+`publish` 在当前夹具 Run 内通过其绑定的 CLI 发布 150 组表格／代码正文，附唯一标记，避免误匹配旧回复。
+记录实际消息 hint、完整正文 DOM（含 150 个独立代码框）可用时间，以及消息到达前 100ms 至后 700ms 的输入窗口；
+这个小窗口的分位数只作关键时刻观察。完整 DOM 可用不等于已经绘制到屏幕。
 
 `trace-start`／`trace-stop` 可保存包含 Renderer、input、latencyInfo 与 compositor 的诊断时间线；
 采集 trace 或 CPU profile 的轮次单独标注，不与无诊断开销的正式分位数混算。

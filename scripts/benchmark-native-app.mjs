@@ -16,7 +16,7 @@ import { startQualificationCore } from './lib/qualification-core.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 import { launchAcceptanceBrowser, pause } from './lib/host-web-browser.mjs'
 import { installNativeInputRecorder } from './lib/native-input-recorder.mjs'
-import { summarizeNativeImeRound, summarizeNativePlainRound } from './lib/native-input-metrics.mjs'
+import { inputStatistics, nativeTimingCoverage, summarizeNativeImeRound, summarizeNativePlainRound, summarizeNativeKeys } from './lib/native-input-metrics.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const out = resolve(process.argv[2] ?? 'docs/prototypes/native-app-input')
@@ -46,6 +46,7 @@ seedCompletedOnboardingForAcceptance(data)
 await writeFile(join(data, 'window-state.json'), JSON.stringify({ schemaVersion: 1, width: 1440, height: 800, x: 0, y: 30 }))
 let browser, core, commandInput, isMinimal = false, selectedCase, threads, currentControl = {}, activeRuns = []
 let traceChunks = null, removeTraceListener, publicationTimer
+const publications = new Map()
 const env = { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1', ROVAI_HOST_BIN: host, ROVAI_DISABLE_AUTO_UPDATE_CHECKS: '1' }
 delete env.ELECTRON_RUN_AS_NODE
 const setControl = async value => {
@@ -167,12 +168,13 @@ try {
         assert.ok(['current', 'both'].includes(selectedCase), 'publication requires the fixture current Run')
         const publicationId = randomUUID(), file = join(fixture, 'large-reply-' + publicationId + '.md')
         const publicationResult = join(fixture, 'publication-' + publicationId + '.json')
-        const text = '大回复到达性能检查。\n\n| 项目 | 结果 |\n| --- | --- |\n| 输入 | 持续 |\n\n~~~ts\nconsole.log("large reply");\n~~~\n\n'.repeat(150)
+        const text = '大回复到达性能检查。\n\n| 项目 | 结果 |\n| --- | --- |\n| 输入 | 持续 |\n\n~~~ts\nconsole.log("large reply");\n~~~\n\n'.repeat(150) + publicationId
         await writeFile(file, text)
+        publications.set(publicationId, { result: publicationResult, threadId: threads.current.id })
         clearTimeout(publicationTimer)
         publicationTimer = setTimeout(async () => {
           try {
-            await browser.evaluate("window.__nativeInputRecorder.mark('large-reply-request'," + JSON.stringify({ publicationId }) + ")")
+            await browser.evaluate("window.__nativeInputRecorder.mark('large-reply-request'," + JSON.stringify({ publicationId, expectedCodeBlocks: 150 }) + ")")
             await setControl({ publishFile: file, publicationResult, publicationThreadId: threads.current.id })
           } catch (error) { console.error(JSON.stringify({ publicationError: String(error) })) }
         }, command.delayMs ?? 3_000)
@@ -269,16 +271,19 @@ async function archiveRecorder(reason) {
 // cannot quietly reduce the input or background load offered to the App.
 async function softwarePlain(command) {
   const samples = command.samples ?? 180, rounds = command.rounds ?? 3
+  const timestampMode = command.timestampMode ?? 'browser-arrival'
+  assert.ok(['browser-arrival', 'planned'].includes(timestampMode))
   assert.ok(Number.isInteger(samples) && samples > 0 && samples <= 1000)
   assert.ok(Number.isInteger(rounds) && rounds > 0 && rounds <= 10)
   assert.match(command.label, /^[a-zA-Z0-9_-]+$/)
   await archiveRecorder('before-software')
   await browser.evaluate(`(${installNativeInputRecorder.toString()})(${JSON.stringify({
-    scenario: selectedCase, sourceCommit, sourceDigest, inputSource: 'timestamped-CDP-software-keys',
+    scenario: selectedCase, sourceCommit, sourceDigest, inputSource: 'CDP-software-keys', timestampMode,
     actualApp: !isMinimal, eventIntervalMs: activeRuns.length ? 32 : null,
     upstream: 'synthetic ACP through actual Host', keyIntervalMs: 100
   })})`)
   await browser.click(`document.querySelector('[contenteditable=true]')`)
+  const dispatch = [], clocks = []
   const key = async (value, code, virtualKey, modifiers = 0, commands) => {
     await browser.send('Input.dispatchKeyEvent', { type: 'keyDown', key: value, code,
       windowsVirtualKeyCode: virtualKey, modifiers, ...(commands ? { commands } : {}) })
@@ -289,12 +294,17 @@ async function softwarePlain(command) {
     await key('a', 'KeyA', 65, process.platform === 'darwin' ? 4 : 2, ['selectAll'])
     await key('Backspace', 'Backspace', 8)
     assert.equal(await browser.evaluate(`document.querySelector('[contenteditable=true]').textContent.replaceAll('\\u200b','')`), '')
+    const hostBefore = Date.now()
+    const clock = await browser.evaluate(`({dateNow:Date.now(),timeOrigin:performance.timeOrigin,now:performance.now()})`)
+    clocks.push({ round, hostBefore, ...clock, hostAfter: Date.now() })
     console.log(JSON.stringify({ phase: 'software-plain', selectedCase, round, rounds, samples }))
     const origin = Date.now() + 150, pending = [], failures = []
     await Promise.all(Array.from({ length: samples }, (_, index) => new Promise(resolve => {
       setTimeout(() => {
+        const plannedAt = origin + index * 100, sentAt = Date.now()
+        dispatch.push({ round, index, plannedAt, sentAt, delayMs: sentAt - plannedAt })
         pending.push(browser.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', text: 'a',
-          windowsVirtualKeyCode: 65, timestamp: (origin + index * 100) / 1000 }).catch(error => failures.push(error)))
+          windowsVirtualKeyCode: 65, ...(timestampMode === 'planned' ? { timestamp: plannedAt / 1000 } : {}) }).catch(error => failures.push(error)))
         resolve()
       }, Math.max(0, origin + index * 100 - Date.now()))
     })))
@@ -303,9 +313,11 @@ async function softwarePlain(command) {
     await pause(800)
     // Retain the raw round even if delivery or content validation fails.
     await archiveRecorder('software-round-' + round)
+    await writeFile(join(out, command.label + '-dispatch-' + round + '.json'), JSON.stringify({ timestampMode, clocks, dispatch }), { flag: 'wx' })
     assert.deepEqual(failures, [])
   }
-  await save({ label: command.label, kind: 'plain', samples, rounds: Array.from({ length: rounds }, (_, index) => index + 1) })
+  await save({ label: command.label, kind: 'plain', samples, rounds: Array.from({ length: rounds }, (_, index) => index + 1),
+    driver: { timestampMode, clocks, delayMs: inputStatistics(dispatch.map(row => row.delayMs)), maxDelayMs: Math.max(...dispatch.map(row => row.delayMs)) } })
 }
 
 async function save(command) {
@@ -329,10 +341,27 @@ async function save(command) {
     result.focusedKeys = keys.filter(key => key.focused === true).length
     assert.equal(result.focusedKeys, keys.length, 'visible native acceptance requires a focused editor for every key')
     assert.ok(keys.every(key => key.visibility === 'visible' && key.trusted), 'native acceptance requires visible trusted input')
+    const targetThreadId = isMinimal ? null : threads[selectedCase === 'short' ? 'short' : 'current'].id
+    result.messageArrivalWindows = rows.filter(row => row.type === 'messageChange' && row.threadId === targetThreadId
+      && row.at >= first && row.at < end).map(marker => ({ at: marker.at,
+      ...summarizeNativeKeys(keys.filter(key => key.start >= marker.at - 100 && key.start < marker.at + 700),
+        rows.filter(row => row.type === 'eventTiming'), { coverage: nativeTimingCoverage(rows) }) }))
+  }
+  const publicationEvidence = []
+  for (const marker of rows.filter(row => row.type === 'marker' && row.name === 'large-reply-request')) {
+    const completed = rows.find(row => row.type === 'bodyReady' && row.publicationId === marker.publicationId)
+    assert.ok(completed, 'the published large reply must finish all independent code blocks')
+    const publication = publications.get(marker.publicationId)
+    const sent = JSON.parse(await readFile(publication.result, 'utf8'))
+    assert.equal(sent.code, 0); assert.equal(sent.ack.threadId, publication.threadId)
+    publicationEvidence.push({ publicationId: marker.publicationId, messageId: completed.messageId,
+      domReadyFromRequestMs: completed.at - marker.at, codeBlocks: completed.codeBlocks,
+      endpoint: completed.endpoint })
   }
   const report = { scenario: selectedCase, sourceCommit, sourceDigest, binary, environment: rows.find(row => row.type === 'environment'), results,
+    driver: command.driver,
     longTasks: rows.filter(row => row.type === 'longtask'), backgroundLoad: rows.find(row => row.type === 'backgroundLoad'),
-    markers: rows.filter(row => row.type === 'marker'), errors: browser.errors }
+    markers: rows.filter(row => row.type === 'marker'), publicationEvidence, errors: browser.errors }
   await writeFile(join(out, label + '-results.json'), JSON.stringify(report, null, 2), { flag: 'wx' })
   console.log(JSON.stringify({ saved: label, results, longTasks: report.longTasks.length }))
 }

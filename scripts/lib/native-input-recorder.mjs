@@ -6,7 +6,26 @@ export function installNativeInputRecorder(metadata = {}) {
   let round = 0, dropped = 0
   const record = value => records.push({ at: performance.now(), ...value })
   const background = new Map()
+  const expectedBodies = new Map()
+  let bodyObserver
+  const checkBodies = () => {
+    for (const [publicationId, expectedCodeBlocks] of expectedBodies) {
+      for (const body of document.querySelectorAll('.timeline-scroll [data-message-id] .safe-markdown')) {
+        if (body.querySelector('[data-timeline-pending]') || !body.textContent.includes(publicationId)) continue
+        const codeBlocks = body.querySelectorAll('.markdown-code-frame').length
+        if (codeBlocks !== expectedCodeBlocks) continue
+        record({ type: 'bodyReady', publicationId, messageId: body.closest('[data-message-id]').dataset.messageId,
+          codeBlocks, endpoint: 'complete body DOM; not pixel presentation' })
+        expectedBodies.delete(publicationId); break
+      }
+    }
+    if (!expectedBodies.size) { bodyObserver?.disconnect(); bodyObserver = undefined }
+  }
   const unsubscribe = metadata.actualApp ? window.rovai?.onEvent?.(event => {
+    if (event.method === 'thread.messages.changed') {
+      record({ type: 'messageChange', threadId: event.params?.threadId, throughGlobalSequence: event.params?.throughGlobalSequence })
+      return
+    }
     if (!['agent.text.block', 'agent.text.delta'].includes(event.method)) return
     const run = event.params?.agentRunId, thread = event.params?.threadId
     const key = `${thread}:${run}`, now = performance.now()
@@ -45,7 +64,15 @@ export function installNativeInputRecorder(metadata = {}) {
     userAgent: navigator.userAgent, visibility: document.visibilityState, eventTimingSupported: supported,
     thresholdMs: 16, eventCountAtStart: performance.eventCounts?.get('keydown'), logging: 'renderer-memory' })
   const state = window.__nativeInputRecorder = {
-    mark(name, detail = {}) { record({ type: 'marker', name, ...detail }) },
+    mark(name, detail = {}) {
+      record({ type: 'marker', name, ...detail })
+      if (name === 'large-reply-request' && typeof detail.publicationId === 'string' && detail.expectedCodeBlocks > 0) {
+        expectedBodies.set(detail.publicationId, detail.expectedCodeBlocks)
+        bodyObserver ??= new MutationObserver(checkBodies)
+        bodyObserver.observe(document.querySelector('.timeline-scroll'), { childList: true, subtree: true })
+        checkBodies()
+      }
+    },
     snapshot() {
       if (observer) entries(observer.takeRecords())
       return [...records, { type: 'backgroundLoad', runs: [...background.values()] }, { type: 'collection', at: performance.now(), dropped, round,
@@ -53,6 +80,7 @@ export function installNativeInputRecorder(metadata = {}) {
     },
     dispose() {
       unsubscribe?.()
+      bodyObserver?.disconnect()
       observer?.disconnect(); longTasks.disconnect()
       for (const name of names) document.removeEventListener(name, listener, true)
       document.removeEventListener('visibilitychange', visibility)
