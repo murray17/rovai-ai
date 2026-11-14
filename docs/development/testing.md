@@ -245,6 +245,16 @@ Goose 新接入扩展已有模型目录、数值 parser、权限默认、Skills�
 官方原生 probe 验证三模式实际工具集合和客户端回放缩减后模型历史保留；Core smoke 验证探测零残留、
 Skills 管理的用户 `.agents/skills` 读取与原共享生命周期。UI 使用既有 `pnpm test:capability-workspace`。
 
+Goose 目录精简继续扩展以上 health/live-model owners，验证完整目录零 Session/setter、
+inventory/defaults 错误不降级建会话、目标查询零 inventory、同选择跳过、Provider 回显更新和缺失回显失效。
+持久化沿现有 slow owner `target_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`
+扩展 Goose，验证目标只更新选项、不续完整目录时间、不更改默认/名称且不恢复已删除模型。
+该 owner 必须使用 `--features slow-tests,extended-tests --lib target_catalog_updates_accumulate`，
+不能把 extended-only 的零匹配当成通过。迁移 helper 收拢继续运行原 catalog migration owner；不新增 Rust 测试函数。
+`pnpm test:runtime-model-picker` 原 MiniMax 用例扩至 Goose，两个入口共验请求合并、缓存、迟到、
+空档位和失败保留；Goose 完整目录过期时先单独初始化一次。官方原生 probe 在创建任何 Session 前
+验证 inventory/defaults、零原生 Session 行和零生成；Core smoke 验跨 Provider 条目与目录时间保留。
+
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

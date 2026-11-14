@@ -65,7 +65,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
   Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#kilo-windows-x64-qualification)与
   [D85](../versions/v1.72/decisions.md#v1-72-d85)。
 
-Goose 原生接入的当前边界：[Runtime Launch v91](../contracts/runtime-launch-and-verification-v91.md)、
+Goose 原生接入的当前边界：[Runtime Launch v92](../contracts/runtime-launch-and-verification-v92.md)、
 [Runtime Catalog](../architecture/runtime-catalog-boundaries.md#goose-官方-acp)、
 [Platform Admission](../contracts/runtime-platform-admission-v2.md#goose-macos-arm64-preview)；
 采用原生扩展与接受 Preview 差异的理由见 [V1.72-D86](../versions/v1.72/decisions.md#v1-72-d86)。

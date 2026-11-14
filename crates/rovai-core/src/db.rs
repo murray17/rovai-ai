@@ -5393,6 +5393,67 @@ const DSH_RUNTIME_TABLES: [&str; 5] = [
 ];
 const DSH_SKILL_TABLES: [&str; 2] = ["skill_group_assignment", "skill_projection_observation"];
 
+fn runtime_catalog_schema_contains(
+    connection: &Connection,
+    runtime: &str,
+    skill: &str,
+) -> rusqlite::Result<bool> {
+    for (tables, token) in [
+        (&DSH_RUNTIME_TABLES[..], runtime),
+        (&DSH_SKILL_TABLES[..], skill),
+    ] {
+        for table in tables {
+            let sql: String = connection.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )?;
+            if !sql.contains(token) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn rewrite_runtime_catalog_closed_sets(
+    transaction: &Transaction<'_>,
+    runtime: (&str, &str),
+    skill: (&str, &str),
+    reverse: bool,
+) -> Result<()> {
+    let triggers = {
+        let mut query = transaction.prepare(
+            "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql IS NOT NULL ORDER BY name"
+        )?;
+        query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (name, _) in &triggers {
+        transaction.execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))?;
+    }
+    for (tables, (old, new)) in [
+        (&DSH_RUNTIME_TABLES[..], runtime),
+        (&DSH_SKILL_TABLES[..], skill),
+    ] {
+        for table in tables {
+            expand_closed_set(
+                transaction,
+                table,
+                if reverse { new } else { old },
+                if reverse { old } else { new },
+            )?;
+        }
+    }
+    for (_, sql) in triggers {
+        transaction.execute_batch(&sql)?;
+    }
+    Ok(())
+}
+
 fn runtime_v184_source_schema_matches(
     connection: &Connection,
     has_v185: bool,

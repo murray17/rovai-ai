@@ -9,6 +9,7 @@ import {mkdir, mkdtemp, readFile, writeFile, unlink, access} from 'node:fs/promi
 import {join, isAbsolute, resolve} from 'node:path'
 import {performance} from 'node:perf_hooks'
 import {tmpdir} from 'node:os'
+import {DatabaseSync} from 'node:sqlite'
 
 assert(process.platform!=='win32','This research probe uses POSIX shell fixtures; Windows needs target-specific acceptance')
 const configuredExecutable=process.env.ROVAI_GOOSE_BIN??process.argv[2]
@@ -197,6 +198,20 @@ try{
  const host=await open()
  assert.equal(host.initialization.agentInfo.version,version)
  console.log(JSON.stringify({initialize:host.initialization}))
+ const directory=await host.rpc('_goose/unstable/providers/list',{providerIds:[]})
+ const defaults=await host.rpc('_goose/unstable/defaults/read',{})
+ assert(directory.entries.some(p=>p.providerId==='openai'&&p.configured&&p.available))
+ assert.equal(defaults.providerId,'openai');assert.equal(defaults.modelId,'gpt-4o-mini')
+ assert.equal(requests.length,0,'Directory/default reads must not generate a model response')
+ const sessionDatabase=join(fixture,'goose-root','data','sessions','sessions.db')
+ let nativeSessionRows=0
+ try {
+   await access(sessionDatabase)
+   const db=new DatabaseSync(sessionDatabase,{readOnly:true})
+   try { nativeSessionRows=db.prepare('SELECT count(*) AS n FROM sessions').get().n } finally { db.close() }
+ } catch(error) { if(error.code!=='ENOENT')throw error }
+ assert.equal(nativeSessionRows,0,'Directory/default reads must not create native Sessions')
+ checks.directory={beforeAnySession:true,nativeDefaults:true,nativeSessionRows,modelGenerations:0}
  const session=await host.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[]})
  console.log(JSON.stringify({newSession:{sessionId:session.sessionId,modes:session.modes,configOptions:session.configOptions.map(c=>({id:c.id,currentValue:c.currentValue,optionCount:c.options?.length,...(c.id==='thinking_effort'?{options:c.options}:{})}))}}))
  const tools=await host.rpc('_goose/unstable/tools/list',{sessionId:session.sessionId})

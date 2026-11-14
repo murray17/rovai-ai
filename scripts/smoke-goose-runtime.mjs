@@ -82,6 +82,9 @@ const provider=createServer(async(req,res)=>{
 })
 await new Promise(r=>provider.listen(0,'127.0.0.1',r))
 const environment={PATH:'/usr/bin:/bin:/usr/sbin:/sbin',HOME:join(root,'home'),XDG_CONFIG_HOME:join(root,'config'),XDG_DATA_HOME:join(root,'data'),XDG_CACHE_HOME:join(root,'cache'),XDG_STATE_HOME:join(root,'state'),GOOSE_PATH_ROOT:join(root,'goose-root'),GOOSE_DISABLE_KEYRING:'1',GOOSE_PROVIDER:'openai',GOOSE_MODEL:'gpt-4o-mini',GOOSE_MODE:'auto',GOOSE_AUTO_COMPACT_THRESHOLD:'0.5',OPENAI_API_KEY:'fixture-key',OPENAI_HOST:'http://127.0.0.1:'+provider.address().port,OPENAI_BASE_PATH:'v1/chat/completions',TERM:'dumb',NO_COLOR:'1',TMPDIR:root,ROVAI_GOOSE_BIN:executable}
+const customProviders=join(root,'goose-root','config','custom_providers')
+await mkdir(customProviders,{recursive:true})
+await writeFile(join(customProviders,'custom_secondary.json'),JSON.stringify({name:'custom_secondary',engine:'openai',display_name:'Secondary fixture',api_key_env:'OPENAI_API_KEY',base_url:'http://127.0.0.1:'+provider.address().port,models:[{name:'gpt-5',context_limit:128000}],dynamic_models:false,supports_streaming:true,requires_auth:true}))
 assert.throws(()=>execFileSync('node',['--version'],{env:environment,stdio:'pipe'}),e=>e.code==='ENOENT');result.checks.noImplicitNode=true
 let core, index=0
 async function openCore(){
@@ -164,11 +167,13 @@ try{
  const managedBody=await core.request('nativeSkills.read',{skillId:managedSkill.id,path:'SKILL.md'})
  assert(managedBody.content.includes('GOOSE_USER_AGENTS_SKILL'))
  result.checks.skillsManagement={userAgentsDiscovered:true,previewRead:true}
- await setMember()
+ assert.equal((await core.request('members.get',{agentId:'agent_2'})).runtimeConfiguration.model.mode,'runtime_default')
  const offset=calls.length
  const catalog=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',waitForRefresh:true})
  assert.equal(catalog.cache.status,'fresh',JSON.stringify(catalog))
  assert(catalog.models.some(m=>m.id==='openai/gpt-6.1-sol'))
+ assert(catalog.models.some(m=>m.id==='custom_secondary/gpt-5'))
+ assert.equal(catalog.models.find(m=>m.id==='openai/gpt-6.1-sol').runtimeMetadata.modelOptionsResolved,false,'Directory inventory must not claim target effort was observed')
  assert.equal(calls.length,offset,'Model discovery must not generate a response')
  const nativeProbeRows=()=>{
   const db=new DatabaseSync(join(root,'goose-root','data','sessions','sessions.db'),{readOnly:true})
@@ -181,6 +186,8 @@ try{
  const first=await createConfiguredCampAndSend(core.request.bind(core),{commandId:crypto.randomUUID(),workspace,memberAgentIds:['agent_2'],defaultLeadAgentId:'agent_2',address:{mode:'explicit',agentIds:['agent_2']},body:'CORE_GOOSE_FIRST',purpose:'Goose native integration'})
  threadId=(first.commandResult??first).payload.threadId
  const a=await settle(first),b=await settle(await send('CORE_GOOSE_WARM'))
+ result.checks.nativeDefaultFirstAndWarm=true
+ await setMember()
  assert.equal(a.started.hostInstanceId,b.started.hostInstanceId)
  assert.equal(a.started.nativeThreadId,b.started.nativeThreadId)
  const firstOwner=await owner(a),secondOwner=await owner(b);assert.equal(firstOwner.pid,secondOwner.pid)
@@ -222,7 +229,11 @@ try{
   assert(calls.slice(compactOffset).some(c=>!c.tools?.length&&(c.messages??[]).some(m=>m.role==='system'&&String(m.content).includes('## Task Context'))),'Native automatic compaction must actually summarize')
  }
  result.checks.compaction={automaticThreshold:true,overflowRecovery:true}
+ const directoryBeforeTarget=(await core.request('runtime.installations.list')).find(i=>i.adapterKind==='goose-cli')
  const target=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',modelId:'openai/gpt-6.1-sol',forceRefresh:true})
+ assert.deepEqual(target.models.map(m=>m.id),directoryBeforeTarget.snapshot.models.map(m=>m.id),'A target read must retain models from other Providers')
+ assert.equal(target.cache.observedAt,directoryBeforeTarget.modelCatalog.observedAt,'Target parameters must not renew directory freshness')
+ assert.equal(target.models.find(m=>m.isDefault)?.id,directoryBeforeTarget.snapshot.models.find(m=>m.isDefault)?.id,'A target probe must not change the native default')
  const targetModel=target.models.find(m=>m.id==='openai/gpt-6.1-sol')
  assert.equal(targetModel.runtimeMetadata.modelOptionsResolved,true,JSON.stringify(target))
  assert(targetModel.options.some(o=>o.key==='thinking_effort'&&o.values.some(v=>v.value==='high')))
@@ -231,7 +242,7 @@ try{
  const reasoningOffset=calls.length
  await settle(await send('CORE_GOOSE_REASONING'))
  assert(calls.slice(reasoningOffset).some(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'))
- result.checks.effort={targetModel:'openai/gpt-6.1-sol',nativeKey:'thinking_effort',providerEffort:'high',onDemand:true}
+ result.checks.effort={targetModel:'openai/gpt-6.1-sol',nativeKey:'thinking_effort',providerEffort:'high',onDemand:true,otherProvidersRetained:true,directoryFreshnessUnchanged:true,nativeDefaultUnchanged:true}
  const defaultsProfile=await core.request('members.get',{agentId:'agent_2'})
  assert.equal((await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:defaultsProfile.version,adapterKind:'goose-cli',model:{mode:'runtime_default'},permissions:defaultsProfile.runtimeConfiguration.permissions}})).status,'applied')
  const defaultOffset=calls.length

@@ -542,6 +542,16 @@ function ModelFields({
         if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
         const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
         if (cached.refreshStatus === 'not_required' && targetModelOptionsResolved(adapterKind, model, current.target.dshSource)) return cached
+        // Goose parameter reads do not fetch the directory. Load a missing or
+        // expired directory once before subscribing to its target observation.
+        if (adapterKind === 'goose-cli' && !['fresh', 'stale'].includes(cached.cache.status)) {
+          const catalog = await read()
+          if (!ownsRequest()) return catalog
+          if (catalog.runtimeKind !== adapterKind || ['failed', 'deferred'].includes(catalog.refreshStatus)) {
+            throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
+          }
+          publishCatalog(catalog)
+        }
         return read(current.target)
       })
       const owner = { key: current.key, generation: request, promise }

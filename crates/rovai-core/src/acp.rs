@@ -5716,7 +5716,10 @@ impl AcpRuntime {
                 }
             }
         }
-        if self.host.adapter_kind == AdapterKind::GooseCli && model_source == "runtime_default" {
+        if self.host.adapter_kind == AdapterKind::GooseCli
+            && model_source == "runtime_default"
+            && continuation != AcpSessionContinuation::New
+        {
             self.set_config_option(&session_id, "provider", "goose")
                 .await?;
         }
@@ -15471,15 +15474,16 @@ for line in sys.stdin:
 
         // Reuse the live model owner to prove unchanged Goose selections cause
         // no native setters, while a changed model/effort still reaches native.
-        let root =
-            std::env::temp_dir().join(format!("rovai-goose-selection-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = root.join("goose");
-        let log = root.join("requests");
-        make_executable(
-            &executable,
-            &format!(
-                r#"#!/usr/bin/python3
+        for first_target in ["native/model-a", "runtime_default"] {
+            let root = std::env::temp_dir()
+                .join(format!("rovai-goose-selection-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("goose");
+            let log = root.join("requests");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/usr/bin/python3
 import json, sys
 options = dict(provider='native', model='model-a', thinking_effort='high', mode='auto')
 for line in sys.stdin:
@@ -15491,129 +15495,139 @@ for line in sys.stdin:
     elif method == 'session/set_config_option':
         options[params['configId']] = params['value']
         if params['configId'] == 'model': options['thinking_effort'] = 'off'
+        if params['configId'] == 'provider' and params['value'] == 'goose':
+            options.update(provider='native', model='model-a', thinking_effort='high')
     if method in ('session/new', 'session/set_config_option'):
         result = {{'sessionId':'goose-selection','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
     if method == 'session/set_config_option' and params.get('value') == 'model-no-echo': result = {{}}
     print(json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)), flush=True)
 "#,
-                log = log.to_string_lossy()
-            ),
-        );
-        let mut frozen = frozen_trae_runtime(&executable);
-        frozen.adapter_kind = AdapterKind::GooseCli;
-        frozen.permissions.adapter_kind = AdapterKind::GooseCli;
-        frozen.permissions.values = json!({"mode":"auto"});
-        let workspace =
-            AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
-        let (incoming, _receiver) = mpsc::unbounded_channel();
-        let host = AcpHost::spawn(
-            &root,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &frozen,
-            incoming,
-            Some(exact_builtin_tools(&root)),
-            CompactionDetectorPolicy::Disabled,
-            true,
-            &BTreeMap::new(),
-            &root.join("private"),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        for (epoch, target, mode, expected) in [
-            (1, "native/model-a", "auto", vec![]),
-            (2, "native/model-a", "auto", vec![]),
-            (
-                3,
-                "native/model-b",
-                "auto",
-                vec!["model", "thinking_effort"],
-            ),
-            (4, "native/model-b", "auto", vec![]),
-            (5, "native/model-b", "approve", vec!["mode"]),
-            (6, "native/model-b", "approve", vec![]),
-            (
-                7,
-                "second/model-c",
-                "approve",
-                vec!["provider", "model", "thinking_effort"],
-            ),
-            (8, "second/model-c", "approve", vec![]),
-            (
-                9,
-                "second/model-no-echo",
-                "approve",
-                vec!["model", "thinking_effort"],
-            ),
-            (10, "second/model-no-echo", "approve", vec![]),
-        ] {
-            let before = std::fs::read_to_string(&log).unwrap().lines().count();
-            let runtime = AcpRuntime::from_test_host(
-                AcpRuntimeOwner {
-                    agent_run_id: format!("goose-run-{epoch}"),
-                    execution_epoch: epoch,
-                },
-                host.clone(),
-                "compat".into(),
-                "mcp".into(),
-                root.clone(),
-                Some(exact_attachment_root(&root)),
-                "runtime_managed".into(),
-                AcpSessionPermissions {
-                    mode: Some(mode.into()),
-                    ..Default::default()
-                },
+                    log = log.to_string_lossy()
+                ),
+            );
+            let mut frozen = frozen_trae_runtime(&executable);
+            frozen.adapter_kind = AdapterKind::GooseCli;
+            frozen.permissions.adapter_kind = AdapterKind::GooseCli;
+            frozen.permissions.values = json!({"mode":"auto"});
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+            let (incoming, _receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
                 None,
-            );
-            let session = runtime
-                .start_or_resume_session(
-                    (epoch > 1).then_some("goose-selection"),
-                    AcpSessionCapabilities {
-                        can_resume: false,
-                        can_load_history: true,
+                None,
+            )
+            .await
+            .unwrap();
+            for (epoch, target, mode, expected) in [
+                (1, first_target, "auto", vec![]),
+                (2, "native/model-a", "auto", vec![]),
+                (
+                    3,
+                    "native/model-b",
+                    "auto",
+                    vec!["model", "thinking_effort"],
+                ),
+                (4, "native/model-b", "auto", vec![]),
+                (5, "native/model-b", "approve", vec!["mode"]),
+                (6, "native/model-b", "approve", vec![]),
+                (
+                    7,
+                    "second/model-c",
+                    "approve",
+                    vec!["provider", "model", "thinking_effort"],
+                ),
+                (8, "second/model-c", "approve", vec![]),
+                (
+                    9,
+                    "second/model-no-echo",
+                    "approve",
+                    vec!["model", "thinking_effort"],
+                ),
+                (10, "second/model-no-echo", "approve", vec![]),
+                (11, "runtime_default", "approve", vec!["provider"]),
+                (12, "runtime_default", "approve", vec!["provider"]),
+                (13, "native/model-a", "approve", vec![]),
+            ] {
+                let before = std::fs::read_to_string(&log).unwrap().lines().count();
+                let runtime = AcpRuntime::from_test_host(
+                    AcpRuntimeOwner {
+                        agent_run_id: format!("goose-run-{epoch}"),
+                        execution_epoch: epoch,
                     },
-                    "explicit",
-                    target,
-                    &json!({"thinking_effort":"high"}),
-                    &BTreeMap::new(),
-                )
-                .await
-                .unwrap();
-            runtime
-                .bind_managed_bootstrap(&session, "COMPLETE_SYSTEM")
-                .await
-                .unwrap();
-            host.rpc("audit/barrier", json!({})).await.unwrap();
-            let requests: Vec<Value> = std::fs::read_to_string(&log)
-                .unwrap()
-                .lines()
-                .skip(before)
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-            let setters: Vec<_> = requests
-                .iter()
-                .filter(|r| r["method"] == "session/set_config_option")
-                .map(|r| r["params"]["configId"].as_str().unwrap())
-                .collect();
-            assert_eq!(setters, expected, "Goose round {epoch}");
-            assert!(
-                !requests
+                    host.clone(),
+                    "compat".into(),
+                    "mcp".into(),
+                    root.clone(),
+                    Some(exact_attachment_root(&root)),
+                    "runtime_managed".into(),
+                    AcpSessionPermissions {
+                        mode: Some(mode.into()),
+                        ..Default::default()
+                    },
+                    None,
+                );
+                let session = runtime
+                    .start_or_resume_session(
+                        (epoch > 1).then_some("goose-selection"),
+                        AcpSessionCapabilities {
+                            can_resume: false,
+                            can_load_history: true,
+                        },
+                        if target == "runtime_default" {
+                            "runtime_default"
+                        } else {
+                            "explicit"
+                        },
+                        target,
+                        &json!({"thinking_effort":"high"}),
+                        &BTreeMap::new(),
+                    )
+                    .await
+                    .unwrap();
+                runtime
+                    .bind_managed_bootstrap(&session, "COMPLETE_SYSTEM")
+                    .await
+                    .unwrap();
+                host.rpc("audit/barrier", json!({})).await.unwrap();
+                let requests: Vec<Value> = std::fs::read_to_string(&log)
+                    .unwrap()
+                    .lines()
+                    .skip(before)
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                let setters: Vec<_> = requests
                     .iter()
-                    .any(|r| r["method"] == "_goose/unstable/session/extensions/list")
-            );
-            assert_eq!(
-                requests
-                    .iter()
-                    .filter(|r| r["method"] == "_goose/unstable/session/system-prompt/set")
-                    .count(),
-                1
-            );
-            host.unbind_session(&session, &runtime.owner).await;
+                    .filter(|r| r["method"] == "session/set_config_option")
+                    .map(|r| r["params"]["configId"].as_str().unwrap())
+                    .collect();
+                assert_eq!(setters, expected, "Goose round {epoch}");
+                assert!(
+                    !requests
+                        .iter()
+                        .any(|r| r["method"] == "_goose/unstable/session/extensions/list")
+                );
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| r["method"] == "_goose/unstable/session/system-prompt/set")
+                        .count(),
+                    1
+                );
+                host.unbind_session(&session, &runtime.owner).await;
+            }
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
         }
-        host.shutdown().await;
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

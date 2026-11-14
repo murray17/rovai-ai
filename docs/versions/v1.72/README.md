@@ -21,7 +21,7 @@ User sequence 117 已确认[接入及模型输入 R1](goose-acp-proposal.md)，
 不复制 Kilo 的 instructions 文件、第二 prompt、SQLite reader 或已退役权限 Hook。
 MCP 原生恢复不删除旧项、write 缺完整前像等差异已明示。
 现已实施独立 identity、Migration 224/schema 174、共享执行与现有表单，macOS arm64 开放 Preview。
-字段边界见[Runtime Launch v91](../../contracts/runtime-launch-and-verification-v91.md)，选择理由见 [D86](decisions.md#v1-72-d86)，
+字段边界见[Runtime Launch v92](../../contracts/runtime-launch-and-verification-v92.md)，选择理由见 [D86](decisions.md#v1-72-d86)，
 实际验证与未验证范围见[实施记录](goose-acp-implementation.md)。
 User sequence 123 的精简已收窄重复选项设置、MCP 核对与客户端回放，并清理探测原生会话；
 三模式工具集合和 Skills 管理用户 `.agents/skills` 已补定向验证，模型输入与平台资格不变。

@@ -2152,6 +2152,7 @@ impl AgentProfileService {
         fingerprint: &str,
         models: &[ModelDescriptor],
         succeeded_at: &str,
+        target_model: Option<&str>,
     ) -> Result<bool> {
         let transaction = database.connection_mut().transaction()?;
         let models = normalize_model_catalog(models.to_vec());
@@ -2187,11 +2188,48 @@ impl AgentProfileService {
             upsert_static_capability_snapshot(&transaction, &expected.id, &snapshot)?;
         }
         let models = merge_persisted_model_options(&transaction, &expected.id, &models)?;
-        let updated = transaction.execute(
-            "UPDATE adapter_capability_snapshot SET model_catalog_json = ?2, model_catalog_succeeded_at = ?3
-             WHERE installation_id = ?1 AND executable_fingerprint = ?4",
-            params![expected.id, serde_json::to_string(&models)?, succeeded_at, fingerprint],
-        )? != 0;
+        let updated = if let Some(target) = target_model {
+            // A parameter observation neither replaces the directory nor renews
+            // its success time. Merge against the current row in this transaction.
+            let keys = crate::runtime_model_options::metadata_keys(expected.adapter_kind)
+                .context("Runtime does not support target options")?;
+            let observation = models
+                .iter()
+                .find(|model| model.id == target)
+                .context("Target model options missing")?;
+            let metadata = observation
+                .runtime_metadata
+                .as_ref()
+                .context("Target model metadata missing")?;
+            anyhow::ensure!(
+                metadata[keys.resolved] == true,
+                "Target model options were not confirmed"
+            );
+            let stored: String = transaction.query_row(
+                "SELECT model_catalog_json FROM adapter_capability_snapshot WHERE installation_id=?1",
+                [&expected.id], |row| row.get(0),
+            )?;
+            let mut directory: Vec<ModelDescriptor> = serde_json::from_str(&stored)?;
+            let Some(model) = directory.iter_mut().find(|model| model.id == target) else {
+                return Ok(false);
+            };
+            model.options = observation.options.clone();
+            let target_metadata = model.runtime_metadata.get_or_insert_with(|| json!({}));
+            for key in [keys.resolved, keys.context, keys.observed_at] {
+                target_metadata[key] = metadata[key].clone();
+            }
+            transaction.execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_json=?2
+                 WHERE installation_id=?1 AND executable_fingerprint=?3",
+                params![expected.id, serde_json::to_string(&directory)?, fingerprint],
+            )? != 0
+        } else {
+            transaction.execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_json = ?2, model_catalog_succeeded_at = ?3
+                 WHERE installation_id = ?1 AND executable_fingerprint = ?4",
+                params![expected.id, serde_json::to_string(&models)?, succeeded_at, fingerprint],
+            )? != 0
+        };
         transaction.commit()?;
         Ok(updated)
     }
@@ -6472,7 +6510,11 @@ mod slow_tests {
     fn target_catalog_updates_accumulate_capabilities_without_reviving_removed_routes() {
         // Owns the persisted merge across full checks and interleaved target reads;
         // parser tests cannot detect a stale whole-catalog SQL writeback.
-        for kind in [AdapterKind::DeepseekHarness, AdapterKind::MinimaxCodeCli] {
+        for kind in [
+            AdapterKind::DeepseekHarness,
+            AdapterKind::MinimaxCodeCli,
+            AdapterKind::GooseCli,
+        ] {
             let keys = crate::runtime_model_options::metadata_keys(kind).unwrap();
             let (mut database, directory) = database();
             let service = AgentProfileService::default();
@@ -6494,7 +6536,7 @@ mod slow_tests {
             a.id = "[\"relay\",\"a\"]".into();
             a.runtime_metadata = Some(json!({"dshSource":"web", (keys.context):"config-1",
             (keys.resolved):true, (keys.observed_at):"2026-10-09T10:00:00Z"}));
-            if kind == AdapterKind::MinimaxCodeCli {
+            if kind != AdapterKind::DeepseekHarness {
                 a.runtime_metadata
                     .as_mut()
                     .unwrap()
@@ -6551,7 +6593,8 @@ mod slow_tests {
                             .as_deref()
                             .unwrap(),
                         &[unobserved_a.clone(), b.clone()],
-                        "2026-10-09T10:00:10Z"
+                        "2026-10-09T10:00:10Z",
+                        None,
                     )
                     .unwrap()
             );
@@ -6581,7 +6624,8 @@ mod slow_tests {
                             .as_deref()
                             .unwrap(),
                         &[older_a, snapshot.models[1].clone()],
-                        "2026-10-09T10:00:11Z"
+                        "2026-10-09T10:00:11Z",
+                        None,
                     )
                     .unwrap()
             );
@@ -6616,7 +6660,8 @@ mod slow_tests {
                             .as_deref()
                             .unwrap(),
                         &[changed_route.clone()],
-                        "2026-10-09T10:00:12Z"
+                        "2026-10-09T10:00:12Z",
+                        None,
                     )
                     .unwrap()
             );
@@ -6641,7 +6686,8 @@ mod slow_tests {
                             .as_deref()
                             .unwrap(),
                         &[changed_config.clone()],
-                        "2026-10-09T10:00:13Z"
+                        "2026-10-09T10:00:13Z",
+                        None,
                     )
                     .unwrap()
             );
@@ -6649,6 +6695,81 @@ mod slow_tests {
                 read(&database).snapshot.unwrap().models,
                 vec![changed_config]
             );
+            if kind == AdapterKind::GooseCli {
+                let before = read(&database);
+                let retained = &before.snapshot.as_ref().unwrap().models[0];
+                let fingerprint = before
+                    .snapshot
+                    .as_ref()
+                    .unwrap()
+                    .executable_fingerprint
+                    .as_deref()
+                    .unwrap();
+                let mut partial = retained.clone();
+                partial.display_name = "Probe label must not replace directory label".into();
+                partial.is_default = !retained.is_default;
+                assert!(
+                    service
+                        .commit_runtime_model_catalog(
+                            &mut database,
+                            &before,
+                            fingerprint,
+                            &[partial.clone()],
+                            "2026-10-09T10:01:00Z",
+                            Some(&partial.id),
+                        )
+                        .is_err(),
+                    "An unconfirmed target is not a successful options observation"
+                );
+                assert_eq!(
+                    read(&database).snapshot.unwrap().models,
+                    before.snapshot.as_ref().unwrap().models
+                );
+                partial.runtime_metadata.as_mut().unwrap()[keys.resolved] = json!(true);
+                partial.runtime_metadata.as_mut().unwrap()[keys.observed_at] =
+                    json!("2026-10-09T10:01:00Z");
+                assert!(
+                    service
+                        .commit_runtime_model_catalog(
+                            &mut database,
+                            &before,
+                            fingerprint,
+                            &[partial.clone()],
+                            "2026-10-09T10:01:00Z",
+                            Some(&partial.id),
+                        )
+                        .unwrap()
+                );
+                let after = read(&database);
+                assert_eq!(
+                    after.model_catalog.observed_at, before.model_catalog.observed_at,
+                    "Target options must not renew full-directory freshness"
+                );
+                let stored = &after.snapshot.as_ref().unwrap().models;
+                assert_eq!(stored.len(), 1);
+                assert_eq!(stored[0].display_name, retained.display_name);
+                assert_eq!(stored[0].is_default, retained.is_default);
+                assert_eq!(
+                    stored[0].runtime_metadata.as_ref().unwrap()[keys.observed_at],
+                    "2026-10-09T10:01:00Z"
+                );
+                let mut removed = partial;
+                removed.id = b.id.clone();
+                assert!(
+                    !service
+                        .commit_runtime_model_catalog(
+                            &mut database,
+                            &before,
+                            fingerprint,
+                            &[removed.clone()],
+                            "2026-10-09T10:02:00Z",
+                            Some(&removed.id),
+                        )
+                        .unwrap(),
+                    "Late target replies must not restore a removed model"
+                );
+                assert_eq!(read(&database).snapshot.unwrap().models, *stored);
+            }
             drop(database);
             std::fs::remove_dir_all(directory).unwrap();
         }
@@ -8438,7 +8559,8 @@ mod slow_tests {
                         &after_auth,
                         fingerprint,
                         &ready.models,
-                        &chrono::Utc::now().to_rfc3339()
+                        &chrono::Utc::now().to_rfc3339(),
+                        None,
                     )
                     .unwrap()
             );
@@ -8478,7 +8600,8 @@ mod slow_tests {
                         &before_edit,
                         fingerprint,
                         &ready.models,
-                        &chrono::Utc::now().to_rfc3339()
+                        &chrono::Utc::now().to_rfc3339(),
+                        None,
                     )
                     .unwrap()
             );
@@ -8492,7 +8615,8 @@ mod slow_tests {
                         &after_edit,
                         fingerprint,
                         &ready.models,
-                        &chrono::Utc::now().to_rfc3339()
+                        &chrono::Utc::now().to_rfc3339(),
+                        None,
                     )
                     .unwrap()
             );
@@ -9056,7 +9180,8 @@ mod slow_tests {
                             &catalog_expected,
                             &fingerprint,
                             &models,
-                            &observed_at
+                            &observed_at,
+                            None,
                         )
                         .unwrap()
                 );
@@ -9144,7 +9269,8 @@ mod slow_tests {
                             &catalog_expected,
                             &fingerprint,
                             &models,
-                            &chrono::Utc::now().to_rfc3339()
+                            &chrono::Utc::now().to_rfc3339(),
+                            None,
                         )
                         .unwrap(),
                     "the old directory response must not write into the replacement program"

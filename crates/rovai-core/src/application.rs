@@ -5470,6 +5470,9 @@ impl Core {
                 &fingerprint,
                 &catalog.models,
                 &observed_at,
+                target
+                    .filter(|_| kind == AdapterKind::GooseCli)
+                    .map(|(model, _)| model),
             )?
         };
         eprintln!(
@@ -6400,6 +6403,7 @@ impl Core {
                         &candidate_fingerprint,
                         &snapshot.models,
                         &chrono::Utc::now().to_rfc3339(),
+                        None,
                     )?;
                 }
             }

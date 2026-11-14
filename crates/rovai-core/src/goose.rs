@@ -208,7 +208,14 @@ pub(crate) fn current_model(session: &Value) -> Option<String> {
 }
 
 pub(crate) fn model_catalog(inventory: &Value, session: &Value) -> Result<Vec<ModelDescriptor>> {
-    let selected = current_model(session);
+    let selected = current_model(session).or_else(|| {
+        let defaults = session.pointer("/_meta/rovaiGooseDefaults")?;
+        Some(format!(
+            "{}/{}",
+            defaults["providerId"].as_str()?,
+            defaults["modelId"].as_str()?
+        ))
+    });
     let mut models = Vec::new();
     for provider in inventory["entries"]
         .as_array()

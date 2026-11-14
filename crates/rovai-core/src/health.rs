@@ -505,8 +505,16 @@ pub async fn refresh_model_catalog_for_selection(
             Ok(rovai_core::agent_runtime_adapter::antigravity_models(ids))
         }
         _ => {
-            let (_, session) =
-                run_acp_probe_with_scope(path, kind, true, purpose, true, target, None).await?;
+            let (_, session) = run_acp_probe_with_scope(
+                path,
+                kind,
+                kind != AdapterKind::GooseCli || target.is_some(),
+                purpose,
+                true,
+                target,
+                None,
+            )
+            .await?;
             if kind == AdapterKind::DeepseekHarness {
                 dsh_preparation = session
                     .as_ref()
@@ -515,9 +523,7 @@ pub async fn refresh_model_catalog_for_selection(
             }
             let mut models = rovai_core::agent_runtime_adapter::acp_model_catalog_for_adapter(
                 kind,
-                session
-                    .as_ref()
-                    .context("ACP catalog did not create a Session")?,
+                session.as_ref().context("ACP catalog response missing")?,
             )?;
             // The same native Kiro mapping as full checks; reasoning is not configurable.
             if kind == AdapterKind::KiroCli {
@@ -2265,6 +2271,20 @@ async fn run_acp_probe_with_scope(
             if initialize.get("protocolVersion").and_then(Value::as_u64) != Some(1) {
                 bail!("Runtime did not negotiate ACP v1");
             }
+            if kind == AdapterKind::GooseCli && catalog_only && !include_session {
+                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":2,"method":"_goose/unstable/providers/list","params":{"providerIds":[]}})).await?;
+                let inventory = read_rpc_result(lines, 2).await?;
+                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":3,"method":"_goose/unstable/defaults/read","params":{}})).await?;
+                let defaults = read_rpc_result(lines, 3).await?;
+                return Ok((
+                    initialize,
+                    Some(json!({"_meta":{
+                        "rovaiGooseProviders":inventory,
+                        "rovaiGooseDefaults":defaults,
+                        "rovaiModelOptionsContext":options_context
+                    }})),
+                ));
+            }
             if !include_session {
                 return Ok::<_, anyhow::Error>((initialize, None));
             }
@@ -2353,7 +2373,7 @@ async fn run_acp_probe_with_scope(
                 }
                 crate::dsh::annotate_session(&mut session, preparation);
             }
-            if kind == AdapterKind::GooseCli && catalog_only {
+            if kind == AdapterKind::GooseCli && catalog_only && target.is_none() {
                 write_json_line(stdin,&json!({"jsonrpc":"2.0","id":session_request_id+10,"method":"_goose/unstable/providers/list","params":{"providerIds":[]}})).await?;
                 session["_meta"]["rovaiGooseProviders"] =
                     read_rpc_result(lines, session_request_id + 10).await?;
@@ -2363,12 +2383,17 @@ async fn run_acp_probe_with_scope(
                     anyhow::ensure!(source.is_none(), "Goose models do not have a DSH source");
                     let (provider, model) = crate::goose::model_route(model_id)?;
                     for (offset, key, value) in [(1, "provider", provider), (2, "model", model)] {
+                        if crate::goose::selected_option(&session, key) == Some(value) {
+                            continue;
+                        }
                         write_json_line(stdin,&json!({"jsonrpc":"2.0","id":session_request_id+offset,"method":"session/set_config_option","params":{"sessionId":session["sessionId"],"configId":key,"value":value}})).await?;
                         let result = read_rpc_result(lines, session_request_id + offset).await?;
-                        if result["configOptions"].is_array() {
-                            session["configOptions"] = result["configOptions"].clone();
-                        }
+                        session["configOptions"] = result["configOptions"].clone();
                     }
+                    anyhow::ensure!(
+                        crate::goose::current_model(&session).as_deref() == Some(model_id),
+                        "Goose did not confirm the requested provider/model"
+                    );
                 } else if kind == AdapterKind::MinimaxCodeCli {
                     anyhow::ensure!(
                         source.is_none(),
@@ -5022,7 +5047,57 @@ while IFS= read -r ignored; do :; done
     #[cfg(unix)]
     #[tokio::test]
     async fn acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals() {
-        for case in ["ok", "target_error", "delete_error", "session_error"] {
+        for (case, include_session, target, succeeds, expected_setters) in [
+            ("ok", true, None, true, vec![]),
+            ("delete_error", true, None, false, vec![]),
+            ("session_error", true, None, false, vec![]),
+            (
+                "target_error",
+                true,
+                Some("missing/model"),
+                false,
+                vec!["provider"],
+            ),
+            ("catalog", false, None, true, vec![]),
+            ("inventory_error", false, None, false, vec![]),
+            ("defaults_error", false, None, false, vec![]),
+            ("target_same", true, Some("native/model-a"), true, vec![]),
+            (
+                "target_model",
+                true,
+                Some("native/model-b"),
+                true,
+                vec!["model"],
+            ),
+            (
+                "target_provider",
+                true,
+                Some("second/model-b"),
+                true,
+                vec!["provider"],
+            ),
+            (
+                "provider_no_echo",
+                true,
+                Some("second/model-b"),
+                true,
+                vec!["provider", "model"],
+            ),
+            (
+                "target_no_echo",
+                true,
+                Some("native/model-b"),
+                false,
+                vec!["model"],
+            ),
+            (
+                "target_wrong",
+                true,
+                Some("second/model-b"),
+                false,
+                vec!["provider"],
+            ),
+        ] {
             let root = env::temp_dir().join(format!(
                 "rovai-goose-probe-cleanup-{}",
                 uuid::Uuid::new_v4()
@@ -5034,15 +5109,24 @@ while IFS= read -r ignored; do :; done
             std::fs::write(&executable, format!(r#"#!/usr/bin/python3
 import json, sys
 case = {case:?}
+options = dict(provider='native', model='model-a', thinking_effort='high')
 for line in sys.stdin:
     request = json.loads(line)
     with open({log:?}, 'a') as out: out.write(json.dumps(request) + '\n')
     method = request['method']
+    params = request.get('params', {{}})
     result = {{'protocolVersion':1}} if method == 'initialize' else {{}}
-    if method == 'session/new': result = {{'sessionId':'goose-probe-only','configOptions':[]}}
-    if method == '_goose/unstable/providers/list': result = {{'entries':[]}}
+    if method == 'session/set_config_option':
+        key = params['configId']
+        if case != 'target_wrong' or key != 'provider': options[key] = params['value']
+        if key == 'provider' and case != 'provider_no_echo': options['model'] = 'model-b'
+    if method in ('session/new', 'session/set_config_option'):
+        result = {{'sessionId':'goose-probe-only','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
+    if method == 'session/set_config_option' and (case == 'target_no_echo' or (case == 'provider_no_echo' and params['configId'] == 'provider')): result = {{}}
+    if method == '_goose/unstable/providers/list': result = {{'entries':[{{'providerId':'native','configured':True,'available':True,'models':[{{'id':'model-a'}}]}}]}}
+    if method == '_goose/unstable/defaults/read': result = {{'providerId':'native','modelId':'model-a'}}
     response = {{'jsonrpc':'2.0','id':request['id'],'result':result}}
-    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('delete_error','session/delete')]:
+    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('delete_error','session/delete'), ('inventory_error','_goose/unstable/providers/list'), ('defaults_error','_goose/unstable/defaults/read')]:
         response = {{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32602,'message':case}}}}
     print(json.dumps(response), flush=True)
 "#, log=log.to_string_lossy())).unwrap();
@@ -5050,27 +5134,68 @@ for line in sys.stdin:
             let result = run_acp_probe_with_scope(
                 &executable,
                 AdapterKind::GooseCli,
-                true,
+                include_session,
                 RuntimeLaunchPurpose::HealthProbe,
                 true,
-                (case == "target_error").then_some(("missing/model", None)),
+                target.map(|model| (model, None)),
                 Some("1.59.0"),
             )
             .await;
-            assert_eq!(result.is_ok(), case == "ok", "{case}: {result:?}");
+            assert_eq!(result.is_ok(), succeeds, "{case}: {result:?}");
             let requests: Vec<Value> = std::fs::read_to_string(&log)
                 .unwrap()
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
             assert!(!requests.iter().any(|r| r["method"] == "session/prompt"));
+            let setters: Vec<_> = requests
+                .iter()
+                .filter(|r| r["method"] == "session/set_config_option")
+                .map(|r| r["params"]["configId"].as_str().unwrap())
+                .collect();
+            assert_eq!(setters, expected_setters, "{case}");
+            if target.is_some() {
+                assert!(
+                    !requests
+                        .iter()
+                        .any(|r| r["method"] == "_goose/unstable/providers/list")
+                );
+            }
+            if !include_session {
+                assert!(!requests.iter().any(|r| r["method"] == "session/new"));
+                if succeeds {
+                    assert_eq!(
+                        requests
+                            .iter()
+                            .map(|r| r["method"].as_str().unwrap())
+                            .collect::<Vec<_>>(),
+                        [
+                            "initialize",
+                            "_goose/unstable/providers/list",
+                            "_goose/unstable/defaults/read"
+                        ]
+                    );
+                    let (_, catalog) = result.as_ref().unwrap();
+                    let models = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                        AdapterKind::GooseCli,
+                        catalog.as_ref().unwrap(),
+                    )
+                    .unwrap();
+                    assert!(models[0].is_default);
+                    assert!(models[0].options.is_empty());
+                    assert_eq!(
+                        models[0].runtime_metadata.as_ref().unwrap()["modelOptionsResolved"],
+                        false
+                    );
+                }
+            }
             let removed: Vec<_> = requests
                 .iter()
                 .filter(|r| r["method"] == "session/delete")
                 .collect();
             assert_eq!(
                 removed.len(),
-                usize::from(case != "session_error"),
+                usize::from(include_session && case != "session_error"),
                 "{case}"
             );
             if let Some(request) = removed.first() {

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-14",
+  "runtime": "goose-cli",
+  "officialVersion": "1.59.0",
+  "upstreamCommit": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+  "baseline": "21a086f10447fd9d2ea466597e2fb410f7f15e9e",
+  "platform": "macos-arm64",
+  "contract": "Runtime Launch v92",
+  "productStage": "Preview",
+  "qualificationPromotion": false,
+  "protocolFixture": {
+    "directoryRequests": [
+      "initialize",
+      "_goose/unstable/providers/list",
+      "_goose/unstable/defaults/read"
+    ],
+    "directorySessionNew": 0,
+    "directorySessionDelete": 0,
+    "directorySetters": 0,
+    "targetInventoryRequests": 0,
+    "confirmedSameSelectionSkipsSetter": true,
+    "providerReplyRecheckedBeforeModelSetter": true,
+    "missingSnapshotInvalidatesPriorSelection": true,
+    "wrongProviderModelRejected": true,
+    "originalSessionDeleteFailureCasesRetained": true,
+    "newSessionNativeDefaultSetter": 0,
+    "warmNativeDefaultRefresh": "retained-native-provider-alias"
+  },
+  "officialNative": {
+    "directory": {
+      "beforeAnySession": true,
+      "nativeDefaults": true,
+      "nativeSessionRows": 0,
+      "modelGenerations": 0
+    },
+    "providerRequests": 58,
+    "fullProbePassed": true
+  },
+  "officialCore": {
+    "successfulRuns": 18,
+    "cancelledRuns": 1,
+    "providerRequests": 53,
+    "modelCount": 66,
+    "catalogGenerationRequests": 0,
+    "effort": {
+      "targetModel": "openai/gpt-6.1-sol",
+      "nativeKey": "thinking_effort",
+      "providerEffort": "high",
+      "onDemand": true,
+      "otherProvidersRetained": true,
+      "directoryFreshnessUnchanged": true,
+      "nativeDefaultUnchanged": true
+    },
+    "probeSessions": {
+      "remaining": 0
+    },
+    "defaultRestored": true,
+    "sharedLifecyclePassed": true,
+    "nativeDefaultFirstAndWarm": true
+  },
+  "realSub2api": {
+    "provider": "custom_sub2api",
+    "model": "gpt-6",
+    "nativeOptionKey": "thinking_effort",
+    "advertisedValues": [
+      "off",
+      "low",
+      "medium",
+      "high",
+      "max"
+    ],
+    "verifiedEffort": "high",
+    "runStatus": "succeeded",
+    "writeAndEditCompleted": true,
+    "bundledCliSend": true,
+    "directoryTimePreserved": true,
+    "temporaryCredentialCopyRemoved": true
+  },
+  "renderer": {
+    "productionComponents": true,
+    "fixtureHasNoCoreOrRuntime": true,
+    "entrypoints": [
+      "member",
+      "onboarding"
+    ],
+    "sharedTargetBehaviorWith": [
+      "minimax-code-cli",
+      "deepseek-harness"
+    ],
+    "expiredDirectoryInitializedOnce": true,
+    "controlsShareTargetRequest": true,
+    "lateReplyIsolation": true,
+    "confirmedEmptyCached": true,
+    "savedOptionsSurviveFailures": true,
+    "integrationPassed": true,
+    "componentTests": 41,
+    "typecheckPassed": true
+  },
+  "migration": {
+    "gooseAndKiloShareOnlyClosedSetHelpers": true,
+    "versionsTransactionsAndRollbackUnchanged": true,
+    "existingMigrationOwnerPassed": true
+  },
+  "notVerified": [
+    "Other platforms or Provider OAuth",
+    "Other real model/effort combinations",
+    "Packaged App acceptance for this change",
+    "Before/after latency benchmark"
+  ],
+  "rust": {
+    "existingOwners": {
+      "protocol": 1,
+      "liveSelection": 1,
+      "catalogParser": 1,
+      "catalogMigrations": 1,
+      "persistedTargetSlow": 1
+    },
+    "newTestFunctions": 0,
+    "workspace": {
+      "coreLibPassed": 438,
+      "cliPassed": 31,
+      "hostPassed": 4,
+      "webPassed": 11,
+      "existingIgnored": 1
+    }
+  },
+  "documentationGates": {
+    "tests": 10,
+    "checkPassed": true,
+    "diffAwareCheckPassed": true
+  }
+}

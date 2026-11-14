@@ -10,7 +10,7 @@ last_updated: 2026-11-14
 已确认 [R1](model-context-change-goose-acp.md) 后，在 `rovai/goose-acp` 独立 worktree 实施。
 研究起点为 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并
 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`，不修改主 checkout。
-当前合同为 [Runtime Launch v91](../../contracts/runtime-launch-and-verification-v91.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
+当前合同为 [Runtime Launch v92](../../contracts/runtime-launch-and-verification-v92.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
 
 ## 基线差异和共享入口
 
@@ -91,7 +91,7 @@ Rust 扩展现有 owner，不新增测试函数：模型路由/选项、权限�
 ## 用户复核后的精简（2026-11-14）
 
 User sequence 123 要求能收窄的请求、存储和文件创建都收窄；基线为 `6902e8e8d5`。
-当前增量合同为 [Runtime Launch v91](../../contracts/runtime-launch-and-verification-v91.md)，
+本阶段增量合同为 [Runtime Launch v91](../../contracts/runtime-launch-and-verification-v91.md)，
 不改 B/P 正文、选择或投递位置，不截断模型会话历史，R1 和各模型输入版本轴保持不变。
 
 | 原行为 | 收窄后 |
@@ -163,3 +163,46 @@ User sequence 128 明确要求配置本机官方 Goose 并测试真实模型。�
 自动验收 HOME、原生 data/cache、项目、Core data、Skill 与 MCP 根均独立；用户原生配置本身是本次明确授权的修改。
 私有验收目录中的临时凭据副本在完成后删除，公开记录不含密钥、完整用户配置或 Provider 请求正文。
 这次结果不替代既有合成故障矩阵，不提升平台资格，仍为 macOS arm64 Preview。
+
+## 目录与参数探测收尾（2026-11-14）
+
+User sequence 130 以 21a086f10447fd9d2ea466597e2fb410f7f15e9e 为审查基线。
+当前合同更新为 [Runtime Launch v92](../../contracts/runtime-launch-and-verification-v92.md)，
+沿现有 worktree 实施，没有修改 Bootstrap、Dynamic Context、原生会话历史或 R1 输入版本。
+
+| 范围 | 本次结果 |
+| --- | --- |
+| 完整目录 | initialize 后直接调用原生 providers/list 与 defaults/read，不创建/删除 Session，不切模型 |
+| 目标 thinking_effort | 保留必要临时 Session，不读取 inventory；跳过已确认同值，Provider 回显后重新判断 model |
+| 参数发布 | 现有目录事务只合并目标选项/观察 metadata，保留其他 Provider、默认标记、目录名称和成功时间 |
+| 初始/过期目录 | Renderer 先独立初始化一次目录，再订阅目标；有效目录下不重复读取 inventory |
+| 新 Session 默认 | 已由原生选择默认，不再立即重复设置 provider=goose |
+| Warm/冷恢复默认 | 保留原生别名重新解析当前默认，包含显式模型切回默认；本轮不改变外部配置生效时机 |
+| 迁移重复 | Goose/Kilo 共用闭集检查与 trigger 保护下的改写 helper；各自迁移号、schema、事务、回滚不变 |
+
+目标查询返回局部数据后，若继续按完整目录覆盖 SQLite，会丢失其他 Provider 的条目。
+因此在既有 commit 入口增加可选目标语义，事务内只修改该条目的参数；普通目录/其他接入调用保持原义。
+这是沿用原目录存储，没有新增参数表、模型缓存、配置镜像或第二份目录来源。
+
+思考强度继续与 MiniMax/DSH 使用相同的共享目标队列、缓存预读、在途合并、过期复核和迟到响应隔离。
+字段分别为 Goose thinking_effort、MiniMax thinkingEffort、DSH reasoning_effort，值均来自对应原生响应。
+用户保存的未知值不会被刷新静默改写；原生确认无选项可缓存为空，失败不能变成“无档位”。
+
+新增确定性反例保留原 delete_error、session_error 和目标失败清理断言。
+UI 夹具首次没有实际设置过期状态，随后模拟的目录时间又早于安装投影，被原有迟到保护正确拒收；
+修正夹具过期条件与单调时间后，既有原生选项显示断言通过，没有放松生产时间检查或删除断言。
+原生脚本扩展中的局部重名在启动前被语法检查发现并修正，不作为官方程序失败。
+
+官方 1.59.0 的原生探针在任何 session/new 前完成目录/defaults 读取，原生会话行数为零、生成数为零；
+全探针仍完成 58 次受控响应。Core smoke 完成 18 成功/1 取消，另一个 Provider 的模型、原生默认和
+完整目录时间在目标查询后保持，实际受控请求仍含 high。
+真实 Sub2API/gpt-6 的目标查询返回 off/low/medium/high/max；只覆盖 high 的正式 Core Run，
+write/edit 与 bundled CLI 发送成功，不据此宣称所有档位、Provider 或平台已验收。
+明细见[本轮白名单](../../research/goose-runtime/catalog-options-1.59.0-macos-arm64.json)。
+
+本轮回归：health 边界、live selection、catalog parser 与 catalog migration 既有 extended owners 通过；
+持久化 target slow owner 使用 slow-tests/extended-tests 实际执行 1 项并通过。
+初次 extended-only 筛选为零匹配，不能作为通过；补开 slow 后，夹具缺少“已确认”状态被生产 guard 拒绝，
+补齐真实参数观察应有的状态后通过，保留失败记录和拒绝断言。
+默认 workspace 为 438 Core lib、31 CLI、4 host、11 web 通过，保留原 1 ignored；
+原生参数组件 41 项、类型检查、共享 Electron picker（含成员/创建入口）及文档三项门禁通过。
