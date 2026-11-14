@@ -540,7 +540,7 @@ export function ToolCallRow({
       undefined,
       { commitOnSuccess: true, previewOnly: true }
     )
-    if (outcome.kind !== 'preview') onFileOpenError(uiAttribute('无法打开该文件'))
+    if (outcome.kind !== 'preview' && outcome.kind !== 'preview_error') onFileOpenError(uiAttribute('无法打开该文件'))
   }
   const readSummary = step.shellReadSummary
   const readFileLink = (path: string, label: string): JSX.Element => (

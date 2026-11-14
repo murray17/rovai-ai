@@ -17631,6 +17631,10 @@ impl Core {
                             &id,
                             observation.executable_path.as_deref().unwrap(),
                         );
+                    drop(database);
+                    // Launch version publication matches this discovery identity.
+                    // Publish the verified entry under the same commit guard.
+                    self.publish_verified_runtime_discovery(observation).await;
                     return Ok::<(), anyhow::Error>(());
                 }
                 if attempt == 0 {
@@ -28393,19 +28397,22 @@ async fn process_runtime_check_manager(
                     }
                 };
                 if request.purpose == RuntimeLaunchPurpose::DiscoveryVersion {
+                    // A Warm Host can keep an older canonical executable.
+                    // Resolve its installation's current target for admission;
+                    // the worker and commit still enforce the target revision.
                     if let Some(runtime) = &request.version_refresh
                         && installation_target.as_ref().is_none_or(|target|
-                            target.id != runtime.installation_id || target.executable_path != runtime.executable_path)
+                            target.id != runtime.installation_id)
                     {
                         let _ = request.acknowledged.send(false);
                         continue;
                     }
-                    if request.version_target.is_none()
+                    if (request.version_refresh.is_some() || request.version_target.is_none())
                         && let Some(target) = &installation_target
                     {
                         request.version_target = runtime_check_environment::version_target(
                             request.runtime_kind, &target.id, &target.executable_path,
-                            &request.search, None,
+                            &request.search, request.version_refresh.as_ref().and_then(|runtime| runtime.environment.clone()),
                         ).await.ok();
                     }
                     if request.version_refresh.is_some()

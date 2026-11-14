@@ -53,6 +53,18 @@ describe('AgentRun file preview routing', () => {
     })
   })
 
+  it('treats a failure preview as navigation without emitting duplicate global feedback', async () => {
+    const open = vi.fn().mockResolvedValue({ kind: 'preview_error', tabId: 'failed-file',
+      error: { code: 'file_not_found', message: 'missing', retryable: false } })
+    const onError = vi.fn()
+    await expect(openAgentRunCurrentFilePreview({ filePreview: { open }, threadId: 'camp-1',
+      changes, evidenceFileId: 'operation-only', onError })).resolves.toBe(true)
+    await expect(openAgentRunActivityFilePreview({ filePreview: { open }, threadId: 'camp-1',
+      evidence: { agentRunId: 'run', executionEpoch: 1, canonical: { diffProjection: { sourceEvidenceIds: ['file-evidence'] } } },
+      path: 'src/missing.ts', onError })).resolves.toBe(true)
+    expect(onError).not.toHaveBeenCalled()
+  })
+
   it('opens the current file through the run-evidence preview-only path', async () => {
     const open = vi.fn().mockResolvedValue({ kind: 'preview', tabId: 'current-file' })
     const onError = vi.fn()

@@ -5,7 +5,7 @@ authority: published-thread-copy
 status: accepted
 version: 1
 source_version: v1.72
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Thread Fork v1
@@ -101,12 +101,16 @@ one target; replay after source/target deletion does not recreate it.
 The application owns one foreground request across workspace unmounts. Both entries share its busy state; editing,
 reading and navigation remain available. Persistence stores only command/source/optional anchor IDs and, once known,
 the target ID, isolated by the existing Profile/Host/Owner scope. Refresh reads the existing receipt; no background
-task or retry queue is created. Unknown outcome retries use the same original request. Known target opening retries
-never call `threads.fork`.
+task or retry queue is created. Unknown outcome retries use the same original request. Opening a known target
+through ordinary navigation never calls `threads.fork`.
 
 Only completion during the same source-page visit may automatically navigate, through the existing leave guard.
 Visit and navigation ownership are checked again after async draft/attachment work. A→B and A→B→A suppress automatic
-navigation. Save/open failure preserves the target and offers only opening retry. Fork opening does not commit a
-cached preview before the full projection succeeds. An already visible target counts as opened only with a full
-projection; a current preview must retry the full open. Recovery identifiers are cleared only after this confirmation. The
+navigation. Completion after leaving the source, and save/open failure after a known copy, produce no completion or
+opening-failure toast, target title, or Open action. The known copy remains accessible through ordinary navigation;
+its saved locator is not a new copy request. Fork opening does not commit a cached preview before the full projection
+succeeds. An already visible target counts as opened only with a full projection; recovery identifiers are cleared only
+after this confirmation. Rejected feedback auto-dismisses after 3.2 seconds; unknown outcomes retain explicit retry.
+The loading indicator waits 200ms before appearing and stays visible for at least 600ms once shown, with errors taking
+precedence. This visual timing never delays the command, navigation or busy-state completion. The
 [conversation UI contract](../ui/components/conversation-workspace.md#thread-分叉) owns presentation.

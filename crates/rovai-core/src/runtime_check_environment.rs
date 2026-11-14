@@ -417,8 +417,7 @@ impl Core {
                 .managed_installation(&database, kind, &runtime.auth_scope)?
                 .context("Runtime installation is unavailable")?;
             anyhow::ensure!(
-                installation.id == runtime.installation_id
-                    && installation.executable_path == runtime.executable_path,
+                installation.id == runtime.installation_id,
                 "Runtime installation changed before automatic version read"
             );
             let locator =
@@ -433,7 +432,7 @@ impl Core {
         let target = version_target(
             kind,
             &runtime.installation_id,
-            &runtime.executable_path,
+            &installation.executable_path,
             &search,
             runtime.environment.clone(),
         )
@@ -447,7 +446,113 @@ impl Core {
         {
             return Ok(None);
         }
-        let attempt = begin_version_read(
+        // Resolve only this Runtime in the background. A missing entry counts
+        // as an attempt; finding a fresh resolved target must not move a clock.
+        let path = installation.executable_path.clone();
+        let source = installation.source;
+        let fixed = installation.installation_class
+            == crate::agent_profile::InstallationClass::Custom
+            || (!search.has_startup_configuration(kind)
+                && matches!(
+                    source,
+                    crate::agent_profile::InstallationSource::Manual
+                        | crate::agent_profile::InstallationSource::Custom
+                ));
+        let entry_search = search.clone();
+        let resolved = tokio::task::spawn_blocking(move || {
+            let saved_path = locator
+                .as_ref()
+                .map(|entry| entry.canonical_shim_path.clone())
+                .unwrap_or_else(|| path.clone());
+            let previous = identity
+                .as_ref()
+                .map(|(fingerprint, identity)| (path.as_str(), fingerprint.as_str(), identity));
+            let mut selection = entry_search.as_ref().clone();
+            if fixed {
+                let mut configuration = selection.startup_configuration(kind);
+                configuration.program_path = Some(saved_path.clone());
+                selection = selection.with_startup_configuration(kind, configuration);
+            }
+            let mut candidates = selection.candidates(kind, std::iter::empty());
+            if fixed {
+                for candidate in &mut candidates {
+                    candidate.source = source;
+                }
+            }
+            let (mut observation, mut verified) =
+                crate::runtime_discovery::discover_runtime_entry_from_candidates(
+                    kind,
+                    &entry_search,
+                    candidates,
+                    previous,
+                );
+            // Match ordinary discovery's saved-entry fallback only when no
+            // current entry exists, never after a selected version command fails.
+            if verified.is_none() && !fixed && !entry_search.has_startup_configuration(kind) {
+                let mut configuration = entry_search.startup_configuration(kind);
+                configuration.program_path = Some(saved_path);
+                let fallback = entry_search
+                    .as_ref()
+                    .clone()
+                    .with_startup_configuration(kind, configuration);
+                let mut candidates = fallback.candidates(kind, std::iter::empty());
+                for candidate in &mut candidates {
+                    candidate.source = source;
+                }
+                (observation, verified) =
+                    crate::runtime_discovery::discover_runtime_entry_from_candidates(
+                        kind,
+                        &entry_search,
+                        candidates,
+                        previous,
+                    );
+            }
+            (observation, verified)
+        })
+        .await
+        .context("Runtime current entry resolution worker failed")
+        .and_then(|(observation, verified)| {
+            Ok((
+                observation,
+                verified.context("Runtime current installation entry is unavailable")?,
+            ))
+        });
+        let (mut observation, verified) = match resolved {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                begin_version_read(
+                    &self.runtime_check_activity,
+                    &self.database,
+                    target,
+                    search.generation(),
+                    &Some((installation.id.clone(), installation.version)),
+                )
+                .await?;
+                return Err(error);
+            }
+        };
+        let resolved_path = verified.entry().executable_path.as_str();
+        let resolved_target = if resolved_path == target.executable_path {
+            target.clone()
+        } else {
+            version_target(
+                kind,
+                &installation.id,
+                resolved_path,
+                &search,
+                runtime.environment.clone(),
+            )
+            .await?
+        };
+        if !self
+            .runtime_check_activity
+            .read()
+            .await
+            .automatic_version_is_due(&resolved_target)
+        {
+            return Ok(None);
+        }
+        let mut attempt = begin_version_read(
             &self.runtime_check_activity,
             &self.database,
             target,
@@ -455,44 +560,19 @@ impl Core {
             &Some((installation.id.clone(), installation.version)),
         )
         .await?;
-        // Once admitted, this is an actual fixed-entry attempt, including
-        // failure to inspect/open that entry. A cached/skipped request above
-        // must not move the clock; an unavailable entry must not retry per Run.
-        let path = runtime.executable_path.clone();
-        let source = installation.source;
-        let verified = tokio::task::spawn_blocking(move || {
-            crate::agent_profile::VerifiedDiscoveredRuntimeEntry::discover(
-                kind,
-                path,
-                source,
-                locator,
-                identity
-                    .as_ref()
-                    .map(|(fingerprint, identity)| (fingerprint.as_str(), identity)),
+        if resolved_target != attempt.target {
+            // The logical launcher can now resolve to a different package
+            // directory while the old Host still owns its original executable.
+            // Order the actual command with other reads of that resolved target.
+            attempt = begin_version_read(
+                &self.runtime_check_activity,
+                &self.database,
+                resolved_target,
+                search.generation(),
+                &Some((installation.id.clone(), installation.version)),
             )
-        })
-        .await??;
-        let mut observation = self
-            .runtime_discovery
-            .read()
-            .await
-            .get(&kind)
-            .filter(|observation| {
-                observation.executable_path.as_deref() == Some(runtime.executable_path.as_str())
-            })
-            .cloned()
-            .unwrap_or_else(|| RuntimeDiscoveryObservation::detecting(kind, search.generation()));
-        observation.search_generation = search.generation();
-        observation.observed_at = chrono::Utc::now().to_rfc3339();
-        observation.reported_version = None;
-        observation.version_probe_succeeded = None;
-        observation.diagnostic_code = None;
-        observation.discovery_status = RuntimeDiscoveryStatus::Found;
-        observation.executable_path = Some(verified.entry().executable_path.clone());
-        observation.executable_fingerprint = Some(verified.entry().executable_fingerprint.clone());
-        observation.entrypoint_locator_identity =
-            verified.entry().entrypoint_locator_identity.clone();
-        observation.source = Some(source);
+            .await?;
+        }
         crate::runtime_discovery::with_launch_environment(
             runtime.environment.clone(),
             crate::runtime_discovery::discover_runtime_version(&mut observation, &search),

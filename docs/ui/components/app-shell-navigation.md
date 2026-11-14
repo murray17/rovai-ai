@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # App Shell 与统一侧栏
@@ -366,6 +366,22 @@ Project/Thread 行、菜单、临时提醒和设置返回均可键盘操作，Ic
 显示和恢复，放大时进入 25%，缩小时保持当前值。`CommandOrControl 0` 重置为 100%。键盘调整后，
 App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，并通过 polite live region 播报同一文字。
 浮层使用当前配色的语义 Token，在首次训练和所有一级页面上保持同一位置与行为。
+
+## 通用操作提示
+
+AppToast 统一位于 App 容器顶部 10px 的水平中线，随侧栏折叠、窗口尺寸和页面布局保持居中。
+独立来源的提示在同一个浮层中以 8px 间距纵向排列，不相互覆盖；提示外部继续支持阅读、编辑与导航。
+共享控件不增加触发场景、成功提示、通知队列或消息／输入框／附件旁的错误行；分叉完成后与打开副本失败的提示已移除。
+
+正文、操作和关闭图标垂直居中。提示最小高度 44px，最大宽度 560px，窄窗口两侧至少保留 16px；
+长文字自然换行，操作与关闭区域不被压缩。沿用现有主题的普通正文／表面与 danger 语义色，不统一为黑色。
+“打开／重试”使用无底色、无描边的文字与细线箭头／刷新图标，最小操作高度 28px；Hover 与键盘可见焦点
+仅给操作文字加细下划线。关闭使用 SVG 叉号与独立 28×28px 点击区，Hover／键盘焦点使用既有浅色表面。
+普通提示保留 polite status，错误保留 assertive alert。BusinessApp 普通提示 3.2 秒自动关闭，外链操作失败为 5 秒；
+未确认操作与明确需要恢复动作的提示保留原有常驻语义，分叉加载与失败的时序见[分叉反馈](conversation-workspace.md#thread-分叉)。
+
+新版本可用卡片和右上角会话 heads-up 保持现状；缩放、语言偏好、快捷键、图片操作、Web 上传与连接恢复的
+专用反馈也不因本控件调整而删除或迁移。文件打不开转入[文件预览失败页](file-preview.md#更新与错误)。
 
 ## References
 

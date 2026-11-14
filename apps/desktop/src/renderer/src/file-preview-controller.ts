@@ -77,6 +77,7 @@ export function canDownloadFile(tab: PreviewTabModel, api: FilePreviewApi): bool
 
 export type FilePreviewOpenOutcome =
   | { kind: 'preview'; tabId: string }
+  | { kind: 'preview_error'; tabId: string; error: FilePreviewErrorPayload }
   | { kind: 'system' }
   | { kind: 'evidence_review'; result: Extract<OpenFilePreviewResult, { kind: 'evidence_review' }> }
   | { kind: 'error'; error: FilePreviewErrorPayload }
@@ -94,6 +95,7 @@ interface FilePreviewViewRollback {
 }
 
 export interface FilePreviewOpenOptions {
+  /** Wait for the initial read before showing content or its failure page. */
   commitOnSuccess?: boolean
   previewOnly?: boolean
 }
@@ -777,6 +779,39 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   ): Promise<FilePreviewOpenOutcome> => {
     const interaction = session.lastUsed
     const scopeGeneration = scopeGenerationRef.current
+    const showFailure = (rawError: FilePreviewErrorPayload): FilePreviewOpenOutcome => {
+      const error = safeOpenError(rawError)
+      if (disposed || scopeGenerationRef.current !== scopeGeneration || error.code === 'too_many_open_files') {
+        return { kind: 'error', error }
+      }
+      const sourceKey = filePreviewSourceKey(request)
+      const existing = tabsRef.current.find((tab): tab is FilePreviewTabModel => tab.kind === 'file'
+        && tab.sourceKey === sourceKey && !tab.content && tab.loadState !== 'opening')
+      const tab: FilePreviewTabModel = {
+        ...existing,
+        kind: 'file',
+        id: existing?.id ?? `file-preview-${newCommandId()}`,
+        sourceKey,
+        sourceRequest: request,
+        previewKey: null,
+        presentation: existing?.presentation ?? filePreviewPresentationFromRequest(request, presentationHint),
+        file: null,
+        loadState: errorLoadState(error),
+        content: null,
+        error,
+        requestGeneration: (existing?.requestGeneration ?? 0) + 1,
+        hasExternalUpdate: false,
+        externalUpdateVersion: 0,
+        isRefreshing: false,
+        refreshError: null,
+        pageOffsets: [],
+        pageIndex: 0
+      }
+      if (existing?.file) void api.release({ handleId: existing.file.handleId })
+      setTabs(entries => existing ? entries.map(entry => entry.id === tab.id ? tab : entry) : [...entries, tab])
+      if (owner.isCurrent(threadId) && session.lastUsed === interaction) showOpenedTab(tab.id, !existing)
+      return { kind: 'preview_error', tabId: tab.id, error }
+    }
     if (!owner.admit(session)) return { kind: 'error', error: { code: 'too_many_open_files', message: uiAttribute('预览资源不足'), retryable: true } }
     const load = Symbol()
     committedLoads.add(load)
@@ -791,12 +826,12 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       let result: FilePreviewOperationResult<OpenFilePreviewResult>
       if (previewOnly) {
         const restoreRequest = restorableFilePreviewRequest(request)
-        if (!restoreRequest) return { kind: 'error', error: unavailableSourceError() }
+        if (!restoreRequest) return showFailure(unavailableSourceError())
         result = await api.restore(restoreRequest)
       } else {
         result = await api.open(request)
       }
-      if (!result.ok) return { kind: 'error', error: safeOpenError(result.error) }
+      if (!result.ok) return showFailure(result.error)
       if (result.value.kind === 'opened_in_system') return { kind: 'system' }
       if (result.value.kind === 'evidence_review') {
         return { kind: 'evidence_review', result: result.value }
@@ -809,7 +844,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       reservation()
       if (!loaded.ok) {
         void api.release({ handleId: file.handleId })
-        return { kind: 'error', error: safeOpenError(loaded.error) }
+        return showFailure(loaded.error)
       }
       if (scopeGenerationRef.current !== scopeGeneration) {
         revokeContent(loaded.content)
@@ -851,7 +886,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         loaded
       )
     } catch {
-      return { kind: 'error', error: errorFromUnknown() }
+      return showFailure(errorFromUnknown())
     } finally { committedLoads.delete(load); owner.changed() }
   }
 
@@ -889,7 +924,14 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     if (options?.commitOnSuccess === true) {
       const key = `${filePreviewSourceKey(request)}:${options.previewOnly === true}`
       const pending = committedRequests.get(key)
-      if (pending) return pending
+      if (pending) {
+        const interaction = session.lastUsed
+        return pending.then(result => {
+          if ((result.kind === 'preview' || result.kind === 'preview_error')
+            && owner.isCurrent(threadId) && session.lastUsed === interaction) showOpenedTab(result.tabId, false)
+          return result
+        })
+      }
       const operation = performCommittedOpen(request, target, presentationHint, options.previewOnly === true)
         .finally(() => committedRequests.delete(key))
       committedRequests.set(key, operation)
@@ -932,8 +974,15 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   }
 
   const open = async (...args: Parameters<typeof openFile>): Promise<FilePreviewOpenOutcome> => {
-    const result = await openFile(...args)
-    if (args[0].kind === 'project_file' && result.kind === 'preview'
+    let result = await openFile(...args)
+    if (result.kind === 'error') {
+      const { error } = result
+      const sourceKey = filePreviewSourceKey(args[0])
+      const failed = tabsRef.current.find((tab): tab is FilePreviewTabModel => tab.kind === 'file'
+        && tab.sourceKey === sourceKey && tab.error === error && !tab.content)
+      if (failed) result = { kind: 'preview_error', tabId: failed.id, error }
+    }
+    if (args[0].kind === 'project_file' && (result.kind === 'preview' || result.kind === 'preview_error')
       && tabsRef.current.some(tab => tab.kind === 'file' && tab.id === result.tabId)) {
       setTabs(tabs => tabs.filter(tab => tab.kind !== 'file_picker').map(tab =>
         tab.kind === 'file' && tab.id === result.tabId ? { ...tab, openedFromDirectory: true } : tab))

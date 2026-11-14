@@ -442,6 +442,85 @@ it('preserves independent cached content after handle eviction and can refresh i
   a.actions.displayed(first.id, 'handle-3')
 })
 
+describe('file opening failure navigation', () => {
+  it.each([false, true])('opens a failure tab without replacing readable content (committed: %s)', async committed => {
+    const { owner, api } = fixture()
+    const session = await open(owner, 'a', 'readable.txt')
+    const readable = active(session)
+    vi.mocked(api.open).mockResolvedValue({ ok: false, error: {
+      code: 'authorization_required', message: 'PRIVATE /internal/root', retryable: false
+    } })
+    const request = { kind: 'camp_workspace' as const, threadId: 'a', rawReference: 'missing.txt' }
+    const outcome = await session.actions.open(request, undefined, { fileName: 'missing.txt' }, { commitOnSuccess: committed })
+    expect(outcome).toMatchObject({ kind: 'preview_error', tabId: active(session).id,
+      error: { code: 'authorization_required', message: '文件访问已失效' } })
+    expect(active(session)).toMatchObject({ loadState: 'unavailable', file: null, content: null,
+      presentation: { fileName: 'missing.txt' }, sourceRequest: request })
+    expect(session.getSnapshot().paneVisible).toBe(true)
+    expect(session.getSnapshot().tabs.find(tab => tab.id === readable.id)).toBe(readable)
+    expect(api.release).not.toHaveBeenCalledWith({ handleId: readable.file!.handleId })
+    expect(JSON.stringify(outcome)).not.toContain('PRIVATE')
+
+    const retry = await session.actions.open(request, undefined, undefined, { commitOnSuccess: committed })
+    expect(retry).toMatchObject({ kind: 'preview_error', tabId: active(session).id })
+    expect(session.getSnapshot().tabs).toHaveLength(2)
+  })
+
+  it('coalesces repeated clicks into one selected failure tab', async () => {
+    const { owner, api } = fixture()
+    owner.activate('a'); const session = owner.session('a')
+    vi.mocked(api.open).mockResolvedValue({ ok: false, error: { code: 'file_not_found', message: 'missing', retryable: false } })
+    const request = { kind: 'camp_workspace' as const, threadId: 'a', rawReference: 'missing.txt' }
+    const results = await Promise.all([session.actions.open(request, undefined, undefined, { commitOnSuccess: true }),
+      session.actions.open(request, undefined, undefined, { commitOnSuccess: true })])
+    expect(results[0]).toEqual(results[1])
+    expect(results[0]).toMatchObject({ kind: 'preview_error', tabId: active(session).id })
+    expect(session.getSnapshot().paneVisible).toBe(true)
+    expect(api.open).toHaveBeenCalledTimes(1)
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+  })
+
+  it('releases the initial-read handle and opens the failure page for a committed file', async () => {
+    const { owner, api } = fixture()
+    owner.activate('a'); const session = owner.session('a')
+    vi.mocked(api.readText).mockResolvedValueOnce({ ok: false, error: { code: 'read_failed', message: 'private reason', retryable: true } })
+    expect(await session.actions.open({ kind: 'camp_workspace', threadId: 'a', rawReference: 'unreadable.txt' },
+      undefined, undefined, { commitOnSuccess: true })).toMatchObject({ kind: 'preview_error' })
+    expect(active(session)).toMatchObject({ content: null, file: null, loadState: 'error' })
+    expect(api.release).toHaveBeenCalledWith({ handleId: 'handle-1' })
+  })
+
+  it.each(['another file', 'another Thread'] as const)('keeps a late failure from interrupting %s', async navigation => {
+    const { owner, api } = fixture()
+    const session = await open(owner, 'a', 'readable.txt')
+    const pending = deferred<Awaited<ReturnType<FilePreviewApi['open']>>>()
+    vi.mocked(api.open).mockReturnValueOnce(pending.promise)
+    const opening = session.actions.open({ kind: 'camp_workspace', threadId: 'a', rawReference: 'slow.txt' },
+      undefined, undefined, { commitOnSuccess: true })
+    await vi.waitFor(() => expect(api.open).toHaveBeenCalledTimes(2))
+    const current = await open(owner, navigation === 'another file' ? 'a' : 'b', 'newer.txt')
+    const selected = active(current)
+    pending.resolve({ ok: false, error: { code: 'file_not_found', message: 'not found', retryable: false } })
+    expect(await opening).toMatchObject({ kind: 'preview_error' })
+    expect(active(current)).toBe(selected)
+    expect(session.getSnapshot().tabs).toContainEqual(expect.objectContaining({ loadState: 'missing', sourceRequest: expect.objectContaining({ rawReference: 'slow.txt' }) }))
+  })
+
+  it('does not resurrect a disposed session from a late open failure', async () => {
+    const { owner, api } = fixture()
+    owner.activate('a'); const session = owner.session('a')
+    const pending = deferred<Awaited<ReturnType<FilePreviewApi['open']>>>()
+    vi.mocked(api.open).mockReturnValueOnce(pending.promise)
+    const opening = session.actions.open({ kind: 'camp_workspace', threadId: 'a', rawReference: 'slow.txt' },
+      undefined, undefined, { commitOnSuccess: true })
+    await vi.waitFor(() => expect(api.open).toHaveBeenCalled())
+    owner.dispose()
+    pending.resolve({ ok: false, error: { code: 'file_not_found', message: 'missing', retryable: false } })
+    expect(await opening).toMatchObject({ kind: 'error' })
+    expect(session.getSnapshot().tabs).toHaveLength(0)
+  })
+})
+
 it('coalesces concurrent committed opens of the same source', async () => {
   const { owner, api } = fixture()
   owner.activate('a'); const a = owner.session('a')

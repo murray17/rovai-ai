@@ -3,10 +3,84 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # v1.72 实施与验收
+
+## 通用提示与分叉反馈（2026-11-12）
+
+- Work item：通用提示顶部居中、文件失败预览与分叉反馈简化；Owner：爱丽丝。
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-toast-preview-v4`；Branch：`rovai/toast-preview-v4`；
+  Base：`origin/main@8bc31ecb3c3c10047e7b7bbc00697ac3895593ef`；Governance：none，同一变更同步当前 UI／合同。
+- Status：本地实施与验证完成；本次 PR 交付 AppToast、文件失败预览与分叉反馈。
+- AppToast：独立 Portal 共用 App 顶部浮层并纵向排列；透明文字动作、细线图标与独立 SVG 关闭点击区，
+  保留普通／danger 色与 live region。未新建触发、后台通知队列或输入框／消息／附件旁错误行。
+- 文件：`preview_error` 仅为 Renderer outcome，首次失败进入既有文件 Tab；保留其他可读内容、来源校验、
+  scope／迟到响应保护、候选句柄释放与 Web 下载降级。底层错误码继续更新附件可用性，不重复发全局 Toast。
+- 分叉：后续 User 指令移除 ready 阶段的完成／标题／Open／打开失败提示及专属标题查询；普通侧栏仍可访问已知副本。
+  loading 延迟 200ms 出现、至少显示 600ms，计时不阻塞命令、busy 或导航；明确拒绝 3.2 秒后关闭，未知结果保持原请求重试。
+- 已通过：`pnpm typecheck`；`TZ=UTC pnpm test`（276 文件，3281 Vitest passed／2 skipped；后续 Node 377 passed／2 skipped，
+  Docs、Skills 与 Electron admission 随同通过）；`pnpm build:desktop`；`pnpm test:rust:pr`（workspace 484 passed／1 ignored）。
+  本项没有新增或调整 Rust 测试。
+- 独立 Electron 验收：`pnpm test:thread-fork` 与 `node --test scripts/lib/file-reference-navigation.test.mjs`。
+  每个夹具使用独立 userData 与声明的 unused Skill Library，不启动 Core／Runtime，也不访问日常数据。
+  覆盖 A→B／A→B→A 静默完成、打开／保存失败无完成提示、普通侧栏打开副本不重建、未知结果重试和刷新回执、
+  拒绝自动关闭、快操作零 loading、可见 loading 满 600ms 且跳转已完成、StrictMode 浮层共用／清理、键盘动作、
+  中英文 × 五套主题、三个桌面尺寸、200% 放大与长文字、触屏及 reduced motion。
+- 文件夹具覆盖中英文失败页、无重复全局错误／内部授权详情、草稿和已有文件保留、阅读锚点、宽代码／表格与调整预览宽度。
+  Files Changed 的“打开当前文件”同样消费 `preview_error`，回归验证失败页打开后旧标签隐藏及重新激活时均无第二条错误；
+  修复前该隔离窗口回归准确失败，修复后通过，并保留原 Review 组件实例。
+  `test:file-preview-layout` 在首次执行自动打开的前置场景超时；未修改的 `main@8c4839494` 同样复现该失败，
+  此夹具未作为本次通过项，本次没有修改该场景或延长等待时间。
+  顺带修正该夹具落后于当前已准入 SafeMarkdown 的 HTML 字面断言与表格滚动容器选择器；基线 `8bc31ecb3` 可复现旧断言失败，
+  没有为此修改生产 Markdown 或渲染规则。原 AppToast 静态 SSR 语义断言迁入真实 Portal 浏览器验收。
+- 文档：当前 App Shell、Thread、File Preview UI、File Preview v28 与 Thread Fork v1 同步，合同索引修正 v28 标签。
+  最终执行 `pnpm docs:test`、`pnpm docs:check` 与 `DOCS_BASE_REF=8bc31ecb3c3c10047e7b7bbc00697ac3895593ef pnpm docs:check:ci`。
+
+## 安装版本刷新当前入口修正（2026-11-11）
+
+Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-install-version-current-entry`；
+分支：`rovai/install-version-current-entry`；基线：`origin/main@171f80bad4813b4f848ade4b33b91a5422ad954a`。
+随后合入 `main@8bc31ecb3`；Rust 源码与已验收提交一致。
+这是安装版本投影的局部修正，不涉及 Context、Bootstrap、Manifest 或 Renderer 格式。
+
+### 问题与实现
+
+Homebrew 将稳定入口从 2.2.6 转到 2.2.7 后，旧 Cellar 程序和旧 OpenCode Host 仍存在。
+原后台请求只验证 Host 冻结的 canonical 路径，导致用户发起后续 Run 时，安装版本行仍被旧目录钉住。
+
+`refresh_runtime_version_for_launch()` 在后台按当前 Runtime 的既有发现规则解析入口，
+保留显式程序路径、手动／自定义归属与必要的缺失入口 fallback；选中后仍只执行一次适配器版本命令。
+解析的新目标登记自身读取顺序，并通过原安装、搜索代次和文件身份围栏提交到既有版本行。
+Manager 以当前安装目标和捕获环境判断自动限频／合并，不因 Warm Host 留有旧路径拒绝同一安装的请求。
+入口读取失败继续计入十分钟间隔，自动失败不更新可用性，不在版本失败后改试其他程序副本。
+
+没有 Fleet 获取／释放／清扫、Host 基线或退役调用变更；旧 Run 的版本不被安装投影更新覆盖。
+当前入口确实改变时的既有身份处理保留。合同只增补 [Runtime Launch v89](../../contracts/runtime-launch-and-verification-v89.md)，
+Architecture 当前入口同步；v88 及其 Pi 真实升级验收记录保持原范围。
+
+### 验证归属
+
+扩展现有 `manual_rescan_reads_versions_and_discards_replaced_version_responses`，新增 Rust 测试函数为零。
+在原私有 Core／Check Manager／可计数合成程序 owner 内覆盖：自动 PATH 与显式稳定链接分别指向新目录、
+旧程序保留、安装行更新、原 Warm Host 可复用、当前 Run 版本保留、后续旧 Host 请求共享新目标限频，
+以及用户固定旧版本绝对路径时不自动改选。另覆盖新目标版本失败不回退副本、失败静默及解析后命中缓存不移动尝试时间。
+扩展既有 `warm_compatibility_matches_process_inputs_across_acp_adapters`，在保留同路径 patch 用例的基础上，
+增加 canonical 目录变化后的 OpenCode Host／Binding／Native Session 兼容性断言；ACP 生产生命周期代码不变。
+
+修复前，相同回归稳定在等待安装版本更新处失败；修复后的最终相关 owners 为 40 passed。
+默认 workspace 为 484 passed、1 ignored；TypeScript 与完整 `pnpm test` 通过，包含 Vitest 3274 passed／2 skipped、
+Node 主测试组 377 passed／2 skipped，文档单测 10 passed，格式及文档差异门禁通过。
+本轮是隔离合成程序与现有兼容性 owner 验证，没有将其表述为真实 OpenCode／LLM 的新版日常 App 验收。
+同步主线后的首次 Node 全量重跑出现一项既有文件预览 watcher 一秒等待超时；该模块与主线字节一致，
+单独复查 59 项及完整 Node 重跑均通过。未修改该模块或测试期限，原失败记录保留，不宣称其根因已修复。
+最小命令：
+
+```sh
+cargo test -p rovai-core --features slow-tests,extended-tests --lib manual_rescan_reads_versions_and_discards_replaced_version_responses
+cargo test --workspace
+```
 
 ## Thread 分叉（2026-11-11）
 
@@ -133,6 +207,11 @@ Linux x64 的真实模型和 ACP 结果见[目标机验收](../../research/kilo-
 Windows x64 资格及 Sub2API 复验见[目标机验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)。
 
 2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正，以及 Steer 接续可行性见[复核记录](kilo-acp-review-fixes.md)。
+
+**TODO：Kilo Steer 提前接收确认。** 等待官方 ACP 提供执行结束前、可关联到具体插话请求的原生接收回执后，
+再接入并对齐“已插话”的显示时机。此前保持现有回执判定；不实施仅放宽 `end_turn` 条件的方案，
+该方案无法缩短“发送中”的等待时间。
+
 ## OpenCode Steer 局部接入（2026-11-10）
 
 - 分支 `rovai/opencode-steer`，基线 `13a4b8f96c71bc7866c749da5321a026d8f876b9`，独立 worktree

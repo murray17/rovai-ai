@@ -304,6 +304,190 @@ fn configuration(path: Option<&Path>) -> RuntimeStartupConfiguration {
 #[tokio::test]
 async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_state() {
     let fixture = Fixture::new();
+    // A cold launch must publish the identity it just committed before its
+    // actual version read. Otherwise the old discovery record hides a version
+    // already saved in SQLite, and the same-Run receipt suppresses a second read.
+    for previous_version in [Some("opencode v2.0.29"), None] {
+        use crate::agent_profile::{
+            AdapterPermissionConfig, AgentProfileService, FrozenAgentRuntimeConfig,
+            ResolvedModelSelection,
+        };
+        let kind = AdapterKind::OpencodeCli;
+        let root = fixture.root.join(if previous_version.is_some() {
+            "cold-old-version"
+        } else {
+            "cold-empty-version"
+        });
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join(if cfg!(windows) {
+            "opencode.cmd"
+        } else {
+            "opencode"
+        });
+        let calls = root.join("version-calls");
+        let write_program = |version: &str| {
+            #[cfg(windows)]
+            let body = format!(
+                "@echo off\r\necho %*>>\"{}\"\r\nif \"%~1\"==\"--version\" (\r\necho opencode v{}\r\nexit /b 0\r\n)\r\nexit /b 79\r\n",
+                calls.display(),
+                version,
+            );
+            #[cfg(unix)]
+            let body = format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n[ \"$1\" = '--version' ] || exit 79\nprintf 'opencode v{}\\n'\n",
+                calls.display(),
+                version,
+            );
+            std::fs::write(&program, body).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+        };
+        write_program("2.0.29");
+        let mut core = crate::application::tests::runtime_resolution_test_core(&root).unwrap();
+        *core.runtime_search_environment.get_mut() = Arc::new(
+            RuntimeSearchEnvironment::for_test_paths(1, vec![root.clone()]),
+        );
+        let (output, mut notifications) = mpsc::unbounded_channel();
+        core.output = output;
+        let (requests, mut pending) = mpsc::unbounded_channel();
+        core.runtime_check_requests = requests;
+        core.run_runtime_discovery().await;
+        let service = AgentProfileService::default();
+        let (installation, fingerprint) = {
+            let mut database = core.database.lock().await;
+            let installation = service
+                .managed_installation(&database, kind, "default")
+                .unwrap()
+                .unwrap();
+            let (fingerprint, _) = service
+                .recorded_executable_identity(
+                    &database,
+                    &installation.id,
+                    &installation.executable_path,
+                )
+                .unwrap()
+                .unwrap();
+            assert!(
+                service
+                    .record_runtime_version(
+                        &mut database,
+                        &installation.id,
+                        &installation.executable_path,
+                        &fingerprint,
+                        "opencode v2.0.29",
+                    )
+                    .unwrap()
+            );
+            (installation, fingerprint)
+        };
+        core.runtime_discovery
+            .get_mut()
+            .get_mut(&kind)
+            .unwrap()
+            .reported_version = previous_version.map(str::to_owned);
+        let runtime = FrozenAgentRuntimeConfig {
+            environment: None,
+            custom_api: None,
+            camp_fast: None,
+            adapter_kind: kind,
+            installation_id: installation.id.clone(),
+            installation_generation: installation.generation,
+            search_environment_generation: 1,
+            executable_path: installation.executable_path.clone(),
+            auth_scope: "default".into(),
+            reported_version: Some("opencode v2.0.29".into()),
+            executable_fingerprint: fingerprint,
+            capabilities: vec![],
+            protocol_version: "acp-v1".into(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".into(),
+                model_id: "default".into(),
+                options: json!({}),
+                dsh_source: None,
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: kind,
+                schema_version: 1,
+                values: crate::agent_runtime_adapter::AgentRuntimeAdapterRegistry::default()
+                    .member_permission_defaults(kind),
+            },
+            native_session_compatibility_key: None,
+            binding_compatibility_digest: None,
+            host_config_digest: None,
+            config_digest: "cold-version-fixture".into(),
+        };
+        while notifications.try_recv().is_ok() {}
+        assert!(!calls.exists(), "passive discovery cannot query a version");
+        write_program("2.2.7");
+        let prepared = core
+            .prepare_cold_runtime(
+                runtime,
+                &crate::runtime::AgentRunWorkspace::runtime_managed_path(
+                    root.to_string_lossy().into_owned(),
+                ),
+                Some("cold-version-run"),
+            )
+            .await
+            .map_err(|failure| failure.error)
+            .unwrap();
+        assert_eq!(
+            prepared.reported_version.as_deref(),
+            Some("opencode v2.2.7")
+        );
+        let saved = service
+            .managed_installation(&*core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.snapshot.unwrap().reported_version.as_deref(),
+            Some("opencode v2.2.7")
+        );
+        let health = core.runtime_health_payload().await.unwrap();
+        let row = health["runtimeAvailability"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["runtimeKind"] == kind.as_str())
+            .unwrap();
+        assert_eq!(
+            row["reportedVersion"], "opencode v2.2.7",
+            "cold launch must publish the saved version for {previous_version:?}"
+        );
+        let mut published = Vec::new();
+        while let Ok(message) = notifications.try_recv() {
+            let event: Value = serde_json::from_str(&message).unwrap();
+            if event["method"] == "runtime.discovery.updated"
+                && event["params"]["runtimeKind"] == kind.as_str()
+                && event["params"]["reportedVersion"] == "opencode v2.2.7"
+            {
+                published.push(event["params"].clone());
+            }
+        }
+        assert_eq!(published.len(), 1, "publish the actual read once");
+        assert_eq!(published[0]["executablePath"], prepared.executable_path);
+        assert_eq!(
+            published[0]["executableFingerprint"],
+            prepared.executable_fingerprint
+        );
+        assert_eq!(published[0]["versionProbeSucceeded"], true);
+        core.enqueue_automatic_version_refresh(&prepared, "cold-version-run");
+        assert!(matches!(
+            pending.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(calls)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["--version"],
+            "display refresh reuses the launch read"
+        );
+        drop(core);
+    }
     let old = fixture.program("old", "1.0.0", false);
     let new = fixture.program("new", "2.0.0", false);
     *fixture.paths.lock().unwrap() = vec![old.parent().unwrap().into()];
@@ -2795,6 +2979,292 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     );
     fixture.core.runtime_fleet.shutdown_all().await;
     fixture.close().await;
+
+    // A package manager can replace a stable launcher while keeping the old
+    // canonical executable and its Warm Host alive (Homebrew Cellar layout).
+    for explicit_launcher in [false, true] {
+        let linked = Fixture::new();
+        let original = linked.program("cellar/1", "1.0.0", false);
+        let upgraded = linked.program("cellar/2", "2.0.0", false);
+        for path in [&original, &upgraded] {
+            let body = std::fs::read_to_string(path).unwrap();
+            std::fs::write(
+                path,
+                body.replace(
+                    "if [ \"$1\" = '--version' ]; then",
+                    &format!(
+                        "if [ \"$1\" = '--version' ]; then printf 'version\\n' >> '{}';",
+                        path.with_extension("calls").display()
+                    ),
+                ),
+            )
+            .unwrap();
+        }
+        let bin = linked.root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let launcher = bin.join("codex");
+        std::os::unix::fs::symlink(&original, &launcher).unwrap();
+        *linked.paths.lock().unwrap() = vec![bin];
+        if explicit_launcher {
+            linked.save(0, &configuration(Some(&launcher))).await;
+        } else {
+            linked
+                .core
+                .refresh_runtime_check_environment()
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            linked
+                .core
+                .await_runtime_check(
+                    KIND,
+                    RuntimeLaunchPurpose::DiscoveryVersion,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let installation = AgentProfileService::default()
+            .managed_installation(&*linked.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap();
+        let mut running = runtime.clone();
+        running.installation_id = installation.id.clone();
+        running.installation_generation = installation.version;
+        running.executable_path = installation.executable_path.clone();
+        running.executable_fingerprint = fingerprint_executable(&original).unwrap();
+        running.reported_version = Some("codex-cli 1.0.0".into());
+        let original_target = RuntimeVersionTarget::for_launch(&running).unwrap();
+        linked
+            .core
+            .runtime_check_activity
+            .write()
+            .await
+            .version_reads
+            .entry(original_target.clone())
+            .or_default()
+            .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        let held_host = fake_runtime_process_host("linked-old-v1");
+        let warm = linked
+            .core
+            .runtime_fleet
+            .acquire(request("linked-old", "linked"), || async { Ok(held_host) })
+            .await
+            .unwrap();
+        linked
+            .core
+            .runtime_fleet
+            .release_with_outcome("linked-old", 1, FleetReleaseDisposition::Reusable)
+            .await;
+        let reads = |path: &Path| {
+            std::fs::read_to_string(path.with_extension("calls"))
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        assert_eq!(reads(&original), 1);
+        std::fs::remove_file(&launcher).unwrap();
+        std::os::unix::fs::symlink(&upgraded, &launcher).unwrap();
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-upgrade");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while linked.health().await["reportedVersion"] != "codex-cli 2.0.0" {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background refresh must follow the current launcher, not the old Host path");
+        assert!(original.exists());
+        assert_eq!(
+            reads(&original),
+            1,
+            "the retained executable must not be queried"
+        );
+        assert_eq!(reads(&upgraded), 1);
+        assert_eq!(running.reported_version.as_deref(), Some("codex-cli 1.0.0"));
+        assert_eq!(running.executable_path, original.to_string_lossy());
+        let current = AgentProfileService::default()
+            .managed_installation(&*linked.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.id, installation.id);
+        assert_eq!(current.executable_path, upgraded.to_string_lossy());
+        let mut current_target = original_target.clone();
+        current_target.executable_path = current.executable_path;
+        let previous = {
+            let state = linked.core.runtime_check_activity.read().await;
+            assert!(!state.version_reads.contains_key(&original_target));
+            assert!(!state.automatic_version_is_due(&current_target));
+            state.version_reads[&current_target].next
+        };
+        let current_search = linked.core.runtime_search_environment.read().await.clone();
+        assert!(
+            linked
+                .core
+                .refresh_runtime_version_for_launch(&running, current_search)
+                .await
+                .unwrap()
+                .is_none(),
+            "an old Warm Host shares the current installation's fresh interval"
+        );
+        linked
+            .core
+            .runtime_check_activity
+            .write()
+            .await
+            .version_reads
+            .get_mut(&current_target)
+            .unwrap()
+            .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-old-host-next-interval");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while linked
+                .core
+                .runtime_check_activity
+                .read()
+                .await
+                .version_reads[&current_target]
+                .accepted
+                <= previous
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(reads(&original), 1);
+        assert_eq!(reads(&upgraded), 2);
+        let reused = linked
+            .core
+            .runtime_fleet
+            .acquire(request("linked-after", "linked"), || async {
+                panic!("updating the installed version cannot retire a healthy Host")
+            })
+            .await
+            .unwrap();
+        assert_eq!(reused.process_id, warm.process_id);
+        linked
+            .core
+            .runtime_fleet
+            .release_with_outcome("linked-after", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        // A failed new target stays silent and cannot fall back to a retained
+        // old executable. A fresh resolved target is a cache hit, not a read.
+        let broken = linked.program("cellar/broken", "3.0.0", false);
+        std::fs::write(
+            &broken,
+            format!(
+                "#!/bin/sh\nprintf 'version\\n' >> '{}'\nexit 2\n",
+                broken.with_extension("calls").display(),
+            ),
+        )
+        .unwrap();
+        std::fs::remove_file(&launcher).unwrap();
+        std::os::unix::fs::symlink(&broken, &launcher).unwrap();
+        let public_before_failure = linked.public_state().await;
+        linked
+            .core
+            .runtime_check_activity
+            .write()
+            .await
+            .version_reads
+            .get_mut(&current_target)
+            .unwrap()
+            .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        let mut broken_target = current_target.clone();
+        broken_target.executable_path = broken.to_string_lossy().into_owned();
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-broken-target");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = linked.core.runtime_check_activity.read().await;
+                if state
+                    .version_reads
+                    .get(&broken_target)
+                    .is_some_and(|read| read.accepted > 0)
+                {
+                    break;
+                }
+                drop(state);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(linked.public_state().await, public_before_failure);
+        assert_eq!(reads(&original), 1);
+        assert_eq!(reads(&upgraded), 2);
+        assert_eq!(reads(&broken), 1);
+        let before_resolved_cache_hit = {
+            let mut state = linked.core.runtime_check_activity.write().await;
+            let read = state.version_reads.get_mut(&current_target).unwrap();
+            read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+            (read.next, read.attempted_at)
+        };
+        let search = linked.core.runtime_search_environment.read().await.clone();
+        assert!(
+            linked
+                .core
+                .refresh_runtime_version_for_launch(&running, search)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let state = linked.core.runtime_check_activity.read().await;
+        let read = &state.version_reads[&current_target];
+        assert_eq!((read.next, read.attempted_at), before_resolved_cache_hit);
+        drop(state);
+        assert_eq!(reads(&broken), 1);
+
+        // A user explicitly pinning the old canonical executable keeps that
+        // selection, even though the normal PATH launcher points to the new one.
+        let revision = linked.settings().await["revision"].as_u64().unwrap();
+        linked.save(revision, &configuration(Some(&original))).await;
+        assert_eq!(
+            linked
+                .core
+                .await_runtime_check(
+                    KIND,
+                    RuntimeLaunchPurpose::DiscoveryVersion,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let before_pin = reads(&original);
+        linked
+            .core
+            .enqueue_automatic_version_refresh(&running, "linked-explicit-pin");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = linked.core.runtime_check_activity.read().await;
+                if state
+                    .version_reads
+                    .get(&original_target)
+                    .is_some_and(|read| read.accepted > 0)
+                    && reads(&original) > before_pin
+                {
+                    break;
+                }
+                drop(state);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(linked.health().await["reportedVersion"], "codex-cli 1.0.0");
+        assert_eq!(reads(&upgraded), 2);
+        linked.core.runtime_fleet.shutdown_all().await;
+        linked.close().await;
+    }
 }
 
 // Owns the save/refresh lock interleaving and the absence of indirect operations.

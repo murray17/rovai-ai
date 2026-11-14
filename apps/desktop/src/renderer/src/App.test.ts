@@ -38,7 +38,6 @@ import type {
 import {
   activeThreadSurfaceNeedsLeaveGuard,
   App,
-  AppToast,
   applyCancellationResult,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
@@ -274,27 +273,6 @@ function supervisorSnapshot(
     ...overrides
   }
 }
-
-describe('application toast semantics', () => {
-  it('announces file-open failures as a danger alert without changing neutral notifications', () => {
-    const danger = renderToStaticMarkup(createElement(AppToast, {
-      toast: { message: '无法打开该文件', tone: 'danger' },
-      onClose: () => undefined
-    }))
-    const neutral = renderToStaticMarkup(createElement(AppToast, {
-      toast: { message: '响应模式未保存，请重试。', tone: 'neutral' },
-      onClose: () => undefined
-    }))
-
-    expect(danger).toContain('class="app-toast is-danger"')
-    expect(danger).toContain('role="alert"')
-    expect(danger).toContain('aria-live="assertive"')
-    expect(danger).toContain('无法打开该文件')
-    expect(neutral).toContain('class="app-toast"')
-    expect(neutral).toContain('role="status"')
-    expect(neutral).toContain('aria-live="polite"')
-  })
-})
 
 describe('accepted Thread deletion tombstone', () => {
   it('removes a Thread from stale navigation snapshots and adjusts its group count', () => {

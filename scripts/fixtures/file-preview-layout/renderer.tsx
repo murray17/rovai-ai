@@ -507,7 +507,7 @@ function InitialExecutionWorkspace({ camp }: { camp: string }): React.JSX.Elemen
   }
   return <ThreadWorkspace key={generation} snapshot={snapshot} projectName="Fixture" agents={agents} installations={installations}
     initialComposerDraft={{ ...initialDraft, threadId: camp }} busy={false} executionPlacement="right"
-    workspaceEntrySnapshotReady={entryReady} notificationFocus={notificationFocus}
+    executionAutoOpen workspaceEntrySnapshotReady={entryReady} notificationFocus={notificationFocus}
     onSend={async () => {
       setPhase('submitted')
       return { threadMessageId: initial.messages[0].id, deliveryIds: ['delivery-1'], agentRunIds: [], addressedAgentIds: [agents[0].agentId] }

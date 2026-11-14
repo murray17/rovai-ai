@@ -6,10 +6,28 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 通用提示与分叉反馈（2026-11-12）
+
+在独立 worktree 的 `rovai/toast-preview-v4` 实施通用 AppToast 顶部居中、透明文字动作与 SVG 关闭，
+沿用现有五套主题和普通／错误语义色；新版本卡片、右上角会话提醒与其他专用反馈保持原有边界。
+文件打不开进入现有预览区，统一显示“无法打开文件 / Could not open file”，不新增消息或附件旁错误行。
+按 User 后续要求移除分叉完成后／打开副本失败的提示；loading 仅在 200ms 后出现，一旦显示至少持续 600ms，
+不延迟真实分叉与导航。明确拒绝 3.2 秒后收起，未知结果仍使用原请求重试。
+规则归[通用提示](../../ui/components/app-shell-navigation.md#通用操作提示)、[文件预览 v28](../../contracts/file-preview-v28.md#打开失败的预览页)
+和[Thread Fork v1](../../contracts/thread-fork-v1.md#foreground-recovery-and-navigation)；证据见[实施记录](implementation-plan.md#通用提示与分叉反馈2026-11-12)。
+版本指针、Core／Main 协议、模型输入和历史事实保持现状。
+
+## 安装版本刷新当前入口修正（2026-11-11）
+
+后台按当前 Runtime 的既有选择规则重新解析入口，覆盖 Homebrew 稳定链接换目录、旧程序和旧 Host 仍存活的情形。
+安装版本行读取新目标，旧 Host／Run 保留原运行版本；十分钟限频、静默失败和无版本驱动退役的边界保持。
+合同见 [Runtime Launch v89](../../contracts/runtime-launch-and-verification-v89.md)，
+实现与回归见[本版记录](implementation-plan.md#安装版本刷新当前入口修正2026-11-11)。
 
 ## Thread 分叉（2026-11-11）
 

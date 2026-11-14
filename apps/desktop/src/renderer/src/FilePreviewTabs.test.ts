@@ -406,7 +406,7 @@ describe('FilePreviewPane path presentation', () => {
 })
 
 describe('FilePreviewPane recovery state', () => {
-  it('shows only the generic file outline and one-line missing copy in the content area', () => {
+  it('shows only the generic file outline and one-line failure copy in the content area', () => {
     const missing = tab('missing-report')
     missing.file = null
     missing.loadState = 'missing'
@@ -425,8 +425,9 @@ describe('FilePreviewPane recovery state', () => {
 
     expect(paneMarkup).toContain('class="file-preview-recovery" role="status" aria-live="polite"')
     expect(paneMarkup).toContain('class="file-preview-recovery-icon" data-resource-type="file"')
-    expect(paneMarkup).toContain('<p>找不到这个文件</p>')
-    expect(paneMarkup.match(/找不到这个文件/gu)).toHaveLength(1)
+    expect(paneMarkup).toContain('<p>无法打开文件</p>')
+    expect(paneMarkup.match(/无法打开文件/gu)).toHaveLength(1)
+    expect(paneMarkup).not.toContain('找不到这个文件')
     expect(paneMarkup).not.toContain('<strong>')
     expect(paneMarkup).not.toContain('>重试</button>')
     expect(paneMarkup).not.toContain('file-preview-path-row')

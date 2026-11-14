@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-11-10
+last_updated: 2026-11-12
 ---
 
 # Thread 文件预览区
@@ -196,7 +196,7 @@ Thread 工作区内的 child 会先收敛为独立稳定 source，同一项目�
 上述 Review 入口只适用于至少一个 `presentationKind != operation_only` 的文件。混合卡片 header 选择仍可审查的
 历史选择或第一个可审查文件；点击 operation-only 文件行直接通过 `run_evidence / open_current` 打开普通当前文件
 Tab。全 operation-only 卡片使用“查看文件”，header 默认打开第一项当前文件，逐文件行仍精确打开自身。当前文件入口
-采用成功后提交与 preview-only：失败只在当前页显示“无法打开该文件”，不切换 Pane、留下 Tab 或启动系统应用。
+采用首屏读取后提交与 preview-only：成功进入普通文件 Tab，打不开则进入下述失败页，不启动系统应用。
 这一跳转不把当前正文当作历史差异，File Change 查找也不会索引当前文件。
 
 详情沿用不可变 projection/detail 的读取与证据语义，不读取当前文件推测差异。预览自身宽度不大于 760px 时，
@@ -355,17 +355,19 @@ document 模式的 Mermaid 代码块默认自动绘图，首轮加载和当前�
 可访问名称中。带可靠 Diff 的文件行和有已准入路径的终态 Read/Write 文件操作行使用 exact
 `run_activity_file` 证据；终态 Read/Write 缺少证据身份时不打开文件，缺少身份的历史 Diff
 presentation 保留 `camp_workspace` 兼容入口。
-它们均采用成功后提交导航；Main open 和 Renderer 首屏内容读取都成功后
-才显示／激活目标 Tab 和预览 Pane。文件已移动、删除、无权或读取失败时，当前页只显示红色 Toast `无法打开该文件`，不创建失败预览页、不切换
-当前 Tab、不替换已有 ready 内容，也不抢焦点；不支持应用内预览的类型同样不从这类入口启动系统应用或显示目录。
-精确事务与资源清理边界见
-[File Preview v16](../../contracts/file-preview-v16.md)。
+它们在 Main open 和 Renderer 首屏读取取得结果后提交导航：成功进入普通文件 Tab，文件已移动、删除、无权或
+读取失败则进入同一预览区的失败 Tab。消息文件引用、Skill 和附件预览同样在现有预览区呈现打开失败，
+不重复弹全局 Toast，不向消息、输入框或附件旁添加错误行。重复打开同一失败来源复用标签，不覆盖其他 ready 内容；
+用户已切到其他文件／Thread 的迟到结果不抢回选择或焦点，Thread 冷却／销毁后的旧请求不能重建页面。
+无法形成有效文件请求或资源准入失败仍保留安全错误反馈；preview-only 不启动系统应用或显示目录。
+当前失败导航与资源清理边界见 [File Preview v28](../../contracts/file-preview-v28.md#打开失败的预览页)。
 
 首次打开与恢复使用 cold/opening/ready/missing/unavailable/error；快速成功直接显示正文，耗时后才显示轻量 Loading。
 无法形成当前可读内容时，正文只显示水平、垂直居中的 32px 通用文件轮廓，图标下方相隔 12px 显示一句 13px 常规
-公开文案。错误码到文案的 closed mapping 由 [File Preview v16](../../contracts/file-preview-v16.md) 继承的 v8 失败呈现拥有。
+文案“无法打开文件 / Could not open file”。底层错误码与安全诊断继续保留，正文不按错误码展开技术原因。
 该状态不显示路径、尺寸、标题、卡片、边框、按钮、技术详情或内部能力名称；错误内容区之外的 Tabs、Viewer 布局和
-其他 Thread 界面沿用既有视觉，不以本状态为理由重做。
+其他 Thread 界面沿用既有视觉，不以本状态为理由重做。Web 已有的不可在线预览／过大／解码失败下载降级仍保留
+文件名与下载操作，不归入这类通用打开失败页。
 历史 Attachment 初始 availability 为 unknown；预览、打开或显示所在位置的结果只更新当前卡片为 available、missing、
 unreadable 或 kind_changed，不写回历史，也不启动后台监控。
 监听通知仅安排核对，后台文件待重新显示时再检查，不先显示“有更新”。版本未变时不提示、不重载；

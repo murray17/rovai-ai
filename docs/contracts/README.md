@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
 # 长期接口合同
@@ -179,7 +179,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v88（当前）](runtime-launch-and-verification-v88.md) | Run 按需限频刷新本机版本、读取顺序围栏与 Host 生命周期解耦 |
+| [Runtime Launch and Verification v89（当前）](runtime-launch-and-verification-v89.md) | 后台解析当前安装入口，旧 Host 不阻止链接换代后的安装版本刷新 |
+| [Runtime Launch and Verification v88（历史）](runtime-launch-and-verification-v88.md) | Run 按需限频刷新本机版本、读取顺序围栏与 Host 生命周期解耦 |
 | [Runtime Launch and Verification v87（历史）](runtime-launch-and-verification-v87.md) | 保留执行默认 allow；Kilo 权限展示细节由 UI 规范拥有 |
 | [Runtime Launch and Verification v86（历史）](runtime-launch-and-verification-v86.md) | Kilo 正式执行进程环境默认 allow，具体权限仍由原生裁决；目录、输入与生命周期保持 |
 | [Runtime Launch and Verification v85（历史）](runtime-launch-and-verification-v85.md) | Kilo 单次官方 CLI 模型/variants 目录，移除逐模型扫描；原 ACP 执行、缓存与平台资格保持 |
@@ -329,7 +330,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [File Preview v24](file-preview-v24.md) | 当前项目 UTF-8 文本编辑、共享 Host 手动保存、摘要冲突及窗口草稿保留 |
 | [File Preview v25（历史）](file-preview-v25.md) | 项目浏览首版；offset 分页与逐文件登记由 v26 替代 |
-| [File Preview v27（当前）](file-preview-v28.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |
+| [File Preview v28（当前）](file-preview-v28.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |
 | [File Preview v23（历史）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
 | [File Preview v22（历史）](file-preview-v22.md) | 当前可见文件自动刷新、后台按需更新、失败阻断与分页行号恢复；复用候选刷新和既有通知 |
 | [File Preview v21（历史）](file-preview-v21.md) | 精确归因内部诊断 CSP 拒绝，中性降级并停止当前文档无效重试；保留作者策略与真实错误 |

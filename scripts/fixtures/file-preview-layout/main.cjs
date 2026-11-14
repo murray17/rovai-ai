@@ -171,8 +171,12 @@ app.whenReady().then(async () => {
     assert.equal(before.imageScrollLeft, 420)
     assert.equal(before.imageScrollTop, 310)
     await run('window.previewTest.rebuildPreview()')
-    await waitForExecution(`document.querySelector('.file-preview-image-content img')?.naturalWidth === 2600
-      && document.querySelector('.file-preview-image-content img') !== previousImage`)
+    await waitForExecution(`(() => {
+      const image = document.querySelector('.file-preview-image-content img')
+      const scroll = document.querySelector('.file-preview-image-scroll')
+      return image?.naturalWidth === 2600 && image !== previousImage
+        && scroll?.scrollLeft === 420 && scroll.scrollTop === 310
+    })()`)
     await snapshot()
     const position = await run(`(() => {const e=document.querySelector('.file-preview-image-scroll');
       return {left:e.scrollLeft,top:e.scrollTop,width:e.querySelector('img').getBoundingClientRect().width}})()`)
@@ -627,7 +631,7 @@ app.whenReady().then(async () => {
     await run('window.previewTest.setTheme("day"); window.previewTest.closeExtraTabs(); window.previewTest.open()')
   })
 
-  await check('tool file links commit only after content is readable and preserve the current preview on failure', async () => {
+  await check('tool file links wait for the first read and open a separate tab when it fails', async () => {
     const before = await reviewSnapshot()
     const beforeLayout = await snapshot()
     await run('window.previewTest.startPendingToolPreview()')
@@ -648,15 +652,18 @@ app.whenReady().then(async () => {
     const failed = await run('window.previewTest.openToolPreview(true)')
     const afterFailure = await reviewSnapshot()
     const afterFailureLayout = await snapshot()
-    assert.equal(failed.kind, 'error')
-    assert.equal(afterFailure.selectedTab, beforeFailure.selectedTab)
-    assert.equal(afterFailureLayout.visible, beforeFailureLayout.visible)
-    assert.equal(afterFailureLayout.tabCount, beforeFailureLayout.tabCount)
-    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, undefined,
-      'A failed tool link must not replace the current file with a preview error page')
+    assert.equal(failed.kind, 'preview_error')
+    assert.equal(afterFailure.selectedTab, 'tool-link-preview.ts，读取失败')
+    assert.equal(afterFailureLayout.visible, true)
+    assert.equal(afterFailureLayout.tabCount, beforeFailureLayout.tabCount + 1)
+    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, '无法打开文件')
     assert.equal(afterFailure.fileRestores.length, beforeFailure.fileRestores.length + 1)
     assert.equal(afterFailure.fileReads, beforeFailure.fileReads + 1)
     assert.equal(afterFailure.releases.length, beforeFailure.releases.length + 1)
+    await click('[role="tab"][aria-label="preview-layout.ts"]')
+    assert.equal((await reviewSnapshot()).selectedTab, beforeFailure.selectedTab)
+    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, undefined)
+    await run('window.previewTest.closeExtraTabs()')
 
     const opened = await run('window.previewTest.openToolPreview(false)')
     const afterSuccess = await reviewSnapshot()
@@ -715,7 +722,7 @@ app.whenReady().then(async () => {
   await check('missing files use only the centered generic file state in both themes', async () => {
     await run('window.previewTest.closeAll(); window.previewTest.openMissing()')
     const state = await run('window.previewTest.recoverySnapshot()')
-    assert.equal(state.text, '找不到这个文件')
+    assert.equal(state.text, '无法打开文件')
     assert.equal(state.paragraphs, 1)
     assert.equal(state.buttons, 0)
     assert.equal(state.childCount, 2)
@@ -729,7 +736,7 @@ app.whenReady().then(async () => {
     await capture('preview-missing-day')
     await run('window.previewTest.setTheme("night")')
     await snapshot()
-    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, '找不到这个文件')
+    assert.equal((await run('window.previewTest.recoverySnapshot()')).text, '无法打开文件')
     await capture('preview-missing-night')
     await run('window.previewTest.setTheme("day"); window.previewTest.closeAll()')
     await open()
@@ -1197,9 +1204,9 @@ app.whenReady().then(async () => {
     assert.equal(docked.approvalHeadingSingleLine, true)
     assert.equal(docked.recoveryTextWraps, true)
     assert.equal(docked.approvalActionsVisible, true, 'The sample approval options are fully readable')
-    closeTo(docked.approval.width, docked.pane.width, 'Approval shares the full conversation width')
-    closeTo(docked.approval.left, docked.pane.left, 'Approval aligns with the conversation column')
-    closeTo(docked.recovery.width, 396, 'Recovery follows the narrow conversation')
+    closeTo(docked.approval.width, docked.pane.width - 24, 'Approval keeps the compact conversation gutters')
+    closeTo(docked.approval.left, docked.pane.left + 12, 'Approval is centered in the conversation column')
+    closeTo(docked.recovery.width, docked.approval.width, 'Recovery follows the same compact width')
     assert.ok(docked.approval.bottom <= docked.composer.top && docked.recovery.bottom <= docked.composer.top)
     assert.ok(docked.composer.bottom <= 700, 'Both docks keep the Composer within the window')
     assert.equal((await snapshot()).sameEditor, true)
@@ -1699,9 +1706,10 @@ app.whenReady().then(async () => {
     await run('window.previewTest.failNextToolRead()')
     await click(`${edit} .tool-file-link`)
     const afterFailure = await run('window.previewTest.toolState()')
-    assert.equal(afterFailure.tabs, beforeFailure.tabs)
-    assert.equal(afterFailure.activeTabId, beforeFailure.activeTabId)
-    assert.deepEqual(afterFailure.notices, ['无法打开该文件'])
+    assert.equal(afterFailure.tabs, beforeFailure.tabs + 1)
+    assert.notEqual(afterFailure.activeTabId, beforeFailure.activeTabId)
+    assert.deepEqual(afterFailure.notices, beforeFailure.notices)
+    assert.equal(await run('document.querySelector(".file-preview-recovery p")?.textContent'), '无法打开文件')
     assert.equal(await expanded(), false)
     await click(`${edit} .modified-file-title > span`)
     await capture('tool-edit-preview-and-diff')
