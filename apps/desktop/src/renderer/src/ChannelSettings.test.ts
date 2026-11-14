@@ -80,9 +80,16 @@ describe('Channel settings', () => {
     snapshot.channels[0].memberBots[0].connectionNeedsAttention = true
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online',
       connectionFailureCode: 'connection_confirmation_pending', canReconcile: false }
-    expect(render()).toContain('连接已建立，正在保存结果')
-    expect(render()).toContain('data-signal-strength="4"')
+    expect(render()).not.toContain('channel-connection-indicator')
+    expect(render()).not.toContain('连接已建立，正在保存结果')
     expect(render()).not.toContain('检查网络或代理')
+    for (const connectionStatus of ['online', 'connecting', 'unknown', undefined] as const) {
+      snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0],
+        connectionStatus, connectionFailureCode: null, connectionNeedsAttention: false }
+      expect(render()).toContain('已发布')
+      expect(render()).not.toContain('channel-connection-indicator')
+      expect(render()).not.toContain('继续核对')
+    }
     snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'offline',
       connectionFailureCode: 'identity_conflict', canReconcile: true }
     expect(render()).toContain('继续核对')
@@ -223,7 +230,8 @@ describe('Channel settings', () => {
     expect(unnamed).toContain('钉钉用户')
     expect(unnamed).toContain('当前企业')
     expect(unnamed).toContain('登录态待校验')
-    expect(unnamed).toContain('连接状态未知')
+    expect(unnamed).not.toContain('channel-connection-indicator')
+    expect(unnamed).not.toContain('连接状态未知')
     expect(unnamed).not.toContain('连接在线')
     expect(account.userName).toBeNull()
     expect(account.tenantName).toBeNull()

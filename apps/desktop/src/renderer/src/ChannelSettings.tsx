@@ -799,7 +799,9 @@ function ChannelMemberBotTable({
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
                 <span className="channel-publication-label">{bot?.published && status !== 'published' ? uiAttribute("已发布 · {0}", String(publicationLabel(status))) : publicationLabel(status)}</span>
-                {bot?.appId && <BotConnectionIndicator bot={bot} />}
+                {bot?.appId && (bot.connectionStatus === 'reconnecting' || bot.connectionStatus === 'offline') && (
+                  <BotConnectionIndicator bot={bot} />
+                )}
               </span>
               <div className="channel-member-action" role="cell">
                 {published && bot?.managementUrl && (
