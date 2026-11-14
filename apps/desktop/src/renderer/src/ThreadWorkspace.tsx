@@ -66,6 +66,7 @@ import { samePublicMessageSegment } from './public-message-grouping'
 import { messageTimeParts, useMessageTimeDate } from './message-time'
 import { usePublicMessageLayout } from './usePublicMessageLayout'
 import { useRunLiveEvents } from './useRunLiveEvents'
+import { TimelineVirtualList, PUBLIC_TIMELINE_VIRTUAL_THRESHOLD, type TimelineVirtualListHandle } from './TimelineVirtualList'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -2072,8 +2073,15 @@ export function ThreadWorkspace({
   }, [pasteMessage])
   const workspaceShellRef = useRef<HTMLElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
-  const runSourceNavigation = useRunSourceNavigation(snapshot.thread.id, snapshot.messages, timelineScrollRef)
+  const timelineVirtualRef = useRef<TimelineVirtualListHandle>(null)
+  const ensureTimelineMessageMounted = useCallback((id: string) => {
+    const current = timelineReadingPosition.current
+    if (current) timelineReadingPosition.current = { ...current, position: { ...current.position, followingLatest: false } }
+    return timelineVirtualRef.current?.ensureMounted(id) ?? Promise.resolve(null)
+  }, [])
+  const runSourceNavigation = useRunSourceNavigation(snapshot.thread.id, snapshot.messages, timelineScrollRef, ensureTimelineMessageMounted)
   const historyLoaderRef = useRef<HTMLDivElement>(null)
+  const timelineTouchStartY = useRef<number | null>(null)
   const earlierMessageLoadInFlightRef = useRef(false)
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
@@ -2650,6 +2658,8 @@ export function ThreadWorkspace({
     () => new Map(visibleThreadMessages.map((message) => [message.id, message])),
     [visibleThreadMessages]
   )
+  const activeVisibleMessageById = useRef(visibleMessageById)
+  activeVisibleMessageById.current = visibleMessageById
   const replyParentById = useMemo(() => {
     const messages = new Map(visibleMessageById)
     for (const windowMessages of replyAnchorWindows.values()) {
@@ -2688,6 +2698,35 @@ export function ThreadWorkspace({
   const retainedStopIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
     item.kind === 'run_presence' && isUserInterruptedRun(item.slot.run) ? [item.slot.run.id] : []
   )), [presenceTimeline])
+  // Row metadata is structural: execution text does not rebuild this list. Results
+  // attached to a public message remain in that message's measured row.
+  const timelineRows = useMemo(() => {
+    const rows: Array<{ id: string; index: number; previousDay: string; previousAuthor: string | null }> = []
+    let day = '', author: string | null = null
+    for (let index = 0; index < presenceTimeline.length; index++) {
+      const item = presenceTimeline[index]
+      rows.push({ id: item.id, index, previousDay: day, previousAuthor: author })
+      if (item.kind === 'run_presence') { author = null; continue }
+      const nextDay = localDayKey(item.createdAt)
+      if (nextDay && nextDay !== day) { day = nextDay; author = null }
+      if (item.kind !== 'camp_message' || item.message.withdrawn) { author = null; continue }
+      const message = item.message
+      author = ['user', 'agent', 'external_principal'].includes(message.authorType)
+        ? `${message.authorType}:${message.authorId}` : null
+      if (item.interruptedRun && !retainedStopIds.has(item.interruptedRun.id)) author = null
+      if (message.authorType !== 'agent' || !message.sourceAgentRunId) continue
+      while (index + 1 < presenceTimeline.length) {
+        const next = presenceTimeline[index + 1]
+        const runId = next.kind === 'run_file_changes' ? next.changes.agentRunId
+          : next.kind === 'member_joined' ? next.receipt.sourceAgentRunId : null
+        if (runId !== message.sourceAgentRunId || next.kind !== 'run_file_changes' && next.kind !== 'member_joined') break
+        index++; author = null
+      }
+    }
+    return rows
+  }, [presenceTimeline, retainedStopIds])
+  const virtualTimelineEnabled = timelineRows.length > PUBLIC_TIMELINE_VIRTUAL_THRESHOLD
+
   const historyBoundaryId = anchorWindowBeforeNormal
     ? conversationTimeline.find(item => item.kind === 'camp_message' && item.message.sequence >= normalStart!)?.id : null
   const latestAgentMessageId = useMemo(() => {
@@ -2704,6 +2743,12 @@ export function ThreadWorkspace({
     && (timelineReadingPosition.current?.threadId !== snapshot.thread.id
       || timelineReadingPosition.current.position.followingLatest !== false),
   [conversationFind.open, snapshot.thread.id])
+  const stopFollowingForEarlierInput = useCallback(() => {
+    const current = timelineReadingPosition.current
+    if (current?.threadId === snapshot.thread.id) timelineReadingPosition.current = {
+      threadId: current.threadId, position: { ...current.position, followingLatest: false }
+    }
+  }, [snapshot.thread.id])
   useEffect(() => {
     if (conversationView !== 'conversation' || notificationFocus?.active) {
       cancelReplyReveal()
@@ -2713,7 +2758,7 @@ export function ThreadWorkspace({
   }, [conversationView, notificationFocus?.requestId, notificationFocus?.active, anchorNavigation.navigation, runSourceNavigation.cancel, cancelReplyReveal])
   const shortPublicMessages = usePublicMessageLayout(
     timelineScrollRef, conversationTimeline, snapshot.thread.id,
-    conversationView === 'conversation', groupingFollowsLatest, preserveTimelineReadingPosition
+    conversationView === 'conversation', groupingFollowsLatest, preserveTimelineReadingPosition, virtualTimelineEnabled
   )
   const isThreadEmpty = !campConversationHasVisibleHistory(conversationTimeline)
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead && campMemberIsLeadEligible(member)) ?? null
@@ -3097,7 +3142,7 @@ export function ThreadWorkspace({
       let target = timelineScrollRef.current?.querySelector<HTMLElement>(
         `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
       ) ?? null
-      if (!target) {
+      if (!target && !activeVisibleMessageById.current.has(selectedMatch.messageId)) {
         const around = await client.request<ThreadMessageAroundSnapshot>(
           'thread.messages.around',
           { threadId, messageId: selectedMatch.messageId }
@@ -3120,6 +3165,8 @@ export function ThreadWorkspace({
       await new Promise<void>((resolve) => {
         window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
       })
+      if (conversationFindRequestGeneration.current !== generation) return
+      await timelineVirtualRef.current?.ensureMounted(selectedMatch.messageId)
       if (conversationFindRequestGeneration.current !== generation) return
       target = timelineScrollRef.current?.querySelector<HTMLElement>(
         `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
@@ -3277,7 +3324,8 @@ export function ThreadWorkspace({
       position: { scrollTop: viewport.scrollTop, followingLatest: false } }
     void anchorNavigation.navigation.locate(messageId, visibleMessageById).then(ticket => {
       if (ticket === null) return
-      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(async () => {
+        await timelineVirtualRef.current?.ensureMounted(messageId)
         const viewport = timelineScrollRef.current
         if (!viewport || viewport.hidden || mountedThreadId.current !== threadId
           || !anchorNavigation.navigation.currentNavigation(ticket)) return
@@ -3591,6 +3639,8 @@ export function ThreadWorkspace({
     }
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     if (activeThreadIdRef.current !== threadId) return
+    await timelineVirtualRef.current?.ensureMounted(messageId)
+    if (activeThreadIdRef.current !== threadId) return
     const target = timelineScrollRef.current?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(messageId)}"][data-quote-owner="thread:${CSS.escape(threadId)}"]`)
     if (!target) throw new Error('quote.source_unavailable')
     revealMessageQuote(target)
@@ -3632,6 +3682,8 @@ export function ThreadWorkspace({
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     })
     if (!isCurrent()) return
+    await timelineVirtualRef.current?.ensureMounted(messageId)
+    if (!isCurrent()) return
     const scroll = timelineScrollRef.current
     const target = scroll?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
     if (!scroll?.clientHeight || !target) {
@@ -3653,6 +3705,7 @@ export function ThreadWorkspace({
       timelineLayoutAnchorRef.current = { threadId, width: timelineViewportWidth(scroll), hidden: false,
         scrollTop: scroll.scrollTop, anchor: captureTimelineReadingAnchor(scroll) }
       timelineReadingPosition.current = { threadId, position: { scrollTop: scroll.scrollTop, followingLatest: false } }
+      timelineVirtualRef.current?.rememberAnchor()
       timelineViewportGeometry.current = { threadId,
         geometry: { scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight } }
     }
@@ -3662,7 +3715,9 @@ export function ThreadWorkspace({
       scroll.scrollTo({ top: scroll.scrollTop, behavior: 'instant' })
     }
     const top = destination()
-    if (Math.abs(top - scroll.scrollTop) <= 1 || prefersReducedMotion()) finish()
+    // Traversing unmeasured virtual rows changes the destination during a smooth
+    // animation. Mount then locate directly; short, fully mounted history keeps it.
+    if (timelineVirtualRef.current?.virtual || Math.abs(top - scroll.scrollTop) <= 1 || prefersReducedMotion()) finish()
     else scroll.scrollTo({ top, behavior: 'smooth' })
   }
 
@@ -3858,6 +3913,7 @@ export function ThreadWorkspace({
         if (target) {
           presentTarget(target)
         } else {
+          if (messageId) void timelineVirtualRef.current?.ensureMounted(messageId)
           frame = window.requestAnimationFrame(present)
         }
         return
@@ -3994,7 +4050,9 @@ export function ThreadWorkspace({
     }
     const current = timelineReadingPosition.current
     const followingLatest = current?.threadId !== threadId || current.position.followingLatest !== false
-    if (followingLatest) {
+    if (timelineVirtualRef.current?.virtual) {
+      timelineVirtualRef.current.restoreAnchor()
+    } else if (followingLatest) {
       scroll.scrollTop = scroll.scrollHeight
     } else if (saved?.threadId === threadId && (saved.hidden || saved.width !== width)) {
       restoreTimelineReadingAnchor(scroll, saved.anchor)
@@ -4122,7 +4180,7 @@ export function ThreadWorkspace({
   }, [conversationTimeline, conversationView, snapshot.thread.id])
 
   useLayoutEffect(() => {
-    if (conversationView !== 'conversation' || typeof ResizeObserver === 'undefined') {
+    if (virtualTimelineEnabled || conversationView !== 'conversation' || typeof ResizeObserver === 'undefined') {
       return undefined
     }
     const scroll = timelineScrollRef.current
@@ -4175,7 +4233,7 @@ export function ThreadWorkspace({
       if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
     }
-  }, [conversationView, restoreTimelineLayout, snapshot.thread.id])
+  }, [conversationView, restoreTimelineLayout, snapshot.thread.id, virtualTimelineEnabled])
 
   useEffect(() => {
     if (!onVisibleNotificationSources) return undefined
@@ -4942,6 +5000,7 @@ export function ThreadWorkspace({
     ) return
     const timeline = timelineScrollRef.current
     if (!timeline) return
+    timelineVirtualRef.current?.rememberAnchor()
     const threadId = snapshot.thread.id
     const readingAnchor = captureTimelineReadingAnchor(timeline)
     const previousScrollHeight = timeline.scrollHeight
@@ -4962,8 +5021,14 @@ export function ThreadWorkspace({
         && !timeline.hidden
         && !conversationFindOpenRef.current
       ) {
+        if (timelineVirtualRef.current?.virtual && readingAnchor.message) {
+          await timelineVirtualRef.current.ensureMounted(readingAnchor.message.messageId)
+          if (timelineScrollRef.current !== timeline || mountedThreadId.current !== threadId) return
+        }
         if (readingAnchor.source || readingAnchor.message) {
           restoreTimelineReadingAnchor(timeline, readingAnchor)
+        } else if (timelineVirtualRef.current?.virtual) {
+          timelineVirtualRef.current.restoreAnchor()
         } else {
           timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
         }
@@ -5515,9 +5580,21 @@ export function ThreadWorkspace({
               onWheelCapture={(event) => {
                 cancelReplyReveal()
                 captureFilePreviewAnchor()
-                if (event.deltaY < 0) checkHistoryAfterUserInput()
+                if (event.deltaY < 0) {
+                  stopFollowingForEarlierInput()
+                  checkHistoryAfterUserInput()
+                }
               }}
-              onTouchStartCapture={() => { cancelReplyReveal(); captureFilePreviewAnchor() }}
+              onTouchStartCapture={(event) => {
+                timelineTouchStartY.current = event.touches[0]?.clientY ?? null
+                cancelReplyReveal(); captureFilePreviewAnchor()
+              }}
+              onTouchMoveCapture={(event) => {
+                const y = event.touches[0]?.clientY
+                if (y !== undefined && timelineTouchStartY.current !== null && y > timelineTouchStartY.current + 2) {
+                  stopFollowingForEarlierInput()
+                }
+              }}
               onPointerDownCapture={cancelReplyReveal}
               onKeyDownCapture={(event) => {
                 if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
@@ -5525,6 +5602,7 @@ export function ThreadWorkspace({
                   captureFilePreviewAnchor()
                 }
                 if (campHistoryKeyboardInputMovesEarlier(event.key, event.shiftKey)) {
+                  stopFollowingForEarlierInput()
                   checkHistoryAfterUserInput()
                 }
               }}
@@ -5536,345 +5614,337 @@ export function ThreadWorkspace({
               <div className="timeline-track">
               {missionBoard}
               {!anchorWindowBeforeNormal && historyLoader}
-              {(() => {
+              <TimelineVirtualList items={timelineRows} viewportRef={timelineScrollRef} controllerRef={timelineVirtualRef}
+                followingLatest={groupingFollowsLatest} preserveReadingPosition={preserveTimelineReadingPosition}>
+              {(row) => {
                 const items: JSX.Element[] = []
-                let lastDayKey = ''
-                let previousMessageAuthorKey: string | null = null
-                for (let timelineIndex = 0; timelineIndex < presenceTimeline.length; timelineIndex += 1) {
-                  const timelineItem = presenceTimeline[timelineIndex]
-                  if (timelineItem.id === historyBoundaryId) {
-                    if (hasAnchorGap) items.push(<div className="camp-history-gap" role="status" key="anchor-history-gap">{uiAttribute('中间消息尚未加载')}</div>)
-                    if (historyLoader) items.push(historyLoader)
-                    previousMessageAuthorKey = null
-                  }
-                  if (timelineItem.kind === 'run_presence') {
-                    previousMessageAuthorKey = null
-                    items.push(<ConversationRunPresence key={timelineItem.id} snapshot={snapshot}
-                      slot={timelineItem.slot} profiles={agents} installations={installations}
-                      source={<ConversationRunSource key={`${snapshot.thread.id}:${timelineItem.slot.run.id}`}
-                        run={timelineItem.slot.run} messages={visibleMessageById} members={snapshot.members} text={anchorText}
-                        loading={runSourceNavigation.loading} unavailable={runSourceNavigation.unavailable}
-                        error={runSourceNavigation.error} onReveal={messageId => {
-                          anchorNavigation.navigation.cancelNavigation()
-                          if (conversationFind.open) closeConversationFind(false)
-                          setConversationView('conversation')
-                          const viewport = timelineScrollRef.current
-                          if (viewport) timelineReadingPosition.current = { threadId: snapshot.thread.id,
-                            position: { scrollTop: viewport.scrollTop, followingLatest: false } }
-                          void runSourceNavigation.reveal(timelineItem.slot.run.id, messageId, visibleMessageById)
-                        }} />}
-                      onActivateMember={openMemberProfilePopover} eventsByRunId={executionEventsByRunId}
-                      windowedEvidence={openCoverage !== null}
-                      stopState={run => agentRunStopViewState(run, snapshot.turns.find(turn => turn.id === run.threadTurnId) ?? null, {
-                        cancelling: cancellingRunIds.has(run.id) || run.cancelRequestedAt !== null,
-                        confirming: confirmingRunIds.has(run.id),
-                        turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
-                      })}
-                      onContinued={runId => setContinuedRunIds(current => new Set(current).add(runId))}
-                      onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
-                    continue
-                  }
-                  const dayKey = localDayKey(timelineItem.createdAt)
-                  if (dayKey && dayKey !== lastDayKey) {
-                    if (lastDayKey) {
-                      items.push(
-                        <div className="timeline-node timeline-day" key={`day-${dayKey}-${timelineItem.id}`}>
-                          {timelineDayLabel(timelineItem.createdAt, interfaceLanguage)}
-                        </div>
-                      )
-                    }
-                    lastDayKey = dayKey
-                    previousMessageAuthorKey = null
-                  }
-                  if (timelineItem.kind === 'member_joined') {
-                    previousMessageAuthorKey = null
-                    items.push(<MemberJoinedCard key={timelineItem.id} receipt={timelineItem.receipt} onConfigure={onConfigureRuntime} />)
-                    continue
-                  }
-                  if (timelineItem.kind === 'task_card') {
-                    previousMessageAuthorKey = null
+                let lastDayKey = row.previousDay
+                let previousMessageAuthorKey = row.previousAuthor
+                const timelineIndex = row.index
+                const timelineItem = presenceTimeline[timelineIndex]
+                if (timelineItem.id === historyBoundaryId) {
+                  if (hasAnchorGap) items.push(<div className="camp-history-gap" role="status" key="anchor-history-gap">{uiAttribute('中间消息尚未加载')}</div>)
+                  if (historyLoader) items.push(historyLoader)
+                  previousMessageAuthorKey = null
+                }
+                if (timelineItem.kind === 'run_presence') {
+                  previousMessageAuthorKey = null
+                  items.push(<ConversationRunPresence key={timelineItem.id} snapshot={snapshot}
+                    slot={timelineItem.slot} profiles={agents} installations={installations}
+                    source={<ConversationRunSource key={`${snapshot.thread.id}:${timelineItem.slot.run.id}`}
+                      run={timelineItem.slot.run} messages={visibleMessageById} members={snapshot.members} text={anchorText}
+                      loading={runSourceNavigation.loading} unavailable={runSourceNavigation.unavailable}
+                      error={runSourceNavigation.error} onReveal={messageId => {
+                        anchorNavigation.navigation.cancelNavigation()
+                        if (conversationFind.open) closeConversationFind(false)
+                        setConversationView('conversation')
+                        const viewport = timelineScrollRef.current
+                        if (viewport) timelineReadingPosition.current = { threadId: snapshot.thread.id,
+                          position: { scrollTop: viewport.scrollTop, followingLatest: false } }
+                        void runSourceNavigation.reveal(timelineItem.slot.run.id, messageId, visibleMessageById)
+                      }} />}
+                    onActivateMember={openMemberProfilePopover} eventsByRunId={executionEventsByRunId}
+                    windowedEvidence={openCoverage !== null}
+                    stopState={run => agentRunStopViewState(run, snapshot.turns.find(turn => turn.id === run.threadTurnId) ?? null, {
+                      cancelling: cancellingRunIds.has(run.id) || run.cancelRequestedAt !== null,
+                      confirming: confirmingRunIds.has(run.id),
+                      turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
+                    })}
+                    onContinued={runId => setContinuedRunIds(current => new Set(current).add(runId))}
+                    onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
+                  return items
+                }
+                const dayKey = localDayKey(timelineItem.createdAt)
+                if (dayKey && dayKey !== lastDayKey) {
+                  if (lastDayKey) {
                     items.push(
-                      <TaskTimelineCard
-                        key={timelineItem.id}
-                        task={timelineItem.task}
-                        assigneeName={taskAssigneeName(timelineItem.task, snapshot)}
-                        onOpen={() => {
-                          setFocusedTaskId(timelineItem.task.taskId)
-                          setTaskFocusRequest((request) => request + 1)
-                          openInspector('tasks')
-                        }}
-                      />
+                      <div className="timeline-node timeline-day" key={`day-${dayKey}-${timelineItem.id}`}>
+                        {timelineDayLabel(timelineItem.createdAt, interfaceLanguage)}
+                      </div>
                     )
-                    continue
                   }
-                  if (timelineItem.kind === 'run_artifacts') {
-                    previousMessageAuthorKey = null
-                    const { run, imageGroups, memberCreations, fileChanges } = timelineItem
-                    const member = memberById.get(run.agentId)
-                    const profile = profileById.get(run.agentId)
-                    const author = member?.displayName ?? profile?.displayName ?? run.agentId
-                    const canInspect = Boolean(member && profile
-                      && member.membershipStatus === 'active' && member.profilePresence !== 'removed')
-                    const authorPart = (variant: 'avatar' | 'name'): JSX.Element => {
-                      const content = variant === 'avatar'
-                        ? <MemberAvatar agentId={run.agentId} avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
-                            displayName={author} size="list" decorative />
-                        : <strong>{author}</strong>
-                      return canInspect
-                        ? <MessageAuthorProfileTrigger agentId={run.agentId} displayName={author}
-                            variant={variant} onActivate={openMemberProfilePopover}>{content}</MessageAuthorProfileTrigger>
-                        : content
-                    }
-                    items.push(
-                      <section className="agent-message-output run-artifact-output" key={timelineItem.id}
-                        data-run-artifact-output-id={run.id} data-camp-turn-id={run.threadTurnId}
-                        aria-label={uiAttribute("{0}的运行产物", String(author))}>
-                        <div className="timeline-node conversation-bubble agent"
-                          style={{ '--agent-accent': identityColorToken(run.agentId) } as CSSProperties}>
-                          {authorPart('avatar')}
-                          <div className="message-body">
-                            <div className="bubble-meta">
-                              {authorPart('name')}
-                              {profile?.runtimeConfiguration && <span>{runtimeAdapterLabel(profile.runtimeConfiguration.adapterKind)}</span>}
-                              <time>{messageClockTime(run.endedAt ?? timelineItem.createdAt)}</time>
-                            </div>
-                            {imageGroups.length > 0 && (
-                              <section className="message-attachments agent-message-outputs" aria-label={uiAttribute("Agent 输出图片")}>
-                                <div className="agent-output-images">
-                                  <ImageGallery images={imageGroups.flatMap((group) => group.images.map((image) => ({
-                                    kind: 'runtime' as const, threadId: snapshot.thread.id, image
-                                  })))} />
-                                </div>
-                              </section>
-                            )}
-                          </div>
-                        </div>
-                        {(memberCreations.length > 0 || fileChanges.length > 0) && (
-                          <div className="run-result-stack">
-                            {memberCreations.map((receipt) => (
-                              <MemberJoinedCard key={receipt.creationId} receipt={receipt} onConfigure={onConfigureRuntime} />
-                            ))}
-                            {fileChanges.map((changes) => (
-                              <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
-                                changes={changes} onOpenReview={(selectedEvidenceFileId) => {
-                                  return filePreview?.openFileChanges(snapshot.thread.id, changes, selectedEvidenceFileId)
-                                }} onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(changes, evidenceFileId)} />
-                            ))}
-                          </div>
-                        )}
-                        {isUserInterruptedRun(run) && !retainedStopIds.has(run.id) && (
-                          <RunInterruptionMarker run={run} author={author} onOpen={openExecutionProcess} />
-                        )}
-                      </section>
-                    )
-                    continue
+                  lastDayKey = dayKey
+                  previousMessageAuthorKey = null
+                }
+                if (timelineItem.kind === 'member_joined') {
+                  previousMessageAuthorKey = null
+                  items.push(<MemberJoinedCard key={timelineItem.id} receipt={timelineItem.receipt} onConfigure={onConfigureRuntime} />)
+                  return items
+                }
+                if (timelineItem.kind === 'task_card') {
+                  previousMessageAuthorKey = null
+                  items.push(
+                    <TaskTimelineCard
+                      key={timelineItem.id}
+                      task={timelineItem.task}
+                      assigneeName={taskAssigneeName(timelineItem.task, snapshot)}
+                      onOpen={() => {
+                        setFocusedTaskId(timelineItem.task.taskId)
+                        setTaskFocusRequest((request) => request + 1)
+                        openInspector('tasks')
+                      }}
+                    />
+                  )
+                  return items
+                }
+                if (timelineItem.kind === 'run_artifacts') {
+                  previousMessageAuthorKey = null
+                  const { run, imageGroups, memberCreations, fileChanges } = timelineItem
+                  const member = memberById.get(run.agentId)
+                  const profile = profileById.get(run.agentId)
+                  const author = member?.displayName ?? profile?.displayName ?? run.agentId
+                  const canInspect = Boolean(member && profile
+                    && member.membershipStatus === 'active' && member.profilePresence !== 'removed')
+                  const authorPart = (variant: 'avatar' | 'name'): JSX.Element => {
+                    const content = variant === 'avatar'
+                      ? <MemberAvatar agentId={run.agentId} avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
+                          displayName={author} size="list" decorative />
+                      : <strong>{author}</strong>
+                    return canInspect
+                      ? <MessageAuthorProfileTrigger agentId={run.agentId} displayName={author}
+                          variant={variant} onActivate={openMemberProfilePopover}>{content}</MessageAuthorProfileTrigger>
+                      : content
                   }
-                  if (timelineItem.kind === 'run_images') {
-                    previousMessageAuthorKey = null
-                    items.push(
-                      <div className="timeline-node conversation-bubble runtime-image-supplement" key={timelineItem.id}>
+                  items.push(
+                    <section className="agent-message-output run-artifact-output" key={timelineItem.id}
+                      data-run-artifact-output-id={run.id} data-camp-turn-id={run.threadTurnId}
+                      aria-label={uiAttribute("{0}的运行产物", String(author))}>
+                      <div className="timeline-node conversation-bubble agent"
+                        style={{ '--agent-accent': identityColorToken(run.agentId) } as CSSProperties}>
+                        {authorPart('avatar')}
                         <div className="message-body">
-                          <ImageGallery images={timelineItem.images.images.map((image) => ({ kind: 'runtime', threadId: snapshot.thread.id, image }))} />
+                          <div className="bubble-meta">
+                            {authorPart('name')}
+                            {profile?.runtimeConfiguration && <span>{runtimeAdapterLabel(profile.runtimeConfiguration.adapterKind)}</span>}
+                            <time>{messageClockTime(run.endedAt ?? timelineItem.createdAt)}</time>
+                          </div>
+                          {imageGroups.length > 0 && (
+                            <section className="message-attachments agent-message-outputs" aria-label={uiAttribute("Agent 输出图片")}>
+                              <div className="agent-output-images">
+                                <ImageGallery images={imageGroups.flatMap((group) => group.images.map((image) => ({
+                                  kind: 'runtime' as const, threadId: snapshot.thread.id, image
+                                })))} />
+                              </div>
+                            </section>
+                          )}
                         </div>
                       </div>
-                    )
-                    continue
-                  }
-                  if (timelineItem.kind === 'run_file_changes') {
-                    previousMessageAuthorKey = null
-                    items.push(
-                      <AgentRunFileChangesTimelineCard
-                        key={timelineItem.id}
-                        changes={timelineItem.changes}
-                        onOpenReview={(selectedEvidenceFileId) => {
-                          return filePreview?.openFileChanges(snapshot.thread.id, timelineItem.changes, selectedEvidenceFileId)
-                        }}
-                        onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(timelineItem.changes, evidenceFileId)}
-                      />
-                    )
-                    continue
-                  }
-                  if (timelineItem.kind === 'stop_event') {
-                    previousMessageAuthorKey = null
-                    const turnRun = snapshot.agentRuns
-                      .filter((candidate) => candidate.threadTurnId === timelineItem.threadTurnId)
-                      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
-                    items.push(
-                      <StopOutcomeEvent
-                        key={timelineItem.id}
-                        item={timelineItem}
-                        onOpenDrawer={turnRun
-                          ? (trigger) => openExecutionProcess(turnRun.agentId, trigger)
-                          : undefined}
-                      />
-                    )
-                    continue
-                  }
-                  const campMessage = timelineItem.message
-                  const interruptedRun = timelineItem.interruptedRun && !retainedStopIds.has(timelineItem.interruptedRun.id)
-                    ? timelineItem.interruptedRun : undefined
-                  if (campMessage.withdrawn) {
-                    previousMessageAuthorKey = null
-                    items.push(
-                      <div
-                        className="timeline-node withdrawn-message-event"
-                        key={campMessage.id}
-                        role="status"
-                        aria-label={uiAttribute("你撤回了第{0}条消息", String(campMessage.sequence))}
-                      >
-                        <span><UiText zh={"你撤回了一条消息"} /></span>
-                        {reeditStore && <MessageReeditButton store={reeditStore} threadId={snapshot.thread.id}
-                          messageId={campMessage.id} disabled={composerInteractionDisabled || busy}
-                          onSelect={() => requestReedit(campMessage.id)} />}
-                        <time>{messageClockTime(campMessage.createdAt)}</time>
+                      {(memberCreations.length > 0 || fileChanges.length > 0) && (
+                        <div className="run-result-stack">
+                          {memberCreations.map((receipt) => (
+                            <MemberJoinedCard key={receipt.creationId} receipt={receipt} onConfigure={onConfigureRuntime} />
+                          ))}
+                          {fileChanges.map((changes) => (
+                            <AgentRunFileChangesTimelineCard key={`${changes.agentRunId}:${changes.executionEpoch}`}
+                              changes={changes} onOpenReview={(selectedEvidenceFileId) => {
+                                return filePreview?.openFileChanges(snapshot.thread.id, changes, selectedEvidenceFileId)
+                              }} onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(changes, evidenceFileId)} />
+                          ))}
+                        </div>
+                      )}
+                      {isUserInterruptedRun(run) && !retainedStopIds.has(run.id) && (
+                        <RunInterruptionMarker run={run} author={author} onOpen={openExecutionProcess} />
+                      )}
+                    </section>
+                  )
+                  return items
+                }
+                if (timelineItem.kind === 'run_images') {
+                  previousMessageAuthorKey = null
+                  items.push(
+                    <div className="timeline-node conversation-bubble runtime-image-supplement" key={timelineItem.id}>
+                      <div className="message-body">
+                        <ImageGallery images={timelineItem.images.images.map((image) => ({ kind: 'runtime', threadId: snapshot.thread.id, image }))} />
                       </div>
-                    )
-                    continue
-                  }
-                  const member = memberById.get(campMessage.authorId)
-                  const author = campMessageAuthorLabel(campMessage, memberById, currentUserName)
-                  const authorProfile = profileById.get(campMessage.authorId) ?? null
-                  const authorProfileAvailable = Boolean(
-                    campMessage.authorType === 'agent'
-                    && member
-                    && authorProfile
-                    && member.membershipStatus === 'active'
-                    && member.profilePresence !== 'removed'
+                    </div>
                   )
-                  const sourceRun = campMessage.sourceAgentRunId
-                    ? runById.get(campMessage.sourceAgentRunId) ?? null
-                    : null
-                  const displayBody = campMessage.body
-                  const humanAuthored = campMessage.authorType === 'user'
-                    || campMessage.authorType === 'external_principal'
-                  const defaultRecipientAgentId = defaultRecipientMentionAgentId(campMessage)
-                  const runtimeImages = timelineItem.runtimeImageGroups.flatMap((group) => group.images)
-                  const messageAuthorKey = campMessage.authorType === 'user'
-                    || campMessage.authorType === 'agent'
-                    || campMessage.authorType === 'external_principal'
-                    ? `${campMessage.authorType}:${campMessage.authorId}`
-                    : null
-                  const followsSameAuthor = messageAuthorKey !== null
-                    && previousMessageAuthorKey === messageAuthorKey
-                  const previousItem = presenceTimeline[timelineIndex - 1]
-                  const nextItem = presenceTimeline[timelineIndex + 1]
-                  const isGroupContinuation = previousItem?.kind === 'camp_message'
-                    && publicMessagesJoin(previousItem.message, campMessage)
-                  const joinsNextMessage = nextItem?.kind === 'camp_message'
-                    && publicMessagesJoin(campMessage, nextItem.message)
-                  const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
-                  const messageTimestamp = !joinsNextMessage && messageTime ? (
-                    <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}
-                      title={messageTime.full} aria-label={`${messageTime.full} · #${campMessage.sequence}`}>
-                      {messageTime.short}
-                    </time>
-                  ) : undefined
-                  const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
-                    delivery.deliveryKind === 'public_a2a'
-                    && (delivery.continuationRequest
-                      ? campMessage.authorType === 'user'
-                        && (delivery.inputMessageIds ?? [delivery.messageId]).includes(campMessage.id)
-                      : delivery.messageId === campMessage.id)
+                  return items
+                }
+                if (timelineItem.kind === 'run_file_changes') {
+                  previousMessageAuthorKey = null
+                  items.push(
+                    <AgentRunFileChangesTimelineCard
+                      key={timelineItem.id}
+                      changes={timelineItem.changes}
+                      onOpenReview={(selectedEvidenceFileId) => {
+                        return filePreview?.openFileChanges(snapshot.thread.id, timelineItem.changes, selectedEvidenceFileId)
+                      }}
+                      onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(timelineItem.changes, evidenceFileId)}
+                    />
                   )
-                  const userMessageRuns = campMessage.authorType === 'user'
-                    ? snapshot.agentRuns.filter((run) =>
-                        (run.inputMessageIds ?? []).includes(campMessage.id)
-                      )
-                    : []
-                  const replyParentId = campMessage.replyToThreadMessageId
-                  const replyParent = replyParentId ? replyParentById.get(replyParentId) ?? null : null
-                  const replyParentUnavailable = Boolean(
-                    replyParentId
-                    && replyAnchorWindows.has(replyParentId)
-                    && replyAnchorWindows.get(replyParentId) === null
+                  return items
+                }
+                if (timelineItem.kind === 'stop_event') {
+                  previousMessageAuthorKey = null
+                  const turnRun = snapshot.agentRuns
+                    .filter((candidate) => candidate.threadTurnId === timelineItem.threadTurnId)
+                    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+                  items.push(
+                    <StopOutcomeEvent
+                      key={timelineItem.id}
+                      item={timelineItem}
+                      onOpenDrawer={turnRun
+                        ? (trigger) => openExecutionProcess(turnRun.agentId, trigger)
+                        : undefined}
+                    />
                   )
-                  const replyQuote = replyParentId && (
-                                  <ReplyParentQuote
-                                    parent={replyParent}
-                                    projectedBody={replyParent?.content
-                                      ? structuredThreadContentPlainText(replyParent.content, messageMentionNames, currentUserName)
-                                      : replyParent?.body ?? ''}
-                                    authorLabel={replyParent
-                                      ? campMessageAuthorLabel(replyParent, memberById, currentUserName)
-                                      : null}
-                                    unavailable={replyParentUnavailable}
-                                    loading={!replyParent && !replyParentUnavailable}
-                                    onReveal={() => openReplyDetails(campMessage.id)}
-                                  />
-                                )
-                  const isConversationFindCurrent = conversationFind.open
-                    && conversationFind.snapshot?.match?.messageId === campMessage.id
-                  const trailingResultItems: Extract<
-                    ThreadConversationTimelineItem,
-                    { kind: 'run_file_changes' | 'member_joined' }
-                  >[] = []
-                  if (campMessage.authorType === 'agent' && campMessage.sourceAgentRunId) {
-                    for (
-                      let nextIndex = timelineIndex + 1;
-                      nextIndex < presenceTimeline.length;
-                      nextIndex += 1
-                    ) {
-                      const candidate = presenceTimeline[nextIndex]
-                      const candidateRunId = candidate.kind === 'run_file_changes' ? candidate.changes.agentRunId
-                        : candidate.kind === 'member_joined' ? candidate.receipt.sourceAgentRunId : null
-                      if (candidateRunId !== campMessage.sourceAgentRunId
-                        || (candidate.kind !== 'run_file_changes' && candidate.kind !== 'member_joined')) break
-                      trailingResultItems.push(candidate)
-                    }
-                  }
-                  const copied = copiedMessageId === campMessage.id
-                  const handleReply = campMessage.id.startsWith('optimistic:')
-                    ? undefined
-                    : (modality: ReplyFocusModality) => void startReply(campMessage, modality)
-                  const handleCopy = (): void => copyMessage(
-                    campMessage.id,
-                    displayBody.trim() ? displayBody : [
-                      ...campMessage.attachments.map(attachment => attachment.displayName),
-                      ...runtimeImages.map(image => image.displayName)
-                    ].join('\n'),
-                    campMessage.content
-                  )
-                  const messageClasses = [
-                    'timeline-node conversation-bubble', campMessage.authorType,
-                    campMessage.authorType === 'agent' && 'public-agent-message',
-                    followsSameAuthor && 'same-author',
-                    isGroupContinuation && 'is-group-continuation',
-                    joinsNextMessage && 'joins-next-message',
-                    isConversationFindCurrent && 'conversation-find-current-message'
-                  ].filter(Boolean).join(' ')
-                  const messageElement = (
-                    <article
-                      className={messageClasses}
+                  return items
+                }
+                const campMessage = timelineItem.message
+                const interruptedRun = timelineItem.interruptedRun && !retainedStopIds.has(timelineItem.interruptedRun.id)
+                  ? timelineItem.interruptedRun : undefined
+                if (campMessage.withdrawn) {
+                  previousMessageAuthorKey = null
+                  items.push(
+                    <div
+                      className="timeline-node withdrawn-message-event"
                       key={campMessage.id}
-                      data-message-id={campMessage.id}
-                      data-export-selected={messageExport.selecting && messageExport.selected.has(campMessage.id) || undefined}
-                      data-camp-turn-id={campMessage.threadTurnId ?? sourceRun?.threadTurnId}
-                      aria-label={uiAttribute("{0}，{1}，第{2}条消息", String(author), String(messageClockTime(campMessage.createdAt)), String(campMessage.sequence))}
-                      tabIndex={-1}
-                      style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
+                      role="status"
+                      aria-label={uiAttribute("你撤回了第{0}条消息", String(campMessage.sequence))}
                     >
-                      {messageExport.selecting && messageExport.eligible.some(m => m.id === campMessage.id) && <label className="message-export-check" data-quote-exclude>
-                        <input type="checkbox" checked={messageExport.selected.has(campMessage.id)} onChange={() => undefined}
-                          onClick={event => messageExport.toggle(campMessage.id, event.shiftKey)} aria-label={uiAttribute('选择 {0} 的消息', author)} />
-                      </label>}
-                      {campMessage.authorType === 'agent' && (authorProfileAvailable
-                        ? (
-                            <MessageAuthorProfileTrigger
-                              agentId={campMessage.authorId}
-                              displayName={author}
-                              variant="avatar"
-                              onActivate={openMemberProfilePopover}
-                            >
-                              <MemberAvatar
-                                agentId={campMessage.authorId}
-                                avatarRef={member?.avatarRef ?? null}
-                                displayName={author}
-                                size="list"
-                                decorative
-                              />
-                            </MessageAuthorProfileTrigger>
-                          )
-                        : (
+                      <span><UiText zh={"你撤回了一条消息"} /></span>
+                      {reeditStore && <MessageReeditButton store={reeditStore} threadId={snapshot.thread.id}
+                        messageId={campMessage.id} disabled={composerInteractionDisabled || busy}
+                        onSelect={() => requestReedit(campMessage.id)} />}
+                      <time>{messageClockTime(campMessage.createdAt)}</time>
+                    </div>
+                  )
+                  return items
+                }
+                const member = memberById.get(campMessage.authorId)
+                const author = campMessageAuthorLabel(campMessage, memberById, currentUserName)
+                const authorProfile = profileById.get(campMessage.authorId) ?? null
+                const authorProfileAvailable = Boolean(
+                  campMessage.authorType === 'agent'
+                  && member
+                  && authorProfile
+                  && member.membershipStatus === 'active'
+                  && member.profilePresence !== 'removed'
+                )
+                const sourceRun = campMessage.sourceAgentRunId
+                  ? runById.get(campMessage.sourceAgentRunId) ?? null
+                  : null
+                const displayBody = campMessage.body
+                const humanAuthored = campMessage.authorType === 'user'
+                  || campMessage.authorType === 'external_principal'
+                const defaultRecipientAgentId = defaultRecipientMentionAgentId(campMessage)
+                const runtimeImages = timelineItem.runtimeImageGroups.flatMap((group) => group.images)
+                const messageAuthorKey = campMessage.authorType === 'user'
+                  || campMessage.authorType === 'agent'
+                  || campMessage.authorType === 'external_principal'
+                  ? `${campMessage.authorType}:${campMessage.authorId}`
+                  : null
+                const followsSameAuthor = messageAuthorKey !== null
+                  && previousMessageAuthorKey === messageAuthorKey
+                const previousItem = presenceTimeline[timelineIndex - 1]
+                const nextItem = presenceTimeline[timelineIndex + 1]
+                const isGroupContinuation = previousItem?.kind === 'camp_message'
+                  && publicMessagesJoin(previousItem.message, campMessage)
+                const joinsNextMessage = nextItem?.kind === 'camp_message'
+                  && publicMessagesJoin(campMessage, nextItem.message)
+                const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
+                const messageTimestamp = !joinsNextMessage && messageTime ? (
+                  <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}
+                    title={messageTime.full} aria-label={`${messageTime.full} · #${campMessage.sequence}`}>
+                    {messageTime.short}
+                  </time>
+                ) : undefined
+                const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
+                  delivery.deliveryKind === 'public_a2a'
+                  && (delivery.continuationRequest
+                    ? campMessage.authorType === 'user'
+                      && (delivery.inputMessageIds ?? [delivery.messageId]).includes(campMessage.id)
+                    : delivery.messageId === campMessage.id)
+                )
+                const userMessageRuns = campMessage.authorType === 'user'
+                  ? snapshot.agentRuns.filter((run) =>
+                      (run.inputMessageIds ?? []).includes(campMessage.id)
+                    )
+                  : []
+                const replyParentId = campMessage.replyToThreadMessageId
+                const replyParent = replyParentId ? replyParentById.get(replyParentId) ?? null : null
+                const replyParentUnavailable = Boolean(
+                  replyParentId
+                  && replyAnchorWindows.has(replyParentId)
+                  && replyAnchorWindows.get(replyParentId) === null
+                )
+                const replyQuote = replyParentId && (
+                                <ReplyParentQuote
+                                  parent={replyParent}
+                                  projectedBody={replyParent?.content
+                                    ? structuredThreadContentPlainText(replyParent.content, messageMentionNames, currentUserName)
+                                    : replyParent?.body ?? ''}
+                                  authorLabel={replyParent
+                                    ? campMessageAuthorLabel(replyParent, memberById, currentUserName)
+                                    : null}
+                                  unavailable={replyParentUnavailable}
+                                  loading={!replyParent && !replyParentUnavailable}
+                                  onReveal={() => openReplyDetails(campMessage.id)}
+                                />
+                              )
+                const isConversationFindCurrent = conversationFind.open
+                  && conversationFind.snapshot?.match?.messageId === campMessage.id
+                const trailingResultItems: Extract<
+                  ThreadConversationTimelineItem,
+                  { kind: 'run_file_changes' | 'member_joined' }
+                >[] = []
+                if (campMessage.authorType === 'agent' && campMessage.sourceAgentRunId) {
+                  for (
+                    let nextIndex = timelineIndex + 1;
+                    nextIndex < presenceTimeline.length;
+                    nextIndex += 1
+                  ) {
+                    const candidate = presenceTimeline[nextIndex]
+                    const candidateRunId = candidate.kind === 'run_file_changes' ? candidate.changes.agentRunId
+                      : candidate.kind === 'member_joined' ? candidate.receipt.sourceAgentRunId : null
+                    if (candidateRunId !== campMessage.sourceAgentRunId
+                      || (candidate.kind !== 'run_file_changes' && candidate.kind !== 'member_joined')) break
+                    trailingResultItems.push(candidate)
+                  }
+                }
+                const copied = copiedMessageId === campMessage.id
+                const handleReply = campMessage.id.startsWith('optimistic:')
+                  ? undefined
+                  : (modality: ReplyFocusModality) => void startReply(campMessage, modality)
+                const handleCopy = (): void => copyMessage(
+                  campMessage.id,
+                  displayBody.trim() ? displayBody : [
+                    ...campMessage.attachments.map(attachment => attachment.displayName),
+                    ...runtimeImages.map(image => image.displayName)
+                  ].join('\n'),
+                  campMessage.content
+                )
+                const messageClasses = [
+                  'timeline-node conversation-bubble', campMessage.authorType,
+                  campMessage.authorType === 'agent' && 'public-agent-message',
+                  followsSameAuthor && 'same-author',
+                  isGroupContinuation && 'is-group-continuation',
+                  joinsNextMessage && 'joins-next-message',
+                  isConversationFindCurrent && 'conversation-find-current-message'
+                ].filter(Boolean).join(' ')
+                const messageElement = (
+                  <article
+                    className={messageClasses}
+                    key={campMessage.id}
+                    data-message-id={campMessage.id}
+                    data-export-selected={messageExport.selecting && messageExport.selected.has(campMessage.id) || undefined}
+                    data-camp-turn-id={campMessage.threadTurnId ?? sourceRun?.threadTurnId}
+                    aria-label={uiAttribute("{0}，{1}，第{2}条消息", String(author), String(messageClockTime(campMessage.createdAt)), String(campMessage.sequence))}
+                    tabIndex={-1}
+                    style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
+                  >
+                    {messageExport.selecting && messageExport.eligible.some(m => m.id === campMessage.id) && <label className="message-export-check" data-quote-exclude>
+                      <input type="checkbox" checked={messageExport.selected.has(campMessage.id)} onChange={() => undefined}
+                        onClick={event => messageExport.toggle(campMessage.id, event.shiftKey)} aria-label={uiAttribute('选择 {0} 的消息', author)} />
+                    </label>}
+                    {campMessage.authorType === 'agent' && (authorProfileAvailable
+                      ? (
+                          <MessageAuthorProfileTrigger
+                            agentId={campMessage.authorId}
+                            displayName={author}
+                            variant="avatar"
+                            onActivate={openMemberProfilePopover}
+                          >
                             <MemberAvatar
                               agentId={campMessage.authorId}
                               avatarRef={member?.avatarRef ?? null}
@@ -5882,224 +5952,232 @@ export function ThreadWorkspace({
                               size="list"
                               decorative
                             />
-                          ))}
-                      {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
-                        <button
-                          type="button"
-                          className="message-author-trigger message-author-avatar-trigger current-user-profile-trigger"
-                          aria-label={uiAttribute("查看{0}的个人资料", String(currentUserDisplayName(currentUserProfile)))}
-                          aria-haspopup="dialog"
-                          aria-expanded={false}
-                          onClick={(event) => openCurrentUserProfilePopover(event.currentTarget, event.detail === 0)}
-                        >
-                          <CurrentUserAvatar profile={currentUserProfile} className="local-message-avatar" />
-                        </button>
-                      )}
-                      {(campMessage.authorType === 'user'
-                        || campMessage.authorType === 'agent'
-                        || campMessage.authorType === 'external_principal')
-                        ? (
-                            <div className="message-body">
-                              <div className="bubble-meta">
-                                {campMessage.authorType === 'agent' && authorProfileAvailable
-                                  ? (
-                                      <MessageAuthorProfileTrigger
-                                        agentId={campMessage.authorId}
-                                        displayName={author}
-                                        variant="name"
-                                        onActivate={openMemberProfilePopover}
-                                      >
-                                        <strong>{author}</strong>
-                                      </MessageAuthorProfileTrigger>
-                                    )
-                                  : <strong>{author}</strong>}
-                                {campMessage.authorType === 'agent' && (
-                                  <MessageModelSummary message={campMessage} installations={installations}
-                                    displayName={author} avatarRef={authorProfile?.avatarRef ?? null} />
-                                )}
-                              </div>
-                              <div className="public-message-readout">
-                              <MessageSurface
-                                timestamp={messageTimestamp}
-                                copied={copied}
-                                hasDelivery={campMessage.authorType === 'agent' && campMessageDeliveries.length > 0}
-                                showActions={campMessage.authorType !== 'agent'}
-                                actionAfter={campMessage.authorType === 'user' ? (
-                                  <UserMessageDeliveryReceipt
-                                    message={campMessage}
-                                    onReconcile={onReconcileDelivery}
-                                    runs={userMessageRuns}
-                                    deliveries={campMessageDeliveries}
-                                    allRuns={snapshot.agentRuns}
-                                    memberById={memberById}
-                                    onOpenExecution={(run, trigger) => openExecutionProcess(
-                                      run.agentId,
-                                      trigger,
-                                      { runId: run.id }
-                                    )}
-                                    onWithdraw={campMessage.canWithdraw && onWithdrawMessage
-                                      ? () => {
-                                          setWithdrawalError(null)
-                                          setWithdrawalMessage(campMessage)
-                                        }
-                                      : undefined}
-                                  />
-                                ) : undefined}
-                                onReply={humanAuthored ? undefined : handleReply}
-                                onCopy={handleCopy}
-                                onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
-                              >
-                                <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
-
-                                {!displayBody.trim() && defaultRecipientAgentId === null && replyQuote && <div className="message-bubble">{replyQuote}</div>}
-                                {humanAuthored && (
-                                  <MessageAttachmentGroups
-                                    attachments={campMessage.attachments}
-                                    threadId={snapshot.thread.id}
-                                    messageId={campMessage.id}
-                                    presentation="user"
-                                    onNotify={onNotify}
-                                  />
-                                )}
-                                {(displayBody.trim().length > 0 || defaultRecipientAgentId !== null) && (
-                                  campMessage.authorType === 'agent'
-                                  && !campMessage.content?.some((segment) =>
-                                    segment.kind === 'current_user_mention'
+                          </MessageAuthorProfileTrigger>
+                        )
+                      : (
+                          <MemberAvatar
+                            agentId={campMessage.authorId}
+                            avatarRef={member?.avatarRef ?? null}
+                            displayName={author}
+                            size="list"
+                            decorative
+                          />
+                        ))}
+                    {(campMessage.authorType === 'user' || campMessage.authorType === 'external_principal') && (
+                      <button
+                        type="button"
+                        className="message-author-trigger message-author-avatar-trigger current-user-profile-trigger"
+                        aria-label={uiAttribute("查看{0}的个人资料", String(currentUserDisplayName(currentUserProfile)))}
+                        aria-haspopup="dialog"
+                        aria-expanded={false}
+                        onClick={(event) => openCurrentUserProfilePopover(event.currentTarget, event.detail === 0)}
+                      >
+                        <CurrentUserAvatar profile={currentUserProfile} className="local-message-avatar" />
+                      </button>
+                    )}
+                    {(campMessage.authorType === 'user'
+                      || campMessage.authorType === 'agent'
+                      || campMessage.authorType === 'external_principal')
+                      ? (
+                          <div className="message-body">
+                            <div className="bubble-meta">
+                              {campMessage.authorType === 'agent' && authorProfileAvailable
+                                ? (
+                                    <MessageAuthorProfileTrigger
+                                      agentId={campMessage.authorId}
+                                      displayName={author}
+                                      variant="name"
+                                      onActivate={openMemberProfilePopover}
+                                    >
+                                      <strong>{author}</strong>
+                                    </MessageAuthorProfileTrigger>
                                   )
-                                    ? (
-                                        <AgentMessageContent className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
-                                          {replyQuote}
-                                          {renderPublicMessageBody(campMessage, 'timeline')}
-                                        </AgentMessageContent>
-                                      )
-                                    : (
-                                        campMessage.authorType === 'agent' ? (
-                                          <AgentMessageContent className="message-bubble" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
-                                            {replyQuote}
-                                            {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
-                                          </AgentMessageContent>
-                                        ) : (
-                                          <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' ? campMessage.id : undefined} data-quote-owner={`thread:${snapshot.thread.id}`}>
-                                            {replyQuote}
-                                            {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
-                                          </div>
-                                        )
-                                      )
-                                )}
-                                {!humanAuthored && (
-                                  <MessageAttachmentGroups
-                                    attachments={campMessage.attachments}
-                                    runtimeImages={runtimeImages.map((image) => ({
-                                      kind: 'runtime',
-                                      threadId: snapshot.thread.id,
-                                      image
-                                    }))}
-                                    threadId={snapshot.thread.id}
-                                    messageId={campMessage.id}
-                                    presentation="agent"
-                                    onNotify={onNotify}
-                                  />
-                                )}
-                              </MessageSurface>
+                                : <strong>{author}</strong>}
                               {campMessage.authorType === 'agent' && (
-                                <ThreadMessageDeliveryFooter
+                                <MessageModelSummary message={campMessage} installations={installations}
+                                  displayName={author} avatarRef={authorProfile?.avatarRef ?? null} />
+                              )}
+                            </div>
+                            <div className="public-message-readout">
+                            <MessageSurface
+                              timestamp={messageTimestamp}
+                              copied={copied}
+                              hasDelivery={campMessage.authorType === 'agent' && campMessageDeliveries.length > 0}
+                              showActions={campMessage.authorType !== 'agent'}
+                              actionAfter={campMessage.authorType === 'user' ? (
+                                <UserMessageDeliveryReceipt
+                                  message={campMessage}
+                                  onReconcile={onReconcileDelivery}
+                                  runs={userMessageRuns}
                                   deliveries={campMessageDeliveries}
+                                  allRuns={snapshot.agentRuns}
                                   memberById={memberById}
-                                  onActivateMemberMention={openMemberProfilePopover}
+                                  onOpenExecution={(run, trigger) => openExecutionProcess(
+                                    run.agentId,
+                                    trigger,
+                                    { runId: run.id }
+                                  )}
+                                  onWithdraw={campMessage.canWithdraw && onWithdrawMessage
+                                    ? () => {
+                                        setWithdrawalError(null)
+                                        setWithdrawalMessage(campMessage)
+                                      }
+                                    : undefined}
+                                />
+                              ) : undefined}
+                              onReply={humanAuthored ? undefined : handleReply}
+                              onCopy={handleCopy}
+                              onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
+                            >
+                              <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
+
+                              {!displayBody.trim() && defaultRecipientAgentId === null && replyQuote && <div className="message-bubble">{replyQuote}</div>}
+                              {humanAuthored && (
+                                <MessageAttachmentGroups
+                                  attachments={campMessage.attachments}
+                                  threadId={snapshot.thread.id}
+                                  messageId={campMessage.id}
+                                  presentation="user"
+                                  onNotify={onNotify}
                                 />
                               )}
-                              {campMessage.authorType === 'agent'
-                                && trailingResultItems.length === 0 && !interruptedRun
-                                && (
-                                  <MessageActions
-                                    timestamp={messageTimestamp}
-                                    timeAfter
-                                    copied={copied}
-                                    className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
-                                    onReply={handleReply}
-                                    onCopy={handleCopy}
-                                    onFork={!snapshot.thread.missionId && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
-                                    forkBusy={forkBusy}
-                                    onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          )
-                        : (
-                            <MessageSurface copied={copied} hasDelivery={false} onCopy={handleCopy}>
-                              <div className="system-message-card">
-                                <div className="system-message-meta">
-                                  <NavigationIcon name="cpu" />
-                                  <span><UiText zh={"系统"} /></span>
-                                  <time dateTime={campMessage.createdAt} title={`#${campMessage.sequence}`}>
-                                    {messageClockTime(campMessage.createdAt)}
-                                  </time>
-                                </div>
-                                <p>{displayBody}</p>
-                              </div>
-                            </MessageSurface>
-                          )}
-                    </article>
-                  )
-                  if (trailingResultItems.length > 0 || interruptedRun) {
-                    items.push(
-                      <div
-                        className={`agent-message-output public-message-output${followsSameAuthor ? ' same-author' : ''}${isGroupContinuation ? ' is-group-continuation' : ''}`}
-                        data-message-output-id={campMessage.id}
-                        key={`agent-message-output:${campMessage.id}`}
-                      >
-                        {messageElement}
-                        {trailingResultItems.length > 0 && <div className="run-result-stack">
-                          {trailingResultItems.map((resultItem) => resultItem.kind === 'member_joined' ? (
-                            <MemberJoinedCard key={resultItem.id} receipt={resultItem.receipt} onConfigure={onConfigureRuntime} />
-                          ) : (
-                            <AgentRunFileChangesTimelineCard
-                              key={resultItem.id}
-                              changes={resultItem.changes}
-                              onOpenReview={(selectedEvidenceFileId) => {
-                                return filePreview?.openFileChanges(
-                                  snapshot.thread.id,
-                                  resultItem.changes,
-                                  selectedEvidenceFileId
+                              {(displayBody.trim().length > 0 || defaultRecipientAgentId !== null) && (
+                                campMessage.authorType === 'agent'
+                                && !campMessage.content?.some((segment) =>
+                                  segment.kind === 'current_user_mention'
                                 )
-                              }}
-                              onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(
-                                resultItem.changes,
-                                evidenceFileId
+                                  ? (
+                                      <AgentMessageContent className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                        {replyQuote}
+                                        {renderPublicMessageBody(campMessage, 'timeline')}
+                                      </AgentMessageContent>
+                                    )
+                                  : (
+                                      campMessage.authorType === 'agent' ? (
+                                        <AgentMessageContent className="message-bubble" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                          {replyQuote}
+                                          {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
+                                        </AgentMessageContent>
+                                      ) : (
+                                        <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' ? campMessage.id : undefined} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                          {replyQuote}
+                                          {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
+                                        </div>
+                                      )
+                                    )
                               )}
-                            />
-                          ))}
-                        </div>}
-                        {interruptedRun && (
-                          <RunInterruptionMarker run={interruptedRun} author={author} onOpen={openExecutionProcess} />
+                              {!humanAuthored && (
+                                <MessageAttachmentGroups
+                                  attachments={campMessage.attachments}
+                                  runtimeImages={runtimeImages.map((image) => ({
+                                    kind: 'runtime',
+                                    threadId: snapshot.thread.id,
+                                    image
+                                  }))}
+                                  threadId={snapshot.thread.id}
+                                  messageId={campMessage.id}
+                                  presentation="agent"
+                                  onNotify={onNotify}
+                                />
+                              )}
+                            </MessageSurface>
+                            {campMessage.authorType === 'agent' && (
+                              <ThreadMessageDeliveryFooter
+                                deliveries={campMessageDeliveries}
+                                memberById={memberById}
+                                onActivateMemberMention={openMemberProfilePopover}
+                              />
+                            )}
+                            {campMessage.authorType === 'agent'
+                              && trailingResultItems.length === 0 && !interruptedRun
+                              && (
+                                <MessageActions
+                                  timestamp={messageTimestamp}
+                                  timeAfter
+                                  copied={copied}
+                                  className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
+                                  onReply={handleReply}
+                                  onCopy={handleCopy}
+                                  onFork={!snapshot.thread.missionId && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
+                                  forkBusy={forkBusy}
+                                  onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        )
+                      : (
+                          <MessageSurface copied={copied} hasDelivery={false} onCopy={handleCopy}>
+                            <div className="system-message-card">
+                              <div className="system-message-meta">
+                                <NavigationIcon name="cpu" />
+                                <span><UiText zh={"系统"} /></span>
+                                <time dateTime={campMessage.createdAt} title={`#${campMessage.sequence}`}>
+                                  {messageClockTime(campMessage.createdAt)}
+                                </time>
+                              </div>
+                              <p>{displayBody}</p>
+                            </div>
+                          </MessageSurface>
                         )}
-                        <MessageActions
-                          timestamp={messageTimestamp}
-                          timeAfter
-                          copied={copied}
-                          className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
-                          onReply={handleReply}
-                          onCopy={handleCopy}
-                          onFork={!snapshot.thread.missionId && campMessage.authorType === 'agent' && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
-                          forkBusy={forkBusy}
-                          onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
-                        />
-                      </div>
-                    )
-                    timelineIndex += trailingResultItems.length
-                    previousMessageAuthorKey = null
-                    continue
-                  }
-                  items.push(messageElement)
-                  previousMessageAuthorKey = messageAuthorKey
+                  </article>
+                )
+                if (trailingResultItems.length > 0 || interruptedRun) {
+                  items.push(
+                    <div
+                      className={`agent-message-output public-message-output${followsSameAuthor ? ' same-author' : ''}${isGroupContinuation ? ' is-group-continuation' : ''}`}
+                      data-message-output-id={campMessage.id}
+                      key={`agent-message-output:${campMessage.id}`}
+                    >
+                      {messageElement}
+                      {trailingResultItems.length > 0 && <div className="run-result-stack">
+                        {trailingResultItems.map((resultItem) => resultItem.kind === 'member_joined' ? (
+                          <MemberJoinedCard key={resultItem.id} receipt={resultItem.receipt} onConfigure={onConfigureRuntime} />
+                        ) : (
+                          <AgentRunFileChangesTimelineCard
+                            key={resultItem.id}
+                            changes={resultItem.changes}
+                            onOpenReview={(selectedEvidenceFileId) => {
+                              return filePreview?.openFileChanges(
+                                snapshot.thread.id,
+                                resultItem.changes,
+                                selectedEvidenceFileId
+                              )
+                            }}
+                            onOpenCurrent={(evidenceFileId) => openCurrentAgentRunFile(
+                              resultItem.changes,
+                              evidenceFileId
+                            )}
+                          />
+                        ))}
+                      </div>}
+                      {interruptedRun && (
+                        <RunInterruptionMarker run={interruptedRun} author={author} onOpen={openExecutionProcess} />
+                      )}
+                      <MessageActions
+                        timestamp={messageTimestamp}
+                        timeAfter
+                        copied={copied}
+                        className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
+                        onReply={handleReply}
+                        onCopy={handleCopy}
+                        onFork={!snapshot.thread.missionId && campMessage.authorType === 'agent' && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
+                        forkBusy={forkBusy}
+                        onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
+                      />
+                    </div>
+                  )
+                  previousMessageAuthorKey = null
+                  return items
                 }
-                if (anchorWindowBeforeNormal && !historyBoundaryId) {
-                  if (hasAnchorGap) items.push(<div className="camp-history-gap" role="status" key="anchor-history-gap">{uiAttribute('中间消息尚未加载')}</div>)
-                  if (historyLoader) items.push(historyLoader)
-                }
+                items.push(messageElement)
                 return items
-              })()}
+              }}
+              </TimelineVirtualList>
+              {anchorWindowBeforeNormal && !historyBoundaryId && <>
+                {hasAnchorGap && <div className="camp-history-gap" role="status">{uiAttribute('中间消息尚未加载')}</div>}
+                {historyLoader}
+              </>}
               {!missionBoard && conversationTimeline.length === 0 && snapshot.agentRuns.length === 0 && (
                 <EmptyThreadWelcome
                   snapshot={snapshot}

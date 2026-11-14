@@ -2740,6 +2740,14 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .camp-world-map.is-static .camp-world-map-route, .camp-world-map.is-static .camp-world-map-route[data-active], .camp-world-map.is-static .camp-world-map-agent-button::before, .camp-world-map.is-static .camp-world-map-speech, .camp-world-map.is-static .camp-world-map-ambient-encounter { animation: none; transition: none; }
 .camp-world-map.is-static .camp-world-map-agent-button::before { opacity: 0; }
 .timeline-track { position: relative; width: min(790px, 100%); min-height: 100%; margin: 0 auto; }
+.timeline-virtual-list > .timeline-virtual-row { display: flow-root; padding-top: 14px; }
+.timeline-virtual-list > .timeline-virtual-row:has(> :is(.conversation-bubble, .agent-message-output).same-author) { padding-top: 8px; }
+.timeline-virtual-list > .timeline-virtual-row:has(> :is(.public-agent-message, .public-message-output).same-author:not(.is-group-continuation)) { padding-top: 20px; }
+.timeline-virtual-list > .timeline-virtual-row:has(> .conversation-run-presence-tail.has-continuation) { padding-top: 4px; }
+.timeline-virtual-list > .timeline-virtual-row:has(> .timeline-day:first-child) { padding-top: 24px; }
+.timeline-virtual-list > .timeline-virtual-row[data-first="true"] { padding-top: 0; }
+.timeline-virtual-list > .timeline-virtual-row[data-timeline-key] > :first-child { margin-top: 0; }
+.timeline-virtual-list > .timeline-virtual-row[data-timeline-key] > :last-child { margin-bottom: 0; }
 .camp-history-loader {
   display: flex;
   min-height: 36px;
