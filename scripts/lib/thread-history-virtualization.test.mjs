@@ -103,6 +103,7 @@ test('public history bounds mounting and preserves reading, selection, focus and
     await b.send('Input.dispatchKeyEvent', { type:'keyDown', key:'f', code:'KeyF', windowsVirtualKeyCode:70, modifiers: process.platform === 'darwin' ? 4 : 2 })
     await b.send('Input.dispatchKeyEvent', { type:'keyUp', key:'f', code:'KeyF', windowsVirtualKeyCode:70 })
     await b.wait('!!document.querySelector(".conversation-find-surface input")')
+    await click('.conversation-find-surface input')
     await b.send('Input.insertText', { text:'长链回复 321' })
     await b.wait('!!document.querySelector("[data-message-id=long-321].conversation-find-current-message")')
     await pause(350)

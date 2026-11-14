@@ -776,3 +776,17 @@ for (const [sourceId, record] of retries) if (record.status === 'pending')
 const streamingTimer = setInterval(streamTick, 90)
 addEventListener('pagehide', () => clearInterval(streamingTimer), { once: true })
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.playing) halt() })
+// Opt-in native IME acceptance: real production editor, bounded public history,
+// and Run-local events, with no Host, Core, model or user's daily data.
+const historyScale = Number(new URLSearchParams(location.search).get('historyScale'))
+if (Number.isInteger(historyScale) && historyScale >= 20 && historyScale <= 1000) {
+  model.showReplyCase(true, true, false, true, historyScale)
+  model.showNarration('持续执行与中文组合输入检查')
+  let revision = 10_000
+  const nativeStream = setInterval(() => model.emitCoreEvent({ method: 'agent.text.block', params: {
+    threadId: state.snapshot.thread.id, agentRunId: 'run-alice', executionEpoch: 1,
+    evidenceId: 'native-tail', sequence: 10_000, changeSequence: ++revision, revision,
+    payload: { blockId: 'native-tail', status: 'streaming', text: `持续执行与中文组合输入检查 ${revision}` }
+  } }), 32)
+  addEventListener('pagehide', () => clearInterval(nativeStream), { once: true })
+}

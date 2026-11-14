@@ -48,6 +48,14 @@ async function runReplyDetails(t, splittersOnly = false) {
       if (scrollAfterOpen) {
         const point = await b.evaluate(`(() => { const e = document.querySelector('.timeline-scroll'), r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, deltaY: -e.scrollHeight } })()`)
         await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0 })
+        if (scrollAfterOpen !== 'middle') for (let attempt = 0; attempt < 8; attempt++) {
+          await pause(150)
+          if (await b.evaluate('(() => { const e=document.querySelector(".timeline-scroll");return e.scrollHeight-e.clientHeight-e.scrollTop<2 })()')) break
+          // New rows can replace estimated heights as a user scrolls. Continue
+          // native scrolling until the measured tail is reached.
+          const next = await b.evaluate(`(() => {const e=document.querySelector('.timeline-scroll'),r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,deltaY:e.scrollHeight}})()`)
+          await b.send('Input.dispatchMouseEvent', { type:'mouseWheel', ...next, deltaX:0 })
+        }
         await b.wait('!!document.querySelector("[data-message-id=reply-b]") && document.querySelector(".timeline-scroll").scrollTop < 2')
       }
       await click(`[data-message-id=${scrollAfterOpen ? 'reply-b' : 'long-120'}] .reply-parent-quote`)
