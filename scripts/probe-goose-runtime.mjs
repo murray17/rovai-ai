@@ -202,9 +202,23 @@ try{
  const tools=await host.rpc('_goose/unstable/tools/list',{sessionId:session.sessionId})
  console.log(JSON.stringify({tools:tools.tools.map(t=>t.name)}))
  await writeFile(join(fixture,'evidence','tools.json'),JSON.stringify(tools,null,2))
+ await setBootstrap(host,session.sessionId,'ROVAI_GOOSE_BOOTSTRAP_A')
+ checks.questionTools={modes:{}}
+ for(const mode of ['auto','approve','smart_approve']){
+   await host.rpc('session/set_mode',{sessionId:session.sessionId,modeId:mode})
+   const native=await host.rpc('_goose/unstable/tools/list',{sessionId:session.sessionId})
+   const offset=requests.length
+   await prompt(host,session.sessionId,'PROBE_TOOLSET_'+mode)
+   const advertised=[...new Set(requests.slice(offset).flatMap(r=>(r.tools??[]).map(t=>t.function?.name??t.name)))].sort()
+   assert(advertised.length>0,'Inspect the tools actually sent to the Provider')
+   const names=native.tools.map(t=>t.name).sort()
+   const questions=[...names,...advertised].filter(name=>/askuser|requestuserinput|askquestion/.test(name.toLowerCase().replace(/[^a-z0-9]/g,'')))
+   assert.deepEqual(questions,[],mode+' must not advertise ask_user-style tools')
+   checks.questionTools.modes[mode]={native:names,provider:advertised,askUserTools:questions}
+ }
+ await host.rpc('session/set_mode',{sessionId:session.sessionId,modeId:'auto'})
  const inventory=await host.rpc('_goose/unstable/providers/list',{providerIds:['openai']})
  checks.catalog={providers:inventory.entries.map(p=>({id:p.providerId,configured:p.configured,available:p.available,modelCount:p.models.length})),providerOptions:session.configOptions.find(c=>c.id==='provider').options.length}
- await setBootstrap(host,session.sessionId,'ROVAI_GOOSE_BOOTSTRAP_A')
  const first=await prompt(host,session.sessionId,'GOOSE_FIRST_INPUT')
  assert.equal(first.stopReason,'end_turn')
  checks.first={stopReason:first.stopReason,ordinary:checkBootstrap(0,'ROVAI_GOOSE_BOOTSTRAP_A'),auxiliary:requests.filter(r=>!r.tools?.length).length}
@@ -215,12 +229,17 @@ try{
  checks.warm={pid:host.pid,ordinary:checkBootstrap(start,'ROVAI_GOOSE_BOOTSTRAP_B','ROVAI_GOOSE_BOOTSTRAP_A')}
  await host.close()
  const cold=await open()
- await cold.rpc('session/load',{sessionId:session.sessionId,cwd:join(fixture,'workspace'),mcpServers:[]})
+ const replayOffset=frames.length
+ await cold.rpc('session/load',{sessionId:session.sessionId,cwd:join(fixture,'workspace'),mcpServers:[],_meta:{replayTail:1}})
+ const replayText=frames.slice(replayOffset).flatMap(m=>m.params?.update?.content?.text??[]).join('\n')
+ assert(!replayText.includes('GOOSE_FIRST_INPUT'),'Client replay must omit older turns')
  start=requests.length
  await setBootstrap(cold,session.sessionId,'ROVAI_GOOSE_BOOTSTRAP_C')
  const resumed=await prompt(cold,session.sessionId,'GOOSE_COLD_INPUT')
  assert.equal(resumed.stopReason,'end_turn')
  checks.cold={pid:cold.pid,sameSession:session.sessionId,ordinary:checkBootstrap(start,'ROVAI_GOOSE_BOOTSTRAP_C','ROVAI_GOOSE_BOOTSTRAP_B')}
+ assert(requests.slice(start).some(r=>r.tools?.length&&JSON.stringify(r.messages).includes('GOOSE_FIRST_INPUT')),'Trimming client replay must retain native model history')
+ checks.clientReplay={tail:1,oldClientTurnOmitted:true,nativeModelHistoryPreserved:true}
  try{await cold.rpc('session/load',{sessionId:'rovai-does-not-exist',cwd:join(fixture,'workspace'),mcpServers:[]});assert.fail('Missing native Session must fail')}catch(error){assert(error.rpcError);checks.missingSession={code:error.rpcError.code,data:error.rpcError.data}}
  const model=await cold.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'model',value:'gpt-6.1-sol'})
  const effort=model.configOptions.find(c=>c.id==='thinking_effort')

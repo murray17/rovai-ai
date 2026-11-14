@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # 测试与 Smoke Test
@@ -238,6 +238,12 @@ Goose 新接入扩展已有模型目录、数值 parser、权限默认、Skills�
 它不读取其他 Runtime 的认证，不代表真实账号或其他平台资格。失败原始夹具保留，公开结果只导出白名单。
 最小门禁为默认 workspace，及 `--features extended-tests --lib` 的 `grouped_acp_models`、`runtime_parsers`、
 `runtime_catalog_migrations`、`projection_filters_assignment`、`member_permission_defaults` 与 `adapters_declare_their_skill_delivery_groups` owners。
+后续精简扩展已有 `real_acp_session_model_selection_respects_native_adapter_boundaries` 和
+`acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals`：前者验证同选择零 setter、
+模型／Provider／effort／mode 真正改变仍应用及每轮完整 System；后者验证探测成功、选项失败时精确删除，
+没有已知会话 ID 不删除，原生删除拒绝不伪报成功。仍不新增 Rust 测试函数。
+官方原生 probe 验证三模式实际工具集合和客户端回放缩减后模型历史保留；Core smoke 验证探测零残留、
+Skills 管理的用户 `.agents/skills` 读取与原共享生命周期。UI 使用既有 `pnpm test:capability-workspace`。
 
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、

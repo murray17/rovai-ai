@@ -1,7 +1,7 @@
 {
   "recordType": "native-runtime-research",
   "status": "pre-implementation",
-  "observedAt": "2026-11-12T16:42:24+00:00",
+  "observedAt": "2026-11-14T12:21:16.352109+00:00",
   "upstream": {
     "repository": "https://github.com/aaif-goose/goose",
     "version": "1.59.0",
@@ -10,8 +10,8 @@
   },
   "rovai": {
     "branch": "rovai/goose-acp",
-    "base": "c7295e2b0b4667a5434c855cd2dd456bcf637e4c",
-    "implementation": "NotImplemented"
+    "base": "6902e8e8d5ab6478cef131f2b2a7a7915cc2a5b7",
+    "implementation": "Preview"
   },
   "scope": {
     "platform": "macos-arm64",
@@ -27,7 +27,7 @@
       "scripts/fixtures/goose-mcp-elicitation.mjs"
     ]
   },
-  "requestCount": 55,
+  "requestCount": 58,
   "requestCountMeaning": "synthetic Provider requests including auxiliary title, compaction and child calls; not Core Run count",
   "initialize": {
     "protocolVersion": 1,
@@ -97,6 +97,133 @@
       "provider": "synthetic-loopback",
       "qualification": false
     },
+    "questionTools": {
+      "modes": {
+        "auto": {
+          "native": [
+            "analyze",
+            "apps__create_app",
+            "apps__delete_app",
+            "apps__iterate_app",
+            "apps__list_apps",
+            "delegate",
+            "edit",
+            "extensionmanager__list_resources",
+            "extensionmanager__manage_extensions",
+            "extensionmanager__read_resource",
+            "extensionmanager__search_available_extensions",
+            "load",
+            "load_skill",
+            "read_image",
+            "shell",
+            "tree",
+            "write"
+          ],
+          "provider": [
+            "analyze",
+            "apps__create_app",
+            "apps__delete_app",
+            "apps__iterate_app",
+            "apps__list_apps",
+            "delegate",
+            "edit",
+            "extensionmanager__list_resources",
+            "extensionmanager__manage_extensions",
+            "extensionmanager__read_resource",
+            "extensionmanager__search_available_extensions",
+            "load",
+            "load_skill",
+            "read_image",
+            "shell",
+            "tree",
+            "write"
+          ],
+          "askUserTools": []
+        },
+        "approve": {
+          "native": [
+            "analyze",
+            "apps__create_app",
+            "apps__delete_app",
+            "apps__iterate_app",
+            "apps__list_apps",
+            "delegate",
+            "edit",
+            "extensionmanager__list_resources",
+            "extensionmanager__manage_extensions",
+            "extensionmanager__read_resource",
+            "extensionmanager__search_available_extensions",
+            "load",
+            "load_skill",
+            "read_image",
+            "shell",
+            "tree",
+            "write"
+          ],
+          "provider": [
+            "analyze",
+            "apps__create_app",
+            "apps__delete_app",
+            "apps__iterate_app",
+            "apps__list_apps",
+            "delegate",
+            "edit",
+            "extensionmanager__list_resources",
+            "extensionmanager__manage_extensions",
+            "extensionmanager__read_resource",
+            "extensionmanager__search_available_extensions",
+            "load",
+            "load_skill",
+            "read_image",
+            "shell",
+            "tree",
+            "write"
+          ],
+          "askUserTools": []
+        },
+        "smart_approve": {
+          "native": [
+            "analyze",
+            "apps__create_app",
+            "apps__delete_app",
+            "apps__iterate_app",
+            "apps__list_apps",
+            "delegate",
+            "edit",
+            "extensionmanager__list_resources",
+            "extensionmanager__manage_extensions",
+            "extensionmanager__read_resource",
+            "extensionmanager__search_available_extensions",
+            "load",
+            "load_skill",
+            "read_image",
+            "shell",
+            "tree",
+            "write"
+          ],
+          "provider": [
+            "analyze",
+            "apps__create_app",
+            "apps__delete_app",
+            "apps__iterate_app",
+            "apps__list_apps",
+            "delegate",
+            "edit",
+            "extensionmanager__list_resources",
+            "extensionmanager__manage_extensions",
+            "extensionmanager__read_resource",
+            "extensionmanager__search_available_extensions",
+            "load",
+            "load_skill",
+            "read_image",
+            "shell",
+            "tree",
+            "write"
+          ],
+          "askUserTools": []
+        }
+      }
+    },
     "catalog": {
       "providers": [
         {
@@ -110,17 +237,22 @@
     },
     "first": {
       "stopReason": "end_turn",
-      "ordinary": 1,
-      "auxiliary": 1
+      "ordinary": 4,
+      "auxiliary": 3
     },
     "warm": {
-      "pid": 67959,
+      "pid": 50972,
       "ordinary": 1
     },
     "cold": {
-      "pid": 67962,
-      "sameSession": "20261112_1",
+      "pid": 50974,
+      "sameSession": "20261114_1",
       "ordinary": 1
+    },
+    "clientReplay": {
+      "tail": 1,
+      "oldClientTurnOmitted": true,
+      "nativeModelHistoryPreserved": true
     },
     "missingSession": {
       "code": -32002,
@@ -143,25 +275,25 @@
       "verbatim": true
     },
     "steer": {
-      "receiptMs": 0.17195800000001782,
+      "receiptMs": 0.21095800000000509,
       "receiptBeforeCompletion": true,
       "messageIds": [
-        "steer_7b1f3bf7-8616-4ccf-bc3e-30d2ac297844",
-        "steer_93165eef-ac57-42fd-9473-5595b18ca9cb"
+        "steer_fd4c2b50-af62-48cf-9210-9bc43cf09a42",
+        "steer_347db32d-6c38-4219-911d-c0c5618ee3cb"
       ],
       "wrongRunRejected": true,
       "stopReason": "end_turn"
     },
     "cancel": {
-      "ms": 2.580500000000029,
+      "ms": 3.5819589999999835,
       "stopReason": "cancelled",
-      "samePidSuccessor": 67962,
+      "samePidSuccessor": 50974,
       "next": "end_turn"
     },
     "files": {
       "calls": [
         {
-          "id": "goose_call_13",
+          "id": "goose_call_16",
           "title": "write · 测试 空格.txt",
           "rawOutputKeys": [],
           "metaKeys": [
@@ -169,7 +301,7 @@
           ]
         },
         {
-          "id": "goose_call_13",
+          "id": "goose_call_16",
           "status": "completed",
           "contentTypes": [
             "content"
@@ -178,7 +310,7 @@
           "metaKeys": []
         },
         {
-          "id": "goose_call_14",
+          "id": "goose_call_17",
           "title": "shell · cat '测试 空格.txt'",
           "rawOutputKeys": [],
           "metaKeys": [
@@ -186,7 +318,7 @@
           ]
         },
         {
-          "id": "goose_call_14",
+          "id": "goose_call_17",
           "status": "in_progress",
           "rawOutputKeys": [],
           "metaKeys": [
@@ -194,7 +326,15 @@
           ]
         },
         {
-          "id": "goose_call_14",
+          "id": "goose_call_17",
+          "status": "in_progress",
+          "rawOutputKeys": [],
+          "metaKeys": [
+            "toolNotification"
+          ]
+        },
+        {
+          "id": "goose_call_17",
           "status": "completed",
           "contentTypes": [
             "content"
@@ -207,7 +347,7 @@
           "metaKeys": []
         },
         {
-          "id": "goose_call_15",
+          "id": "goose_call_18",
           "title": "edit · 测试 空格.txt",
           "rawOutputKeys": [],
           "metaKeys": [
@@ -215,7 +355,7 @@
           ]
         },
         {
-          "id": "goose_call_15",
+          "id": "goose_call_18",
           "status": "completed",
           "contentTypes": [
             "content"
@@ -226,6 +366,9 @@
       ]
     },
     "shell": [
+      {
+        "status": "in_progress"
+      },
       {
         "status": "failed",
         "rawOutput": {
@@ -272,7 +415,7 @@
       "childInheritsParentBootstrap": false,
       "updates": [
         {
-          "id": "goose_call_33",
+          "id": "goose_call_36",
           "status": "completed"
         }
       ]
@@ -280,7 +423,7 @@
     "delegateCancel": {
       "stopReason": "cancelled",
       "childProviderDisconnectedBeforeRelease": true,
-      "samePidSuccessor": 67962,
+      "samePidSuccessor": 50974,
       "next": "end_turn"
     },
     "automaticCompaction": {
@@ -297,7 +440,7 @@
       "stopReason": "end_turn"
     },
     "coldAfterCompaction": {
-      "sameSession": "20261112_1",
+      "sameSession": "20261114_1",
       "bootstrapPreserved": true
     },
     "mcp": {
@@ -319,7 +462,7 @@
         "cost": 2.625e-05,
         "costSource": "estimated",
         "elapsedMs": 3,
-        "timeToFirstTokenMs": 3,
+        "timeToFirstTokenMs": 2,
         "isCompaction": false
       },
       "cumulativeIncludesCompaction": true,
@@ -344,9 +487,9 @@
       "sessionUpdate": "usage_update",
       "used": 120,
       "contextLimit": 128000,
-      "accumulatedInputTokens": 123800,
-      "accumulatedOutputTokens": 780,
-      "accumulatedCost": 0.0193635
+      "accumulatedInputTokens": 124100,
+      "accumulatedOutputTokens": 840,
+      "accumulatedCost": 0.019442249999999998
     }
   },
   "limitations": [

@@ -2,7 +2,7 @@
 document_type: research-record
 authority: non-normative-runtime-evidence
 status: native-research
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # Goose 官方 ACP 研究与原生探测
@@ -10,6 +10,9 @@ last_updated: 2026-11-13
 结论：可以沿共享 ACP/Fleet 接入，推荐入口是官方 `goose acp`。
 Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收回执和逐消息／累计用量通知，
 这三处可以比 Kilo 更薄。MCP 恢复的追加语义、write 缺少完整前像、压缩用量范围是必须正面处理的差异。
+
+2026-11-14 在相同官方版本复跑 58 次受控 Provider 请求，补充三模式工具集合和客户端回放缩减验证；
+没有真实账号调用或平台资格提升，当前事实以更新的白名单和实施记录为准。
 
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。

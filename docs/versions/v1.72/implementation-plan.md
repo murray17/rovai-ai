@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # v1.72 实施与验收
@@ -28,6 +28,9 @@ last_updated: 2026-11-13
 - 九范围：Version lifecycle 保持 v1.72；Documentation routing 增加研究/提案入口；
   Decisions、Contracts、Architecture、Runtime compatibility、UI 与 Runtime Activity 同步当前 Goose 语义；Root README 无需复制具体产品矩阵。
   当前版本已有 model_context_change=true；Goose 的独立说明记录真实 User 确认，不增加 gate 例外。
+
+User sequence 123 后续精简及验收归[同一实施记录](goose-acp-implementation.md#用户复核后的精简2026-11-14)；
+当前原生复跑 58 次受控请求，新增模式工具集合和客户端回放边界，不从原生探测推导完整产品资格。
 
 ## 通用提示与分叉反馈（2026-11-12）
 

@@ -99,7 +99,12 @@ Object.assign(window, {
         }
       }
       if (method === 'nativeSkills.list') {
-        const result = { skills: structuredClone(nativeSkills), diagnostics: structuredClone(nativeDiagnostics) }
+        const skills = params.adapterKind === 'goose-cli' ? nativeSkills.map(skill => ({
+          ...skill, adapterKind: 'goose-cli',
+          entryPath: `/fixture/home/.agents/skills/${skill.name}/SKILL.md`,
+          canonicalPath: `/fixture/home/.agents/skills/${skill.name}/SKILL.md`
+        })) : structuredClone(nativeSkills)
+        const result = { skills, diagnostics: structuredClone(nativeDiagnostics) }
         const hold = nativeListHold
         nativeListHold = null
         if (hold) await hold.wait

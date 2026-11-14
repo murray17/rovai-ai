@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-11-13
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v90](../contracts/runtime-launch-and-verification-v90.md)。实测版本和能力只由
+[Runtime Launch and Verification v91](../contracts/runtime-launch-and-verification-v91.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 原生提问边界
@@ -73,10 +73,12 @@ Goose 以完整官方 `goose acp` 加入独立产品身份，复用共享 ACP、
 原生子代理和摘要拥有自己的 System，不额外复制父身份；原生 write/edit 无完整前像，不伪造 Diff。
 
 模型目录读官方 Provider inventory，`thinking_effort` 沿共享目标模型按需查询；不增加全量模型扫描。
+相同原生选项复用已有会话快照，省略重复 setter；恢复默认仍交由原生解析。探测会话在原期限内精确删除，
+冷恢复仅缩减客户端回放，不截断模型历史。MCP 撤回核对只在恢复入口进行，正常兼容复用不重复查询。
 MCP 撤回使用稳定分配名及原生 extension 移除，保存不主动停止 Host；不同 cwd 复用 bundled Rovai 入口。
 用量从原生累计通知建立派发前基线，逐消息只补 cache，不增加数据库轮询。
 原生权限模式、认证和配置仍由 Goose 解析。精确字段、Preview 与已接受差异见
-[Runtime Launch v90](../contracts/runtime-launch-and-verification-v90.md)。
+[Runtime Launch v91](../contracts/runtime-launch-and-verification-v91.md)。
 
 ## Kilo 官方 ACP
 
@@ -313,7 +315,7 @@ Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统�
 取消、协议/进程故障、配置变化、空闲回收和正常关闭保持。新进程沿原入口和 Session 接续，安装版本不改写运行版本。
 Pi 采用相同规则，不预置升级退役例外；真实原地升级证据按当前版本实施记录维护。
 Hermes 共享 Gateway 不在本功能管理范围。自动失败只记日志，手动等待同一读取仍收到具体错误。
-精确来源、顺序及失败边界见 [Runtime Launch v90](../contracts/runtime-launch-and-verification-v90.md)。
+精确来源、顺序及失败边界见 [Runtime Launch v91](../contracts/runtime-launch-and-verification-v91.md)。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。

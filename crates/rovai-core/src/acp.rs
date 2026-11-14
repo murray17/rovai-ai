@@ -2345,6 +2345,17 @@ impl AcpHost {
                                     &message["params"],
                                 );
                             }
+                            if message["method"] == "session/update"
+                                && message["params"]["update"]["sessionUpdate"]
+                                    == "config_option_update"
+                                && message["params"]["update"]["configOptions"].is_array()
+                                && let Some(session) = message["params"]["sessionId"].as_str()
+                                && let Some(result) =
+                                    host.session_results.write().await.get_mut(session)
+                            {
+                                result["configOptions"] =
+                                    message["params"]["update"]["configOptions"].clone();
+                            }
                         }
                         if host.adapter_kind == AdapterKind::DeepseekHarness
                             && let Some(root) = host.private_config_root.as_deref()
@@ -5446,6 +5457,10 @@ impl AcpRuntime {
                         ) {
                             params["additionalDirectories"] = json!(additional_directories);
                         }
+                        if self.host.adapter_kind == AdapterKind::GooseCli {
+                            // Only trim client replay. Goose retains its full native conversation.
+                            params["_meta"]["replayTail"] = json!(1);
+                        }
                         params
                     };
                     match self
@@ -5706,7 +5721,14 @@ impl AcpRuntime {
                 .await?;
         }
         if self.host.adapter_kind == AdapterKind::GooseCli {
-            self.host.rpc("session/set_mode",json!({"sessionId":session_id,"modeId":self.session_permissions.mode.as_deref().context("Goose native mode missing")?})).await?;
+            let mode = self
+                .session_permissions
+                .mode
+                .as_deref()
+                .context("Goose native mode missing")?;
+            self.set_config_option(&session_id, "mode", mode).await?;
+        }
+        if self.host.adapter_kind == AdapterKind::GooseCli && restore_method.is_some() {
             let extensions = self
                 .host
                 .rpc(
@@ -5897,6 +5919,20 @@ impl AcpRuntime {
         config_id: &str,
         value: &str,
     ) -> Result<()> {
+        // Goose setters can rebuild Providers and persist unchanged selections.
+        // The default alias must still resolve current native configuration.
+        if self.adapter_kind() == AdapterKind::GooseCli
+            && !(config_id == "provider" && value == "goose")
+            && self
+                .session_result
+                .read()
+                .await
+                .as_ref()
+                .and_then(|session| crate::goose::selected_option(session, config_id))
+                == Some(value)
+        {
+            return Ok(());
+        }
         let result = self
             .host
             .rpc(
@@ -5912,14 +5948,17 @@ impl AcpRuntime {
         // Successful native replies need not repeat the catalog or selected value.
         // Consume any returned option state without turning missing metadata into
         // an execution failure.
-        if let Some(options) = result.get("configOptions").filter(|value| value.is_array()) {
+        let options = result.get("configOptions").filter(|value| value.is_array());
+        if options.is_some() || self.adapter_kind() == AdapterKind::GooseCli {
             let mut selected = self
                 .session_result
                 .read()
                 .await
                 .clone()
                 .unwrap_or_else(|| json!({}));
-            selected["configOptions"] = options.clone();
+            // A Goose Provider/model change can reset other options. Without
+            // a new snapshot they are unknown, never grounds for skipping.
+            selected["configOptions"] = options.cloned().unwrap_or(Value::Null);
             *self.session_result.write().await = Some(selected.clone());
             self.host
                 .remember_session(session_id, Some(&selected))
@@ -15429,6 +15468,152 @@ for line in sys.stdin:
                 std::fs::remove_dir_all(root).unwrap();
             }
         }
+
+        // Reuse the live model owner to prove unchanged Goose selections cause
+        // no native setters, while a changed model/effort still reaches native.
+        let root =
+            std::env::temp_dir().join(format!("rovai-goose-selection-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("goose");
+        let log = root.join("requests");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/usr/bin/python3
+import json, sys
+options = dict(provider='native', model='model-a', thinking_effort='high', mode='auto')
+for line in sys.stdin:
+    request = json.loads(line)
+    with open({log:?}, 'a') as out: out.write(json.dumps(request) + '\n')
+    method, params = request['method'], request.get('params', {{}})
+    result = {{}}
+    if method == 'initialize': result = {{'protocolVersion':1,'agentCapabilities':{{}}}}
+    elif method == 'session/set_config_option':
+        options[params['configId']] = params['value']
+        if params['configId'] == 'model': options['thinking_effort'] = 'off'
+    if method in ('session/new', 'session/set_config_option'):
+        result = {{'sessionId':'goose-selection','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
+    if method == 'session/set_config_option' and params.get('value') == 'model-no-echo': result = {{}}
+    print(json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)), flush=True)
+"#,
+                log = log.to_string_lossy()
+            ),
+        );
+        let mut frozen = frozen_trae_runtime(&executable);
+        frozen.adapter_kind = AdapterKind::GooseCli;
+        frozen.permissions.adapter_kind = AdapterKind::GooseCli;
+        frozen.permissions.values = json!({"mode":"auto"});
+        let workspace =
+            AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(exact_builtin_tools(&root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        for (epoch, target, mode, expected) in [
+            (1, "native/model-a", "auto", vec![]),
+            (2, "native/model-a", "auto", vec![]),
+            (
+                3,
+                "native/model-b",
+                "auto",
+                vec!["model", "thinking_effort"],
+            ),
+            (4, "native/model-b", "auto", vec![]),
+            (5, "native/model-b", "approve", vec!["mode"]),
+            (6, "native/model-b", "approve", vec![]),
+            (
+                7,
+                "second/model-c",
+                "approve",
+                vec!["provider", "model", "thinking_effort"],
+            ),
+            (8, "second/model-c", "approve", vec![]),
+            (
+                9,
+                "second/model-no-echo",
+                "approve",
+                vec!["model", "thinking_effort"],
+            ),
+            (10, "second/model-no-echo", "approve", vec![]),
+        ] {
+            let before = std::fs::read_to_string(&log).unwrap().lines().count();
+            let runtime = AcpRuntime::from_test_host(
+                AcpRuntimeOwner {
+                    agent_run_id: format!("goose-run-{epoch}"),
+                    execution_epoch: epoch,
+                },
+                host.clone(),
+                "compat".into(),
+                "mcp".into(),
+                root.clone(),
+                Some(exact_attachment_root(&root)),
+                "runtime_managed".into(),
+                AcpSessionPermissions {
+                    mode: Some(mode.into()),
+                    ..Default::default()
+                },
+                None,
+            );
+            let session = runtime
+                .start_or_resume_session(
+                    (epoch > 1).then_some("goose-selection"),
+                    AcpSessionCapabilities {
+                        can_resume: false,
+                        can_load_history: true,
+                    },
+                    "explicit",
+                    target,
+                    &json!({"thinking_effort":"high"}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap();
+            runtime
+                .bind_managed_bootstrap(&session, "COMPLETE_SYSTEM")
+                .await
+                .unwrap();
+            host.rpc("audit/barrier", json!({})).await.unwrap();
+            let requests: Vec<Value> = std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .skip(before)
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let setters: Vec<_> = requests
+                .iter()
+                .filter(|r| r["method"] == "session/set_config_option")
+                .map(|r| r["params"]["configId"].as_str().unwrap())
+                .collect();
+            assert_eq!(setters, expected, "Goose round {epoch}");
+            assert!(
+                !requests
+                    .iter()
+                    .any(|r| r["method"] == "_goose/unstable/session/extensions/list")
+            );
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|r| r["method"] == "_goose/unstable/session/system-prompt/set")
+                    .count(),
+                1
+            );
+            host.unbind_session(&session, &runtime.owner).await;
+        }
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

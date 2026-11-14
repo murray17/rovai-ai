@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "date": "2026-11-13",
+  "date": "2026-11-14",
   "runtime": "goose-cli",
   "officialVersion": "1.59.0",
   "upstreamCommit": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
@@ -9,13 +9,13 @@
   "qualification": false,
   "productStage": "Preview",
   "coreRuns": {
-    "cancelled": 1,
-    "succeeded": 18
+    "succeeded": 18,
+    "cancelled": 1
   },
   "providerRequests": 53,
   "bootstrap": {
     "nativeKey": "rovai-session-bootstrap",
-    "bytes": 2818,
+    "bytes": 2801,
     "verbatim": true,
     "dynamicOnly": true
   },
@@ -124,5 +124,12 @@
   "reproduction": {
     "native": "scripts/probe-goose-runtime.mjs",
     "core": "scripts/smoke-goose-runtime.mjs"
+  },
+  "skillsManagement": {
+    "userAgentsDiscovered": true,
+    "previewRead": true
+  },
+  "probeSessions": {
+    "remaining": 0
   }
 }

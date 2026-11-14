@@ -191,16 +191,20 @@ pub(crate) fn model_route(id: &str) -> Result<(&str, &str)> {
     Ok((provider, model))
 }
 
+pub(crate) fn selected_option<'a>(session: &'a Value, id: &str) -> Option<&'a str> {
+    session["configOptions"]
+        .as_array()?
+        .iter()
+        .find(|option| option["id"] == id)?["currentValue"]
+        .as_str()
+}
+
 pub(crate) fn current_model(session: &Value) -> Option<String> {
-    let options = session["configOptions"].as_array()?;
-    let value = |id| {
-        options
-            .iter()
-            .find(|o| o["id"] == id)?
-            .get("currentValue")?
-            .as_str()
-    };
-    Some(format!("{}/{}", value("provider")?, value("model")?))
+    Some(format!(
+        "{}/{}",
+        selected_option(session, "provider")?,
+        selected_option(session, "model")?
+    ))
 }
 
 pub(crate) fn model_catalog(inventory: &Value, session: &Value) -> Result<Vec<ModelDescriptor>> {

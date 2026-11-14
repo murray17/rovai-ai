@@ -22,6 +22,9 @@ for(const part of ['home','project','core','config','data','cache','state','evid
 const project=join(root,'project'),data=join(root,'core'),binaries=join(root,'bundled tools')
 for(const name of ['rovai-core','rovai'])await copyFile(join(repo,'target/debug',name),join(binaries,name))
 execFileSync('git',['init','--quiet',project])
+const userSkill=join(root,'home','.agents','skills','rovai-goose-user-probe')
+await mkdir(userSkill,{recursive:true})
+await writeFile(join(userSkill,'SKILL.md'),'---\nname: rovai-goose-user-probe\ndescription: Goose Skills management acceptance\n---\nGOOSE_USER_AGENTS_SKILL\n')
 const calls=[],events=[],result={root,platform:process.platform+'-'+process.arch,provider:'synthetic-loopback',checks:{}}
 let gate,approvalDecision='allow_once',compactInjected=false,overflowInjected=false,newLease
 function hold(marker){let enter,release;const entered=new Promise(r=>enter=r),wait=new Promise(r=>release=r);return gate={marker,enter,entered,release,wait,held:false}}
@@ -155,12 +158,24 @@ try{
  console.log(JSON.stringify({channel:'automatic-acceptance',root,dataDir:data,skillRoot:join(data,'managed-skill-library'),project}))
  core=await openCore();await core.request('health.check')
  await configureProductRuntime(core.request.bind(core),'goose-cli',['agent_2'])
+ const managedSkills=await core.request('nativeSkills.list',{adapterKind:'goose-cli',refresh:true})
+ const managedSkill=managedSkills.skills.find(s=>s.name==='rovai-goose-user-probe')
+ assert(managedSkill?.entryPath.includes('/.agents/skills/'),'Skills management must discover Goose user .agents/skills')
+ const managedBody=await core.request('nativeSkills.read',{skillId:managedSkill.id,path:'SKILL.md'})
+ assert(managedBody.content.includes('GOOSE_USER_AGENTS_SKILL'))
+ result.checks.skillsManagement={userAgentsDiscovered:true,previewRead:true}
  await setMember()
  const offset=calls.length
  const catalog=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',waitForRefresh:true})
  assert.equal(catalog.cache.status,'fresh',JSON.stringify(catalog))
  assert(catalog.models.some(m=>m.id==='openai/gpt-6.1-sol'))
  assert.equal(calls.length,offset,'Model discovery must not generate a response')
+ const nativeProbeRows=()=>{
+  const db=new DatabaseSync(join(root,'goose-root','data','sessions','sessions.db'),{readOnly:true})
+  try{return db.prepare("SELECT count(*) AS n FROM sessions WHERE instr(working_dir,'/rovai-acp-probe-')>0").get().n}finally{db.close()}
+ }
+ assert.equal(nativeProbeRows(),0,'Catalog/health probes must not leave native Sessions')
+ result.checks.probeSessions={remaining:0}
  result.checks.catalog={models:catalog.models.map(m=>({id:m.id,options:m.options})),modelCalls:0}
  const workspace=await core.request('workspaces.inspect',{path:project})
  const first=await createConfiguredCampAndSend(core.request.bind(core),{commandId:crypto.randomUUID(),workspace,memberAgentIds:['agent_2'],defaultLeadAgentId:'agent_2',address:{mode:'explicit',agentIds:['agent_2']},body:'CORE_GOOSE_FIRST',purpose:'Goose native integration'})
@@ -211,6 +226,7 @@ try{
  const targetModel=target.models.find(m=>m.id==='openai/gpt-6.1-sol')
  assert.equal(targetModel.runtimeMetadata.modelOptionsResolved,true,JSON.stringify(target))
  assert(targetModel.options.some(o=>o.key==='thinking_effort'&&o.values.some(v=>v.value==='high')))
+ assert.equal(nativeProbeRows(),0,'Target-model option probes must delete their native Sessions too')
  await setMember('openai/gpt-6.1-sol',{thinking_effort:'high'})
  const reasoningOffset=calls.length
  await settle(await send('CORE_GOOSE_REASONING'))
@@ -298,6 +314,7 @@ try{
  assert.notEqual(cold.started.hostInstanceId,b.started.hostInstanceId)
  assert.equal(cold.started.nativeThreadId,b.started.nativeThreadId,'Cold restore must load the exact native Session')
  result.checks.cold={sameSession:true,newHost:true}
+ assert.equal(nativeProbeRows(),0,'Probe Sessions must remain absent after exact cold recovery')
  result.checks.files={writeAndEdit:true,fullDiff:'unsupported-native-metadata'}
  await writeFile(join(root,'evidence','core-events.json'),JSON.stringify(events,null,2))
  await writeFile(join(root,'evidence','checks.json'),JSON.stringify(result,null,2))

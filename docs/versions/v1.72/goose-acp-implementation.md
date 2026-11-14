@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 status: preview
-last_updated: 2026-11-13
+last_updated: 2026-11-14
 ---
 
 # Goose 官方 ACP 接入
@@ -10,7 +10,7 @@ last_updated: 2026-11-13
 已确认 [R1](model-context-change-goose-acp.md) 后，在 `rovai/goose-acp` 独立 worktree 实施。
 研究起点为 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并
 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`，不修改主 checkout。
-当前合同为 [Runtime Launch v90](../../contracts/runtime-launch-and-verification-v90.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
+当前合同为 [Runtime Launch v91](../../contracts/runtime-launch-and-verification-v91.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
 
 ## 基线差异和共享入口
 
@@ -22,7 +22,7 @@ last_updated: 2026-11-13
 | 插话 | 原生活动 Run ID 先确认初始接收，原生 steer 的 runId/messageId 确认补充输入；成功不强制退役 |
 | 取消 | 共享 2s interrupt / 2.5s flush / 3s 非 Windows 总期限；确认收尾后走原 Reusable，异常沿原回收 |
 | 模型 | 原生 Provider inventory；Provider/Model 不透明路由；`thinking_effort` 按需查询，沿既有表单及历史展示 |
-| 权限 | 原生 auto/approve/smart_approve 与原始审批选项；默认 auto，经原生 `set_mode` 生效，不建第二权限求值器 |
+| 权限 | 原生 auto/approve/smart_approve 与原始审批选项；默认 auto，经原生 mode 选项生效，不建第二权限求值器 |
 | MCP | 保存不清理；冻结前形成稳定 owned 名；load 后、prompt 前原生 list/remove 撤回旧分配，保留用户扩展 |
 | cwd | 不同 cwd 的 stdio 使用已有 bundled Rovai launcher；Node 仅为测试 MCP 明确指定的程序 |
 | 工具 | 原生稳定 toolName 映射共享文件、命令及子代理展示；write/edit 无完整前像时不生成 Diff |
@@ -87,10 +87,47 @@ Rust 扩展现有 owner，不新增测试函数：模型路由/选项、权限�
 避免只看结果成功而漏掉生命周期/数值边界。
 完整命令结果和最终白名单另记于验收结果；先前失败不当成通过，也不扩展为跨平台资格。
 
+## 用户复核后的精简（2026-11-14）
+
+User sequence 123 要求能收窄的请求、存储和文件创建都收窄；基线为 `6902e8e8d5`。
+当前增量合同为 [Runtime Launch v91](../../contracts/runtime-launch-and-verification-v91.md)，
+不改 B/P 正文、选择或投递位置，不截断模型会话历史，R1 和各模型输入版本轴保持不变。
+
+| 原行为 | 收窄后 |
+| --- | --- |
+| 相同显式配置仍设置 Provider/model/effort | 复用已报告选项，相同值省略；未知仍设置，恢复原生默认仍重新解析 |
+| 原生模式单独调用并维护选择状态 | 使用同一原生 mode 选项接口及既有会话快照，无第二份状态 |
+| 每轮 extensions/list | 只在精确恢复后撤回旧分配；正常兼容复用不查询，新 Session 不查旧项 |
+| 冷恢复向客户端回放全部历史 | 原生 replayTail=1，只减少客户端回放；模型仍拿完整原生会话 |
+| 探测创建会话后只停止进程 | 在同一绝对期限内精确 session/delete；选项失败仍清理，删除拒绝如实失败 |
+
+官方 1.59.0 的原生列表与实际 Provider 请求分别观察 auto/approve/smart_approve：每种均为 17 项，
+没有 ask_user、AskUserQuestion 或 request_user_input 类工具。MCP 表单仍由原生返回 cancel，后继任务可继续；
+不新增问卷 UI、工具猜测过滤器或原生权限覆盖。
+
+Skills 管理实际走 nativeSkills.list/read，Core 已验证用户 `~/.agents/skills` 发现与正文读取；
+生产 NativeSkillsSettings 的隔离 Electron 夹具验证选择 Goose 后路径与预览，复用原组件、不新增产品控件。
+这不提升完整 Skills Assignment／跨平台矩阵的验证标签。
+
+没有新 instructions、权限插件、MCP 配置副本、数据库 reader 或常驻服务。
+共享 CLI context、Run tmp、MCP 冻结快照仍按既有生命周期管理，官方会话库／模型缓存／最近 10 份请求日志仍存在；
+不声称零写盘，不新增文件旁路删除器。
+
+扩展原有 live-model owner 的第一版夹具漏掉轮间解绑，被共享归属检查拒绝；
+补齐夹具的原解绑步骤后通过，没有放松生产隔离断言。协议、Core 与 UI 原始结果保留在隔离验收目录，
+公开证据仅导出固定白名单。
+
+本轮定向结果：官方原生 58 次受控请求、Core 18 成功／1 取消通过，目录与选项探测原生会话均为零残留；
+原 live-model／健康探测 owners、`pnpm test:capability-workspace` 与 `pnpm typecheck` 通过。
+既有 UI 夹具在 Goose 下显示 `.agents/skills` 路径和正文；没有修改生产 Renderer。
+新增 Rust 测试函数为零，没有改变共享恢复隔离、取消期限或 CLI lease 规则。
+本轮 workspace 复跑：438 Core lib、31 CLI、4 host、11 web 通过，保留原有 1 ignored；
+文档三项通用门禁通过，差异门禁同时使用本轮基线和分支实施基线。
+
 ## 最终选定验收
 
 [Core 白名单证据](../../research/goose-runtime/core-smoke-1.59.0-macos-arm64.json)记录 **18 个成功 Run、1 个取消 Run**。
-原生探针独立复跑 55 次合成 Provider 请求；二者不混加为真实付费 Run 数。
+原生探针在本次精简复跑 58 次合成 Provider 请求（新增三模式工具集合观察）；二者不混加为真实付费 Run 数。
 同样两个模型调用的首轮/Warm 均为 input 200、output 40、cache-read 20，原生估算费用一致；
 缺失 cache-write 保持 null，Context Gauge 独立进入监控。
 仅将已知 Session 费用快照保留为下一轮基线，原生费用缺失事件仍保持 unobserved。

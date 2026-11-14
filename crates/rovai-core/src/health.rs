@@ -2190,7 +2190,8 @@ async fn run_acp_probe_with_scope(
     }
     // Probe the same native Home/configuration as a formal AgentRun. Only the
     // working directory and its additive configuration belong to this probe;
-    // native initialization may persist state, which is not ours to remove.
+    // Native initialization may persist state. Only the exact Goose Session
+    // created by this probe is deleted before the process exits.
     command.current_dir(&probe_root).stdin(Stdio::piped());
     let mut process = RuntimeProbeProcess::spawn_with_purpose(
         &mut command,
@@ -2203,13 +2204,15 @@ async fn run_acp_probe_with_scope(
         },
     )
     .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
-    let deadline = Duration::from_secs(if kind == AdapterKind::HermesCli {
-        90
-    } else {
-        30
-    });
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(if kind == AdapterKind::HermesCli {
+            90
+        } else {
+            30
+        });
     let result = {
         let (stdin, lines) = process.split_io()?;
+        let mut goose_probe_session = None;
         let exchange = async {
             let model_preparation = if kind == AdapterKind::DeepseekHarness {
                 let prepared = crate::dsh::await_model_preparation(&probe_root).await?;
@@ -2335,6 +2338,15 @@ async fn run_acp_probe_with_scope(
             )
             .await?;
             let mut session = read_rpc_result(lines, session_request_id).await?;
+            if kind == AdapterKind::GooseCli {
+                goose_probe_session = Some(
+                    session["sessionId"]
+                        .as_str()
+                        .filter(|id| !id.is_empty())
+                        .context("Goose probe Session ID missing")?
+                        .to_owned(),
+                );
+            }
             if let Some(preparation) = &model_preparation {
                 if !crate::dsh::model_inputs_unchanged(preparation) {
                     bail!("dsh_model_configuration_changed_during_preparation");
@@ -2440,9 +2452,25 @@ async fn run_acp_probe_with_scope(
                 .context("ACP session/new did not return sessionId")?;
             Ok((initialize, Some(session)))
         };
-        match timeout(deadline, exchange).await {
+        let result = match tokio::time::timeout_at(deadline, exchange).await {
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!("ACP probe timed out")),
+        };
+        if let Some(session) = goose_probe_session {
+            let cleanup = tokio::time::timeout_at(deadline, async {
+                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":99,"method":"session/delete","params":{"sessionId":session}})).await?;
+                read_rpc_result(lines, 99).await?;
+                Ok::<_, anyhow::Error>(())
+            }).await.context("Goose probe Session cleanup timed out").and_then(|result| result);
+            match (result, cleanup) {
+                (result, Ok(())) => result,
+                (Ok(_), Err(error)) => Err(error.context("Goose probe Session cleanup failed")),
+                (Err(error), Err(cleanup)) => {
+                    Err(error.context(format!("Goose probe Session cleanup failed: {cleanup:#}")))
+                }
+            }
+        } else {
+            result
         }
     };
     let stderr = match process.finish().await {
@@ -4994,6 +5022,61 @@ while IFS= read -r ignored; do :; done
     #[cfg(unix)]
     #[tokio::test]
     async fn acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals() {
+        for case in ["ok", "target_error", "delete_error", "session_error"] {
+            let root = env::temp_dir().join(format!(
+                "rovai-goose-probe-cleanup-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let _cleanup = ProbeRootCleanup(root.clone());
+            let executable = root.join("goose");
+            let log = root.join("requests");
+            std::fs::write(&executable, format!(r#"#!/usr/bin/python3
+import json, sys
+case = {case:?}
+for line in sys.stdin:
+    request = json.loads(line)
+    with open({log:?}, 'a') as out: out.write(json.dumps(request) + '\n')
+    method = request['method']
+    result = {{'protocolVersion':1}} if method == 'initialize' else {{}}
+    if method == 'session/new': result = {{'sessionId':'goose-probe-only','configOptions':[]}}
+    if method == '_goose/unstable/providers/list': result = {{'entries':[]}}
+    response = {{'jsonrpc':'2.0','id':request['id'],'result':result}}
+    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('delete_error','session/delete')]:
+        response = {{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32602,'message':case}}}}
+    print(json.dumps(response), flush=True)
+"#, log=log.to_string_lossy())).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let result = run_acp_probe_with_scope(
+                &executable,
+                AdapterKind::GooseCli,
+                true,
+                RuntimeLaunchPurpose::HealthProbe,
+                true,
+                (case == "target_error").then_some(("missing/model", None)),
+                Some("1.59.0"),
+            )
+            .await;
+            assert_eq!(result.is_ok(), case == "ok", "{case}: {result:?}");
+            let requests: Vec<Value> = std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            assert!(!requests.iter().any(|r| r["method"] == "session/prompt"));
+            let removed: Vec<_> = requests
+                .iter()
+                .filter(|r| r["method"] == "session/delete")
+                .collect();
+            assert_eq!(
+                removed.len(),
+                usize::from(case != "session_error"),
+                "{case}"
+            );
+            if let Some(request) = removed.first() {
+                assert_eq!(request["params"]["sessionId"], "goose-probe-only");
+            }
+        }
         for kind in [
             AdapterKind::GrokBuild,
             AdapterKind::KiroCli,
