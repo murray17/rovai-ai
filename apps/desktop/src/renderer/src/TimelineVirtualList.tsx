@@ -16,9 +16,12 @@ const readingSurface = (row: HTMLElement): HTMLElement => row.matches('[data-mes
 const selectionTouches = (element: HTMLElement, selection: Selection | null): boolean => {
   if (!selection) return false
   if (element.contains(selection.anchorNode) || element.contains(selection.focusNode)) return true
-  // A selection can cross the history with both endpoints outside it.
-  if (!selection.isCollapsed) for (let index = 0; index < selection.rangeCount; index++) {
-    if (selection.getRangeAt(index).intersectsNode(element)) return true
+  // A selection can cross the history with both endpoints outside it. Read
+  // DOM range boundaries here: Selection.isCollapsed can reconcile layout,
+  // even for a composer caret whose history ownership never changed.
+  for (let index = 0; index < selection.rangeCount; index++) {
+    const range = selection.getRangeAt(index)
+    if (!range.collapsed && range.intersectsNode(element)) return true
   }
   return false
 }
@@ -133,7 +136,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     }
     const selection = document.getSelection()
     interaction.current = { selection: selectionTouches(element, selection), focus: element.contains(document.activeElement) }
-    if (selection && !selection.isCollapsed) {
+    if (interaction.current.selection && selection && !selection.isCollapsed) {
       const first = indexesById.get(owner(selection.anchorNode) ?? ''), last = indexesById.get(owner(selection.focusNode) ?? '')
       if (first !== undefined && last !== undefined) for (let index = Math.min(first, last); index <= Math.max(first, last); index++) pinned.add(items[index].id)
       else for (const node of [selection.anchorNode, selection.focusNode]) { const key = owner(node); if (key) pinned.add(key) }

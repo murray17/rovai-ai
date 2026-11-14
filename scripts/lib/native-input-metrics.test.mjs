@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { nativeTimingCoverage, summarizeNativeKeys } from './native-input-metrics.mjs'
+import { nativeTimingCoverage, summarizeNativeKeys, summarizeNativePlainRound } from './native-input-metrics.mjs'
 
 const timing = (start, duration) => ({ start, duration, processingStart: start + 1, processingEnd: start + 2 })
 test('an unmatched slow key cannot lower the full-sample percentiles', () => {
@@ -64,4 +64,15 @@ test('verified coverage cannot turn ambiguous or reused timing into a censored s
   assert.equal(ambiguous.unknown, 1); assert.equal(ambiguous.censored, 0)
   const reused = summarizeNativeKeys([key, { ...key, start: 11 }], [timing(10, 40)], { coverage })
   assert.equal(reused.unknown, 1); assert.equal(reused.censored, 0)
+})
+
+test('ordinary native rounds reject lost text, wrong keys and IME composition', () => {
+  const rows = [{ type: 'keydown', round: 1, key: 'a', code: 'KeyA', start: 10 },
+    { type: 'keydown', round: 1, key: 'a', code: 'KeyA', start: 110 },
+    { type: 'input', round: 1, text: 'aa' }, ...[10, 110].map(start => ({ type: 'eventTiming', ...timing(start, 40) }))]
+  assert.equal(summarizeNativePlainRound(rows, 1, { samples: 2 }).characters, 2)
+  assert.throws(() => summarizeNativePlainRound(rows, 1, { samples: 3 }))
+  assert.throws(() => summarizeNativePlainRound([...rows, { type: 'input', round: 1, text: 'a' }], 1, { samples: 2 }))
+  assert.throws(() => summarizeNativePlainRound([...rows, { type: 'compositionstart', round: 1 }], 1, { samples: 2 }))
+  assert.throws(() => summarizeNativePlainRound(rows.map(row => row.start === 10 ? { ...row, key: 'A' } : row), 1, { samples: 2 }))
 })

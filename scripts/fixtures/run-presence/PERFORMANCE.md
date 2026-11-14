@@ -82,7 +82,8 @@ stdin 每次输入一条 JSON：
 `minimal` 只挂载生产输入组件及插件；其他场景使用完整可见 App。每个 case 重置采样轮次。
 同一设备、窗口和系统简体拼音下，每轮 Escape、Command+A、Backspace，再按原生键输入 30 次 ceshi+Space；
 每键 1ms、间隔 100ms。先核对 30 次“测试”提交与最终 60 字，再接受统计。普通输入使用 Latin 输入源，
-每轮重复 a，save 时增加 `"kind":"plain"`；检测到 composition 的轮次不能作为普通输入。
+每轮重复 a 180 次，save 时增加 `"kind":"plain"`；可用 `"samples"` 显式改变样本数。
+分析必须同时验证按键数和完整文本；检测到 composition、错键或丢字的轮次不能作为普通输入。
 Renderer 仅在内存记录，save／切换／正常退出时写盘。保存期间检查真实后台 Run 确实在输入窗口内产生事件，
 并报告观察到的速率；配置的 32ms 只是夹具上游间隔。
 

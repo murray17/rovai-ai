@@ -16,7 +16,7 @@ import { startQualificationCore } from './lib/qualification-core.mjs'
 import { removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
 import { launchAcceptanceBrowser, pause } from './lib/host-web-browser.mjs'
 import { installNativeInputRecorder } from './lib/native-input-recorder.mjs'
-import { nativeTimingCoverage, summarizeNativeImeRound, summarizeNativeKeys } from './lib/native-input-metrics.mjs'
+import { summarizeNativeImeRound, summarizeNativePlainRound } from './lib/native-input-metrics.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const out = resolve(process.argv[2] ?? 'docs/prototypes/native-app-input')
@@ -264,12 +264,9 @@ async function save(command) {
   assert.match(label, /^[a-zA-Z0-9_-]+$/)
   await writeFile(join(out, label + '-events.jsonl'), rows.map(row => JSON.stringify(row)).join('\n') + '\n', { flag: 'wx' })
   const rounds = command.rounds ?? [...new Set(rows.filter(row => row.type === 'keydown' && row.round > 0).map(row => row.round))]
-  const results = command.kind === 'plain' ? rounds.map(round => {
-    const keys = rows.filter(row => row.type === 'keydown' && row.round === round && row.code === 'KeyA' && !row.metaKey && !row.ctrlKey)
-    assert.ok(keys.length, 'ordinary-input rounds must contain samples')
-    assert.equal(rows.filter(row => row.type === 'compositionstart' && row.round === round).length, 0, 'ordinary-input sampling requires a Latin input source')
-    return { round, ...summarizeNativeKeys(keys, rows.filter(row => row.type === 'eventTiming'), { coverage: nativeTimingCoverage(rows) }) }
-  }) : rounds.map(round => summarizeNativeImeRound(rows, round, { repetitions: command.repetitions ?? 30 }))
+  const results = command.kind === 'plain'
+    ? rounds.map(round => summarizeNativePlainRound(rows, round, { samples: command.samples ?? 180 }))
+    : rounds.map(round => summarizeNativeImeRound(rows, round, { repetitions: command.repetitions ?? 30 }))
   for (const result of results) {
     const keys = rows.filter(row => row.type === 'keydown' && row.round === result.round
       && !row.metaKey && !row.ctrlKey && !row.altKey && (/^Key/.test(row.code ?? '') || row.code === 'Space'))

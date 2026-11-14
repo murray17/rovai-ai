@@ -170,6 +170,8 @@ p99 为 56/48/40ms。新增回复每轮解析一次 Markdown，稳定正文不�
 
 Composer 自身的 selectionchange／focusin 不安排历史测量；历史选区、焦点和跨区域选区继续更新，
 离开历史时清理一次保留节点。真实尺寸变化、分页与滚动继续由既有观察驱动。
+选区归属用 DOM Range 的边界判断，避免无关输入读取 Selection.isCollapsed 时强制刷新布局；
+跨区域选区即使两端都在历史区外，仍保留覆盖的历史项，清空选区后释放。
 
 完整 App 的联合 trace／CPU profile 定位到执行摘要的可见内容判断：单行预览每次刷新都解析不断增长的
 执行叙述。15 秒诊断中相关 React 路径约占 3 秒 CPU，慢按键可在 Renderer 队列等待约 6–18ms；
@@ -200,6 +202,13 @@ data-timeline-pending 消失；短列表、虚拟列表、等高内容完成和�
 修改后为 48/40/48ms；分位数没有稳定下降，只认定计算成本减少。稳定历史重建均为 0。
 原始记录为 `baseline-selection-final/`、`after-selection/`、`baseline-history/`、
 `history-readiness-final/`、`preview-numbered-before-3rounds/` 和 `preview-numbered-after-3rounds/`。
+
+补充诊断 `large-rich-current-trace/` 与 `large-rich-range-trace/` 发现，旧选区判断可把整页布局
+拉进 selectionchange：该处理在两次诊断中分别约 32.1ms 和 0.4ms。Chromium 的
+[Selection.isCollapsed 实现](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/core/editing/dom_selection.cc#L155)
+确实包含布局更新。改用 Range 消除了这条强制同步路径，但剩余布局仍会执行；两轮到达附近的
+慢键分别为 64ms 和 80ms，不能据此认定端到端输入已经改善。行级 layout／inline-size containment
+诊断也未见稳定收益，均未进入产品。跨区域选区回归见 `selection-range-final3/`。
 
 ### 大正文样本纠正与同负载对照
 
@@ -256,11 +265,11 @@ data-timeline-pending 消失；短列表、虚拟列表、等高内容完成和�
 
 ### 功能门禁与交付状态
 
-TypeScript、277 文件 Vitest（3,289 pass / 2 skipped）、Node（384 pass / 2 skipped），以及
+整合主线 70aab8938 后，TypeScript、279 文件 Vitest（3,313 pass / 2 skipped）、Node（387 pass / 2 skipped），以及
 生产 Run/回复/历史/选区回归、Composer、消息导出回归通过。大正文导出另验证完整末尾和清理规则，
 搜索往返覆盖两条各有 150 代码块的大正文。完整性能验收与这些功能通过分开记录。
 
 默认 Rust workspace 首轮有一项 shell 失败回收测试把 Failed 观测成 TimedOut；原 100ms 期限和测试断言未改动。
-该用例独立通过后，安静环境下 workspace 重跑为 484 pass / 1 ignored；首次失败与重跑日志均保留。
-采样夹具的发布路径另验证绑定正确 Thread、错绑定不发布及结果不明不重试，三项均通过。
+该用例独立通过后，整合上述主线前的安静环境下 workspace 重跑为 484 pass / 1 ignored；首次失败与重跑日志均保留。
+采样夹具的发布路径另验证绑定正确 Thread、错绑定不发布及结果不明不重试；与最新计时／普通输入完整性分析共 11 项通过。
 分支在完整应用验收和剩余门禁完成前保持待交付状态。

@@ -69,3 +69,16 @@ export function summarizeNativeImeRound(rows, round, { repetitions = 30 } = {}) 
   return { round, durationMs: keys.at(-1).start - keys[0].start, commits, characters: finalText.length,
     ...summarizeNativeKeys(keys, timings, { coverage: nativeTimingCoverage(rows) }) }
 }
+
+export function summarizeNativePlainRound(rows, round, { samples = 180 } = {}) {
+  const keys = rows.filter(row => row.type === 'keydown' && row.round === round
+    && !row.metaKey && !row.ctrlKey && !row.altKey && (/^Key/.test(row.code ?? '') || row.code === 'Space'))
+  assert.equal(keys.length, samples, 'all scheduled ordinary keys must arrive')
+  assert.ok(keys.every(key => key.code === 'KeyA' && key.key === 'a'), 'ordinary rounds require lowercase a')
+  assert.equal(rows.filter(row => row.type === 'compositionstart' && row.round === round).length, 0,
+    'ordinary-input sampling requires a Latin input source')
+  const finalText = rows.filter(row => row.type === 'input' && row.round === round).at(-1)?.text?.replaceAll('\u200b', '')
+  assert.equal(finalText, 'a'.repeat(samples), 'all ordinary characters must survive')
+  return { round, durationMs: keys.at(-1).start - keys[0].start, characters: finalText.length,
+    ...summarizeNativeKeys(keys, rows.filter(row => row.type === 'eventTiming'), { coverage: nativeTimingCoverage(rows) }) }
+}
