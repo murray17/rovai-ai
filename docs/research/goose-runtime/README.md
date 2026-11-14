@@ -12,7 +12,8 @@ Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收
 这三处可以比 Kilo 更薄。MCP 恢复的追加语义、write 缺少完整前像、压缩用量范围是必须正面处理的差异。
 
 2026-11-14 在相同官方版本复跑 58 次受控 Provider 请求，补充三模式工具集合和客户端回放缩减验证；
-没有真实账号调用或平台资格提升，当前事实以更新的白名单和实施记录为准。
+该受控探针没有真实账号调用。后续用户授权的[真实 Sub2API 验收](sub2api-real-1.59.0-macos-arm64.json)
+已验证普通回复、write/edit 和 Core CLI 发送；平台资格没有提升，当前事实以更新的白名单和实施记录为准。
 
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。

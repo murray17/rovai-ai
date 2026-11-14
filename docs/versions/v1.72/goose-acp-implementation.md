@@ -44,9 +44,10 @@ Kilo 的权限 Hook、instructions 文件、第二个 prompt 与无条件 Steer 
 ## 证据边界
 
 真实官方程序为完整 CLI **1.59.0**，固定源码 `5d03ef6ed07ba59826328f1aff18d9a754ff8ad2`，macOS arm64。
-所有模型响应均来自独立 loopback Provider；`fixture-key` 为假密钥，没有借用其他 Runtime 认证。
+以下原生探针与 Core smoke 的模型响应均来自独立 loopback Provider；`fixture-key` 为假密钥，没有借用其他 Runtime 认证。
 Core、内置 CLI、HOME、Skills、MCP、Goose data、cache、workspace 全部位于脚本新建目录。
 Core 与内置 CLI 同目录，未触碰日常 App、SQLite 或用户全局配置。
+另有用户明确授权的真实 Sub2API 小范围验收，配置变更与隔离边界见下文“真实 Sub2API 验收”。
 
 - 原生入口：[probe-goose-runtime.mjs](../../../scripts/probe-goose-runtime.mjs)，原生白名单结果见[研究记录](../../research/goose-runtime/native-probe-1.59.0-macos-arm64.json)。
 - 产品入口：[smoke-goose-runtime.mjs](../../../scripts/smoke-goose-runtime.mjs)，真实 Core IPC、正式成员配置/投递、官方 Goose 和真实内置 CLI。
@@ -57,7 +58,7 @@ Core 与内置 CLI 同目录，未触碰日常 App、SQLite 或用户全局配�
 
 | Checklist 轴 | 已有证据 | 仍未验证或不支持 |
 | --- | --- | --- |
-| Auth/Provider/Model | 非生成目录、Provider/model 路由；选中 gpt-6.1-sol/high 的实际 Provider 请求含 reasoning.effort=high | 真实账号/OAuth/付费 Provider；ACP authenticate 不证明登录 |
+| Auth/Provider/Model | 非生成目录、Provider/model 路由；合成 gpt-6.1-sol/high 请求含 reasoning.effort=high；真实 Sub2API/gpt-6 普通回复、write/edit 与 Core CLI 发送 | OAuth、其他真实 Provider/模型；ACP authenticate 不证明登录 |
 | Host/Fleet/LRU | 同 Host/PID Warm；取消后同 PID；不兼容配置进入共享退役 | 并发压力和跨平台 LRU |
 | Session/Continuation | Core 重启后新 Host 加载原精确 Session | 原生历史损坏、并发多 Binding 全矩阵 |
 | Bootstrap/Context | 原生持久 key 与 Provider System 中的完整 B 一致，普通 user 无重复 B | 图片与大附件 Core/App 实测 |
@@ -140,3 +141,25 @@ Skills 管理实际走 nativeSkills.list/read，Core 已验证用户 `~/.agents/
 
 第一次并行默认回归有一个进程探针因 stdout cleanup deadline 失败；保留失败日志，未改超时或删除断言。
 控制本机并发后完整 workspace 通过。后续 Goose 独有边界以官方 Core smoke 与相应既有 owners 复测。
+
+## 真实 Sub2API 验收（2026-11-14）
+
+User sequence 128 明确要求配置本机官方 Goose 并测试真实模型。使用 Homebrew `block-goose-cli` 1.59.0，
+原生 `custom_providers/custom_sub2api.json` 声明 OpenAI engine 与 `base_path: v1/responses`；
+`config.yaml` 选择该 Provider 和 `gpt-6`，凭据进入官方文件存储 `secrets.yaml`。
+保留原配置的 telemetry 设置，不修改 Kilo/OpenCode 配置或系统环境，不增加 Rovai Provider 转发器。
+本机 Sub2API 目录报告 `gpt-6`，未报告此前合成夹具使用的 `gpt-6.1-sol`。
+
+首轮自定义 Provider 只指定 Responses URL，原生路径推导追加了 Chat Completions 路径并失败；
+改为官方 JSON 的显式 `base_path` 后通过。该修正只在用户原生配置中，不修改 ACP 接入。
+
+[白名单证据](../../research/goose-runtime/sub2api-real-1.59.0-macos-arm64.json)覆盖：
+
+- 官方 `goose acp` 从文件读取默认 Provider/model，无 Provider、model 或凭据环境覆盖；真实文本响应 `end_turn`，约 3.8 秒。
+- 真实模型依次调用原生 write/edit，Unicode 与空格文件路径的最终内容准确，约 7.8 秒；测试 Session 经精确原生删除。
+- 隔离 Core 复制这份已生效的原生配置，目录发现 `custom_sub2api/gpt-6`；真实 Run 成功，write/edit 都进入共享 file-operation 投影，并通过正式 bundled CLI 发布结果。
+- 文件行、状态与预览入口复用现有共享组件；没有完整原生前像，仍不生成完整红绿 Diff 或增删计数。未启动打包 App 重做该真实 Run 的 UI 验收。
+
+自动验收 HOME、原生 data/cache、项目、Core data、Skill 与 MCP 根均独立；用户原生配置本身是本次明确授权的修改。
+私有验收目录中的临时凭据副本在完成后删除，公开记录不含密钥、完整用户配置或 Provider 请求正文。
+这次结果不替代既有合成故障矩阵，不提升平台资格，仍为 macOS arm64 Preview。

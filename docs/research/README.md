@@ -41,7 +41,7 @@ observation into a stronger claim.
 
 ## Current areas
 
-- [Goose official ACP research](goose-runtime/README.md) — pinned 1.59.0 native probes, 14-axis matrix and pending implementation/input proposal; no product qualification yet.
+- [Goose official ACP research](goose-runtime/README.md) — pinned 1.59.0 native probes, 14-axis matrix and real Sub2API acceptance; macOS arm64 Preview.
 - [Task capability switch proposal](task-capability-switch.md) — proposed default-off Task control, shared Bootstrap, CLI discovery, Core admission and retained-data recovery.
 - [Task capability UI proposal](task-capability-ui.md) — current-component designs for General Settings, Thread, Reminders and Shortcuts, with before/after copy and immediate-toggle behavior.
 - [Member runtime environment acceptance](member-runtime-environment-acceptance.md) — private Core storage, process boundaries, warm compatibility and Claude Code loopback evidence.
