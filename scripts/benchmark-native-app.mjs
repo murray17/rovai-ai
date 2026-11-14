@@ -354,8 +354,12 @@ async function save(command) {
     const publication = publications.get(marker.publicationId)
     const sent = JSON.parse(await readFile(publication.result, 'utf8'))
     assert.equal(sent.code, 0); assert.equal(sent.ack.threadId, publication.threadId)
+    assert.equal(completed.messageId, sent.ack.messageId)
+    const hint = rows.find(row => row.type === 'messageChange' && row.threadId === publication.threadId && row.at >= marker.at)
+    assert.ok(hint, 'the production message event must arrive in the recorder')
     publicationEvidence.push({ publicationId: marker.publicationId, messageId: completed.messageId,
       domReadyFromRequestMs: completed.at - marker.at, codeBlocks: completed.codeBlocks,
+      hintAt: hint.at, domReadyFromHintMs: completed.at - hint.at,
       endpoint: completed.endpoint })
   }
   const report = { scenario: selectedCase, sourceCommit, sourceDigest, binary, environment: rows.find(row => row.type === 'environment'), results,
