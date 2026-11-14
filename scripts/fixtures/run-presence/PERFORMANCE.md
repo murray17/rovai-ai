@@ -59,7 +59,7 @@ page/changes 事实，不将完整工具记录作为 Renderer props。默认 `mi
 按[隔离运行流程](../../../docs/development/local-workflow.md)先构建独立打包产物；不要运行日常数据。
 
 ```bash
-ROVAI_PERF_APP_PATH='<独立打包 .app 的绝对路径>' node scripts/benchmark-native-app.mjs '<绝对输出目录>' minimal
+ROVAI_PERF_LABEL='收尾版' ROVAI_PERF_APP_PATH='<独立打包 .app 的绝对路径>' node scripts/benchmark-native-app.mjs '<绝对输出目录>' minimal
 ```
 
 入口先打印本次临时 userData、managed-skill-library、工作树身份和实际 Renderer／Main／Host 二进制摘要。
@@ -80,12 +80,18 @@ stdin 每次输入一条 JSON：
 ```
 
 `minimal` 只挂载生产输入组件及插件；其他场景使用完整可见 App。每个 case 重置采样轮次。
+可选 label 加入合成 Thread 名称，便于区分同时打开的基线与新包；就绪检查须确认编辑器绑定目标 Thread。
 同一设备、窗口和系统简体拼音下，每轮 Escape、Command+A、Backspace，再按原生键输入 30 次 ceshi+Space；
 每键 1ms、间隔 100ms。先核对 30 次“测试”提交与最终 60 字，再接受统计。普通输入使用 Latin 输入源，
 每轮重复 a 180 次，save 时增加 `"kind":"plain"`；可用 `"samples"` 显式改变样本数。
 分析必须同时验证按键数和完整文本；检测到 composition、错键或丢字的轮次不能作为普通输入。
 Renderer 仅在内存记录，save／切换／正常退出时写盘。保存期间检查真实后台 Run 确实在输入窗口内产生事件，
 并报告观察到的速率；配置的 32ms 只是夹具上游间隔。
+
+`{"op":"software-plain","label":"current-software","samples":180,"rounds":3}` 另提供完整可见 App 的
+普通按键自动化对照。Node 按固定 100ms 时间轴发出带时间戳的 CDP 按键，不随 Renderer 完成速度降载；
+记录器重新标记为 `timestamped-CDP-software-keys`，与原生按键／中文轮次分开。完整文本、实际焦点和后台事件
+仍须通过验证。该入口不能证明操作系统按键、中文候选浮层或物理键盘到像素的延迟。
 
 `trace-start`／`trace-stop` 可保存包含 Renderer、input、latencyInfo 与 compositor 的诊断时间线；
 采集 trace 或 CPU profile 的轮次单独标注，不与无诊断开销的正式分位数混算。

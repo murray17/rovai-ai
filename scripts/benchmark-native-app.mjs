@@ -23,6 +23,7 @@ const out = resolve(process.argv[2] ?? 'docs/prototypes/native-app-input')
 const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
 const sourceDigest = createHash('sha256').update(execFileSync('git', ['diff', 'HEAD', '--', 'apps', 'packages'], { cwd: root })).digest('hex')
 const appPath = process.env.ROVAI_PERF_APP_PATH
+const fixtureLabel = process.env.ROVAI_PERF_LABEL?.trim()
 // The worktree revision is not an attestation of a previously packaged App.
 // Keep the actual artifact identity alongside the build log when comparing.
 const binary = appPath ? await fingerprintApp(resolve(appPath)) : null
@@ -38,7 +39,7 @@ const coreExecutable = resolve(process.env.ROVAI_CORE_BIN ?? join(root, 'resourc
 const seedCoreSha256 = createHash('sha256').update(await readFile(coreExecutable)).digest('hex')
 await mkdir(out, { recursive: true }); await mkdir(data, { recursive: true })
 console.log(JSON.stringify({ channel: 'automatic_acceptance', fixture, userData: data,
-  skillLibrary: join(data, 'managed-skill-library'), sourceCommit, sourceDigest,
+  skillLibrary: join(data, 'managed-skill-library'), sourceCommit, sourceDigest, fixtureLabel,
   productionRenderer: Boolean(appPath), binary, seedCoreSha256, sourceIdentity: 'worktree; map the binary using its package build log',
   actualHost: true, upstream: 'controlled synthetic ACP', realModel: false }))
 seedCompletedOnboardingForAcceptance(data)
@@ -102,7 +103,7 @@ try {
   threads = {}
   for (const [name, count] of [['short', 20], ['current', 1000], ['other', 20]]) {
     const member = members[name === 'other' ? 1 : 0]
-    const title = `原生输入性能对照 · ${name} · ${count}`
+    const title = `原生输入性能对照 · ${fixtureLabel ? fixtureLabel + ' · ' : ''}${name} · ${count}`
     const created = await core.request('camps.create', { commandId: randomUUID(), name: title,
       workspace: { projectPath: join(fixture, 'project-' + name) }, memberAgentIds: [member.agentId],
       defaultLeadAgentId: member.agentId, collaborationMode: 'peer', activationState: 'active' })
@@ -138,6 +139,7 @@ try {
       if (command.op === 'quit') break
       if (command.op === 'case') await selectCase(command.name)
       else if (command.op === 'save') await save(command)
+      else if (command.op === 'software-plain') await softwarePlain(command)
       else if (command.op === 'trace-start') {
         assert.equal(traceChunks, null)
         traceChunks = []
@@ -219,9 +221,13 @@ async function selectCase(name) {
     }
     activeRuns = []
     const thread = threads[name === 'short' ? 'short' : 'current']
-    await browser.wait(`document.body.innerText.includes(${JSON.stringify(thread.title)})`, 30_000)
-    await browser.evaluate(`[...document.querySelectorAll('.camp-nav-open')].find(e=>e.textContent.includes(${JSON.stringify(thread.title)}))?.click()`)
-    await browser.wait(`!!document.querySelector('[contenteditable=true]')`)
+    // Fresh profiles can start on Home with collapsed project navigation.
+    // Select the real Thread by identity, or its visible recent-Thread card.
+    const threadButton = `(document.querySelector(${JSON.stringify(`[data-thread-id="${thread.id}"] .camp-nav-open`)})
+      ?? [...document.querySelectorAll('.quick-chat-continue-row')].find(e=>e.querySelector('[title]')?.title===${JSON.stringify(thread.title)}))`
+    await browser.wait(`!!${threadButton}`, 30_000)
+    await browser.evaluate(`${threadButton}.click();true`)
+    await browser.wait(`document.querySelector('[contenteditable=true]')?.dataset.threadId===${JSON.stringify(thread.id)}`)
     for (let page = 0; page < 25; page++) {
       const button = await browser.evaluate(`!!document.querySelector('.camp-history-text-button')`)
       if (!button) break
@@ -256,6 +262,50 @@ async function archiveRecorder(reason) {
   if (!browser || !selectedCase) return
   const rows = await browser.evaluate('window.__nativeInputRecorder?.snapshot()')
   if (rows?.length) await writeFile(join(out, `raw-${selectedCase}-${reason}-${Date.now()}.jsonl`), rows.map(row => JSON.stringify(row)).join('\n') + '\n', { flag: 'wx' })
+}
+
+// Separate software-injected ordinary keys from native-person/CUA/IME rounds.
+// Node's fixed cadence continues while the Renderer is busy, so slow UI work
+// cannot quietly reduce the input or background load offered to the App.
+async function softwarePlain(command) {
+  const samples = command.samples ?? 180, rounds = command.rounds ?? 3
+  assert.ok(Number.isInteger(samples) && samples > 0 && samples <= 1000)
+  assert.ok(Number.isInteger(rounds) && rounds > 0 && rounds <= 10)
+  assert.match(command.label, /^[a-zA-Z0-9_-]+$/)
+  await archiveRecorder('before-software')
+  await browser.evaluate(`(${installNativeInputRecorder.toString()})(${JSON.stringify({
+    scenario: selectedCase, sourceCommit, sourceDigest, inputSource: 'timestamped-CDP-software-keys',
+    actualApp: !isMinimal, eventIntervalMs: activeRuns.length ? 32 : null,
+    upstream: 'synthetic ACP through actual Host', keyIntervalMs: 100
+  })})`)
+  await browser.click(`document.querySelector('[contenteditable=true]')`)
+  const key = async (value, code, virtualKey, modifiers = 0, commands) => {
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyDown', key: value, code,
+      windowsVirtualKeyCode: virtualKey, modifiers, ...(commands ? { commands } : {}) })
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyUp', key: value, code, windowsVirtualKeyCode: virtualKey })
+  }
+  for (let round = 1; round <= rounds; round++) {
+    await key('Escape', 'Escape', 27)
+    await key('a', 'KeyA', 65, process.platform === 'darwin' ? 4 : 2, ['selectAll'])
+    await key('Backspace', 'Backspace', 8)
+    assert.equal(await browser.evaluate(`document.querySelector('[contenteditable=true]').textContent.replaceAll('\\u200b','')`), '')
+    console.log(JSON.stringify({ phase: 'software-plain', selectedCase, round, rounds, samples }))
+    const origin = Date.now() + 150, pending = [], failures = []
+    await Promise.all(Array.from({ length: samples }, (_, index) => new Promise(resolve => {
+      setTimeout(() => {
+        pending.push(browser.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', text: 'a',
+          windowsVirtualKeyCode: 65, timestamp: (origin + index * 100) / 1000 }).catch(error => failures.push(error)))
+        resolve()
+      }, Math.max(0, origin + index * 100 - Date.now()))
+    })))
+    await Promise.all(pending)
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 })
+    await pause(800)
+    // Retain the raw round even if delivery or content validation fails.
+    await archiveRecorder('software-round-' + round)
+    assert.deepEqual(failures, [])
+  }
+  await save({ label: command.label, kind: 'plain', samples, rounds: Array.from({ length: rounds }, (_, index) => index + 1) })
 }
 
 async function save(command) {
