@@ -353,7 +353,7 @@ async function save(command) {
     assert.ok(completed, 'the published large reply must finish all independent code blocks')
     const publication = publications.get(marker.publicationId)
     const sent = JSON.parse(await readFile(publication.result, 'utf8'))
-    assert.equal(sent.code, 0); assert.equal(sent.ack.threadId, publication.threadId)
+    assert.equal(sent.code, 0); assert.equal(sent.threadId, publication.threadId)
     assert.equal(completed.messageId, sent.ack.messageId)
     const hint = rows.find(row => row.type === 'messageChange' && row.threadId === publication.threadId && row.at >= marker.at)
     assert.ok(hint, 'the production message event must arrive in the recorder')

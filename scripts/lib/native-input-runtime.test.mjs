@@ -36,6 +36,10 @@ for (const scenario of ['matching-scope', 'wrong-scope', 'uncertain-ack']) {
       }
       assert.ok(value, 'fixture must settle publication')
       assert.equal(value.code, scenario === 'matching-scope' ? 0 : 1)
+      if (scenario === 'matching-scope') {
+        assert.equal(value.threadId, 'fixture-thread')
+        assert.equal(value.ack.messageId, 'fixture-message')
+      }
       if (scenario === 'wrong-scope') {
         assert.equal(value.stage, 'scope')
         assert.equal(await readFile(sent).then(() => true, () => false), false, 'scope mismatch must not publish')

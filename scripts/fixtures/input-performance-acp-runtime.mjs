@@ -27,14 +27,15 @@ async function publish(state) {
     if (!cli || typeof state.publicationThreadId !== 'string') throw new Error('Missing isolated publication scope')
     // Never allow a fixture to inherit the controller's daily Thread binding.
     const scope = await invoke(cli, ['thread', 'read', '--limit', '1'], { env: process.env, maxBuffer: 1024 * 1024 })
-    if (JSON.parse(scope.stdout).threadId !== state.publicationThreadId) throw new Error('CLI Thread scope mismatch')
+    const threadId = JSON.parse(scope.stdout).threadId
+    if (threadId !== state.publicationThreadId) throw new Error('CLI Thread scope mismatch')
     stage = 'send'
     const sent = await invoke(cli, ['send', '--public-only', '--input-file', state.publishFile], { env: process.env, maxBuffer: 1024 * 1024 })
     stage = 'ack'
     const ack = JSON.parse(sent.stdout)
     if (ack.agentAddressingMode !== 'public_only' || ack.effectiveRecipients?.length !== 0 || ack.deliveryIds?.length !== 0)
       throw new Error('Unexpected publication addressing')
-    result = { code: 0, ack }
+    result = { code: 0, threadId, ack }
   } catch {
     result = { code: 1, stage, uncertain: stage !== 'scope' }
   } finally {
