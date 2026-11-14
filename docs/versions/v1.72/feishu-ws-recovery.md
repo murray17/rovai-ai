@@ -90,7 +90,8 @@ Runtime 兼容矩阵与根 README 无需更新。本地 SDK/Host 夹具不替代
 缺省 presentation preference 假设和 viewport 切换时的等待。截图与 validation.json 位于本次 Thread 附件目录的
 `feishu-ws-p2-ui/`；新版单文件交互稿位于 `feishu-ws-recovery-prototype-p2/`，生成物不进入 Git。日常安装版未替换。
 真实租户、Electron 进程和 Windows 尚未验收。独立复审建议合并前在隔离 userData 下使用真实飞书或 Lark Bot
-完成一次断网后恢复冒烟，并确认没有未捕获异常；已有自动验收不能替代这项结果。分支保留为 ready，尚未合并。
+完成一次断网后恢复冒烟，并确认没有未捕获异常；已有自动验收不能替代这项结果。
+用户已在 2026-11-14 要求通过 PR 合入 main；真实租户验收仍为待办，合并与安装分别以 PR 回执和安装记录为准。
 
 Core 切代次回归还发现旧 Host stop 未清除 started 标记，已修正；停止时旧发布进度清空，新的状态从持久事实恢复。
 本地确认暂不可用时保留已观察到的在线传输并重试保存；SDK 循环中的 connect 等待真实 ready，不能提前报告成功。
