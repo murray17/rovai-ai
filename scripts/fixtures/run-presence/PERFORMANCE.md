@@ -7,6 +7,7 @@
 
 `ROVAI_PERF_SURFACE=desktop` 使用 Electron；默认使用独立 Chrome headless。
 二者都只验证 Renderer 组件与执行事件接入，不等同于完整 App/Host/网络延迟验收。
+Electron 使用隐藏的隔离窗口与 focus emulation；该数字也不等于真实操作系统窗口的像素呈现延迟。
 Fixture 按生产 BusinessApp 是否仍持有执行正文状态选择同语义的事件接入代理；消息组件直接来自当前源码。
 事件在 Node 进程按固定时间轴每 32ms 注入，按键间隔 100ms，不等待上一次渲染再继续注入；结果保存实际事件延迟。
 这不是生产事件频率的断言。

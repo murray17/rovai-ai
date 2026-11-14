@@ -16,7 +16,7 @@ last_updated: 2026-11-14
 - Branch：`rovai/long-thread-input`；Base：`origin/main@a283eb05213fec5734f1d0b0e3096c0f2c4a40f6`。
 - Governance：none；Renderer 内可逆的局部订阅调整，不涉及模型上下文、数据迁移或协议；同一变更更新当前架构和 UI。
   不满足版本决定的高变更成本准入条件，不新增决定。
-- Status：active；第一批本地实现，后两批待实施。
+- Status：active；第一批完成隔离与三轮生产组件对照（PR #1092），第二批在独立分支验证公共历史虚拟化。
 
 ## 固定基线
 
@@ -44,7 +44,19 @@ Web Chrome 生产组件基线：20/200/1,000 条混合历史 × 静止／当前 
 - 第一轮 1,000 条 smoke：当前／其他 Run 的工作区执行、历史 JSX 创建、Markdown 解析均为 0，
   活动行确认更新，24 个输入字符全部保留。当前 Run Event Timing p95 为 40ms；该小样本仅验证实现方向。
 - 已通过：`pnpm typecheck`；Run live events、原 buffer、事件归并及消息 Markdown 47 项定向 Vitest。
-- 三轮修改后对照、Desktop 对照、完整相关交互回归、真实中文 IME 与最终延迟门槛尚未完成。
+- 三轮正式对照：同一台 Apple M5 / macOS 25.6.0，1,000 条混合历史、当前 Run 每 32ms 更新，
+  每轮 80 次按键。Web p95 从 160/176/88ms 降至 56/40/56ms；Desktop Electron 从
+  88/88/88ms 降至 48/48/56ms。其他 Thread 更新时 Web p95 为 48/40/40ms，Desktop 为 48/48/48ms。
+  修改后的 54 个 Web/Desktop 场景中工作区执行、历史 JSX 构建和 Markdown 解析均为 0，
+  1,000 条历史仍全部挂载；上述 1,000 条当前／其他 Run 场景的主线程长任务均为 0。
+  每个场景均验证字符全部保留和活动预览实际变化，原始数据为附件 `perf-isolation-web/`、
+  `perf-isolation-desktop/`，基线为 `perf-baseline-web/`、`perf-baseline-desktop/`。
+- 第一批满足执行更新隔离的结构验收；p95 偶有 56ms，尚未达到每轮均不高于 50ms 的拟定最终门槛。
+  三轮各 80 个样本的 p99 只作观察，不声称稳定尾延迟。真实系统中文 IME 和完整 App/Host 端到端尚待验证。
+- 已完成默认 Rust workspace（484 pass / 1 ignored）、TypeScript、文档门禁和 277 文件 Vitest。
+  合入最新主线后 Vitest 为 3,286 pass / 2 skipped；Node gate 中既有 Cline 观测测试的宽泛
+  敏感词正则误命中 `.999Z` 时间戳，单独重跑通过；远端 CI gate 通过。未更改 Cline 逻辑或弱化其断言。
+- 38 个执行状态、六种视口及停止／重试／来源／详情交互通过；回复分栏拖动通过。
 - 首次交互回归发现模型未记录入口的旧断言与当前主线不符，已按当前 UI 校正；回复定位在
   `929cf6460` 的未改动生产源码上同样于 `scroll-after-opening` 用例失败，单独记录，不宣称本批回归全通过。
 
