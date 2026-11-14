@@ -5,10 +5,13 @@ export const PUBLIC_TIMELINE_VIRTUAL_THRESHOLD = 100
 export interface TimelineVirtualListHandle {
   virtual: boolean
   ensureMounted(id: string): Promise<HTMLElement | null>
+  rememberAnchor(): void
   restoreAnchor(): void
 }
 type Anchor = { id: string; offset: number }
 type PendingMount = { id: string; resolve(node: HTMLElement | null): void }
+const readingSurface = (row: HTMLElement): HTMLElement => row.matches('[data-message-id], [data-presence-run]')
+  ? row : row.querySelector<HTMLElement>('[data-message-id], [data-presence-run]') ?? row
 
 /** Public history owns its viewport, dynamic heights, selection retention and explicit-target mounting. */
 export function TimelineVirtualList<T extends { id: string }>({ items, viewportRef, controllerRef,
@@ -36,7 +39,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   current.current = { followingLatest, preserveReadingPosition }
   const previousItems = useRef(items)
   if (previousItems.current !== items) {
-    pendingAnchor.current = followingLatest() ? 'latest' : anchor.current
+    pendingAnchor.current = virtual ? followingLatest() ? 'latest' : anchor.current : null
     previousItems.current = items
   }
   const indexesById = useMemo(() => new Map(items.map((item, index) => [item.id, index])), [items])
@@ -52,14 +55,24 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
 
   const rememberAnchor = useCallback(() => {
     const viewport = viewportRef.current
-    if (!viewport || !root.current || !viewport.clientHeight) return
+    // A prepend may briefly leave the old anchor outside the mounted range.
+    // Keep that pending anchor until its row is mounted and restored.
+    if (!viewport || !viewport.clientHeight || pendingAnchor.current) return
     const top = viewport.getBoundingClientRect().top
-    for (const row of root.current.querySelectorAll<HTMLElement>(':scope > [data-timeline-key]')) {
-      const bounds = row.getBoundingClientRect()
+    const rows = root.current?.querySelectorAll<HTMLElement>(':scope > [data-timeline-key]')
+      ?? viewport.querySelectorAll<HTMLElement>('[data-message-id], [data-presence-run]')
+    let fallback: Anchor | null = null
+    for (const row of rows) {
+      const surface = readingSurface(row)
+      const bounds = surface.getBoundingClientRect()
+      const id = row.dataset.timelineKey ?? row.dataset.messageId ?? `run-presence:${row.dataset.presenceRun}`
+      if (!root.current) heights.current.set(id, bounds.height + 14)
       if (bounds.bottom <= top || bounds.top >= top + viewport.clientHeight) continue
-      anchor.current = { id: row.dataset.timelineKey!, offset: bounds.top - top }
-      break
+      const next = { id, offset: bounds.top - top }
+      if (surface.dataset.messageId) { anchor.current = next; return }
+      fallback ??= next
     }
+    anchor.current = fallback
   }, [viewportRef])
   const restoreAnchor = useCallback(() => {
     const viewport = viewportRef.current
@@ -67,7 +80,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     if (current.current.followingLatest()) viewport.scrollTop = viewport.scrollHeight
     else if (anchor.current) {
       const row = root.current.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(anchor.current.id)}"]`)
-      if (row) viewport.scrollTop += row.getBoundingClientRect().top - viewport.getBoundingClientRect().top - anchor.current.offset
+      if (row) viewport.scrollTop += readingSurface(row).getBoundingClientRect().top - viewport.getBoundingClientRect().top - anchor.current.offset
     }
   }, [viewportRef])
   const update = useCallback(() => {
@@ -111,7 +124,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     if (!frame.current) frame.current = requestAnimationFrame(() => { frame.current = 0; update() })
   }, [update])
 
-  useImperativeHandle(controllerRef, () => ({ virtual, restoreAnchor,
+  useImperativeHandle(controllerRef, () => ({ virtual, restoreAnchor, rememberAnchor,
     ensureMounted(id) {
       const mounted = findNode(id)
       if (mounted || !virtual || !indexesById.has(id)) return Promise.resolve(mounted)
@@ -119,7 +132,15 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
       setTarget(id)
       return new Promise(resolve => { pendingMount.current = { id, resolve } })
     }
-  }), [virtual, indexesById, findNode, restoreAnchor])
+  }), [virtual, indexesById, findNode, restoreAnchor, rememberAnchor])
+
+  useLayoutEffect(() => {
+    if (virtual) return
+    const viewport = viewportRef.current
+    rememberAnchor()
+    viewport?.addEventListener('scroll', rememberAnchor, { passive: true })
+    return () => viewport?.removeEventListener('scroll', rememberAnchor)
+  }, [virtual, viewportRef, items, rememberAnchor])
 
   useLayoutEffect(() => {
     if (!virtual) return
@@ -136,7 +157,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
         heights.current.set(id, height); dirty = true
       }
       if (dirty) {
-        pendingAnchor.current = current.current.followingLatest() ? 'latest' : anchor.current
+        pendingAnchor.current ??= current.current.followingLatest() ? 'latest' : anchor.current
         measured(value => value + 1)
       }
       schedule()
@@ -162,12 +183,17 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   useLayoutEffect(() => {
     if (!virtual) return
     const viewport = viewportRef.current, saved = pendingAnchor.current
+    if (saved && saved !== 'latest' && current.current.preserveReadingPosition()
+      && indexesById.has(saved.id) && !root.current?.querySelector(`[data-timeline-key="${CSS.escape(saved.id)}"]`)) {
+      setTarget(saved.id)
+      return
+    }
     pendingAnchor.current = null
     if (viewport && saved && current.current.preserveReadingPosition()) {
       if (saved === 'latest') viewport.scrollTop = viewport.scrollHeight
       else {
         const row = root.current?.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(saved.id)}"]`)
-        if (row) viewport.scrollTop += row.getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset
+        if (row) viewport.scrollTop += readingSurface(row).getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset
       }
     }
     const pending = pendingMount.current

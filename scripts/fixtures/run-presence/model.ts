@@ -83,6 +83,7 @@ function evidence(run: any, published = false): any[] {
 }
 const backing = createReviewModel('desktop', 'camp')
 const listeners = new Set<() => void>()
+const coreEventListeners = new Set<(event: any) => void>()
 const timers = new Set<ReturnType<typeof setTimeout>>()
 const initialScenario = new URLSearchParams(location.search).get('scenario') || 'stream'
 const initialStage = new URLSearchParams(location.search).get('stage')
@@ -321,7 +322,7 @@ export const model = {
     invalidationListeners.forEach(listener => listener({ messages: [{ threadId: state.snapshot.thread.id, indexChanged: true,
       unavailableMessageIds: [id], throughGlobalSequence: ++state.version }] }))
   },
-  showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false) {
+  showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false, messageCount = 120) {
     this.setScenario('stream'); halt()
     const messages = [
       makeMessage('reply-a', 1, '回复详情保持只读，沿用当前会话里的回复锚点。'),
@@ -337,7 +338,7 @@ export const model = {
     const parents: Record<string,string> = { 'reply-b':'reply-a','reply-c':'reply-a','reply-d':'reply-b',
       'reply-f':'reply-d','reply-g':'reply-d','reply-h':'reply-e','reply-i':'reply-h' }
     for (const message of messages) message.replyToThreadMessageId = parents[message.id] ?? null
-    if (long) for (let i = 10; i <= 120; i++) {
+    if (long) for (let i = 10; i <= messageCount; i++) {
       // Cross the public-message grouping height when the detail pane closes.
       const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(grouped ? 15 : 16) : ''}`
       messages.push({ ...makeMessage(`long-${i}`,i,body,0,grouped ? 'run-alice' : null), replyToThreadMessageId:'reply-g' })
@@ -349,6 +350,24 @@ export const model = {
       agentRuns:[run,other],executionEvidence:[...evidence(run),...evidence(other)],messageDeliveries:[] } })
     model.resync()
   },
+  historyCoverage() {
+    const messages = state.snapshot.messages
+    return { loadedCount: messages.length, totalCount: messages.length + controls.hiddenMessages.length,
+      omittedCount: controls.hiddenMessages.length, complete: !controls.hiddenMessages.length,
+      hasEarlier: !!controls.hiddenMessages.length, oldestLoadedSequence: messages[0]?.sequence ?? null,
+      newestLoadedSequence: messages.at(-1)?.sequence ?? null }
+  },
+  async loadEarlierHistory() {
+    const page = controls.hiddenMessages.slice(-50)
+    controls.hiddenMessages = controls.hiddenMessages.slice(0, -50)
+    update({ snapshot: { ...state.snapshot, messages: [...page, ...state.snapshot.messages] } })
+  },
+  appendHistoryMessage() {
+    const sequence = state.snapshot.messages.at(-1).sequence + 1
+    update({ snapshot: { ...state.snapshot, messages: [...state.snapshot.messages,
+      makeMessage(`append-${sequence}`, sequence, `新消息 ${sequence}`, 0)] } })
+  },
+  emitCoreEvent(event: any) { coreEventListeners.forEach(listener => listener(event)) },
   finishReplyRuns() {
     halt()
     update({ snapshot: { ...state.snapshot, agentRuns:state.snapshot.agentRuns.map((run:any)=>({ ...run,status:'succeeded',endedAt:new Date().toISOString() })) } })
@@ -573,6 +592,11 @@ export const model = {
   async changeLead(agentId: string) { update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, defaultLeadAgentId: agentId }, members: state.snapshot.members.map((m: any) => ({ ...m, isDefaultLead: m.agentId === agentId })) } }) },
   fileApi: backing.fileApi,
   client: { ...backing.client,
+    onEvent(listener: (event: any) => void) {
+      coreEventListeners.add(listener)
+      const unsubscribe = backing.client.onEvent(listener)
+      return () => { coreEventListeners.delete(listener); unsubscribe() }
+    },
     memberAvatars: { ...backing.client.memberAvatars, async read(avatarRef: string, rendition: any) {
       if (avatarRef !== exportAvatarRef) return backing.client.memberAvatars.read(avatarRef, rendition)
       const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 200
@@ -595,6 +619,18 @@ export const model = {
     } },
     onInvalidated: (listener: (change?: import('@contracts').ThreadReadInvalidation) => void) => { invalidationListeners.add(listener); return () => invalidationListeners.delete(listener) },
     request: async (method: string, input: any = {}): Promise<any> => {
+      if (method === 'thread.messages.find') {
+        const matches: any[] = []
+        for (const message of [...controls.hiddenMessages, ...state.snapshot.messages]) {
+          for (let start = message.body.indexOf(input.query); start >= 0; start = message.body.indexOf(input.query, start + input.query.length)) {
+            matches.push({ messageId: message.id, messageSequence: message.sequence, occurrenceIndex: 0,
+              startOffset: start, endOffset: start + input.query.length })
+          }
+        }
+        const selectedMatchIndex = matches.length ? Math.min(input.selectedMatchIndex ?? 0, matches.length - 1) : null
+        return { schemaVersion: 1, throughGlobalSequence: state.version, threadId: input.threadId, query: input.query,
+          totalMatchCount: matches.length, selectedMatchIndex, match: selectedMatchIndex === null ? null : matches[selectedMatchIndex] }
+      }
       if (method === 'agentRunImages.read' && input.imageId === 'legacy-image') {
         const canvas = document.createElement('canvas'); canvas.width = 80; canvas.height = 40
         const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#23794b'; ctx.fillRect(0, 0, 80, 40)

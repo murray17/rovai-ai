@@ -4987,6 +4987,7 @@ export function ThreadWorkspace({
     ) return
     const timeline = timelineScrollRef.current
     if (!timeline) return
+    timelineVirtualRef.current?.rememberAnchor()
     const threadId = snapshot.thread.id
     const readingAnchor = captureTimelineReadingAnchor(timeline)
     const previousScrollHeight = timeline.scrollHeight
@@ -5007,8 +5008,14 @@ export function ThreadWorkspace({
         && !timeline.hidden
         && !conversationFindOpenRef.current
       ) {
+        if (timelineVirtualRef.current?.virtual && readingAnchor.message) {
+          await timelineVirtualRef.current.ensureMounted(readingAnchor.message.messageId)
+          if (timelineScrollRef.current !== timeline || mountedThreadId.current !== threadId) return
+        }
         if (readingAnchor.source || readingAnchor.message) {
           restoreTimelineReadingAnchor(timeline, readingAnchor)
+        } else if (timelineVirtualRef.current?.virtual) {
+          timelineVirtualRef.current.restoreAnchor()
         } else {
           timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
         }

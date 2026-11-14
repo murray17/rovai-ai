@@ -45,6 +45,11 @@ async function runReplyDetails(t, splittersOnly = false) {
       await click('[contenteditable=true]')
       await b.send('Input.insertText', { text: '跳转时保留草稿。' })
       const draft = await b.evaluate('document.querySelector("[contenteditable=true]").textContent')
+      if (scrollAfterOpen) {
+        const point = await b.evaluate(`(() => { const e = document.querySelector('.timeline-scroll'), r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, deltaY: -e.scrollHeight } })()`)
+        await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0 })
+        await b.wait('!!document.querySelector("[data-message-id=reply-b]") && document.querySelector(".timeline-scroll").scrollTop < 2')
+      }
       await click(`[data-message-id=${scrollAfterOpen ? 'reply-b' : 'long-120'}] .reply-parent-quote`)
       await b.wait('!!document.querySelector("[data-reply-message-id=reply-a]")')
       if (full) await click('.reply-detail-expand')
@@ -160,11 +165,17 @@ async function runReplyDetails(t, splittersOnly = false) {
       })()`)
       await pause(250)
       const afterReveal = await geometry(messageId)
-      if (scenario.grouped) assert.ok(afterReveal.continuations > 0, 'closing details must actually regroup the same Run messages')
       await b.capture(join(out, `${scenario.name}.png`))
       await b.send('Emulation.setDeviceMetricsOverride', { width: (scenario.width ?? 1440) + 40, height: 920, deviceScaleFactor: 1, mobile: false })
       await pause(400)
       const afterResize = await geometry(messageId)
+      if (scenario.grouped) {
+        // History outside the viewport is intentionally unmounted. Inspect a
+        // visible Run segment before checking its width-dependent grouping.
+        const point = await b.evaluate(`(() => { const e=document.querySelector('.timeline-scroll'),r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,deltaY:e.scrollHeight} })()`)
+        await b.send('Input.dispatchMouseEvent', { type:'mouseWheel', ...point, deltaX:0 })
+        await b.wait('document.querySelectorAll("[data-message-id^=long-].is-group-continuation").length > 0')
+      }
       results.push({ name: scenario.name, messageId, expectedDraft, afterReveal, afterResize })
     }
     await writeFile(join(out, 'verification.json'), JSON.stringify(results, null, 2))
