@@ -28,11 +28,11 @@ test('public history bounds mounting and preserves reading, selection, focus and
     await b.send('Emulation.setFocusEmulationEnabled', { enabled: true })
     const click = selector => b.click(`document.querySelector(${JSON.stringify(selector)})`)
     let generation = 0
-    const open = async (count, loaded = true) => {
+    const open = async (count, loaded = true, largeBody = false) => {
       const search = `?pure=1&virtualHistory=1&case=${++generation}`
       await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + search })
       await b.wait(`location.search === ${JSON.stringify(search)} && !!window.__presence && !!document.querySelector('[contenteditable=true]')`)
-      await b.evaluate(`__presence.showReplyCase(true, ${loaded}, false, false, ${count}); __presence.showNarration('固定执行预览')`)
+      await b.evaluate(`__presence.showReplyCase(true, ${loaded}, false, false, ${count}, ${largeBody}); __presence.showNarration('固定执行预览')`)
       await b.wait(`!!document.querySelector('[data-message-id=long-${count}]')`)
       await pause(200)
     }
@@ -47,6 +47,18 @@ test('public history bounds mounting and preserves reading, selection, focus and
       return { id:e?.dataset.messageId, offset:e ? e.getBoundingClientRect().top-r.top : null };
     })()`)
     const offset = id => b.evaluate(`(() => {const v=document.querySelector('.timeline-scroll'),e=v.querySelector('[data-message-id=${id}]');return e ? e.getBoundingClientRect().top-v.getBoundingClientRect().top : null})()`)
+    for (const count of [20, 200]) {
+      for (const action of ['release', 'remove']) {
+        await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + `?timelineReadiness=1&probeCount=${count}&case=${action}` })
+        await b.wait('!!window.__timelineReadiness')
+        await b.evaluate(`window.probeResult='pending';__timelineReadiness.mount('probe-0').then(value=>window.probeResult=value);true`)
+        await pause(100)
+        assert.equal(await b.evaluate('probeResult'), 'pending', 'row navigation must wait for content readiness')
+        await b.evaluate(`__timelineReadiness.${action}()`)
+        await b.wait(`window.probeResult !== 'pending'`)
+        assert.equal(await b.evaluate('probeResult'), action === 'release' ? true : null)
+      }
+    }
     for (const count of [200, 1000]) {
       t.diagnostic(`mounted scale ${count}`)
       await open(count)
@@ -139,8 +151,11 @@ test('public history bounds mounting and preserves reading, selection, focus and
       }
       report.push({ loaded, anchor: before, after })
     }
-    // Search mounts an already-loaded offscreen match without another history request.
-    await open(1000)
+    // Search waits for a newly mounted large body, then restores an old offset
+    // inside another large body when the search window closes.
+    await open(1000, true, true)
+    await wheel(-2600)
+    const beforeFind = await anchor()
     await b.send('Input.dispatchKeyEvent', { type:'keyDown', key:'f', code:'KeyF', windowsVirtualKeyCode:70, modifiers: process.platform === 'darwin' ? 4 : 2 })
     await b.send('Input.dispatchKeyEvent', { type:'keyUp', key:'f', code:'KeyF', windowsVirtualKeyCode:70 })
     await b.wait('!!document.querySelector(".conversation-find-surface input")')
@@ -148,9 +163,16 @@ test('public history bounds mounting and preserves reading, selection, focus and
     await b.send('Input.insertText', { text:'长链回复 321' })
     await b.wait('!!document.querySelector("[data-message-id=long-321].conversation-find-current-message")')
     await pause(350)
+    assert.equal(await b.evaluate('document.querySelectorAll("[data-message-id=long-321] .markdown-code-frame").length'), 150)
+    assert.equal(await b.evaluate('!!document.querySelector("[data-message-id=long-321] [data-timeline-pending]")'), false)
     const found = await offset('long-321')
     assert.ok(found >= 0 && found < 600, `search destination offscreen: ${found}`)
     await click('[aria-label="关闭会话查找"]')
+    await pause(450)
+    const restored = await offset(beforeFind.id)
+    assert.ok(restored !== null && Math.abs(restored - beforeFind.offset) < 2,
+      `closing distant search must restore ${beforeFind.id} at ${beforeFind.offset}; got ${restored}`)
+    report.push({ searchReturn: beforeFind, restored })
     await b.capture(join(out, 'history-search.png'))
     assert.deepEqual(b.errors, [])
     await writeFile(join(out, 'verification.json'), JSON.stringify(report, null, 2))

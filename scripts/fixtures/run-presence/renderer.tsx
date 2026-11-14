@@ -17,6 +17,7 @@ import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/sr
 import { MobileConversationDrawer, MobileLayoutProvider } from '../../../apps/desktop/src/renderer/src/MobileLayout'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from '../../../apps/desktop/src/renderer/src/AppDialog'
 import { model, profiles, scenarios, installations } from './model'
+import { TimelineVirtualList, type TimelineVirtualListHandle } from '../../../apps/desktop/src/renderer/src/TimelineVirtualList'
 import { conversationRunPresenceTimeline } from '../../../apps/desktop/src/renderer/src/conversation-run-presence'
 import { liveRuntimeEventFromExecutionEvidence } from '../../../apps/desktop/src/renderer/src/ui-model'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
@@ -249,5 +250,27 @@ function Workbench() {
     </FilePreviewProvider></CurrentUserProfileContext.Provider>
   </ThreadClientProvider></MobileLayoutProvider>
 }
+// Deterministic row-readiness acceptance: same-height deferred content must
+// settle explicit navigation in both short and windowed histories.
+function TimelineReadinessProbe() {
+  const viewport = useRef<HTMLDivElement>(null)
+  const controller = useRef<TimelineVirtualListHandle | null>(null)
+  const [pending, setPending] = useState(true)
+  const [items, setItems] = useState(() => Array.from({ length: Number(params.get('probeCount') ?? 20) }, (_, index) => ({ id: `probe-${index}` })))
+  useEffect(() => {
+    Object.assign(window, { __timelineReadiness: {
+      mount: (id: string) => controller.current!.ensureMounted(id).then(node => node ? !node.querySelector('[data-timeline-pending]') : null),
+      release: () => setPending(false), remove: () => setItems([])
+    } })
+  }, [])
+  return <div ref={viewport} style={{ height: 300, overflow: 'auto' }}>
+    <TimelineVirtualList items={items} viewportRef={viewport} controllerRef={controller}
+      followingLatest={() => false} preserveReadingPosition={() => true}>
+      {item => <div data-message-id={item.id} style={{ height: 40 }}>
+        <span data-timeline-pending={pending && item.id === 'probe-0' ? '' : undefined}>{pending ? '等待正文' : '正文已可用'}</span>
+      </div>}
+    </TimelineVirtualList>
+  </div>
+}
 if (params.get('startup') === 'queued') model.showStartupStatus(null, false, 'queued')
-createRoot(document.getElementById('root')!).render(<Workbench />)
+createRoot(document.getElementById('root')!).render(params.has('timelineReadiness') ? <TimelineReadinessProbe /> : <Workbench />)

@@ -5,16 +5,19 @@ import { cpus, platform, release, tmpdir } from 'node:os'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createHash } from 'node:crypto'
 import { build } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { launchAcceptanceBrowser, pause } from './lib/host-web-browser.mjs'
+import { nativeTimingCoverage, summarizeNativeKeys } from './lib/native-input-metrics.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const out = resolve(process.argv[2] ?? 'docs/prototypes/thread-input-performance')
 const fixture = await mkdtemp(join(tmpdir(), 'rovai-thread-input-performance-'))
 const baseRef = process.env.ROVAI_PERF_BASE_REF
 const sourceCommit = execFileSync('git', ['rev-parse', baseRef ?? 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const sourceDigest = baseRef ? null : createHash('sha256').update(execFileSync('git', ['diff', 'HEAD', '--', 'apps', 'packages'], { cwd: root })).digest('hex')
 const baselineSources = new Map()
 if (baseRef) for (const file of execFileSync('git', ['diff', '--diff-filter=MRT', '--name-only', baseRef, '--', 'apps/desktop/src', 'apps/web/src', 'packages'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
   baselineSources.set(join(root, file), execFileSync('git', ['show', `${baseRef}:${file}`], { cwd: root, encoding: 'utf8' }))
@@ -27,12 +30,16 @@ const desktop = process.env.ROVAI_PERF_SURFACE === 'desktop'
 const contentProfile = process.env.ROVAI_PERF_CONTENT ?? 'mixed'
 assert.ok(['mixed', 'long-reply', 'tool-steps'].includes(contentProfile), 'known content profile required')
 const replyArrival = process.env.ROVAI_PERF_REPLY_ARRIVAL === '1'
+const narrationCharacters = Number(process.env.ROVAI_PERF_NARRATION_CHARS ?? 0)
+assert.ok(Number.isInteger(narrationCharacters) && narrationCharacters >= 0 && narrationCharacters <= 24_000)
+const narrationPrefix = Array.from({ length: Math.ceil(narrationCharacters / 5) }, (_, index) => `进展 ${index + 1}。`).join('').slice(0, narrationCharacters)
 const samples = Number(process.env.ROVAI_PERF_SAMPLES ?? 80)
 const rounds = Number(process.env.ROVAI_PERF_ROUNDS ?? 3)
 const counts = (process.env.ROVAI_PERF_COUNTS ?? '20,200,1000').split(',').map(Number)
 const loads = (process.env.ROVAI_PERF_LOADS ?? 'idle,current,other').split(',')
 const keyInterval = 100, eventInterval = 32
-const initCounters = 'window.__inputPerf ??= {workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0};'
+const initCounters = 'window.__inputPerf ??= {workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0,markdownParseMs:0,markdownPipelineMs:0,markdownAdmissionChecks:0,markdownAdmissionMs:0};'
+const markdownTiming = `window.__measureMarkdown=(phase,work)=>{const start=performance.now();try{return work()}finally{const end=performance.now();window.__inputPerf[phase==='parse'?'markdownParseMs':'markdownPipelineMs']+=end-start;performance.measure('markdown.'+phase,{start,end})}};`
 const modelExtension = `
 clearInterval(streamingTimer);
 const perfListeners = new Set();
@@ -60,9 +67,10 @@ window.__inputPerfModel = {
    halt(); timers.forEach(clearTimeout); timers.clear(); streams.clear();
    const id = 'input-performance-' + count + '-' + Date.now();
    const text = '会话输入与执行进展核对。\\n\\n- 保留草稿和选区\\n- 保留消息顺序\\n\\n| 项目 | 状态 |\\n| --- | --- |\\n| 草稿 | 已保存 |\\n\\n~~~ts\\nconst sample = { count: 42, active: true };\\nconsole.log(sample);\\n~~~';
-   perfPublicBody = text.repeat(150);
+   perfPublicBody = (text+'\\n\\n').repeat(150);
    const messages = Array.from({length:count}, (_,i)=>makeMessage('perf-message-'+i,i+1,text,i%2 ? 0 : -1));
-   if(${JSON.stringify(contentProfile)} === 'long-reply') messages[count-1] = makeMessage('perf-message-'+(count-1),count,text.repeat(150),0);
+   if(${JSON.stringify(contentProfile)} === 'long-reply') messages[count-1] = makeMessage('perf-message-'+(count-1),count,(text+'\\n\\n').repeat(150),0);
+   window.__inputPerf.bodyMount={id:messages.at(-1).id,requestedAt:performance.now(),expectedCodeBlocks:messages.at(-1).body.split('console.log(sample);').length-1};
    const run = {...makeRun('perf-current-run',0,'running',[messages.at(-2).id]),executionEvidenceCount:0,executionEvidenceChangeSequence:0,anchorMessageId:messages.at(-2).id,publicTailSequenceAtStart:count-2};
    if(${JSON.stringify(contentProfile)} !== 'mixed') Object.assign(run,{inputMessageIds:[messages.at(-1).id],anchorMessageId:messages.at(-1).id,publicTailSequenceAtStart:count});
    const tool = evidence(run)[1];
@@ -75,6 +83,7 @@ window.__inputPerfModel = {
    update({generation:state.generation+1,snapshot:{...state.snapshot,thread:{...state.snapshot.thread,id},messages,agentRuns:[run],turns:[],tasks:[],executionEvidence,messageDeliveries:[],agentRunFileChanges:[],agentRunImages:[],memberCreations:[]},draft:{...state.draft,threadId:id,body:'',content:{version:2,segments:[]},quotes:[],attachments:[],replyIntent:null,continuationIntent:null}});
  },
  appendPublicReply(planned) {
+   window.__inputPerf.replyArrival={requestedAt:performance.now(),planned};
    const message=makeMessage('perf-large-reply',state.snapshot.messages.at(-1).sequence+1,perfPublicBody+'\\n\\n'+planned,0,'perf-current-run');
    update({snapshot:{...state.snapshot,messages:[...state.snapshot.messages,message]}});
  },
@@ -87,7 +96,7 @@ window.__inputPerfModel = {
      perfTail={key:e.id,kind:'item',sequence:1001,lastSequence:1001,changeSequence:perfWatermark,toolCount:0,
        counts:{completed:0,failed:0,stopped:0,recorded:0,running:0,waiting:0},evidence:[e]};
    }
-   const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:${contentProfile === 'tool-steps' ? 1001 : 1},revision:sequence,changeSequence:${contentProfile === 'tool-steps' ? '1000+sequence' : 'sequence'},payload:{blockId:'perf-text',status:'streaming',text:'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:30}}};
+   const event={method:'agent.text.block',params:{threadId:other?'other-performance-thread':state.snapshot.thread.id,agentRunId:other?'perf-other-run':'perf-current-run',executionEpoch:1,evidenceId:'perf-text',sequence:${contentProfile === 'tool-steps' ? 1001 : 1},revision:sequence,changeSequence:${contentProfile === 'tool-steps' ? '1000+sequence' : 'sequence'},payload:{blockId:'perf-text',status:'streaming',text:${JSON.stringify(narrationPrefix)}+'已处理第 '+sequence+' 批测试内容。',delta:'已处理第 '+sequence+' 批测试内容。',textLength:${narrationCharacters}+30}}};
    for(const listener of perfListeners) listener(event);
  },
  legacySubscribe(listener) { perfListeners.add(listener); return ()=>perfListeners.delete(listener) }
@@ -109,8 +118,13 @@ try {
  const built=await build({configFile:false,root:join(root,'scripts/fixtures/run-presence'),base:'./',logLevel:'error',
    plugins:[{name:'thread-input-performance',enforce:'pre',load(id){return baselineSources.get(id)},transform(code,id){
      if(id.endsWith('/ThreadWorkspace.tsx')) return code.replace('  const taskCapability = useTaskCapability()',initCounters+'window.__inputPerf.workspaceRenders++;\n  const taskCapability = useTaskCapability()').replace('const timelineItem = presenceTimeline[timelineIndex]','window.__inputPerf.historyRows++; const timelineItem = presenceTimeline[timelineIndex]');
+     if(id.endsWith('/shared/execution-presentation/safe-markdown-model.ts')) return code
+       .replace('export function safeMarkdownHasRenderableContent(source: string): boolean {', 'export function safeMarkdownHasRenderableContent(source: string): boolean { window.__inputPerf.markdownAdmissionChecks++;const began=performance.now();try {')
+       .replace(/\n}\s*$/, '\n} finally { window.__inputPerf.markdownAdmissionMs+=performance.now()-began }\n}');
      if(id.endsWith('/SafeMarkdown.tsx')) return code.replace('  const rootRef = useRef<HTMLDivElement>(null)',initCounters+'window.__inputPerf.markdownRenders++;\n  const rootRef = useRef<HTMLDivElement>(null)');
-     if(id.includes('/react-markdown/')&&id.endsWith('/lib/index.js')) return code.replaceAll('processor.parse(file)','(window.__inputPerf.markdownParses++,processor.parse(file))');
+     if(id.includes('/react-markdown/')&&id.endsWith('/lib/index.js')) return code
+       .replaceAll('processor.runSync(processor.parse(file), file)', 'window.__measureMarkdown("pipeline",()=>processor.runSync(processor.parse(file), file))')
+       .replaceAll('processor.parse(file)','(window.__inputPerf.markdownParses++,window.__measureMarkdown("parse",()=>processor.parse(file)))');
      if(id.endsWith('/run-presence/model.ts')) return code+modelExtension;
      if(id.endsWith('/run-presence/renderer.tsx')) return `import {appendLiveRuntimeEventBatch as perfAppend,createLiveRuntimeEventBuffer as perfCreateBuffer} from '../../../apps/desktop/src/renderer/src/live-runtime-event-buffer';\nimport {liveRuntimeEventFromCore as perfFromCore} from '../../../apps/desktop/src/renderer/src/ui-model';\n`+code.replace('function Workbench() {','function Workbench() {'+workbenchExtension).replace('liveRuntimeEvents={model.controls.liveEvidence ? visibleSnapshot.executionEvidence.map(liveRuntimeEventFromExecutionEvidence) : undefined}','liveRuntimeEvents={perfLiveEvents}');
    }},react()],resolve:{alias:{'@contracts':join(root,'packages/contracts/src/index.ts')}},define:{__SOURCE_COMMIT__:JSON.stringify(sourceCommit)},
@@ -119,7 +133,8 @@ try {
  const js=bundle.filter(x=>x.type==='chunk').map(x=>x.code).join('\n')
  const css=bundle.filter(x=>x.type==='asset'&&x.fileName.endsWith('.css')).map(x=>x.source).join('\n')
  const html=join(fixture,'benchmark.html')
- await writeFile(html,`<!doctype html><html lang="zh-CN" data-theme="day"><head><meta charset="utf-8"><style>${css}</style></head><body><div id="root"></div><script>${initCounters}</script><script type="module">${js.replaceAll('</script','<\\/script')}</script></body></html>`)
+ await writeFile(html,`<!doctype html><html lang="zh-CN" data-theme="day"><head><meta charset="utf-8"><style>${css}</style></head><body><div id="root"></div><script>${initCounters}${markdownTiming}</script><script type="module">${js.replaceAll('</script','<\\/script')}</script></body></html>`)
+ if(process.env.ROVAI_PERF_COLD_TRACE==='1'||process.env.ROVAI_PERF_TRACE==='1') await writeFile(join(out,'benchmark.html'),await readFile(html))
  let executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',args=['--headless=new','--user-data-dir='+join(fixture,'profile')]
  if(desktop){
    executable=electron
@@ -131,19 +146,40 @@ try {
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
  browser=await launchAcceptanceBrowser({executable,args,env})
  await browser.send('Emulation.setFocusEmulationEnabled',{enabled:true})
+ let coldTrace
+ if(process.env.ROVAI_PERF_COLD_TRACE==='1'){
+   const entries=[]
+   const complete=new Promise(resolve=>{const stop=browser.onProtocolEvent(event=>{if(event.method==='Tracing.dataCollected')entries.push(...event.params.value);if(event.method==='Tracing.tracingComplete'){stop();resolve(entries)}})})
+   await browser.send('Tracing.start',{categories:'devtools.timeline,blink.user_timing,latencyInfo',transferMode:'ReportEvents'})
+   coldTrace=complete
+ }
  await browser.send('Page.navigate',{url:pathToFileURL(html).href+'?pure=1'+(contentProfile==='tool-steps'?'&windowed=1':'')})
  await browser.wait('!!window.__inputPerfModel && !!document.querySelector("[contenteditable=true]")')
  const version=await browser.send('Browser.getVersion')
  await browser.evaluate(`
- window.__perfKeys=[];window.__perfEvents=[];window.__perfLongTasks=[];
+ window.__perfKeys=[];window.__perfEvents=[];window.__perfLongTasks=[];window.__perfDropped=0;window.__perfVisibility=[];
  new PerformanceObserver(list=>window.__perfLongTasks.push(...list.getEntries().map(e=>({start:e.startTime,duration:e.duration})))).observe({type:'longtask'});
- new PerformanceObserver(list=>window.__perfEvents.push(...list.getEntries().filter(e=>e.name==='keydown').map(e=>({start:e.startTime,duration:e.duration,inputDelay:e.processingStart-e.startTime,processing:e.processingEnd-e.processingStart,interactionId:e.interactionId})))).observe({type:'event',durationThreshold:16});
- document.addEventListener('keydown',e=>{if(e.key!=='a')return;const sample={start:e.timeStamp};window.__perfKeys.push(sample);performance.mark('perf-key-'+window.__perfKeys.length);requestAnimationFrame(()=>setTimeout(()=>{sample.afterFrameTaskMs=performance.now()-sample.start},0))},true);
+ new PerformanceObserver((list,_observer,options)=>{window.__perfDropped+=options?.droppedEntriesCount??0;window.__perfEvents.push(...list.getEntries().filter(e=>e.name==='keydown').map(e=>({name:e.name,start:e.startTime,duration:e.duration,processingStart:e.processingStart,processingEnd:e.processingEnd,inputDelay:e.processingStart-e.startTime,processing:e.processingEnd-e.processingStart,interactionId:e.interactionId})))}).observe({type:'event',durationThreshold:16});
+ document.addEventListener('visibilitychange',()=>window.__perfVisibility.push({type:'visibility',at:performance.now(),value:document.visibilityState}));
+ const bodyObserver=new MutationObserver(()=>{
+   for(const measure of [window.__inputPerf.bodyMount,window.__inputPerf.replyArrival]){
+     if(!measure||measure.domReadyAt)continue;
+     const row=document.querySelector('[data-message-id="'+(measure.id??'perf-large-reply')+'"]');
+     const body=row?.querySelector('.safe-markdown');
+     if(!body||row.querySelector('[data-timeline-pending]'))continue;
+     if(measure.expectedCodeBlocks&&body.querySelectorAll('.markdown-code-frame').length!==measure.expectedCodeBlocks)continue;
+     if(measure.planned&&!body.textContent.includes(String(measure.planned)))continue;
+     measure.domReadyAt=performance.now();measure.domReadyDelayMs=measure.domReadyAt-measure.requestedAt;
+     requestAnimationFrame(()=>setTimeout(()=>{measure.afterFrameTaskAt=performance.now()},0));
+   }
+ });
+ bodyObserver.observe(document.getElementById('root'),{subtree:true,childList:true});
+ document.addEventListener('keydown',e=>{if(e.key!=='a')return;const sample={type:'keydown',start:e.timeStamp,observedAt:performance.now(),trusted:e.isTrusted,visibility:document.visibilityState,focused:document.hasFocus(),targetThreadId:e.target.closest?.('[contenteditable=true]')?.dataset.threadId,editable:!!e.target.closest?.('[contenteditable=true]'),disabled:e.target.closest?.('[contenteditable=true]')?.getAttribute('aria-disabled')};window.__perfKeys.push(sample);performance.mark('perf-key-'+window.__perfKeys.length);requestAnimationFrame(()=>setTimeout(()=>{sample.afterFrameTaskMs=performance.now()-sample.start},0))},true);
  true`)
  const percentile=(values,p)=>values.length?values.slice().sort((a,b)=>a-b)[Math.min(values.length-1,Math.floor(values.length*p))]:null
  for(const count of counts) for(const load of loads) for(let round=0;round<rounds;round++){
    console.log(JSON.stringify({phase:'sampling',count,load,round:round+1,samples,surface:desktop?'desktop-electron':'web-chrome'}))
-   await browser.evaluate('Object.assign(window.__inputPerf,{workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0});window.__perfLongTasks=[];true')
+   await browser.evaluate('Object.assign(window.__inputPerf,{workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0,markdownParseMs:0,markdownPipelineMs:0,markdownAdmissionChecks:0,markdownAdmissionMs:0,replyArrival:null});window.__perfLongTasks=[];true')
    const setupStart=Date.now()
    await browser.evaluate(`window.__inputPerfModel.load(${count});true`)
    await browser.wait('!!document.querySelector("[contenteditable=true]")')
@@ -158,9 +194,15 @@ try {
    await browser.send('Input.insertText',{text:'x'})
    await pause(500)
    const setup=await browser.evaluate('({...window.__inputPerf,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll(".timeline-track [data-message-id]").length})')
+   await writeFile(join(out, 'setup-'+count+'-'+load+'-'+(round+1)+'.json'), JSON.stringify(setup), { flag: 'wx' })
+   if(contentProfile==='long-reply') {
+     assert.equal(setup.bodyMount.expectedCodeBlocks,150)
+     assert.ok(Number.isFinite(setup.bodyMount.domReadyAt),'the large-body fixture must render all 150 independent code blocks')
+   }
+   if(coldTrace){await browser.send('Tracing.end');await writeFile(join(out,'cold.trace.json'),JSON.stringify({traceEvents:await coldTrace}));coldTrace=null}
    delete setup.received
    setup.durationIncludingWarmupMs=Date.now()-setupStart
-   await browser.evaluate('Object.assign(window.__inputPerf,{workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0,received:[]});window.__perfKeys=[];window.__perfEvents=[];window.__perfLongTasks=[];true')
+   await browser.evaluate('Object.assign(window.__inputPerf,{workspaceRenders:0,historyRows:0,markdownRenders:0,markdownParses:0,markdownParseMs:0,markdownPipelineMs:0,markdownAdmissionChecks:0,markdownAdmissionMs:0,received:[],replyArrival:null});window.__perfKeys=[];window.__perfEvents=[];window.__perfLongTasks=[];window.__perfVisibility=[];window.__perfDropped=0;window.__perfCountAtStart=performance.eventCounts?.get("keydown");true')
    let trace
    if(process.env.ROVAI_PERF_TRACE==='1'&&count===1000&&load==='current'&&round===0){
      const entries=[]
@@ -179,21 +221,25 @@ try {
    await browser.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65})
    await pause(800)
    if(trace){await browser.send('Tracing.end');await writeFile(join(out,'calibration.trace.json'),JSON.stringify({traceEvents:await trace}))}
-   const raw=await browser.evaluate(`({...window.__inputPerf,keys:window.__perfKeys,eventTiming:window.__perfEvents,longTasks:window.__perfLongTasks,mountedMessages:document.querySelectorAll('.timeline-track [data-message-id]').length,retainedRows:document.querySelectorAll('.timeline-track [data-retained="true"]').length,executionRows:document.querySelectorAll('[data-execution-virtual-key]').length,executionTailVisible:document.querySelector('.execution-process-stage')?.textContent.includes('已处理第'),elements:document.getElementsByTagName('*').length,text:document.querySelector('[contenteditable=true]').textContent,activity:document.querySelector('.run-presence-preview')?.textContent})`)
+   const raw=await browser.evaluate(`({...window.__inputPerf,keys:window.__perfKeys,eventTiming:window.__perfEvents,longTasks:window.__perfLongTasks,timingCoverage:[{type:'environment',eventTimingSupported:PerformanceObserver.supportedEntryTypes.includes('event'),thresholdMs:16,eventCountAtStart:window.__perfCountAtStart},...window.__perfVisibility,{type:'collection',at:performance.now(),eventCountAtEnd:performance.eventCounts?.get('keydown'),complete:window.__perfDropped===0,dropped:window.__perfDropped}],mountedMessages:document.querySelectorAll('.timeline-track [data-message-id]').length,retainedRows:document.querySelectorAll('.timeline-track [data-retained="true"]').length,executionRows:document.querySelectorAll('[data-execution-virtual-key]').length,executionTailVisible:document.querySelector('.execution-process-stage')?.textContent.includes('已处理第'),elements:document.getElementsByTagName('*').length,text:document.querySelector('[contenteditable=true]').textContent,activity:document.querySelector('.run-presence-preview')?.textContent})`)
+   await writeFile(join(out, `raw-${count}-${load}-${round+1}.json`), JSON.stringify({ sourceCommit, sourceDigest, ...raw }), { flag: 'wx' })
    assert.equal(raw.keys.length,samples,'all scheduled key events must arrive')
+   if(replyArrival) assert.ok(Number.isFinite(raw.replyArrival?.domReadyAt),'the arriving reply must finish its complete DOM projection')
    assert.equal(raw.text,'x'+'a'.repeat(samples),'all input characters must survive')
    if(load==='current')assert.match(raw.activity,/已处理第/,'the measured active region must update')
    if(contentProfile==='tool-steps'){
      assert.ok(raw.executionRows>0&&raw.executionRows<100,'execution steps must use the production DOM window');
      if(load==='current')assert.equal(raw.executionTailVisible,true,'the opened execution window must receive the active tail');
    }
-   const timings=raw.keys.map(key=>raw.eventTiming.find(e=>Math.abs(e.start-key.start)<2)?.duration??0)
-   const eventStats=Object.fromEntries([['p50',.5],['p95',.95],['p99',.99]].map(([name,p])=>[name,percentile(timings,p)||'<16ms']))
+   const coverage=nativeTimingCoverage([...raw.timingCoverage,...raw.keys])
+   const timingQuality=summarizeNativeKeys(raw.keys,raw.eventTiming,{coverage})
+   const eventStats=timingQuality.eventTimingMs
+   const arrivalKeys=raw.replyArrival?raw.keys.filter(key=>key.start>=raw.replyArrival.requestedAt-100&&key.start<=raw.replyArrival.requestedAt+700):[]
    const proxies=raw.keys.map(k=>k.afterFrameTaskMs).filter(Number.isFinite)
-   const result={count,load,round:round+1,samples,durationMs:Date.now()-origin,setup,eventTimingMs:eventStats,eventTimingReported:raw.eventTiming.length,afterFrameTaskApproxMs:{p50:percentile(proxies,.5),p95:percentile(proxies,.95),p99:percentile(proxies,.99)},eventArrivalLagMs:{p50:percentile(raw.received.map(x=>x.lag),.5),p95:percentile(raw.received.map(x=>x.lag),.95)},...raw}
+   const result={count,load,round:round+1,samples,durationMs:Date.now()-origin,setup,eventTimingMs:eventStats,timingQuality,firstKey:summarizeNativeKeys(raw.keys.slice(0,1),raw.eventTiming,{coverage}),replyArrivalWindow:arrivalKeys.length?summarizeNativeKeys(arrivalKeys,raw.eventTiming,{coverage}):null,eventTimingReported:raw.eventTiming.length,afterFrameTaskApproxMs:{p50:percentile(proxies,.5),p95:percentile(proxies,.95),p99:percentile(proxies,.99)},eventArrivalLagMs:{p50:percentile(raw.received.map(x=>x.lag),.5),p95:percentile(raw.received.map(x=>x.lag),.95)},...raw}
    delete result.text
    results.push(result)
-   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,legacyIngress,contentProfile,replyArrival,executionWindowed:contentProfile==='tool-steps',surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms reported as censored. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. Small samples do not establish stable p99.',results,errors:browser.errors},null,2))
+   await writeFile(join(out,'results.json'),JSON.stringify({sourceCommit,sourceDigest,narrationCharacters,contentRevision:"mixed-v2-separated-fences",legacyIngress,contentProfile,replyArrival,executionWindowed:contentProfile==='tool-steps',surface:desktop?'desktop-electron':'web-chrome',build:'Vite production minified; production renderer components; fixture proxy of BusinessApp execution ingress',machine:{cpu:cpus()[0].model,platform:platform(),release:release()},browser:version,keyIntervalMs:keyInterval,eventIntervalMs:eventInterval,measurement:'EventTiming keydown to next rendering completion, rounded to 8ms; below 16ms censored only with verified collection coverage, otherwise unknown. afterFrameTask is a separate approximate proxy, not actual presentation. Timestamped CDP injection includes queued input time. No real OS IME. First key and arrival window are separate small-sample diagnostics, not stable quantiles.',results,errors:browser.errors},null,2))
    console.log(JSON.stringify({count,load,round:round+1,eventTimingMs:eventStats,approx:result.afterFrameTaskApproxMs,workspaceRenders:raw.workspaceRenders,historyRows:raw.historyRows,markdownParses:raw.markdownParses,mountedMessages:raw.mountedMessages,longTasks:raw.longTasks.length}))
  }
  assert.deepEqual(browser.errors,[])

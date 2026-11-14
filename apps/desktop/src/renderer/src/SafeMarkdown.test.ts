@@ -3,8 +3,19 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { SafeMarkdown } from './SafeMarkdown'
 import { DocumentMarkdown } from './DocumentMarkdown'
+import { MessageMarkdown } from './MessageMarkdown'
+import { MessageExportContext } from './message-export-context'
 
 describe('SafeMarkdown default HTML sanitization', () => {
+  it('exports a large message synchronously with its final code and sanitized body', () => {
+    const body = '完整正文。'.repeat(3000) + '\n\n<pre><code>全文末尾</code></pre>\n<script>private</script>'
+    const html = renderToStaticMarkup(createElement(MessageExportContext.Provider, { value: true },
+      createElement(MessageMarkdown, { children: body, theme: 'day' })))
+    expect(html).toContain('<code>全文末尾</code>')
+    expect(html).not.toContain('data-timeline-pending')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('private')
+  })
   it('dispatches exact Mermaid languages only in documents, retaining source and copy during loading', () => {
     const source = '```MeRmAiD\nflowchart LR\n A[中文] --> B\n```'
     const document = renderToStaticMarkup(createElement(DocumentMarkdown, { children: source }))

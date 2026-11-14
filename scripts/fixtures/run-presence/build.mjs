@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { instrumentTimelineMeasurements } from '../../lib/timeline-measurements.mjs'
 
 const root = resolve(import.meta.dirname, '../../..')
 const out = process.argv[2] ?? import.meta.dirname
@@ -13,7 +14,9 @@ if (baseline) for (const file of execFileSync('git', ['diff', '--diff-filter=MRT
   baselineSources.set(join(root, file), execFileSync('git', ['show', `${baseline}:${file}`], { cwd: root, encoding: 'utf8' }))
 }
 const result = await build({ configFile: false, root: import.meta.dirname, base: './', logLevel: 'warn',
-  plugins: [{ name: 'fixture-source-baseline', enforce: 'pre', load: id => baselineSources.get(id) }, react()],
+  plugins: [{ name: 'fixture-source-baseline', enforce: 'pre', load: id => baselineSources.get(id),
+    transform: (code, id) => process.env.ROVAI_FIXTURE_MEASURE_TIMELINE === '1'
+      ? instrumentTimelineMeasurements(code, id) : undefined }, react()],
   resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
   define: { __SOURCE_COMMIT__: JSON.stringify(sourceCommit) },
   build: { write: false, assetsInlineLimit: Number.MAX_SAFE_INTEGER, cssCodeSplit: false,
