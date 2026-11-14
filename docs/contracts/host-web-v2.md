@@ -5,7 +5,7 @@ authority: shared-host-web-transport
 status: accepted
 version: 2
 source_version: v1.59
-last_updated: 2026-09-16
+last_updated: 2026-11-14
 ---
 
 # Host Web v2
@@ -390,8 +390,20 @@ responses are fenced by authentication generation. Read failure shows unavailabl
 stored publication facts. Each provider's `provisioning` retains its original publication progress independently;
 the legacy aggregate cannot hide another provider's in-flight work or approver choices.
 `connection.sessionStatus` is the latest runtime inspection (`valid`, `invalid`, `unavailable`,
-`unknown`), distinct from account connection records. Bot `connectionStatus` is `online`, `offline` or `unknown`, separate
+`unknown`), distinct from account connection records. Bot `connectionStatus` is `online`, `offline`, `unknown`, `connecting` or `reconnecting`, separate
 from publication status. `published` retains the durable Bot publication fact when a later retry/connection failed. Absent live fields are unknown; persisted records alone cannot establish current connectivity.
+`connectionFailureCode` is an optional safe classification; `connectionNeedsAttention` marks a persistent connection issue on the compact disconnected-link icon,
+and `canReconcile` preserves the existing retry action for terminal configuration failures. These fields are projected
+with failure-specific guidance in its hover/focus/click tooltip, without permanent connection descriptions in the row.
+The icon appears only for `reconnecting` or observed `offline` states; `online` (including pending local confirmation),
+initial `connecting` and `unknown` states have no icon. Recovery removes the icon. A legacy brand mismatch disables reconciliation on the wrong provider.
+An initial publication whose only remaining work is connection recovery returns its ongoing provisioning snapshot,
+not an action error. Its Dialog can close while the Host continues; if kept open until `completed`, it allows only
+the finish/close action and cannot submit publication again. An online transport with pending local confirmation
+remains online and reports `connection_confirmation_pending` if that confirmation fails. Fields are projected
+explicitly by Desktop; raw SDK errors and external identity values are never forwarded. An App with no live observation
+is `unknown`; `offline` requires an observed disconnect or terminal failure. A recovery timer or active SDK loop is
+required before displaying `reconnecting`.
 
 Only known expired/mismatched sessions produce `channel_session_expired` and the instruction:
 “请在运行此服务的 Rovai Desktop 中重新连接账号，完成后返回本页重试。” Timeouts, platform approval and ordinary

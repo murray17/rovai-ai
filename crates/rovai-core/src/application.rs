@@ -774,6 +774,7 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.feishu.publicationIntent.advance"
         | "channels.feishu.publicationIntent.storeCredential"
         | "channels.feishu.memberBot.upsert"
+        | "channels.feishu.memberBot.observeConnection"
         | "channels.feishu.owner.verify"
         | "channels.feishu.dm.startNew"
         | "channels.feishu.pendingBinding.resolve"
@@ -816,6 +817,7 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.lark.publicationIntent.advance"
         | "channels.lark.publicationIntent.storeCredential"
         | "channels.lark.memberBot.upsert"
+        | "channels.lark.memberBot.observeConnection"
         | "channels.lark.owner.verify"
         | "channels.lark.dm.startNew"
         | "channels.lark.pendingBinding.resolve"
@@ -9499,6 +9501,39 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
                     .upsert_feishu_member_bot(
+                        &mut database,
+                        &system_command_envelope(
+                            params.command_id,
+                            channel_request_host_component(&request.method)?,
+                            None,
+                            params.command,
+                        ),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.feishu.memberBot.observeConnection" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::ObserveChannelBotConnectionCommand<false>,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::default().observe_member_bot_connection(
+                    &mut database,
+                    &system_command_envelope(
+                        params.command_id,
+                        channel_request_host_component(&request.method)?,
+                        None,
+                        params.command,
+                    ),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "channels.lark.memberBot.observeConnection" => {
+                let params: UserCommandParams<
+                    rovai_core::channel::ObserveChannelBotConnectionCommand<true>,
+                > = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = ChannelService::for_spec(&rovai_core::channel::LARK_SPEC)
+                    .observe_member_bot_connection(
                         &mut database,
                         &system_command_envelope(
                             params.command_id,

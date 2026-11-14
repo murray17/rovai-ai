@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { BotConnection, type BotConnectionStatus } from './bot-connection'
 import { readFile } from 'node:fs/promises'
 import {
   createLarkChannel,
@@ -222,7 +223,10 @@ export interface ChannelHostDependencies {
 }
 
 type ManagedChannel = {
-  connectionStatus: 'online' | 'offline' | 'unknown'
+  connectionStatus: BotConnectionStatus
+  connection?: BotConnection
+  credentialDigest: string
+  observationPending: boolean
   agentId: string
   appId: string
   credentialRef: string
@@ -303,6 +307,8 @@ export class ChannelSettingsService {
   readonly #listeners = new Set<(snapshot: ChannelSettingsSnapshot) => void>()
   readonly #managedChannels = new Map<string, ManagedChannel>()
   readonly #publicationFailures = new Map<string, string>()
+  readonly #connectionFailures = new Map<string, string>()
+  #connectionGeneration = 0
   readonly #chatModeCache = new Map<string, 'p2p' | 'group' | 'topic'>()
   readonly #chatNameCache = new Map<string, string>()
   readonly #rosterReconciledAt = new Map<string, number>()
@@ -370,40 +376,51 @@ export class ChannelSettingsService {
     if (!this.#dependencies || this.#started) return
     this.#started = true
     this.#stopped = false
+    const generation = ++this.#connectionGeneration
+    const current = (): boolean => !this.#stopped && generation === this.#connectionGeneration
     this.#inboundAbort = new AbortController()
     const sessionCheckGeneration = ++this.#sessionCheckGeneration
     try {
       const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
+      if (!current()) return
       const credentialsByRef = new Map(publishedCredentials
         .filter((item): item is PublishedChannelCredential & {
           credential: FeishuAppCredential
         } => item.provider === this.#profile.kind)
         .map((item) => [item.credentialRef, item.credential] as const))
       let snapshot = await this.#coreSnapshot()
+      if (!current()) return
       await this.#recoverPublicationIntents(snapshot)
+      if (!current()) return
       snapshot = await this.#coreSnapshot()
+      if (!current()) return
       if (snapshot.account?.status === 'connected' && snapshot.account.brand !== this.#profile.kind) {
         await this.#expireAccount(snapshot.account)
+        if (!current()) return
         snapshot = await this.#coreSnapshot()
+        if (!current()) return
       }
       for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
+        if (!current()) return
         if (bot.brand !== this.#profile.kind) {
-          this.#publicationFailures.set(bot.agentId, BRAND_MOVED_FAILURE)
+          this.#connectionFailures.set(bot.agentId, BRAND_MOVED_FAILURE)
           continue
         }
         try {
-          await this.#startPublishedBot(bot, credentialsByRef.get(bot.credentialRef) ?? null)
+          this.#startPublishedBot(bot, credentialsByRef.get(bot.credentialRef) ?? null)
         } catch (error) {
-          this.#publicationFailures.set(bot.agentId, channelFailureCode(error))
+          this.#connectionFailures.set(bot.agentId, channelFailureCode(error))
         }
       }
       await this.#emit()
+      if (!current()) return
       this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
       this.#hostPump?.start()
       if (snapshot.account?.status === 'connected') {
         void this.#checkDeveloperSession(snapshot.account, sessionCheckGeneration)
       }
     } catch (error) {
+      if (!current()) return
       await this.stop()
       this.#started = false
       throw error
@@ -411,7 +428,10 @@ export class ChannelSettingsService {
   }
 
   async stop(): Promise<void> {
+    this.#started = false
     this.#stopped = true
+    this.#connectionFailures.clear()
+    ++this.#connectionGeneration
     this.#rosterSweep = null
     this.#aggregateRecovery = null
     this.#inboundAbort.abort()
@@ -421,6 +441,7 @@ export class ChannelSettingsService {
     this.#activeQrAbort = null
     this.#activeProvisioningAbort?.abort()
     this.#activeProvisioningAbort = null
+    this.#activeProvisioning = null
     this.#hostPump?.stop()
     const channels = [...this.#managedChannels.values()]
     this.#managedChannels.clear()
@@ -616,8 +637,17 @@ export class ChannelSettingsService {
     const intent = latestPublicationIntent(snapshot, agentId)
     const credentialRef = bot?.credentialRef ?? memberCredentialRef(this.#profile.kind, agentId)
     const credential = await this.#dependencies!.credentialStore.read(credentialRef)
-    let retryIntentVersion = intent?.version ?? null
-    let retryLastCompletedStep = intent?.lastCompletedStep ?? null
+    const recovering = bot ? this.#managedChannels.get(bot.appId) : undefined
+    const connectionOnlyIntent = intent?.state === 'completed' || intent?.state === 'version_published'
+      || intent?.state === 'connection_verified' || (intent?.state === 'failed_recoverable'
+        && ['version_published', 'connection_verified'].includes(intent.lastCompletedStep ?? ''))
+    if (recovering?.connection && !recovering.connection.terminal && connectionOnlyIntent) {
+      if (recovering.channel.getConnectionStatus?.()?.state !== 'reconnecting') {
+        try { await recovering.connection.connect() }
+        catch (error) { if (recovering.connection.terminal) throw error }
+      }
+      return this.#emit()
+    }
     const canResumeInitialConnection = !bot
       && credential !== null
       && intent?.state === 'failed_recoverable'
@@ -658,47 +688,7 @@ export class ChannelSettingsService {
     const bindingAccountId = bot?.accountId ?? intent?.accountId
     if (!bindingAccountId) throw new Error('该队员缺少可恢复的飞书账号绑定。')
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
-    const recoveringIntent = intent?.state === 'failed_recoverable' ? intent : null
-    const remoteAppId = recoveringIntent?.remoteAppId ?? credential.appId
-    const advanceRetryIntent = async (
-      state: 'connection_verified' | 'completed',
-      lastCompletedStep: 'connection_verified' | 'completed'
-    ): Promise<void> => {
-      if (!recoveringIntent || retryIntentVersion === null) return
-      await this.#advancePublicationIntent(
-        recoveringIntent.publicationIntentId,
-        retryIntentVersion,
-        {
-          state,
-          remoteAppId,
-          credentialRef,
-          lastCompletedStep,
-          failureCode: null
-        }
-      )
-      retryIntentVersion += 1
-      retryLastCompletedStep = lastCompletedStep
-    }
-    try {
-      await this.#connectPublishedCredential(agent, credentialRef, credential)
-      await advanceRetryIntent('connection_verified', 'connection_verified')
-      await advanceRetryIntent('completed', 'completed')
-    } catch (error) {
-      if (recoveringIntent && retryIntentVersion !== null) {
-        await this.#advancePublicationIntent(
-          recoveringIntent.publicationIntentId,
-          retryIntentVersion,
-          {
-            state: 'failed_recoverable',
-            remoteAppId,
-            credentialRef,
-            lastCompletedStep: retryLastCompletedStep,
-            failureCode: channelFailureCode(error)
-          }
-        ).catch(() => undefined)
-      }
-      throw error
-    }
+    await this.#connectPublishedCredential(agent, credentialRef, credential)
     this.#publicationFailures.delete(agentId)
     if (this.#activeProvisioning?.agentId === agentId) {
       this.#activeProvisioning = {
@@ -746,7 +736,7 @@ export class ChannelSettingsService {
     operation: 'publish' | 'retry'
   ): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
-    if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
+    if (this.#activeProvisioningAbort && this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
       this.#activeProvisioning.stage
     )) throw new Error('已有一名队员正在发布。')
     if (this.#activeQrAttempt) throw new Error('已有一个飞书二维码流程正在进行。')
@@ -948,20 +938,6 @@ export class ChannelSettingsService {
         provisioned.ownerOpenId,
         timing
       )
-      await advanceIntent({
-        state: 'connection_verified',
-        remoteAppId,
-        credentialRef,
-        lastCompletedStep: 'connection_verified',
-        failureCode: null
-      })
-      await advanceIntent({
-        state: 'completed',
-        remoteAppId,
-        credentialRef,
-        lastCompletedStep: 'completed',
-        failureCode: null
-      })
       this.#publicationFailures.delete(agentId)
       this.#activeProvisioning = {
         publicationIntentId,
@@ -983,6 +959,7 @@ export class ChannelSettingsService {
       this.#finishQr()
       return this.#emit()
     } catch (error) {
+      if (this.#stopped || abort.signal.aborted) throw error
       timing.recordTotal('failed', error)
       const failureCode = channelFailureCode(error)
       const unknownRemoteState = isUnknownRemoteProvisioningError(error)
@@ -1000,18 +977,23 @@ export class ChannelSettingsService {
         // Keep the original failure. An in-memory App ID is not a recovery identity.
       }
       if (unknownRemoteState && !failureStatePersisted) remoteAppId = null
-      this.#publicationFailures.set(agentId, failureCode)
+      const connection = remoteAppId && lastCompletedStep === 'version_published'
+        ? this.#managedChannels.get(remoteAppId)?.connection : undefined
+      const recoveringConnection = connection && !connection.terminal
+      if (!connection) this.#publicationFailures.set(agentId, failureCode)
       this.#activeProvisioning = {
         publicationIntentId,
         agentId,
-        stage: unknownRemoteState ? 'unknown_remote_state' : 'failed',
-        detail: unknownRemoteState
+        stage: recoveringConnection ? 'connecting_bot' : unknownRemoteState ? 'unknown_remote_state' : 'failed',
+        detail: recoveringConnection ? connection.status === 'online'
+          ? 'Bot 已发布，连接已建立，正在保存结果。' : 'Bot 已发布，正在重连。' : unknownRemoteState
           ? '无法确认本次创建请求是否已在飞书落地。为避免重复应用，Rovai 不会自动再次创建。'
           : recoverableProvisioningDetail(failureCode, remoteAppId !== null),
         remoteAppId,
-        failureCode
+        failureCode: recoveringConnection ? null : failureCode
       }
-      await this.#emit()
+      const result = await this.#emit()
+      if (recoveringConnection) return result
       throw error
     } finally {
       if (this.#activeProvisioningAbort === abort) this.#activeProvisioningAbort = null
@@ -1146,20 +1128,6 @@ export class ChannelSettingsService {
         provisioned.ownerOpenId,
         timing
       )
-      await advanceIntent({
-        state: 'connection_verified',
-        remoteAppId,
-        credentialRef,
-        lastCompletedStep: 'connection_verified',
-        failureCode: null
-      })
-      await advanceIntent({
-        state: 'completed',
-        remoteAppId,
-        credentialRef,
-        lastCompletedStep: 'completed',
-        failureCode: null
-      })
       this.#publicationFailures.delete(agent.agentId)
       this.#activeProvisioning = {
         publicationIntentId: intent.publicationIntentId,
@@ -1182,6 +1150,7 @@ export class ChannelSettingsService {
       timing.recordTotal('ok')
       return this.#emit()
     } catch (error) {
+      if (this.#stopped || abort.signal.aborted) throw error
       timing.recordTotal('failed', error)
       const failureCode = channelFailureCode(error)
       await this.#advancePublicationIntent(intent.publicationIntentId, intentVersion, {
@@ -1191,16 +1160,21 @@ export class ChannelSettingsService {
         lastCompletedStep,
         failureCode
       }).catch(() => undefined)
-      this.#publicationFailures.set(agent.agentId, failureCode)
+      const connection = remoteAppId && lastCompletedStep === 'version_published'
+        ? this.#managedChannels.get(remoteAppId)?.connection : undefined
+      const recoveringConnection = connection && !connection.terminal
+      if (!connection) this.#publicationFailures.set(agent.agentId, failureCode)
       this.#activeProvisioning = {
         publicationIntentId: intent.publicationIntentId,
         agentId: agent.agentId,
-        stage: 'failed',
-        detail: recoverableProvisioningDetail(failureCode, true),
+        stage: recoveringConnection ? 'connecting_bot' : 'failed',
+        detail: recoveringConnection ? connection.status === 'online'
+          ? 'Bot 已发布，连接已建立，正在保存结果。' : 'Bot 已发布，正在重连。' : recoverableProvisioningDetail(failureCode, true),
         remoteAppId,
-        failureCode
+        failureCode: recoveringConnection ? null : failureCode
       }
-      await this.#emit()
+      const result = await this.#emit()
+      if (recoveringConnection) return result
       throw error
     } finally {
       if (this.#activeProvisioningAbort === abort) this.#activeProvisioningAbort = null
@@ -1397,31 +1371,24 @@ export class ChannelSettingsService {
     ownerOpenId: string,
     timing?: ProvisioningTimingRecorder
   ): Promise<void> {
-    await this.#command(this.#method('memberBot.upsert'), {
-      accountId,
-      agentId: agent.agentId,
-      appId: credential.appId,
-      ownerOpenId,
-      botOpenId: null,
-      botDisplayName: agent.displayName,
-      credentialRef
-    })
-    const managed = await this.#connectBot(agent.agentId, credentialRef, credential, timing)
-    try {
+    const snapshot = await this.#coreSnapshot()
+    const existing = snapshot.memberBots.find(bot => bot.agentId === agent.agentId)
+    if (!existing || existing.status === 'disabled') {
       await this.#command(this.#method('memberBot.upsert'), {
-        accountId,
-        agentId: agent.agentId,
-        appId: credential.appId,
-        ownerOpenId,
-        botOpenId: managed.channel.botIdentity?.openId ?? null,
-        botDisplayName: managed.channel.botIdentity?.name || agent.displayName,
-        credentialRef
+        accountId, agentId: agent.agentId, appId: credential.appId, ownerOpenId,
+        botOpenId: null, botDisplayName: agent.displayName, credentialRef
       })
-    } catch (error) {
-      await this.#disconnectManaged(managed)
-      throw error
+    } else if (existing.accountId !== accountId || existing.appId !== credential.appId || existing.credentialRef !== credentialRef) {
+      throw new Error('feishu_member_bot.binding_immutable')
     }
-    await this.#activateManagedChannel(managed)
+    const expectedIntent = latestPublicationIntent(snapshot, agent.agentId)
+    await this.#connectBot(agent.agentId, credentialRef, credential, timing)
+    if (expectedIntent) {
+      const current = latestPublicationIntent(await this.#coreSnapshot(), agent.agentId)
+      if (current?.publicationIntentId !== expectedIntent.publicationIntentId || current.state !== 'completed') {
+        throw new Error('publication_connection_not_settled')
+      }
+    }
   }
 
   async #connectPublishedCredential(
@@ -1435,7 +1402,7 @@ export class ChannelSettingsService {
 
   async #activateManagedChannel(managed: ManagedChannel): Promise<void> {
     const previous = this.#managedChannels.get(managed.appId)
-    if (previous) await this.#disconnectManaged(previous)
+    if (previous && previous !== managed) await this.#disconnectManaged(previous)
     this.#managedChannels.set(managed.appId, managed)
   }
 
@@ -1464,17 +1431,12 @@ export class ChannelSettingsService {
     }
   }
 
-  async #startPublishedBot(
+  #startPublishedBot(
     bot: CoreChannelSnapshot['memberBots'][number],
     credential: FeishuAppCredential | null
-  ): Promise<void> {
+  ): void {
     if (!credential || credential.appId !== bot.appId) throw new Error('published_bot_credential_missing')
-    const managed = await this.#connectBot(bot.agentId, bot.credentialRef, credential)
-    this.#managedChannels.set(bot.appId, managed)
-    // Opt-in synthetic previews reuse this exact connection, never a competing WebSocket.
-    void this.#dependencies?.executionPreview?.connected(bot.agentId, bot.appId, managed.channel).catch(() => {
-      logFeishuBotDiagnostic('execution_preview.failed', { agentId: bot.agentId })
-    })
+    this.#managedForBot(bot, credential).connection!.start()
   }
 
   async #connectBot(
@@ -1483,6 +1445,32 @@ export class ChannelSettingsService {
     credential: FeishuAppCredential,
     timing?: ProvisioningTimingRecorder
   ): Promise<ManagedChannel> {
+    const generation = this.#connectionGeneration
+    const snapshot = await this.#coreSnapshot()
+    if (this.#stopped || generation !== this.#connectionGeneration) throw new Error('connection_cancelled')
+    const bot = snapshot.memberBots.find(bot => bot.agentId === agentId)
+    if (!bot || bot.appId !== credential.appId || bot.credentialRef !== credentialRef) throw new Error('published_bot_binding_missing')
+    const previous = this.#managedChannels.get(bot.appId)
+    if (previous && (previous.connection?.terminal || previous.credentialDigest !== digest(credential.appSecret))) {
+      await this.#disconnectManaged(previous)
+      if (this.#managedChannels.get(bot.appId) === previous) this.#managedChannels.delete(bot.appId)
+    }
+    if (this.#stopped || generation !== this.#connectionGeneration) throw new Error('connection_cancelled')
+    const managed = this.#managedForBot(bot, credential)
+    const connect = () => managed.connection!.connect()
+    if (timing) await timing.measure('websocket_handshake_ms', connect)
+    else await connect()
+    return managed
+  }
+
+  #managedForBot(bot: CoreChannelSnapshot['memberBots'][number], credential: FeishuAppCredential): ManagedChannel {
+    const existing = this.#managedChannels.get(bot.appId)
+    if (existing) {
+      if (existing.credentialRef !== bot.credentialRef || existing.agentId !== bot.agentId) throw new Error('published_bot_binding_immutable')
+      return existing
+    }
+    const agentId = bot.agentId
+    const credentialRef = bot.credentialRef
     const channel = this.#createChannel({
       appId: credential.appId,
       appSecret: credential.appSecret,
@@ -1491,6 +1479,8 @@ export class ChannelSettingsService {
       source: 'rovai-ai',
       includeRawEvent: true,
       handshakeTimeoutMs: 20_000,
+      identityTimeoutMs: 15_000,
+      initialConnectRetry: false,
       policy: { dmMode: 'open', requireMention: true, respondToMentionAll: false },
       safety: {
         dedup: { ttl: 10 * 60_000, maxEntries: 10_000 },
@@ -1501,6 +1491,8 @@ export class ChannelSettingsService {
     })
     const managed: ManagedChannel = {
       connectionStatus: 'unknown',
+      credentialDigest: digest(credential.appSecret),
+      observationPending: false,
       agentId,
       appId: credential.appId,
       credentialRef,
@@ -1526,61 +1518,115 @@ export class ChannelSettingsService {
     }))
     managed.unsubscribers.push(channel.on('botAdded', (event) => this.#handleBotRosterChanged(event)))
     managed.unsubscribers.push(channel.on('botRemoved', (event) => this.#handleBotRosterChanged(event)))
-    managed.unsubscribers.push(channel.on('error', (error) => {
-      managed.connectionStatus = 'unknown'
-      logFeishuBotDiagnostic('ws.error', {
-        appIdDigest: digest(managed.appId),
-        agentId: managed.agentId,
-        reason: error.code
-      })
-      this.#publicationFailures.set(agentId, error.code)
-      void this.#emit()
-    }))
-    managed.unsubscribers.push(channel.on('reconnecting', () => {
-      managed.connectionStatus = 'offline'
-      void this.#emit()
-      logFeishuBotDiagnostic('ws.reconnecting', {
-        appIdDigest: digest(managed.appId),
-        agentId: managed.agentId
-      })
-    }))
-    managed.unsubscribers.push(channel.on('reconnected', () => {
-      managed.connectionStatus = 'online'
-      logFeishuBotDiagnostic('ws.reconnected', {
-        appIdDigest: digest(managed.appId),
-        agentId: managed.agentId
-      })
-      this.#publicationFailures.delete(agentId)
-      this.#hostPump?.wake()
-      void this.#emit()
-    }))
-    try {
-      logFeishuBotDiagnostic('ws.connecting', {
-        appIdDigest: digest(managed.appId),
-        agentId: managed.agentId
-      })
-      const connectionTiming = timing ?? new ProvisioningTimingRecorder({
-        agentId,
-        appId: credential.appId,
-        recovering: true
-      })
-      await connectionTiming.measure('websocket_handshake_ms', () => channel.connect())
-      managed.connectionStatus = 'online'
-      logFeishuBotDiagnostic('ws.connected', {
-        appIdDigest: digest(managed.appId),
-        agentId: managed.agentId
-      })
-      return managed
-    } catch (error) {
-      await this.#disconnectManaged(managed)
-      throw error
+    const generation = this.#connectionGeneration
+    managed.connection = new BotConnection({
+      channel,
+      now: this.#now,
+      setTimeout: this.#dependencies?.setTimeout ?? globalThis.setTimeout,
+      clearTimeout: this.#dependencies?.clearTimeout ?? globalThis.clearTimeout,
+      changed: () => {
+        if (this.#stopped || generation !== this.#connectionGeneration) return
+        managed.connectionStatus = managed.connection!.status
+        if (this.#activeProvisioning?.remoteAppId === managed.appId && this.#activeProvisioning.stage === 'connecting_bot') {
+          const connection = managed.connection!
+          if (connection.terminal) {
+            this.#activeProvisioning = { ...this.#activeProvisioning, stage: 'failed',
+              detail: 'Bot 已发布，连接需要处理。', failureCode: connection.failureCode }
+          } else if (connection.failureCode === 'connection_confirmation_pending') {
+            this.#activeProvisioning = { ...this.#activeProvisioning, detail: 'Bot 已发布，连接已建立，正在保存结果。' }
+          } else if (connection.status === 'reconnecting') {
+            this.#activeProvisioning = { ...this.#activeProvisioning, detail: 'Bot 已发布，正在重连。' }
+          }
+        }
+        void this.#emit().catch(() => undefined)
+      },
+      afterConnect: async () => {
+        if (this.#stopped || generation !== this.#connectionGeneration) throw new Error('connection_cancelled')
+        await this.#observeConnectedBot(managed)
+        if (this.#stopped || generation !== this.#connectionGeneration) return
+        this.#connectionFailures.delete(agentId)
+        this.#publicationFailures.delete(agentId)
+        this.#hostPump?.wake()
+        void this.#dependencies?.executionPreview?.connected(agentId, bot.appId, channel).catch(() => undefined)
+      }
+    })
+    this.#managedChannels.set(bot.appId, managed)
+    return managed
+  }
+
+  async #observeConnectedBot(managed: ManagedChannel): Promise<void> {
+    const identity = managed.channel.botIdentity
+    if (!identity?.openId) throw new Error('bot_identity_unavailable')
+    // A rejected receipt must not pin a later attempt to an earlier Owner state.
+    const observationId = randomUUID()
+    for (let retry = 0; retry < 3; retry++) {
+      if (this.#stopped || this.#managedChannels.get(managed.appId) !== managed) throw new Error('connection_cancelled')
+      const snapshot = await this.#coreSnapshot()
+      if (this.#stopped || this.#managedChannels.get(managed.appId) !== managed) throw new Error('connection_cancelled')
+      const bot = snapshot.memberBots.find(bot => bot.agentId === managed.agentId)
+      if (!bot || bot.appId !== managed.appId || bot.credentialRef !== managed.credentialRef) throw new Error('published_bot_binding_immutable')
+      // Legacy published bindings learn their App-scoped Owner on the first
+      // trusted inbound message. Keep that transport alive to permit verification.
+      if (bot.ownerIdentityStatus !== 'verified') {
+        managed.observationPending = true
+        return
+      }
+      try {
+        await this.#commandWithId(this.#method('memberBot.observeConnection'),
+          stableCommandId('observe-connection', observationId, this.#profile.kind, managed.appId, String(bot.version), identity.openId, identity.name), {
+          accountId: bot.accountId, agentId: bot.agentId, appId: bot.appId,
+          credentialRef: bot.credentialRef, expectedVersion: bot.version,
+          botOpenId: identity.openId, botDisplayName: identity.name
+        })
+        managed.observationPending = false
+        break
+      } catch (error) {
+        if (String((error as { code?: string }).code ?? '').endsWith('owner_identity.unverified')) {
+          managed.observationPending = true
+          return
+        }
+        if (retry === 2 || !String((error as { code?: string }).code ?? error).includes('version_conflict')) throw error
+      }
     }
+    // Re-read for each CAS. Only the latest exact intent may be completed.
+    let completingIntentId: string | undefined
+    for (let retry = 0; retry < 4; retry++) {
+      if (this.#stopped || this.#managedChannels.get(managed.appId) !== managed) throw new Error('connection_cancelled')
+      const snapshot = await this.#coreSnapshot()
+      if (this.#stopped || this.#managedChannels.get(managed.appId) !== managed) throw new Error('connection_cancelled')
+      const bot = snapshot.memberBots.find(bot => bot.agentId === managed.agentId)
+      const intent = latestPublicationIntent(snapshot, managed.agentId)
+      if (!bot || !intent || intent.accountId !== bot.accountId || intent.remoteAppId !== managed.appId || intent.credentialRef !== managed.credentialRef) return
+      if (completingIntentId && completingIntentId !== intent.publicationIntentId) return
+      completingIntentId = intent.publicationIntentId
+      if (intent.state === 'completed') {
+        if (this.#activeProvisioning?.publicationIntentId === intent.publicationIntentId) {
+          this.#activeProvisioning = { ...this.#activeProvisioning, stage: 'completed', detail: 'Bot 已发布并建立长连接。', failureCode: null }
+        }
+        return
+      }
+      const canComplete = intent.state === 'version_published' || intent.state === 'connection_verified'
+        || (intent.state === 'failed_recoverable' && ['version_published', 'connection_verified'].includes(intent.lastCompletedStep ?? ''))
+      if (!canComplete || bot.ownerIdentityStatus !== 'verified') return
+      const next = intent.state === 'connection_verified' || intent.lastCompletedStep === 'connection_verified' ? 'completed' : 'connection_verified'
+      try {
+        await this.#commandWithId(this.#method('publicationIntent.advance'),
+          stableCommandId('complete-connection', this.#profile.kind, intent.publicationIntentId, String(intent.version), next), {
+          publicationIntentId: intent.publicationIntentId, expectedVersion: intent.version, state: next, remoteAppId: managed.appId, credentialRef: managed.credentialRef,
+          lastCompletedStep: next, failureCode: null
+        })
+      } catch (error) {
+        if (retry === 3 || !String((error as { code?: string }).code ?? error).includes('version_conflict')) throw error
+      }
+    }
+    throw new Error('connection_completion_pending')
   }
 
   async #disconnectManaged(managed: ManagedChannel): Promise<void> {
     managed.connectionStatus = 'offline'
     for (const unsubscribe of managed.unsubscribers.splice(0)) unsubscribe()
-    await managed.channel.disconnect().catch(() => undefined)
+    if (managed.connection) await managed.connection.stop()
+    else await managed.channel.disconnect().catch(() => undefined)
   }
 
   async #handleMessage(managed: ManagedChannel, message: NormalizedMessage): Promise<void> {
@@ -1643,6 +1689,15 @@ export class ChannelSettingsService {
       }
       await this.#emit()
       return
+    }
+    if (managed.observationPending) {
+      // Join any in-flight confirmation before requesting another. A trusted
+      // message can arrive while the first observation is still settling.
+      void managed.connection?.connect().then(() => {
+        if (managed.observationPending && !this.#stopped && this.#managedChannels.get(managed.appId) === managed) {
+          managed.connection?.start()
+        }
+      }).catch(() => undefined)
     }
     const conversationKind = await this.#conversationKind(managed.channel, message)
     if (conversationKind === 'group' && message.threadId) {
@@ -2295,7 +2350,7 @@ export class ChannelSettingsService {
     }>(this.#hostMethod('host.tick'), {
       workerId: HOST_WORKER_ID,
       limit: 20,
-      inboundAttachmentAppIds: [...this.#managedChannels.keys()]
+      inboundAttachmentAppIds: [...this.#managedChannels.values()].filter(managed => !managed.connection?.terminal).map(managed => managed.appId)
     })
     const rosterRefreshes = Array.isArray(tick.rosterRefreshes)
       ? tick.rosterRefreshes
@@ -2325,7 +2380,7 @@ export class ChannelSettingsService {
         continue
       }
       const managed = this.#managedChannels.get(pending.appId)
-      if (!managed) continue
+      if (!managed || managed.connection?.terminal) continue
       this.#inboundDownloads.add(pending.requestId)
       let retryDelay = 0
       void this.#downloadInboundAttachments(managed, pending, this.#inboundAbort.signal)
@@ -2421,7 +2476,7 @@ export class ChannelSettingsService {
 
   async #deliverNow(delivery: ClaimedChannelDelivery, executionAgentRunId: string | null): Promise<void> {
     const managed = this.#managedChannels.get(delivery.targetAppId)
-    if (!managed || managed.credentialRef !== delivery.credentialRef) {
+    if (!managed || managed.connection?.terminal || managed.credentialRef !== delivery.credentialRef) {
       await this.#settleDelivery(delivery, null, new Error('target_bot_not_connected'))
       return
     }
@@ -2698,7 +2753,7 @@ export class ChannelSettingsService {
       const bot = bots.get(agentId)
       bots.set(agentId, {
         agentId,
-        publicationStatus: bot?.publicationStatus === 'disabled' ? 'disabled' : 'failed',
+        publicationStatus: bot?.publicationStatus === 'disabled' ? 'disabled' : published.has(agentId) ? 'published' : 'failed',
         botDisplayName: bot?.botDisplayName ?? null,
         appId: bot?.appId ?? null,
         managementUrl: bot?.managementUrl ?? null,
@@ -2728,7 +2783,25 @@ export class ChannelSettingsService {
             lastVerifiedAt: account.lastVerifiedAt
           } : null
         },
-        memberBots: [...bots.values()].map(bot => ({ ...bot, published: published.has(bot.agentId), connectionStatus: bot.appId ? this.#managedChannels.get(bot.appId)?.connectionStatus ?? 'offline' as const : 'unknown' as const })).sort((left, right) => left.agentId.localeCompare(right.agentId)),
+        memberBots: [...bots.values()].map(bot => {
+          const managed = bot.appId ? this.#managedChannels.get(bot.appId) : undefined
+          const connection = managed?.connection
+          const failure = this.#connectionFailures.get(bot.agentId)
+          const intent = latestPublicationIntent(snapshot, bot.agentId)
+          const publicationNeedsAction = intent?.state === 'failed_unknown_remote_state'
+            || (intent?.state === 'failed_recoverable'
+              && !['version_published', 'connection_verified'].includes(intent.lastCompletedStep ?? ''))
+          return { ...bot, publicationStatus: published.has(bot.agentId)
+              ? publicationNeedsAction ? 'failed' as const : 'published' as const : bot.publicationStatus,
+            failureCode: publicationNeedsAction ? intent?.failureCode ?? bot.failureCode : bot.failureCode,
+            published: published.has(bot.agentId),
+            connectionStatus: connection?.status ?? (failure ? 'offline' as const : 'unknown' as const),
+            connectionFailureCode: connection?.failureCode ?? failure ?? null,
+            connectionNeedsAttention: connection?.needsAttention ?? Boolean(failure),
+            canReconcile: failure === BRAND_MOVED_FAILURE ? false
+              : connection?.terminal || Boolean(failure) || bot.publicationStatus === 'failed' || publicationNeedsAction
+          }
+        }).sort((left, right) => left.agentId.localeCompare(right.agentId)),
         pendingBindingCount: snapshot.pendingBindingCount,
         bindingIssueCount: snapshot.bindingIssueCount
       }],
@@ -2788,7 +2861,7 @@ export class ChannelSettingsService {
       command
     })
     if (throwOnRejected && result.status === 'rejected') {
-      throw new Error(commandFailureMessage(result))
+      throw Object.assign(new Error(commandFailureMessage(result)), { code: result.code })
     }
     return result
   }
@@ -2965,7 +3038,8 @@ function latestPublicationIntent(
   snapshot: CoreChannelSnapshot,
   agentId: string
 ): CoreChannelSnapshot['publicationIntents'][number] | null {
-  return snapshot.publicationIntents.find((intent) => intent.agentId === agentId) ?? null
+  return snapshot.publicationIntents.filter(intent => intent.agentId === agentId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
 }
 
 function stableCommandId(...parts: string[]): string {

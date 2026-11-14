@@ -58,6 +58,51 @@ describe('Channel settings', () => {
     expectTypeOf<ChannelsApi['connect']>().parameters.toEqualTypeOf<[kind?: ChannelKind]>()
   })
 
+  it('keeps published transport recovery distinct and retains reconciliation for terminal failures', () => {
+    const snapshot = unavailableSnapshot()
+    snapshot.channels[0].hostStatus = 'ready'
+    snapshot.channels[0].memberBots = [{ agentId: 'agent-a', publicationStatus: 'published', published: true,
+      connectionStatus: 'reconnecting', connectionFailureCode: 'transport_error', connectionNeedsAttention: true,
+      botDisplayName: 'Bot', appId: 'cli_a', managementUrl: 'https://open.feishu.cn/app/cli_a/baseinfo', failureCode: null }]
+    const render = () => renderToStaticMarkup(createElement(ChannelSettingsView, {
+      snapshot, agents: [agent('agent-a', 0)], busy: null
+    }))
+    expect(render()).toContain('class="channel-connection-indicator needs-attention"')
+    expect(render()).toContain('aria-label="Bot · 连接暂不可用，请检查网络或代理"')
+    expect(render()).not.toContain('aria-describedby=')
+    expect(render()).toContain('data-connection-icon="link-off"')
+    expect(render()).not.toContain('data-signal-strength')
+    expect(render()).not.toContain('channel-live-status')
+    expect(render()).not.toContain('role="tooltip"')
+    expect(render()).toContain('已发布')
+    snapshot.channels[0].memberBots[0].connectionNeedsAttention = false
+    expect(render()).toContain('aria-label="Bot · 连接不畅，正在重连"')
+    expect(render()).not.toContain('检查网络或代理')
+    snapshot.channels[0].memberBots[0].connectionNeedsAttention = true
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online',
+      connectionFailureCode: 'connection_confirmation_pending', canReconcile: false }
+    expect(render()).not.toContain('channel-connection-indicator')
+    expect(render()).not.toContain('连接已建立，正在保存结果')
+    expect(render()).not.toContain('检查网络或代理')
+    for (const connectionStatus of ['online', 'connecting', 'unknown', undefined] as const) {
+      snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0],
+        connectionStatus, connectionFailureCode: null, connectionNeedsAttention: false }
+      expect(render()).toContain('已发布')
+      expect(render()).not.toContain('channel-connection-indicator')
+      expect(render()).not.toContain('继续核对')
+    }
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'offline',
+      connectionFailureCode: 'identity_conflict', canReconcile: true }
+    expect(render()).toContain('继续核对')
+    expect(render()).toContain('Bot 身份与已绑定应用不符，请检查凭据')
+    expect(render()).toContain('data-connection-icon="link-off"')
+    expect(render()).not.toContain('identity_conflict')
+    snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0],
+      connectionFailureCode: 'feishu_brand_moved_to_lark', canReconcile: false }
+    expect(render()).toContain('应用所属平台已变更，当前连接已停用')
+    expect(render()).not.toContain('继续核对')
+  })
+
   it('keeps cancellation silent and distinguishes expired login from temporary connection failures', () => {
     expect(channelErrorMessage(new Error('dingtalk_operation_cancelled'))).toBeNull()
     expect(channelErrorMessage(new Error('dingtalk_developer_session_expired'))).toBe('登录已失效，请重新连接。')
@@ -186,7 +231,8 @@ describe('Channel settings', () => {
     expect(unnamed).toContain('钉钉用户')
     expect(unnamed).toContain('当前企业')
     expect(unnamed).toContain('登录态待校验')
-    expect(unnamed).toContain('连接状态未知')
+    expect(unnamed).not.toContain('channel-connection-indicator')
+    expect(unnamed).not.toContain('连接状态未知')
     expect(unnamed).not.toContain('连接在线')
     expect(account.userName).toBeNull()
     expect(account.tenantName).toBeNull()

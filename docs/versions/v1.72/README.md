@@ -18,6 +18,12 @@ last_updated: 2026-11-14
 1,000 条混合历史的普通输入组件基准 p95 为 32–48ms，实际挂载 5 条；真实中文功能通过，原生输入 p95 56ms 的投递／显示路径仍需后续定位。
 范围、同负载数据、功能回归与未验收项见[实施记录](long-thread-input-performance.md)。
 
+## 飞书与 Lark 长连接恢复（2026-11-13）
+
+修复 SDK 握手超时的未捕获异步 error 与关闭后连接残留；Host 首连独立调度，稳定 HTTP channel 与
+WebSocket 生命周期分离，恢复后通过窄的本地身份观测完成同一发布意图。发布、连接、登录状态分别呈现。
+范围、测试归属与验收边界见[实施记录](feishu-ws-recovery.md)。无 Migration 或模型输入语义变化。
+
 ## 通用提示与分叉反馈（2026-11-12）
 
 在独立 worktree 的 `rovai/toast-preview-v4` 实施通用 AppToast 顶部居中、透明文字动作与 SVG 关闭，
