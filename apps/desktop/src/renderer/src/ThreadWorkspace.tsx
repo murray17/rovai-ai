@@ -3266,7 +3266,7 @@ export function ThreadWorkspace({
   }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id, anchorNavigation.navigation, runSourceNavigation.cancel, cancelReplyReveal])
 
   const closeConversationFind = useCallback((restore = true): void => {
-    conversationFindRequestGeneration.current += 1
+    const generation = ++conversationFindRequestGeneration.current
     if (conversationFindDebounceTimer.current !== null) {
       window.clearTimeout(conversationFindDebounceTimer.current)
       conversationFindDebounceTimer.current = null
@@ -3282,11 +3282,18 @@ export function ThreadWorkspace({
     conversationFindRestorePoint.current = null
     if (!restore || restorePoint?.threadId !== snapshot.thread.id) return
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(async () => {
+        if (conversationFindRequestGeneration.current !== generation
+          || mountedThreadId.current !== restorePoint.threadId || conversationFindOpenRef.current) return
         const timeline = timelineScrollRef.current
         if (timeline) {
           let nextScrollTop = restorePoint.scrollTop
           const anchor = restorePoint.anchor
+          if (anchor && timelineVirtualRef.current) {
+            const mounted = await timelineVirtualRef.current.ensureMounted(anchor.messageId)
+            if (!mounted || conversationFindRequestGeneration.current !== generation
+              || mountedThreadId.current !== restorePoint.threadId || conversationFindOpenRef.current) return
+          }
           const anchorNode = anchor
             ? timeline.querySelector<HTMLElement>(
                 `[data-message-id="${CSS.escape(anchor.messageId)}"]`
@@ -3300,6 +3307,7 @@ export function ThreadWorkspace({
               - anchor.topOffset
           }
           timeline.scrollTop = Math.max(0, nextScrollTop)
+          timelineVirtualRef.current?.rememberAnchor()
           timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(timeline)
           timelineReadingPosition.current = {
             threadId: restorePoint.threadId,
@@ -3371,9 +3379,11 @@ export function ThreadWorkspace({
       window.clearTimeout(conversationFindDebounceTimer.current)
       conversationFindDebounceTimer.current = null
     }
+    // Closing already cancels requests and owns an asynchronous anchor restore.
+    // Do not invalidate that restore when the closed state commits.
+    if (!conversationFind.open) return undefined
     const generation = conversationFindRequestGeneration.current + 1
     conversationFindRequestGeneration.current = generation
-    if (!conversationFind.open) return undefined
     if (!conversationFind.query.trim()) {
       setConversationFind((current) => ({
         ...current,

@@ -27,6 +27,15 @@ describe('safe Markdown presentation admission', () => {
     }
     expect(safeMarkdownHasRenderableContent('`<UUID>`')).toBe(true)
   })
+
+  it('admits long plain narration while retaining markup and entity semantics', () => {
+    expect(safeMarkdownHasRenderableContent('进展 123。继续检查输入，保持内容完整。'.repeat(2000))).toBe(true)
+    for (const source of ['[hidden]: https://example.com', '<!-- 进展 123 -->', '&#32;', '###', '![123](image.png)']) {
+      expect(safeMarkdownHasRenderableContent(source)).toBe(false)
+    }
+    expect(safeMarkdownHasRenderableContent('&#27979;&#35797;')).toBe(true)
+    expect(safeMarkdownHasRenderableContent('\\[可见文字]')).toBe(true)
+  })
 })
 
 describe('message file-reference projection', () => {

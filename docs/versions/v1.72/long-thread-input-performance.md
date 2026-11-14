@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
-status: implemented
+status: in_progress
 last_updated: 2026-11-14
 ---
 
@@ -16,7 +16,7 @@ last_updated: 2026-11-14
 - Branch：`rovai/long-thread-input`；Base：`origin/main@a283eb05213fec5734f1d0b0e3096c0f2c4a40f6`。
 - Governance：none；Renderer 内可逆的局部订阅调整，不涉及模型上下文、数据迁移或协议；同一变更更新当前架构和 UI。
   不满足版本决定的高变更成本准入条件，不新增决定。
-- Status：implemented；第一／二批 Renderer 代码与功能验收完成。普通输入组件基准达到拟定门槛；
+- Status：in_progress；第一／二批 Renderer 代码与功能验收完成，第三批收尾实施中。普通输入组件基准达到拟定门槛；
   原生中文 p95 为 56ms，仍高于拟定 50ms，整体性能验收不标记为全部达标。
 - 第一批已合入 `main@f5f4cb26feaba2d09ee5a6e0d73ac53371a2e246`（[PR #1092](https://github.com/murray17/rovai-ai/pull/1092)）。
   第二批分支为 `rovai/long-thread-history`（[PR #1093](https://github.com/murray17/rovai-ai/pull/1093)）；复用同一任务 worktree。
@@ -139,7 +139,7 @@ p95 为 40/40/40ms、p99 为 48/40/40ms。两者均无输入期长任务、历�
 采集与分析入口为 [`benchmark-native-ime.mjs`](../../../scripts/benchmark-native-ime.mjs)，原始记录与分析为
 附件 `perf-native-ime/events.jsonl`、`perf-native-ime/results.json`。
 
-## 条件性后续批次
+## 第二批后的条件性复测（原样本）
 
 公共历史虚拟化必须保留动态高度、320px 同作者分组、阅读锚点、定位与真实可见来源确认；
 overscan 不视作已读。消息数据与复制／导出保持数据驱动，焦点和原生选区保留项单独计量。
@@ -157,3 +157,171 @@ p99 为 56/48/40ms。新增回复每轮解析一次 Markdown，稳定正文不�
 大回复到达及工具窗口更新期间均未观察到超过 50ms 的主线程长任务，因此未增加第三批大内容产品改动。
 预热阶段的初次大正文挂载仍有约 50–72ms 长任务，作为冷挂载限制单独记录，没有混入普通连续输入分位数。
 原生中文的未达项继续按上节投递／显示路径调查，不用调整执行合批或重写 Markdown 来替代定位。
+
+## 第三批：输入与正文调度收尾
+
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-long-thread-input-finish`。
+- Branch：`rovai/long-thread-input-finish`；Base：`ce803df661f9672edaed93bcc5d0a5176e55600a`。
+- Governance：none；沿用现有执行、持久化、读取与 32ms 合批，本轮为可逆 Renderer 边界和调度调整。
+- 证据根目录为本 Thread 附件的 `performance-finish/`；失败轮次、诊断 trace 与未完成场景分别保留。
+  此阶段仍不声明整体性能全部达标。
+
+### 已实施边界
+
+Composer 自身的 selectionchange／focusin 不安排历史测量；历史选区、焦点和跨区域选区继续更新，
+离开历史时清理一次保留节点。真实尺寸变化、分页与滚动继续由既有观察驱动。
+选区归属用 DOM Range 的边界判断，避免无关输入读取 Selection.isCollapsed 时强制刷新布局；
+跨区域选区即使两端都在历史区外，仍保留覆盖的历史项，清空选区后释放。
+
+完整 App 的联合 trace／CPU profile 定位到执行摘要的可见内容判断：单行预览每次刷新都解析不断增长的
+执行叙述。15 秒诊断中相关 React 路径约占 3 秒 CPU，慢按键可在 Renderer 队列等待约 6–18ms；
+该采样包含诊断开销，不作为正式输入分位数。现在摘要采用已有 live_tail（末尾 4,000 字符）；
+纯文字用严格的正向字符集合证明可见，标记、转义、实体和其他输入仍经过原清理链路。
+完整详情、顺序、去重、epoch、终态提交和持久记录均不改变。
+
+MessageMarkdown 在首次挂载超过 12,000 长度的源字符串时，先呈现可访问的加载状态，再用
+[React 可中断渲染](https://react.dev/reference/react/useDeferredValue)构建正文；导出绕过延后挂载并保持完整。
+解析和 DOM 提交仍各有不可中断部分，没有声称移到 Worker。时间线显式定位等待
+data-timeline-pending 消失；短列表、虚拟列表、等高内容完成和目标移除均有真实 DOM 回归。
+
+关闭搜索先恢复原锚点的挂载／正文，再恢复消息内偏移；generation、当前 Thread 和重开状态隔离过期恢复。
+公共消息分组和虚拟行高度继续各自承担职责：选区探针未发现普通输入持续触发公共分组测量，
+因此没有仅凭两个观察器并存就合并它们。
+
+### 小切口与回归证据
+
+| 验证 | 修改前 | 修改后 |
+| --- | --- | --- |
+| 20 次普通按键触发历史 update | 20 次 | 0 次 |
+| 10 次真实光标左右移动触发历史 update | 10 次 | 0 次 |
+| 离开历史选区后释放节点 | 原有行为保留 | 3 次合并 update、之后输入为 0 次 |
+| 关闭远距离搜索的锚点偏差 | 约 179px | 普通正文约 0.25px；大正文约 0.2px |
+| 24,000 字符执行叙述，三轮各 18 秒的可见内容判断累计耗时 | 886 / 867 / 865ms | 15.5 / 17.3 / 17.4ms |
+
+上述执行叙述对照各有 180 次输入／轮、32ms 上游增量。修改前 p95 为 40/40/40ms，
+修改后为 48/40/48ms；分位数没有稳定下降，只认定计算成本减少。稳定历史重建均为 0。
+原始记录为 `baseline-selection-final/`、`after-selection/`、`baseline-history/`、
+`history-readiness-final/`、`preview-numbered-before-3rounds/` 和 `preview-numbered-after-3rounds/`。
+
+补充诊断 `large-rich-current-trace/` 与 `large-rich-range-trace/` 发现，旧选区判断可把整页布局
+拉进 selectionchange：该处理在两次诊断中分别约 32.1ms 和 0.4ms。Chromium 的
+[Selection.isCollapsed 实现](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/core/editing/dom_selection.cc#L155)
+确实包含布局更新。改用 Range 消除了这条强制同步路径，但剩余布局仍会执行；两轮到达附近的
+慢键分别为 64ms 和 80ms，不能据此认定端到端输入已经改善。行级 layout／inline-size containment
+诊断也未见稳定收益，均未进入产品。跨区域选区回归见 `selection-range-final3/`。
+
+### 大正文样本纠正与同负载对照
+
+旧长回复夹具直接重复以代码围栏结尾的片段，没有插入分隔空行；实际形成一段很长的代码块，
+不能代表 150 组文字／列表／表格／代码。上节和旧附件数据保留为原场景，不用于修正版的前后比较。
+默认 20/200/1,000 条混合历史和原生中文样本不受该拼接问题影响。
+
+修正版 `mixed-v2-separated-fences` 加入空行，实际 DOM 必须包含 150 个独立代码块；
+完整 DOM 可用时间与随后 rAF-task 近似点分开保存。固定 1,000 条历史、当前 Run 每 32ms 更新、
+每轮 80 键、100ms 间隔，在输入中点发布同一份修正版大回复。
+
+| Web Chrome 生产组件，三轮 ms | 本轮基线 | 收尾实现 |
+| --- | --- | --- |
+| 整轮输入 p95 | 56 / 48 / 48 | 48 / 48 / 40 |
+| 整轮输入 p99（小样本观察） | 88 / 144 / 144 | 48 / 64 / 72 |
+| 到达附近 8 键窗口最大值 | 88 / 144 / 144 | 48 / 64 / 72 |
+| 输入期长任务数量 | 1 / 2 / 2 | 0 / 1 / 1 |
+| 预热阶段最大长任务 | 224 / 207 / 155 | 56 / 59 / 76 |
+| 回复完整 DOM 可用，距到达 | 138 / 121 / 104 | 120 / 134 / 116 |
+
+基线为 ce803df6；本次采样生产差异 SHA-256 为
+`8928d8af55491a1b8c73e1a859ed39cdabd3a71de08d8a25c173b47c81cdecd8`。
+原始数据为 `large-rich-before-3rounds/` 与 `large-rich-after-3rounds/`，均不启用 trace。
+三个窗口共 24 键，不能据此声称稳定 p99。正文只解析一次，完整可用时间未稳定缩短；
+改善主要是把较大的连续 React 构建拆开，让输入有机会先处理。
+
+**仍有未达项：**关键到达窗口为 64/72ms 的轮次，以及 54/56ms 的输入期长任务仍保留。
+本轮单次正文 parse/pipeline 的最慢累计为约 48/55ms（pipeline 包含 parse，不能相加），
+解析与提交／布局仍存在不可中断工作。后续应分别缩短这些连续工作、复核正文可读与完整时间；
+不能只增加定时器或把上述结果稀释进连续输入后宣布通过。首次冷输入仍需完整可见 App 验收。
+
+### 原生采样与完整 App
+
+旧原生 540 键重新按一对一规则审计，全部有匹配项；原 p95 56/56/56ms 不受旧的缺失补 0 路径影响。
+新分析器把 reported below threshold、可验证的区间截断和 unknown 分开；unknown 不填 0，
+整组分位数留空并单列已报告样本。区间推断要求完整观察、eventCounts 一致、可信可见且有焦点的按键、
+低于阈值的投递等待，以及更晚事件已经完成的记录。单位测试同时覆盖歧义、复用、丢观察、隐藏和未完成呈现。
+
+`benchmark-native-app.mjs` 提供生产输入组件、完整短会话、完整 1,000 条静止／当前／其他／双 Run 对照。
+真实 App／Host 使用隔离数据和 Skill 文件目录，通过本地合成 ACP 经过生产准入与事件链路，
+不调用真实模型。默认 Renderer 内存采样，结束后写盘，并保存实际二进制摘要、按键焦点和输入期间实测事件速率。
+工作树 hash 不自动等同于打包 App；包构建日志和二进制身份必须一起核对。
+
+当前仅有收尾主体改动前的三组诊断：最小组件 p95 48/48/48ms，完整短会话 64/64/64ms，
+完整长会话静止 56/48/48ms，各为三轮 180 键，中文提交和最终文本完整。
+这些轮次早于更严格的焦点／观察完整性记录，且发送夹具后来补正了消息序号游标，
+因此不列为最终完整 App 验收。当前执行的真实链路已跑通；原生中文采样受输入源自动切换未成功及
+原生自动化连接持续超时阻挡，已保留隔离基线窗口并暂停其生成。完整 App 在系统原生输入下的
+当前／其他运行、大回复／工具详情、首次进入和首次展开、最后一字立即发送的最终矩阵仍未完成。
+下面的软件普通按键不能替代这组结论。
+
+另有一个被排除的冷加载探针：它在编辑器尚不可编辑时把首键送到了页面，raw 中明确为 editable=false；
+该探针失败保留在 `cold-input-target-audit/`，没有把它解释成编辑器丢字或放进正式分位数。
+探索过的初始行数／content-visibility 试验未形成稳定收益，未进入产品代码。
+
+### 完整 App 的软件普通按键对照
+
+Apple M5、macOS 26.6、1440×800、DPR 2；两包均使用私有 userData、Skill 文件目录与合成消息，
+经过各自打包 Host、真实执行准入、持久化、IPC 和生产 Renderer。上游是本地可控 ACP，不调用真实模型。
+基线包 Renderer SHA-256 前缀为 `45525f38`，收尾包为 `3de83986`；后者的生产源码对应 0897102e3，
+构建日志和源码差异证明保存在 `finish-build-source.json`。启动采样时的工作树 SHA 不替代打包产物身份。
+此处使用保留的阶段性基线包，不是最初 f3719e66 的卡顿版本；组件源码对照仍按各节注明的固定提交／差异复现。
+
+六个场景各三轮，每轮 180 键、名义间隔 100ms；每包 3,240 键，共 6,480 键。
+默认省略外部 CDP timestamp，从浏览器收到输入的单调时钟开始记录 Event Timing；Node 驱动的等待另存。
+每轮必须验证实际焦点、可信可见按键、180 字完整文本和真实后台事件。没有 unknown，低于报告阈值的可验证
+区间单列 censored。单 Run 在 Renderer 中实测约 30 次正文事件／秒，双 Run 各自相同；不把配置的 32ms 当作实测速率。
+
+| p95，三轮 ms | 基线包 | 收尾包 |
+| --- | --- | --- |
+| 最小生产输入组件 | 16 / 16 / 24 | 16 / 16 / 24 |
+| 完整 App，20 条静止 | 24 / 24 / 24 | 16 / 32 / 24 |
+| 完整 App，1,000 条静止 | 24 / 24 / 24 | 24 / 32 / 16 |
+| 当前 Run 持续生成 | 32 / 32 / 32 | 32 / 32 / 32 |
+| 其他 Thread Run 持续生成 | 32 / 24 / 32 | 32 / 32 / 32 |
+| 当前与其他 Run 同时生成 | 32 / 32 / 40 | 32 / 32 / 40 |
+
+各场景逐轮 p99 为 16–48ms，两包均没有采样期长任务；这些小样本不证明稳定的极端尾延迟。
+这组普通输入达到拟定的 Event Timing 门槛，但没有显示稳定提速。真实系统拼音、冷输入、工具详情和大内容场景分别验收。
+数据为 `full-app-browser-before/`、`full-app-browser-after/` 和 `full-app-browser-comparison.json`。
+
+早一组把计划时刻填进 CDP timestamp 的记录保留在 `full-app-software-before/after/`：
+收尾包双 Run 曾出现三轮 56ms，约 21–23ms 在事件处理前；新实例诊断 p95 为 32ms。
+该次失败尚未完全归因，不能把不同起点的重测差异算成产品提速。新的驱动记录也确认，外部脚本自身会等待：
+基线某组调度偏差 p95 为 15ms；这不属于 Renderer 处理时间。两种起点不混算，带 trace 的诊断也不放入上表。
+采样终点与启动命令见[复现说明](../../../scripts/fixtures/run-presence/PERFORMANCE.md)。
+
+### 完整 App 的真实发布大回复
+
+同一参考设备与可见窗口，在 1,000 条混合历史、当前 Run 持续生成时，由该 Run 自己的 CLI 发布
+150 组表格／代码正文。先验证 CLI 绑定的 Thread，再核对发布回执 messageId、消息 hint 和界面中带唯一标记的
+150 个独立代码框。两包分别使用三份全新 fixture；每轮 80 个软件按键，浏览器时钟起点，不启用 trace。
+
+| 三轮 ms | 基线包 | 收尾包 |
+| --- | --- | --- |
+| 整轮输入 p95 | 40 / 40 / 32 | 40 / 40 / 40 |
+| 整轮输入 p99，小样本观察 | 56 / 48 / 48 | 56 / 40 / 56 |
+| 消息 hint 附近 8 键窗口最大值 | 56 / 40 / 40 | 40 / 32 / 40 |
+| 到达窗口内长任务耗时 | 75 / 71 / 83 | 三轮均无 |
+| 完整正文 DOM 可用，距 hint | 80 / 76 / 87 | 85 / 78 / 77 |
+
+该场景中，收尾版关键窗口达到拟定输入门槛，完整正文可用时间与整轮分位数没有稳定下降。
+窗口每包只有 24 键，不能据此声称稳定 p99，也不能替代上面的双大正文组件压力场景、首次冷输入或系统中文输入。
+驱动偏差 p95 为 2–3ms，所有正文、按键、焦点和后台 Run 校验通过。DOM 可用不是像素呈现。
+数据为 `full-app-arrival-before-1/2/3/`、`full-app-arrival-after-1/2/3/` 和 `full-app-arrival-comparison.json`。
+
+### 功能门禁与交付状态
+
+整合主线 70aab8938 后，TypeScript、279 文件 Vitest（3,313 pass / 2 skipped）、Node（388 pass / 2 skipped），以及
+生产 Run/回复/历史/选区回归、Composer、消息导出回归通过。大正文导出另验证完整末尾和清理规则，
+搜索往返覆盖两条各有 150 代码块的大正文。完整性能验收与这些功能通过分开记录。
+
+默认 Rust workspace 首轮有一项 shell 失败回收测试把 Failed 观测成 TimedOut；原 100ms 期限和测试断言未改动。
+该用例独立通过后，整合上述主线前的安静环境下 workspace 重跑为 484 pass / 1 ignored；首次失败与重跑日志均保留。
+采样夹具的发布路径另验证绑定正确 Thread、错绑定不发布及结果不明不重试；与最新计时／普通输入完整性分析共 11 项通过。
+代码通过[草稿 PR #1097](https://github.com/murray17/rovai-ai/pull/1097)交付审阅；尚未合入，也未声明整体验收完成。

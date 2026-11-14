@@ -4,6 +4,7 @@ import { useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, use
 export const PUBLIC_TIMELINE_VIRTUAL_THRESHOLD = 100
 export interface TimelineVirtualListHandle {
   virtual: boolean
+  /** Resolve after the row and any data-timeline-pending content are mounted. */
   ensureMounted(id: string): Promise<HTMLElement | null>
   rememberAnchor(): void
   restoreAnchor(): void
@@ -12,6 +13,18 @@ type Anchor = { id: string; offset: number }
 type PendingMount = { id: string; resolve(node: HTMLElement | null): void }
 const readingSurface = (row: HTMLElement): HTMLElement => row.matches('[data-message-id], [data-presence-run]')
   ? row : row.querySelector<HTMLElement>('[data-message-id], [data-presence-run]') ?? row
+const selectionTouches = (element: HTMLElement, selection: Selection | null): boolean => {
+  if (!selection) return false
+  if (element.contains(selection.anchorNode) || element.contains(selection.focusNode)) return true
+  // A selection can cross the history with both endpoints outside it. Read
+  // DOM range boundaries here: Selection.isCollapsed can reconcile layout,
+  // even for a composer caret whose history ownership never changed.
+  for (let index = 0; index < selection.rangeCount; index++) {
+    const range = selection.getRangeAt(index)
+    if (!range.collapsed && range.intersectsNode(element)) return true
+  }
+  return false
+}
 
 /** Public history owns its viewport, dynamic heights, selection retention and explicit-target mounting. */
 export function TimelineVirtualList<T extends { id: string }>({ items, viewportRef, controllerRef,
@@ -35,6 +48,7 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   const pendingMount = useRef<PendingMount | null>(null)
   const frame = useRef(0)
   const userScrollPending = useRef(false)
+  const interaction = useRef({ selection: false, focus: false })
   const virtual = items.length > PUBLIC_TIMELINE_VIRTUAL_THRESHOLD
   const committedVirtual = useRef(virtual)
   const current = useRef({ followingLatest, preserveReadingPosition })
@@ -121,7 +135,8 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
       const key = owner(trigger); if (key) pinned.add(key)
     }
     const selection = document.getSelection()
-    if (selection && !selection.isCollapsed) {
+    interaction.current = { selection: selectionTouches(element, selection), focus: element.contains(document.activeElement) }
+    if (interaction.current.selection && selection && !selection.isCollapsed) {
       const first = indexesById.get(owner(selection.anchorNode) ?? ''), last = indexesById.get(owner(selection.focusNode) ?? '')
       if (first !== undefined && last !== undefined) for (let index = Math.min(first, last); index <= Math.max(first, last); index++) pinned.add(items[index].id)
       else for (const node of [selection.anchorNode, selection.focusNode]) { const key = owner(node); if (key) pinned.add(key) }
@@ -141,7 +156,8 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     rememberAnchor() { pendingAnchor.current = null; rememberAnchor() },
     ensureMounted(id) {
       const mounted = findNode(id)
-      if (mounted || !virtual || !indexesById.has(id)) return Promise.resolve(mounted)
+      if (mounted && !mounted.querySelector('[data-timeline-pending]')
+        || !indexesById.has(id) || !virtual && !mounted) return Promise.resolve(mounted)
       pendingMount.current?.resolve(null)
       setTarget(id)
       return new Promise(resolve => { pendingMount.current = { id, resolve } })
@@ -180,66 +196,92 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
     }
     const onTouchMove = () => { userScrollPending.current = true; cancelTarget() }
     const onScroll = () => { userScrollPending.current = false; schedule() }
-    const mutation = new MutationObserver(schedule)
-    mutation.observe(element, { attributes: true, subtree: true, attributeFilter: ['aria-expanded', 'data-state'] })
+    const onSelectionChange = () => {
+      const inside = selectionTouches(element, document.getSelection())
+      if (inside || interaction.current.selection) schedule()
+      interaction.current.selection = inside
+    }
+    const onFocusIn = (event: FocusEvent) => {
+      const inside = event.target instanceof Node && element.contains(event.target)
+      if (inside || interaction.current.focus) schedule()
+      interaction.current.focus = inside
+    }
+    const onFocusOut = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node && element.contains(event.relatedTarget)) return
+      interaction.current.focus = false
+      schedule()
+    }
+    const mutation = new MutationObserver(records => {
+      // Navigation waits for deferred row content, including a short timeline
+      // whose new content happens to keep the same height. Ordinary child-list
+      // mutations do not schedule another geometry pass.
+      const pending = pendingMount.current, node = pending && findNode(pending.id)
+      if (node && !node.querySelector('[data-timeline-pending]')) measured(value => value + 1)
+      if (records.some(record => record.type === 'attributes')) schedule()
+    })
+    mutation.observe(element, { childList: true, attributes: true, subtree: true, attributeFilter: ['aria-expanded', 'data-state', 'data-timeline-pending'] })
     viewport.addEventListener('scroll', onScroll, { passive: true })
     viewport.addEventListener('wheel', onWheel, { passive: true })
     viewport.addEventListener('touchstart', cancelTarget, { passive: true })
     viewport.addEventListener('touchmove', onTouchMove, { passive: true })
-    document.addEventListener('selectionchange', schedule)
-    document.addEventListener('focusin', schedule)
+    document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('focusin', onFocusIn)
+    element.addEventListener('focusout', onFocusOut)
     schedule()
     return () => {
       observe.disconnect(); mutation.disconnect()
       viewport.removeEventListener('scroll', onScroll); viewport.removeEventListener('wheel', onWheel)
       viewport.removeEventListener('touchstart', cancelTarget)
       viewport.removeEventListener('touchmove', onTouchMove)
-      document.removeEventListener('selectionchange', schedule); document.removeEventListener('focusin', schedule)
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('focusin', onFocusIn); element.removeEventListener('focusout', onFocusOut)
     }
-  }, [virtual, viewportRef, range.start, range.end, retained, target, items, schedule])
+  }, [virtual, viewportRef, range.start, range.end, retained, target, items, schedule, findNode])
   useLayoutEffect(() => {
-    if (!virtual) return
-    // Reconcile newly mounted rows before remembering a new reading position.
-    // Their real height can move a still-focused message before ResizeObserver
-    // delivers its first entries; recording that intermediate offset loses it.
-    let dirty = false
-    if (viewportRef.current?.clientHeight) for (const row of root.current?.querySelectorAll<HTMLElement>(':scope > [data-timeline-key]') ?? []) {
-      const height = row.getBoundingClientRect().height, id = row.dataset.timelineKey!
-      if (Math.abs(height - (heights.current.get(id) ?? 160)) < .5) continue
-      heights.current.set(id, height); dirty = true
-    }
-    if (dirty) {
-      if (!userScrollPending.current) pendingAnchor.current ??= current.current.followingLatest() ? 'latest' : anchor.current
-      measured(value => value + 1)
-      return
-    }
-    const viewport = viewportRef.current, saved = pendingAnchor.current
-    if (saved && saved !== 'latest' && current.current.preserveReadingPosition()
-      && indexesById.has(saved.id) && !root.current?.querySelector(`[data-timeline-key="${CSS.escape(saved.id)}"]`)) {
-      setTarget(saved.id)
-      return
-    }
-    pendingAnchor.current = null
-    if (viewport && saved && current.current.preserveReadingPosition()) {
-      if (saved === 'latest') {
-        if (current.current.followingLatest()) viewport.scrollTop = viewport.scrollHeight
+    if (virtual) {
+      // Reconcile newly mounted rows before remembering a new reading position.
+      // Their real height can move a still-focused message before ResizeObserver
+      // delivers its first entries; recording that intermediate offset loses it.
+      let dirty = false
+      if (viewportRef.current?.clientHeight) for (const row of root.current?.querySelectorAll<HTMLElement>(':scope > [data-timeline-key]') ?? []) {
+        const height = row.getBoundingClientRect().height, id = row.dataset.timelineKey!
+        if (Math.abs(height - (heights.current.get(id) ?? 160)) < .5) continue
+        heights.current.set(id, height); dirty = true
       }
-      else {
-        const row = root.current?.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(saved.id)}"]`)
-        if (row) viewport.scrollTop += readingSurface(row).getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset
+      if (dirty) {
+        if (!userScrollPending.current) pendingAnchor.current ??= current.current.followingLatest() ? 'latest' : anchor.current
+        measured(value => value + 1)
+        return
+      }
+      const viewport = viewportRef.current, saved = pendingAnchor.current
+      if (saved && saved !== 'latest' && current.current.preserveReadingPosition()
+        && indexesById.has(saved.id) && !root.current?.querySelector(`[data-timeline-key="${CSS.escape(saved.id)}"]`)) {
+        setTarget(saved.id)
+        return
+      }
+      pendingAnchor.current = null
+      if (viewport && saved && current.current.preserveReadingPosition()) {
+        if (saved === 'latest') {
+          if (current.current.followingLatest()) viewport.scrollTop = viewport.scrollHeight
+        }
+        else {
+          const row = root.current?.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(saved.id)}"]`)
+          if (row) viewport.scrollTop += readingSurface(row).getBoundingClientRect().top - viewport.getBoundingClientRect().top - saved.offset
+        }
       }
     }
     const pending = pendingMount.current
     if (pending) {
       const node = findNode(pending.id)
-      if (node) requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (node && !node.querySelector('[data-timeline-pending]')) requestAnimationFrame(() => requestAnimationFrame(() => {
         if (pendingMount.current !== pending) return
+        const settled = findNode(pending.id)
+        if (settled?.querySelector('[data-timeline-pending]')) return
         pendingMount.current = null
-        pending.resolve(findNode(pending.id))
+        pending.resolve(settled)
       }))
     }
-    rememberAnchor()
-    schedule()
+    if (virtual) { rememberAnchor(); schedule() }
   }, [virtual, measurement, items, target, range, retained, findNode, rememberAnchor, schedule, viewportRef])
   useLayoutEffect(() => {
     const keys = new Set(items.map(item => item.id))

@@ -322,7 +322,7 @@ export const model = {
     invalidationListeners.forEach(listener => listener({ messages: [{ threadId: state.snapshot.thread.id, indexChanged: true,
       unavailableMessageIds: [id], throughGlobalSequence: ++state.version }] }))
   },
-  showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false, messageCount = 120) {
+  showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false, messageCount = 120, largeBody = false) {
     this.setScenario('stream'); halt()
     const messages = [
       makeMessage('reply-a', 1, '回复详情保持只读，沿用当前会话里的回复锚点。'),
@@ -340,7 +340,8 @@ export const model = {
     for (const message of messages) message.replyToThreadMessageId = parents[message.id] ?? null
     if (long) for (let i = 10; i <= messageCount; i++) {
       // Cross the public-message grouping height when the detail pane closes.
-      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(grouped ? 15 : 16) : ''}`
+      let body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(grouped ? 15 : 16) : ''}`
+      if (largeBody && (i === 321 || i === messageCount)) body += '\n\n' + ('大正文完整性检查。\n\n| 项目 | 状态 |\n| --- | --- |\n| 输入 | 保留 |\n\n~~~ts\nconsole.log("complete body");\n~~~\n\n').repeat(150)
       messages.push({ ...makeMessage(`long-${i}`,i,body,0,grouped ? 'run-alice' : null), replyToThreadMessageId:'reply-g' })
     }
     const run = { ...makeRun('run-alice',0,'running',['reply-c','reply-d']),anchorMessageId:'reply-d',publicTailSequenceAtStart:4 }

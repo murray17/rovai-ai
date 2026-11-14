@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunView, ThreadMessageView } from '@contracts'
 import { conversationRunPresenceTimeline, formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview } from './conversation-run-presence'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
-import type { LiveRuntimeEvent } from './ui-model'
+import { buildLiveExecutionProgress, type LiveRuntimeEvent } from './ui-model'
 import { changeInterfaceLanguage } from './interface-language'
 import type { GeneralPreferencesApi } from '@contracts'
 
@@ -185,6 +185,16 @@ describe('conversation Run presence', () => {
     expect(runPresencePreview(run('a'),events)).toMatchObject({kind:'command',text:'pnpm typecheck',iconKind:'terminal'})
     expect(runPresencePreview(run('a','alice',{status:'failed'}),events).kind).toBe('error')
     expect(runPresencePreview(run('a','alice',{cancelRequestedAt:'now'}),events)).toEqual({kind:'status',text:'正在停止…'})
+  })
+
+  it('bounds the activity line without truncating the complete execution projection', () => {
+    const body = '早期进展。'.repeat(2000) + '\n当前正在检查输入。'
+    const events: LiveRuntimeEvent[] = [{ id: 'long-text', agentRunId: 'a', eventType: 'agent.text.delta',
+      payload: { itemId: 'text', delta: body }, createdAt: '2026-10-10T12:00:00Z' }]
+    expect(runPresencePreview(run('a'), events)).toEqual({ kind: 'narration', text: '当前正在检查输入。' })
+    expect(runPresencePreview(run('a'), [{ ...events[0], payload: { itemId: 'text', delta: '进展。'.repeat(5000) } }]).text.length)
+      .toBeLessThanOrEqual(4000)
+    expect(buildLiveExecutionProgress(events, 'a').items).toContainEqual(expect.objectContaining({ kind: 'narration', body }))
   })
 
   it('shows current-epoch activity before a late ACK while keeping old evidence behind the connection fence', () => {
