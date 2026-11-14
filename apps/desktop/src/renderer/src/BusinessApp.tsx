@@ -1,3 +1,4 @@
+import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { reportProjectFileReferenceRejection } from './useProjectFileAvailability'
 import { prepareFileEditsForQuit } from './file-edit-store'
 import { ThreadReferencePreviewProvider } from './ThreadReferencePreview'
@@ -6,7 +7,7 @@ import { MessageWithdrawal } from './message-withdrawal'
 import { useTeams } from './useTeams'
 import { TeamWorkspace, type TeamLeaveGuard } from './TeamWorkspace'
 import { MemoryChangeNotice } from './MemoryChangeNotice'
-import { collectMemoryChanges, memoryChangeText, resolveMemoryChangeScope, type MemoryChange } from './memory-change-notice'
+import { collectMemoryChanges, memoryChangesAfter, memoryChangeText, memoryEventsForNotice, resolveMemoryChangeScope, type MemoryChange } from './memory-change-notice'
 import { useTaskCapability } from './TaskCapabilityProvider'
 import { ShortcutSettings } from './ShortcutSettings'
 import { useShortcutAction } from './ShortcutProvider'
@@ -1020,6 +1021,9 @@ export function BusinessApp({
   initialStartupSnapshot?: DesktopStartupSnapshot
   startupStartedAtMs?: number
 }): React.JSX.Element {
+  const memoryCapability = useMemoryCapability()
+  const memoryCapabilityRef = useRef(memoryCapability)
+  memoryCapabilityRef.current = memoryCapability
   const taskCapability = useTaskCapability()
   const taskCapabilityRef = useRef(taskCapability.enabled)
   const taskCapabilityRevisionRef = useRef(0)
@@ -1087,9 +1091,12 @@ export function BusinessApp({
   }, [])
 
   const [pinnedThreadItems, setPinnedThreadItems] = useState<NavigationThreadItem[]>([])
-  const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
-  const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
+  const [storedPendingMemoryCount, setPendingMemoryCount] = useState(0)
+  const pendingMemoryCount = memoryCapability.active ? storedPendingMemoryCount : 0
+  const [memoryReviewNotice, setMemoryReviewNotice] = useState<number | null>(null)
   const [memoryAutoNotice, setMemoryAutoNotice] = useState<MemoryChange[]>([])
+  const visibleMemoryAutoNotice = memoryChangesAfter(memoryAutoNotice, memoryCapability.headsUpAfterGlobalSequence)
+  const visibleMemoryReviewNotice = memoryReviewNotice !== null && memoryReviewNotice > memoryCapability.headsUpAfterGlobalSequence
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryTarget, setMemoryTarget] = useState<MemoryNavigationTarget>({ kind: 'memory', memoryId: null })
   const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
@@ -1123,6 +1130,7 @@ export function BusinessApp({
   const [onboardingError, setOnboardingError] = useState<string | null>(null)
   const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
   const [view, setView] = useState<View>(() => startupView(initialTarget))
+  const memoryPageOpen = view === 'memory'
   const mobilePageRef = useMobilePageTransition(mobile, view)
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(
     initialTarget.kind === 'members' ? initialTarget.agentId : null
@@ -1675,14 +1683,6 @@ export function BusinessApp({
         const nextNavigationPromise = loadNavigation()
         const nextAgentsPromise = loadAgents()
         const nextInstallationsPromise = loadInstallations()
-        const nextMemoryReviewItemsPromise = client
-          .request<HearthReviewItem[]>('memory.hearthReviewItems.list')
-          .then((nextMemoryReviewItems) => {
-            setPendingMemoryCount(
-              nextMemoryReviewItems.filter((reviewItem) => reviewItem.status === 'pending').length
-            )
-            return nextMemoryReviewItems
-          })
         const nextNavigationPreferencesPromise = navigationPreferencesRead.current ??= uiPreferences.navigationPreferences.get()
           .catch(() => ({ ...structuredClone(EMPTY_SNAPSHOT), readError: '导航偏好暂时无法读取。' }))
         // Apply the snapshot independently: failed optional persistence cannot hide
@@ -1707,8 +1707,7 @@ export function BusinessApp({
         const results = await Promise.allSettled([
           navigationOverviewPromise,
           nextAgentsPromise,
-          nextInstallationsPromise,
-          nextMemoryReviewItemsPromise
+          nextInstallationsPromise
         ])
         const firstFailure = results.find(
           (result): result is PromiseRejectedResult => result.status === 'rejected'
@@ -1729,6 +1728,26 @@ export function BusinessApp({
     }).catch(() => undefined)
     return request
   }, [loadAgents, loadInstallations, loadNavigation, applyNavigationPreferences, completeLegacyProjects])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!memoryCapability.active) {
+      setMemoryReviewNotice(null)
+      setMemoryAutoNotice([])
+      return
+    }
+    const boundary = memoryCapability.headsUpAfterGlobalSequence
+    setMemoryReviewNotice(current => current !== null && current > boundary ? current : null)
+    setMemoryAutoNotice(current => memoryChangesAfter(current, boundary))
+    // The mounted page already reads this list and reports its pending count.
+    if (memoryPageOpen) return
+    void client.request<HearthReviewItem[]>('memory.hearthReviewItems.list').then(items => {
+      if (!cancelled && memoryCapabilityRef.current.active) {
+        setPendingMemoryCount(items.filter(item => item.status === 'pending').length)
+      }
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [client, memoryCapability.active, memoryCapability.headsUpAfterGlobalSequence, memoryRefreshKey, memoryPageOpen])
 
   const loadRuntime = useMemo(() => createRuntimeRefresh(async () => {
     setHealthAttempted(true)
@@ -2673,6 +2692,9 @@ export function BusinessApp({
     const unsubscribe = client.onEvent?.((event: CoreEvent) => {
       const params = asRecord(event.params)
       if (shuttingDownRef.current) return
+      if (event.method === 'memory.changed' && memoryCapabilityRef.current.active) {
+        setMemoryRefreshKey(current => current + 1)
+      }
       const liveEvent = liveRuntimeEventFromCore(
         event,
         `live-${++liveRuntimeEventSequence.current}`
@@ -2706,6 +2728,7 @@ export function BusinessApp({
           setHealthAttempted(false)
         } else if (runtimeStatus === 'ready') {
           void loadOverview().catch(() => undefined)
+          if (viewRef.current !== 'memory' && memoryCapabilityRef.current.active) setMemoryRefreshKey(current => current + 1)
         }
       }
       if (
@@ -2840,6 +2863,8 @@ export function BusinessApp({
     let timer: ReturnType<typeof setTimeout> | null = null
     if (client.onInvalidated || !activeThreadId || campSnapshot?.thread.id !== activeThreadId) return undefined
     const threadId = activeThreadId
+    let memoryNoticeFloor = campEventSequenceMarker.current
+    let resumeMemoryNotices = false
 
     const refreshSnapshot = async (): Promise<void> => {
       const { snapshot } = await requestThreadProjection(threadId, 'open')
@@ -2852,37 +2877,45 @@ export function BusinessApp({
 
     const poll = async (): Promise<void> => {
       try {
+        const memoryObservation = memoryCapabilityRef.current.beginObservation()
         const batch = await client.request<EventBatch>('events.subscribe', {
           threadId,
           afterGlobalSequence: campEventSequenceMarker.current,
           limit: 250
         })
         if (cancelled) return
-        const reviewItemCreated = batch.events.some((event) =>
-          event.eventType === 'memory.hearth_review_created'
-        )
-        const autoAppliedEvents = batch.events.filter((event) =>
+        const capability = batch.memoryCapability !== undefined
+          ? memoryCapabilityRef.current.acceptSnapshot(batch.memoryCapability, memoryObservation)
+          : memoryCapabilityRef.current
+        const memoryResumed = resumeMemoryNotices || batch.resetRequired
+        if (memoryResumed || !capability?.enabled || !memoryCapabilityRef.current.active) {
+          memoryNoticeFloor = Math.max(memoryNoticeFloor, batch.throughGlobalSequence)
+          resumeMemoryNotices = false
+        }
+        const memoryEvents = memoryEventsForNotice(batch.events, capability, memoryCapabilityRef.current.active, memoryNoticeFloor)
+        const noticeSequence = capability?.observedThroughChangeSequence
+        const noticeBoundary = capability?.headsUpAfterGlobalSequence ?? memoryNoticeFloor
+        const reviewSequence = memoryEvents.reduce((sequence, event) => event.eventType === 'memory.hearth_review_created' ? Math.max(sequence, event.globalSequence) : sequence, 0)
+        const autoAppliedEvents = memoryEvents.filter((event) =>
           event.eventType === 'memory.agent_created' || event.eventType === 'memory.agent_revised'
         )
-        if (reviewItemCreated || autoAppliedEvents.length > 0) {
-          if (reviewItemCreated) setMemoryReviewNotice(true)
+        if (reviewSequence > 0 || autoAppliedEvents.length > 0) {
+          if (reviewSequence > 0) setMemoryReviewNotice(current => Math.max(current ?? 0, reviewSequence))
           if (autoAppliedEvents.length > 0) {
-            setMemoryAutoNotice((current) => collectMemoryChanges(current, autoAppliedEvents))
+            setMemoryAutoNotice((current) => collectMemoryChanges(memoryChangesAfter(current, noticeBoundary), autoAppliedEvents))
             const lastChange = collectMemoryChanges([], autoAppliedEvents).at(-1)
             if (lastChange && lastChange.scope === null) {
               void client.request<MemoryRecord>('memory.get', { memoryId: lastChange.memoryId })
                 .then((memory) => {
-                  if (!cancelled) setMemoryAutoNotice((current) => resolveMemoryChangeScope(current, lastChange.memoryId, lastChange.sequence, memory.scope))
+                  if (!cancelled && memoryCapabilityRef.current.active && memoryCapabilityRef.current.observedThroughChangeSequence === noticeSequence) setMemoryAutoNotice((current) => resolveMemoryChangeScope(current, lastChange.memoryId, lastChange.sequence, memory.scope))
                 })
                 .catch(() => undefined)
             }
           }
-          setMemoryRefreshKey((current) => current + 1)
-          void client.request<HearthReviewItem[]>('memory.hearthReviewItems.list')
-            .then((reviewItems) => setPendingMemoryCount(
-              reviewItems.filter((reviewItem) => reviewItem.status === 'pending').length
-            ))
-            .catch(() => undefined)
+        }
+        // Live content uses global memory.changed; this scoped poll only repairs gaps.
+        if (capability?.enabled && memoryCapabilityRef.current.active && memoryResumed) {
+          setMemoryRefreshKey(current => current + 1)
         }
         if (batch.schemaVersion !== 9 || batch.resetRequired || batch.events.length > 0) {
           await refreshSnapshot()
@@ -2890,6 +2923,7 @@ export function BusinessApp({
           campEventSequenceMarker.current = batch.nextGlobalSequence
         }
       } catch (nextError) {
+        resumeMemoryNotices = true
         if (!cancelled) setError(errorMessage(nextError))
       } finally {
         if (!cancelled) timer = setTimeout(() => void poll(), 1_400)
@@ -2903,7 +2937,9 @@ export function BusinessApp({
     }
   }, [activeThreadId, campSnapshot?.thread.id, requestThreadProjection, setThreadSnapshot])
 
-  useEffect(() => client.onInvalidated?.(() => {
+  useEffect(() => client.onInvalidated?.((change) => {
+    if (memoryCapabilityRef.current.active && viewRef.current !== 'memory'
+      && (!change || change.resync || change.memoryContentChanged)) setMemoryRefreshKey(current => current + 1)
     campViewedAcknowledgements.current.clear()
     setOpenedNavigationRow(null)
     void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
@@ -3049,7 +3085,7 @@ export function BusinessApp({
 
   const openMemoryReviews = (): void => {
     const showReviews = (): void => {
-      setMemoryReviewNotice(false)
+      setMemoryReviewNotice(null)
       setMemoryReviewDrawerSignal((current) => current + 1)
     }
     if (viewRef.current === 'memory') showReviews()
@@ -3058,8 +3094,8 @@ export function BusinessApp({
 
   const openAutomaticMemory = (): void => {
     const clearNotice = (): void => setMemoryAutoNotice([])
-    if (viewRef.current === 'memory' && memoryTarget.memoryId === (memoryAutoNotice.at(-1)?.memoryId ?? null)) clearNotice()
-    else void desktopNavigation.push({ kind: 'memory', memoryId: (memoryAutoNotice.at(-1)?.memoryId ?? null) }, { beforeCommit: clearNotice })
+    if (viewRef.current === 'memory' && memoryTarget.memoryId === (visibleMemoryAutoNotice.at(-1)?.memoryId ?? null)) clearNotice()
+    else void desktopNavigation.push({ kind: 'memory', memoryId: (visibleMemoryAutoNotice.at(-1)?.memoryId ?? null) }, { beforeCommit: clearNotice })
   }
 
   const closeSettings = (): void => { void desktopNavigation.push(lastMainTarget.current) }
@@ -4336,19 +4372,18 @@ export function BusinessApp({
   const startupLoadingRoute = startupGateVisible
     ? 'location'
     : startupRoutePending?.kind ?? startupRouteTarget?.kind ?? 'location'
-  const inlineNotices = memoryReviewNotice
-    || memoryAutoNotice.length > 0
+  const inlineNotices = (memoryCapability.active && (visibleMemoryReviewNotice || visibleMemoryAutoNotice.length > 0))
     || (!shuttingDown && (error || locationSaveError))
     ? (
         <>
-          {memoryReviewNotice && (
-            <MemoryChangeNotice review onOpen={openMemoryReviews} onClose={() => setMemoryReviewNotice(false)}>
+          {memoryCapability.active && visibleMemoryReviewNotice && (
+            <MemoryChangeNotice review onOpen={openMemoryReviews} onClose={() => setMemoryReviewNotice(null)}>
               {pendingMemoryCount > 0 ? uiAttribute('{0} 条共同记忆待审核', pendingMemoryCount) : uiAttribute('共同记忆审核已更新')}
             </MemoryChangeNotice>
           )}
-          {memoryAutoNotice.length > 0 && (
+          {memoryCapability.active && visibleMemoryAutoNotice.length > 0 && (
             <MemoryChangeNotice onOpen={openAutomaticMemory} onClose={() => setMemoryAutoNotice([])}>
-              {memoryChangeText(memoryAutoNotice, agents.find((agent) => agent.agentId === memoryAutoNotice.at(-1)?.actorId)?.displayName)}
+              {memoryChangeText(visibleMemoryAutoNotice, agents.find((agent) => agent.agentId === visibleMemoryAutoNotice.at(-1)?.actorId)?.displayName)}
             </MemoryChangeNotice>
           )}
           {!shuttingDown && error && (
