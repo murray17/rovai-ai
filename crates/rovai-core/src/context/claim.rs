@@ -25,8 +25,9 @@ impl BootstrapContents {
             camp_has_active_file_delivery_binding(connection, &snapshot.camp_id)?,
             mission_facts(connection, snapshot)?.is_some(),
         )?;
+        let memory_enabled = crate::memory_capability::discoverable(connection);
         let (memory_entrypoint, observed_memory_revisions, authorization_basis_digest) =
-            if snapshot.invocation_kind == "single_chat" {
+            if !memory_enabled || snapshot.invocation_kind == "single_chat" {
                 (
                     String::new(),
                     Vec::new(),
@@ -39,7 +40,11 @@ impl BootstrapContents {
             };
         let managed = crate::managed_skills::ManagedSkills::for_data_dir(data_dir)?;
         managed.sync()?;
-        let (entries, omitted) = managed.index(crate::managed_skills::PLATFORM_SKILLS);
+        let (entries, omitted) = managed.index(
+            crate::managed_skills::PLATFORM_SKILLS
+                .into_iter()
+                .filter(|name| memory_enabled || *name != "memory-stewardship"),
+        );
         anyhow::ensure!(
             omitted.is_empty(),
             "platform Skill source is unavailable: {}",

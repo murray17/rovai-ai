@@ -1,3 +1,4 @@
+import { MemoryCapabilityProvider } from './MemoryCapabilityProvider'
 import { TaskCapabilityProvider } from './TaskCapabilityProvider'
 import { uiAttribute } from './interface-language'
 import { createContext, useContext, type ReactNode } from 'react'
@@ -60,7 +61,7 @@ export function ThreadClientProvider({ client, children }: {
   client: ThreadClient
   children: ReactNode
 }): React.JSX.Element {
-  return <ThreadClientContext.Provider value={client}><TaskCapabilityProvider client={client}>{children}</TaskCapabilityProvider></ThreadClientContext.Provider>
+  return <ThreadClientContext.Provider value={client}><TaskCapabilityProvider client={client}><MemoryCapabilityProvider client={client}>{children}</MemoryCapabilityProvider></TaskCapabilityProvider></ThreadClientContext.Provider>
 }
 
 export function useThreadClient(): ThreadClient {

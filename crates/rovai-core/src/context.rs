@@ -14666,6 +14666,114 @@ mod slow_tests {
                 CharterDeliveryMode::FirstPayload,
             )
             .unwrap();
+        let tx = fixture.database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, false).unwrap();
+        tx.commit().unwrap();
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let disabled =
+            claim::BootstrapContents::read(&fixture.database, &fixture.directory, &snapshot)
+                .unwrap();
+        assert!(disabled.memory_entrypoint.is_empty());
+        assert!(disabled.observed_memory_revisions.is_empty());
+        assert!(!disabled.platform_skills.contains("memory-stewardship"));
+        assert!(disabled.platform_skills.contains("cli-operations"));
+        assert_eq!(
+            disabled.authorization_basis_digest,
+            canonical_json_digest(&json!({"schemaVersion":1,"memoryAccess":"none"})).unwrap()
+        );
+        let frozen = ContextService
+            .prepare_session_bootstrap(
+                &mut fixture.database,
+                &store,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                CharterDeliveryMode::FirstPayload,
+            )
+            .unwrap();
+        assert_eq!(frozen.evidence_id, initial_bootstrap.evidence_id);
+        assert_eq!(frozen.payload, initial_bootstrap.payload);
+        // Local preference corruption cannot take ordinary or Single Chat
+        // inputs down with Memory. Strict settings/operations still fail.
+        let preference = crate::memory_capability::snapshot(fixture.database.connection()).unwrap();
+        for invalid_value in [
+            None,
+            Some((2, preference.heads_up_after_global_sequence)),
+            Some((1, -1)),
+        ] {
+            let connection = fixture.database.connection();
+            connection
+                .execute("DELETE FROM memory_preference", [])
+                .unwrap();
+            if let Some((value, boundary)) = invalid_value {
+                connection
+                    .execute_batch("PRAGMA ignore_check_constraints=ON")
+                    .unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO memory_preference VALUES(1,?1,?2)",
+                        params![value, boundary],
+                    )
+                    .unwrap();
+                connection
+                    .execute_batch("PRAGMA ignore_check_constraints=OFF")
+                    .unwrap();
+            }
+            assert!(crate::memory_capability::snapshot(connection).is_err());
+            assert!(crate::memory_capability::require_enabled(connection).is_err());
+            for single_chat in [false, true] {
+                let mut candidate =
+                    load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                        .unwrap()
+                        .unwrap();
+                if single_chat {
+                    candidate.invocation_kind = "single_chat".into();
+                }
+                let available = claim::BootstrapContents::read(
+                    &fixture.database,
+                    &fixture.directory,
+                    &candidate,
+                )
+                .unwrap();
+                assert!(available.memory_entrypoint.is_empty());
+                assert!(available.observed_memory_revisions.is_empty());
+                assert!(!available.platform_skills.contains("memory-stewardship"));
+                assert!(available.platform_skills.contains("cli-operations"));
+                assert_eq!(
+                    available.authorization_basis_digest,
+                    disabled.authorization_basis_digest
+                );
+            }
+            let retained = ContextService
+                .prepare_session_bootstrap(
+                    &mut fixture.database,
+                    &store,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                    CharterDeliveryMode::FirstPayload,
+                )
+                .unwrap();
+            assert_eq!(retained.evidence_id, initial_bootstrap.evidence_id);
+            assert_eq!(retained.payload, initial_bootstrap.payload);
+            fixture
+                .database
+                .connection()
+                .execute("DELETE FROM memory_preference", [])
+                .unwrap();
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "INSERT INTO memory_preference VALUES(1,0,?1)",
+                    [preference.heads_up_after_global_sequence],
+                )
+                .unwrap();
+        }
+        let tx = fixture.database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, true).unwrap();
+        tx.commit().unwrap();
         assert!(initial_bootstrap.payload.contains("\"name\": \"叮叮\""));
         let evidence: (String, i64, String, String, String) = fixture
             .database

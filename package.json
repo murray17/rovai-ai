@@ -187,7 +187,7 @@
     "test:member-avatar-flow": "tsc --noEmit -p scripts/fixtures/member-avatar-flow/tsconfig.json && node --test scripts/lib/member-avatar-flow.test.mjs",
     "test:mission-board": "node --test scripts/lib/mission-board.test.mjs",
     "test:member-runtime-apply": "node --test scripts/lib/member-runtime-apply.test.mjs",
-    "test:run-presence-ui": "node --test --test-concurrency=1 scripts/lib/run-presence.test.mjs scripts/lib/reply-details.test.mjs",
+    "test:run-presence-ui": "node --test --test-concurrency=1 scripts/lib/run-presence.test.mjs scripts/lib/reply-details.test.mjs scripts/lib/thread-history-virtualization.test.mjs",
     "test:markdown-mermaid": "node --test scripts/lib/markdown-mermaid.test.mjs",
     "accept:markdown-mermaid": "node scripts/accept-markdown-mermaid.mjs",
     "test:markdown-code-copy": "node --test scripts/lib/markdown-code-copy.test.mjs",

@@ -131,15 +131,34 @@ try {
     [{adapterKind:'codex-cli',modelId:null,reasoningEffort:null},'智能体默认','模型智能体默认'],
     [{adapterKind:'codex-cli',modelId:'observed-model',reasoningEffort:null},'observed-model','模型observed-model'],
     [{modelId:'legacy-observed'},'legacy-observed','模型legacy-observed'],
-    [null,'模型未记录',null]
+    [null,null,null],
+    [undefined,null,null]
   ]) {
     await b.evaluate(`__presence.setRunModel(${JSON.stringify(record)})`); await settle()
+    if (summary === null) {
+      assert.equal(await b.evaluate(`!!document.querySelector('${modelTrigger}')`),false,'Unrecorded models have no trigger')
+      assert.equal(await b.evaluate('!!document.querySelector(".thread-model-popover")'),false,'Unrecorded models have no disclosure')
+      continue
+    }
     assert.equal(await b.evaluate(`document.querySelector('${modelTrigger}').textContent`),summary)
     await b.click(modelTrigger); await settle()
-    if (field) assert.ok((await modelFields()).includes(field))
-    else assert.equal(await b.evaluate('document.querySelector(".thread-model-unrecorded").textContent'),'模型未记录')
+    assert.ok((await modelFields()).includes(field))
     if (record?.adapterKind === 'minimax-code-cli' && record.reasoningEffort) await b.capture(join(out,'minimax-run-model-card.png'))
     await b.key('Escape'); await settle()
+  }
+  const historyMessage = '[data-message-id="history-alice"]'
+  const historyModelTrigger = `${historyMessage} .message-model-summary`
+  for (const [record,summary] of [
+    [null,null],
+    [undefined,null],
+    [{modelId:'legacy-history-model'},'legacy-history-model'],
+    [{adapterKind:'codex-cli',modelId:null,reasoningEffort:null},'智能体默认']
+  ]) {
+    await b.evaluate(`__presence.setHistoryModel(${JSON.stringify(record)})`); await settle()
+    assert.equal(await b.evaluate(`!!document.querySelector('${historyMessage}')`),true,'The historical message stays mounted')
+    if (summary === null) assert.equal(await b.evaluate(`!!document.querySelector('${historyModelTrigger}')`),false)
+    else assert.equal(await b.evaluate(`document.querySelector('${historyModelTrigger}').textContent`),summary)
+    assert.equal(await b.evaluate('!!document.querySelector(".thread-model-popover")'),false)
   }
   for (const [membership,presence] of [['active','removed'],['left','present']]) {
     await b.evaluate(`__presence.setMemberAvailability('${membership}','${presence}')`); await settle()

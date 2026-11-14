@@ -6,9 +6,14 @@ import { execFileSync } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '../../..')
 const out = process.argv[2] ?? import.meta.dirname
-const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const baseline = process.env.ROVAI_FIXTURE_BASE_REF
+const sourceCommit = execFileSync('git', ['rev-parse', baseline ?? 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const baselineSources = new Map()
+if (baseline) for (const file of execFileSync('git', ['diff', '--diff-filter=MRT', '--name-only', baseline, '--', 'apps', 'packages'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
+  baselineSources.set(join(root, file), execFileSync('git', ['show', `${baseline}:${file}`], { cwd: root, encoding: 'utf8' }))
+}
 const result = await build({ configFile: false, root: import.meta.dirname, base: './', logLevel: 'warn',
-  plugins: [react()],
+  plugins: [{ name: 'fixture-source-baseline', enforce: 'pre', load: id => baselineSources.get(id) }, react()],
   resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
   define: { __SOURCE_COMMIT__: JSON.stringify(sourceCommit) },
   build: { write: false, assetsInlineLimit: Number.MAX_SAFE_INTEGER, cssCodeSplit: false,

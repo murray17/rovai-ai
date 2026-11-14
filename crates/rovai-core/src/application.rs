@@ -6846,11 +6846,14 @@ impl Core {
         &self,
         request: rovai_core::builtin_tool_transport::HermesSessionIpcRequest,
     ) -> BuiltinToolIpcResponse {
-        let BuiltinToolIpcRequestBody::Invoke {
-            request_id,
-            operation,
-            ..
-        } = &request.body;
+        let (request_id, operation) = match &request.body {
+            BuiltinToolIpcRequestBody::Invoke {
+                request_id,
+                operation,
+                ..
+            } => (request_id.as_str(), operation.as_str()),
+            BuiltinToolIpcRequestBody::Capabilities => ("", "builtin.capabilities"),
+        };
         let _gate = self.builtin_tool_leases.invocation_guard().await;
         let resolved: Result<_> = {
             let database = self.database.lock().await;
@@ -6943,6 +6946,32 @@ impl Core {
             Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
         };
         match body {
+            BuiltinToolIpcRequestBody::Capabilities => {
+                let database = self.database.lock().await;
+                let capabilities = (|| -> Result<_> {
+                    let single_chat: bool = database.connection().query_row(
+                        "SELECT invocation_kind='single_chat' FROM agent_run WHERE id=?1",
+                        [&authorized.agent_run_id],
+                        |r| r.get(0),
+                    )?;
+                    Ok(
+                        rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
+                            tasks_enabled: !single_chat
+                                && rovai_core::task_capability::enabled(database.connection())?,
+                            memory_enabled: rovai_core::memory_capability::discoverable(
+                                database.connection(),
+                            ),
+                        },
+                    )
+                })();
+                match capabilities {
+                    Ok(capabilities) => BuiltinToolIpcResponse::Capabilities { capabilities },
+                    Err(_) => BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.internal_error",
+                        "Capability state is unavailable",
+                    ),
+                }
+            }
             BuiltinToolIpcRequestBody::Invoke {
                 request_id,
                 operation,
@@ -7098,7 +7127,7 @@ impl Core {
                         if !matches!(
                             operation.as_str(),
                             MEMBER_LIST_TOOL_NAME | MEMBER_GET_TOOL_NAME | MEMBER_UPDATE_TOOL_NAME
-                        ) =>
+                        ) && !rovai_core::memory_capability::is_read_operation(&operation) =>
                     {
                         return BuiltinToolIpcResponse::Envelope { envelope };
                     }
@@ -7821,6 +7850,7 @@ impl Core {
                             MemoryToolService.write(&mut database, &invocation)
                         }?;
                     evidence_replayed = execution.replayed;
+                    emit_memory_if_committed(&self.output, &execution);
                     command_execution_payload(execution)
                 }
                 MEMORY_VIEW_TOOL_NAME => {
@@ -8377,6 +8407,22 @@ impl Core {
             })
         }
         .await;
+        // Select the final read result before constructing any success evidence.
+        // This is the same DB ordering boundary as a preference commit. Once
+        // selected, evidence and transport must not independently reinterpret it.
+        let mut memory_read_guard = if result.is_ok()
+            && rovai_core::memory_capability::is_read_operation(&evidence_tool_name)
+        {
+            Some(self.database.lock().await)
+        } else {
+            None
+        };
+        let result = match memory_read_guard.as_ref() {
+            Some(database) => {
+                rovai_core::memory_capability::require_enabled(database.connection()).and(result)
+            }
+            None => result,
+        };
         if result.is_ok() && member_roster_changed {
             emit_member_roster_invalidated(&self.output, &evidence_tool_name);
             if let Some(authenticated_run) = evidence_run
@@ -8463,7 +8509,10 @@ impl Core {
                 "sendInputFilePath": send_input_file_path,
             });
             let evidence_result = {
-                let mut database = self.database.lock().await;
+                let mut database = match memory_read_guard.take() {
+                    Some(database) => database,
+                    None => self.database.lock().await,
+                };
                 ExecutionEvidenceService.record_builtin_tool_result(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
@@ -10180,12 +10229,56 @@ impl Core {
                 // A same-value save also repairs a previously failed projection.
                 // Retry only this derived file state; the preference stays saved
                 // and each attempt reads the latest value under the invocation gate.
-                if !self.refresh_task_discovery(None).await {
+                if !self.refresh_builtin_discovery(None).await {
                     let core = Arc::clone(self);
                     tokio::spawn(async move {
                         for delay_ms in [100, 500, 2_000] {
                             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                            if core.refresh_task_discovery(None).await {
+                            if core.refresh_builtin_discovery(None).await {
+                                break;
+                            }
+                        }
+                    });
+                }
+                Ok(serde_json::to_value(snapshot)?)
+            }
+            "preferences.memory.get" => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Empty {}
+                let _: Empty = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    rovai_core::memory_capability::snapshot(database.connection())?,
+                )?)
+            }
+            "preferences.memory.set" => {
+                let input: rovai_core::memory_capability::MemoryPreferences =
+                    serde_json::from_value(request.params.clone())?;
+                let (changed, snapshot) = {
+                    let mut database = self.database.lock().await;
+                    let tx = database.connection_mut().transaction()?;
+                    let changed = rovai_core::memory_capability::set(&tx, input.enabled)?;
+                    let snapshot = rovai_core::memory_capability::snapshot(&tx)?;
+                    tx.commit()?;
+                    (changed, snapshot)
+                };
+                if changed {
+                    emit(
+                        &self.output,
+                        "preferences.memory_changed",
+                        json!({"enabled": input.enabled}),
+                    );
+                }
+                // A same-value save also repairs a previously failed projection.
+                // Retry only this derived file state; the preference stays saved
+                // and each attempt reads the latest value under the invocation gate.
+                if !self.refresh_builtin_discovery(None).await {
+                    let core = Arc::clone(self);
+                    tokio::spawn(async move {
+                        for delay_ms in [100, 500, 2_000] {
+                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                            if core.refresh_builtin_discovery(None).await {
                                 break;
                             }
                         }
@@ -10644,6 +10737,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.revise" => {
@@ -10654,6 +10748,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.retire" => {
@@ -10664,6 +10759,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.reactivate" => {
@@ -10674,6 +10770,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.forget" => {
@@ -10684,6 +10781,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.supersede" => {
@@ -10694,6 +10792,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.review.schedule" => {
@@ -10704,6 +10803,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.hearthReviewItems.list" => {
@@ -10720,6 +10820,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.hearthReviewItems.reject" => {
@@ -10730,6 +10831,7 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
+                emit_memory_if_committed(&self.output, &execution);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "memory.export" => {
@@ -13090,12 +13192,16 @@ impl Core {
             "events.subscribe" => {
                 let params: SubscribeEventsParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(ReadModelService.events_since(
+                let mut batch = serde_json::to_value(ReadModelService.events_since(
                     &mut database,
                     params.camp_id.as_ref().map(ThreadId::as_str),
                     params.after_global_sequence,
                     params.limit.unwrap_or(500),
-                )?)?)
+                )?)?;
+                batch["memoryCapability"] = serde_json::to_value(
+                    rovai_core::memory_capability::snapshot(database.connection()).ok(),
+                )?;
+                Ok(batch)
             }
             "executionTrace.export" => {
                 let params: rovai_core::execution_trace::TraceExportParams =
@@ -16863,26 +16969,30 @@ impl Core {
         self.builtin_tool_process_config_factory()?.create()
     }
 
-    async fn refresh_task_discovery(&self, target: Option<(&str, &str, i64)>) -> bool {
+    async fn refresh_builtin_discovery(&self, target: Option<(&str, &str, i64)>) -> bool {
         let _gate = self.builtin_tool_leases.invocation_guard().await;
-        let enabled_runs = {
+        let state = {
             let database = self.database.lock().await;
-            (|| -> Result<HashSet<String>> {
-                if !rovai_core::task_capability::enabled(database.connection())? {
-                    return Ok(HashSet::new());
-                }
-                Ok(database.connection().prepare("SELECT id FROM agent_run WHERE invocation_kind <> 'single_chat' AND status IN ('queued','running','waiting')")?
-                    .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<HashSet<String>>>()?)
+            (|| -> Result<_> {
+                let tasks = rovai_core::task_capability::enabled(database.connection())?;
+                let memory = rovai_core::memory_capability::discoverable(database.connection());
+                let enabled_runs = if tasks {
+                    database.connection().prepare("SELECT id FROM agent_run WHERE invocation_kind <> 'single_chat' AND status IN ('queued','running','waiting')")?
+                        .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<HashSet<String>>>()?
+                } else {
+                    HashSet::new()
+                };
+                Ok((enabled_runs, memory))
             })()
         };
-        match enabled_runs {
-            Ok(enabled_runs) => {
+        match state {
+            Ok((enabled_runs, memory)) => {
                 self.builtin_tool_leases
-                    .refresh_tasks(&enabled_runs, target)
+                    .refresh_capabilities(&enabled_runs, memory, target)
                     .await
             }
             Err(error) => {
-                eprintln!("Task CLI capability read failed: {error:#}");
+                eprintln!("Built-in CLI capability read failed: {error:#}");
                 false
             }
         }
@@ -16904,7 +17014,7 @@ impl Core {
             )
             .await?;
         if config.context_path().is_some() {
-            self.refresh_task_discovery(Some((
+            self.refresh_builtin_discovery(Some((
                 config.process_id(),
                 &execution.agent_run_id,
                 execution.execution_epoch,
@@ -29102,6 +29212,12 @@ fn emit_navigation_invalidated(
     );
 }
 
+fn emit_memory_if_committed(output: &mpsc::UnboundedSender<String>, execution: &CommandExecution) {
+    if !execution.replayed && execution.result.status != CommandResultStatus::Rejected {
+        emit(output, "memory.changed", json!({}));
+    }
+}
+
 fn member_roster_change_applied(execution: &CommandExecution) -> bool {
     !execution.replayed && execution.result.status == CommandResultStatus::Applied
 }
@@ -37618,7 +37734,21 @@ done
             std::env::temp_dir().join(format!("rovai-task-discovery-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
+        let mut core = runtime_resolution_test_core(&root).unwrap();
+        let (output, mut host_events) = mpsc::unbounded_channel();
+        core.output = output;
+        let core = Arc::new(core);
+        fn memory_hints(events: &mut mpsc::UnboundedReceiver<String>) -> usize {
+            let mut count = 0;
+            while let Ok(frame) = events.try_recv() {
+                let frame: Value = serde_json::from_str(&frame).unwrap();
+                if frame["method"] == "memory.changed" {
+                    assert_eq!(frame["params"], json!({}));
+                    count += 1;
+                }
+            }
+            count
+        }
         let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
             path: root.join("core.sock").to_string_lossy().into_owned(),
         };
@@ -37679,7 +37809,7 @@ done
         // binding refresh. It must read the new value, not one captured at bind.
         {
             let gate = core.builtin_tool_leases.invocation_guard().await;
-            let refresh = core.refresh_task_discovery(Some((
+            let refresh = core.refresh_builtin_discovery(Some((
                 b.process_id(),
                 &execution_b.agent_run_id,
                 execution_b.execution_epoch,
@@ -37721,6 +37851,518 @@ done
         tokio::time::advance(Duration::from_millis(100)).await;
         tokio::task::yield_now().await;
         assert!(tasks(a)); // Existing bounded retry repairs without another save/bind.
+        // Memory shares the projection transaction but has independent authority.
+        async fn save_memory(core: &Arc<Core>, enabled: bool) -> Value {
+            core.handle(&Request {
+                client: Default::default(),
+                id: json!(2),
+                method: "preferences.memory.set".into(),
+                params: json!({"enabled":enabled}),
+            })
+            .await
+            .unwrap()
+        }
+        async fn invoke_memory(
+            core: &Arc<Core>,
+            config: &BuiltinToolProcessConfig,
+            id: &str,
+            operation: &str,
+            input: Value,
+        ) -> Value {
+            let context: rovai_core::builtin_tool_transport::BuiltinToolCliContext =
+                serde_json::from_slice(&fs::read(config.context_path().unwrap()).unwrap()).unwrap();
+            serde_json::to_value(
+                core.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+                    ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                    auth: context.auth().unwrap(),
+                    body: BuiltinToolIpcRequestBody::Invoke {
+                        request_id: id.into(),
+                        operation: operation.into(),
+                        input,
+                        send_input_file_path: None,
+                    },
+                })
+                .await,
+            )
+            .unwrap()
+        }
+        let body = "Memory capability must never replay a forgotten body.";
+        let memory_id = {
+            let mut database = core.database.lock().await;
+            let created = MemoryService::default()
+                .create(
+                    &mut database,
+                    &user_command_envelope(
+                        uuid::Uuid::new_v4().to_string(),
+                        CreateMemoryCommand {
+                            scope: rovai_core::memory::MemoryScopeKind::Hearth,
+                            kind: rovai_core::memory::MemoryKind::Agreement,
+                            body: body.into(),
+                            retrieval_keys: vec!["capability replay".into()],
+                            companion_agent_id: None,
+                            relationship_agent_ids: vec![],
+                            direction: None,
+                            directed_actor_agent_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            created.result.payload["memoryId"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let read_id = uuid::Uuid::new_v4().to_string();
+        let read_input = json!({"memoryIds":[memory_id]});
+        let first = invoke_memory(&core, a, &read_id, "memory.read", read_input.clone()).await;
+        assert!(first.to_string().contains(body), "{first}");
+        let write_id = uuid::Uuid::new_v4().to_string();
+        let write_input = json!({"action":"add","scope":"companion","kind":"agreement",
+            "body":"Keep exact capability receipts.","retrievalKeys":["capability receipts"]});
+        let written = invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await;
+        assert_eq!(written["envelope"]["ok"], true, "{written}");
+        assert_eq!(memory_hints(&mut host_events), 1);
+        let hearth_id = uuid::Uuid::new_v4().to_string();
+        let hearth_input = json!({"action":"add","scope":"hearth","kind":"agreement",
+            "body":"A committed pending candidate must refresh the review count.","retrievalKeys":["review refresh"]});
+        let pending =
+            invoke_memory(&core, a, &hearth_id, "memory.write", hearth_input.clone()).await;
+        assert_eq!(pending["envelope"]["ok"], true, "{pending}");
+        assert!(pending.to_string().contains("review_pending"));
+        assert_eq!(
+            memory_hints(&mut host_events),
+            1,
+            "accepted Hearth save must emit a content hint"
+        );
+        assert_eq!(
+            invoke_memory(&core, a, &hearth_id, "memory.write", hearth_input.clone()).await,
+            pending
+        );
+        assert_eq!(
+            memory_hints(&mut host_events),
+            0,
+            "receipt replay must not emit another hint"
+        );
+        let duplicate = invoke_memory(
+            &core,
+            a,
+            &uuid::Uuid::new_v4().to_string(),
+            "memory.write",
+            hearth_input,
+        )
+        .await;
+        assert_eq!(
+            duplicate["envelope"]["error"]["code"],
+            "memory.duplicate_pending"
+        );
+        assert_eq!(
+            memory_hints(&mut host_events),
+            0,
+            "rejected duplicate must not refresh content"
+        );
+        // Arrange close after the actual read, before final result selection,
+        // using the existing FIFO DB mutex rather than a production test hook.
+        let racing_id = uuid::Uuid::new_v4().to_string();
+        let mut read = Box::pin(invoke_memory(
+            &core,
+            a,
+            &racing_id,
+            "memory.read",
+            read_input.clone(),
+        ));
+        let mut database = core.database.lock().await;
+        let before: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM memory_access_evidence", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(read.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let mut closed_after_read = false;
+        for _ in 0..12 {
+            let mut next_lock = Box::pin(core.database.lock());
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(next_lock.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            drop(database);
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(read.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            database = next_lock.await;
+            let observed: i64 = database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM memory_access_evidence", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            if observed > before {
+                let tx = database.connection_mut().transaction().unwrap();
+                rovai_core::memory_capability::set(&tx, false).unwrap();
+                tx.commit().unwrap();
+                closed_after_read = true;
+                break;
+            }
+        }
+        assert!(
+            closed_after_read,
+            "must close in the result selection window"
+        );
+        drop(database);
+        let raced = read.await;
+        assert_eq!(
+            raced["envelope"]["error"]["code"],
+            "memory.feature_disabled"
+        );
+        assert!(!raced.to_string().contains(body));
+        {
+            let database = core.database.lock().await;
+            let (phase, evidence_id, operation_id): (String, String, String) = database
+                .connection()
+                .query_row(
+                    "SELECT phase, id, operation_id FROM agent_run_execution_evidence
+                     WHERE agent_run_id=?1 AND kind='tool_result'
+                     ORDER BY sequence DESC LIMIT 1",
+                    [&execution_a.agent_run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            let payload = ExecutionEvidenceService
+                .read_full_payload(
+                    &database,
+                    &ManagedBlobStore::new(&core.data_dir),
+                    &bindings[0].0,
+                    &evidence_id,
+                )
+                .unwrap();
+            assert_eq!(phase, "failed");
+            assert_eq!(payload["status"], "failed");
+            assert_eq!(payload["errorCode"], raced["envelope"]["error"]["code"]);
+            assert_eq!(payload["coreEnvelope"]["ok"], false);
+            assert!(!payload.to_string().contains(body));
+            let outcome: String = database.connection().query_row(
+                "SELECT outcome FROM execution_activity WHERE agent_run_id=?1 AND operation_id=?2",
+                [&execution_a.agent_run_id, &operation_id], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(outcome, "failed");
+        }
+        let off = save_memory(&core, false).await;
+        for config in [a, b] {
+            let context: Value =
+                serde_json::from_slice(&fs::read(config.context_path().unwrap()).unwrap()).unwrap();
+            assert_eq!(context["memoryEnabled"], false);
+            assert_eq!(context["tasksEnabled"], true);
+        }
+        let denied = invoke_memory(&core, a, &read_id, "memory.read", read_input.clone()).await;
+        assert_eq!(
+            denied["envelope"]["error"]["code"],
+            "memory.feature_disabled"
+        );
+        assert_eq!(denied["envelope"]["error"]["recovery"], "stop");
+        assert!(!denied.to_string().contains(body));
+        let replay = invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await;
+        assert_eq!(replay, written);
+        assert!(
+            !replay
+                .to_string()
+                .contains("Keep exact capability receipts.")
+        );
+        for scope in ["hearth", "companion", "relationship"] {
+            let mut view = json!({"scope":scope});
+            if scope == "relationship" {
+                view["counterpartyAgentId"] = json!("another-agent");
+            }
+            let result = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "memory.view",
+                view,
+            )
+            .await;
+            assert_eq!(
+                result["envelope"]["error"]["code"],
+                "memory.feature_disabled"
+            );
+            let mut input = write_input.clone();
+            input["scope"] = json!(scope);
+            if scope == "relationship" {
+                input["counterpartyAgentId"] = json!("another-agent");
+                input["direction"] = json!("directed");
+            }
+            let result = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "memory.write",
+                input,
+            )
+            .await;
+            assert_eq!(
+                result["envelope"]["error"]["code"], "memory.feature_disabled",
+                "{result}"
+            );
+        }
+        let search = invoke_memory(
+            &core,
+            a,
+            &uuid::Uuid::new_v4().to_string(),
+            "memory.search",
+            json!({"query":"capability replay"}),
+        )
+        .await;
+        assert_eq!(
+            search["envelope"]["error"]["code"],
+            "memory.feature_disabled"
+        );
+        let same = save_memory(&core, false).await;
+        assert_eq!(same["enabled"], off["enabled"]);
+        assert_eq!(
+            same["headsUpAfterGlobalSequence"],
+            off["headsUpAfterGlobalSequence"]
+        );
+        assert_eq!(
+            same["observedThroughChangeSequence"],
+            off["observedThroughChangeSequence"]
+        );
+        let on = save_memory(&core, true).await;
+        assert!(
+            on["observedThroughChangeSequence"].as_i64().unwrap()
+                > off["observedThroughChangeSequence"].as_i64().unwrap()
+        );
+        assert_eq!(core.builtin_tool_leases.active_count().await, 2);
+        {
+            let mut database = core.database.lock().await;
+            MemoryService::default()
+                .forget(
+                    &mut database,
+                    &user_command_envelope(
+                        uuid::Uuid::new_v4().to_string(),
+                        ForgetMemoryCommand {
+                            memory_id: memory_id.clone(),
+                            expected_version: 1,
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let live = invoke_memory(&core, a, &read_id, "memory.read", read_input).await;
+        assert_eq!(live["envelope"]["ok"], true, "{live}");
+        assert!(!live.to_string().contains(body));
+        let context: rovai_core::builtin_tool_transport::BuiltinToolCliContext =
+            serde_json::from_slice(&fs::read(a.context_path().unwrap()).unwrap()).unwrap();
+        let discovery = serde_json::to_value(
+            core.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                auth: context.auth().unwrap(),
+                body: BuiltinToolIpcRequestBody::Capabilities,
+            })
+            .await,
+        )
+        .unwrap();
+        assert_eq!(discovery["capabilities"]["memoryEnabled"], true);
+        assert_eq!(discovery["capabilities"]["tasksEnabled"], true);
+        // Hermes uses the same discovery request with its existing logical
+        // Session routing. Only this isolated SQL fixture is changed, not a live Runtime.
+        let (conversation, installation, original_adapter): (String, String, String) = {
+            let database = core.database.lock().await;
+            let target = database.connection().query_row(
+                "SELECT c.id,c.native_adapter_installation_id,i.adapter_kind FROM conversation c JOIN adapter_installation i ON i.id=c.native_adapter_installation_id WHERE c.id=(SELECT conversation_id FROM agent_run WHERE id=?1)",
+                [&execution_a.agent_run_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+            database.connection().execute("UPDATE conversation SET native_session_id='hermes-memory-capability' WHERE id=?1", [&target.0]).unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE adapter_installation SET adapter_kind='hermes-cli' WHERE id=?1",
+                    [&target.1],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET runtime_adapter_kind='hermes-cli' WHERE id=?1",
+                    [&execution_a.agent_run_id],
+                )
+                .unwrap();
+            target
+        };
+        let hermes = serde_json::to_value(
+            core.handle_hermes_session_ipc(
+                rovai_core::builtin_tool_transport::HermesSessionIpcRequest {
+                    source: rovai_core::builtin_tool_transport::HermesSessionSource::NativeSession,
+                    native_session_id: "hermes-memory-capability".into(),
+                    body: BuiltinToolIpcRequestBody::Capabilities,
+                },
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(hermes["capabilities"]["memoryEnabled"], true, "{hermes}");
+        save_memory(&core, false).await;
+        let hermes_off = serde_json::to_value(
+            core.handle_hermes_session_ipc(
+                rovai_core::builtin_tool_transport::HermesSessionIpcRequest {
+                    source: rovai_core::builtin_tool_transport::HermesSessionSource::NativeSession,
+                    native_session_id: "hermes-memory-capability".into(),
+                    body: BuiltinToolIpcRequestBody::Capabilities,
+                },
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(
+            hermes_off["capabilities"]["memoryEnabled"], false,
+            "{hermes_off}"
+        );
+        assert_eq!(hermes_off["capabilities"]["tasksEnabled"], true);
+        {
+            let database = core.database.lock().await;
+            database
+                .connection()
+                .execute(
+                    "UPDATE adapter_installation SET adapter_kind=?1 WHERE id=?2",
+                    rusqlite::params![original_adapter, installation],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET runtime_adapter_kind=?1 WHERE id=?2",
+                    rusqlite::params![original_adapter, execution_a.agent_run_id],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE conversation SET native_session_id=NULL WHERE id=?1",
+                    [&conversation],
+                )
+                .unwrap();
+        }
+        let preference = {
+            let database = core.database.lock().await;
+            rovai_core::memory_capability::snapshot(database.connection()).unwrap()
+        };
+        for invalid_value in [
+            None,
+            Some((2, preference.heads_up_after_global_sequence)),
+            Some((1, -1)),
+        ] {
+            {
+                let database = core.database.lock().await;
+                let connection = database.connection();
+                connection
+                    .execute("DELETE FROM memory_preference", [])
+                    .unwrap();
+                if let Some((value, boundary)) = invalid_value {
+                    connection
+                        .execute_batch("PRAGMA ignore_check_constraints=ON")
+                        .unwrap();
+                    connection
+                        .execute(
+                            "INSERT INTO memory_preference VALUES(1,?1,?2)",
+                            rusqlite::params![value, boundary],
+                        )
+                        .unwrap();
+                    connection
+                        .execute_batch("PRAGMA ignore_check_constraints=OFF")
+                        .unwrap();
+                }
+            }
+            assert!(
+                core.handle(&Request {
+                    client: Default::default(),
+                    id: json!(3),
+                    method: "preferences.memory.get".into(),
+                    params: json!({})
+                })
+                .await
+                .is_err()
+            );
+            let batch = core
+                .handle(&Request {
+                    client: Default::default(),
+                    id: json!(4),
+                    method: "events.subscribe".into(),
+                    params: json!({"threadId":bindings[0].0,"afterGlobalSequence":0}),
+                })
+                .await
+                .unwrap();
+            assert_eq!(batch.get("memoryCapability"), Some(&Value::Null));
+            assert!(
+                batch["events"]
+                    .as_array()
+                    .is_some_and(|events| !events.is_empty())
+            );
+            let ordinary = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "member.list",
+                json!({}),
+            )
+            .await;
+            assert_eq!(ordinary["envelope"]["ok"], true, "{ordinary}");
+            assert!(core.handle(&Request { client: Default::default(), id: json!(5), method: "camps.open".into(), params: json!({"threadId":bindings[0].0,"traceId":uuid::Uuid::new_v4().to_string()}) }).await.is_ok());
+            let denied = invoke_memory(
+                &core,
+                a,
+                &uuid::Uuid::new_v4().to_string(),
+                "memory.read",
+                json!({"memoryIds":[memory_id]}),
+            )
+            .await;
+            assert_eq!(denied["envelope"]["ok"], false, "{denied}");
+            assert!(!denied.to_string().contains(body));
+            assert_eq!(
+                invoke_memory(&core, a, &write_id, "memory.write", write_input.clone()).await,
+                written
+            );
+            save(&core, false).await;
+            assert!(!tasks(a) && !tasks(b));
+            save(&core, true).await;
+            assert!(tasks(a) && tasks(b));
+            let capabilities = serde_json::to_value(
+                core.handle_builtin_tool_ipc(BuiltinToolIpcRequest {
+                    ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                    auth: context.auth().unwrap(),
+                    body: BuiltinToolIpcRequestBody::Capabilities,
+                })
+                .await,
+            )
+            .unwrap();
+            assert_eq!(capabilities["capabilities"]["tasksEnabled"], true);
+            assert_eq!(capabilities["capabilities"]["memoryEnabled"], false);
+            let database = core.database.lock().await;
+            let connection = database.connection();
+            // Projection repair must never replace an unreadable preference.
+            let stored: Option<(i64, i64)> = connection
+                .query_row(
+                    "SELECT enabled, heads_up_after_global_sequence FROM memory_preference",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .unwrap();
+            assert_eq!(stored, invalid_value);
+            connection
+                .execute("DELETE FROM memory_preference", [])
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO memory_preference VALUES(1,0,?1)",
+                    [preference.heads_up_after_global_sequence],
+                )
+                .unwrap();
+        }
         for (camp, execution, _, config) in &bindings {
             core.builtin_tool_leases
                 .unbind(

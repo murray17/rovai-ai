@@ -652,6 +652,12 @@ impl MemoryService {
         F: FnOnce(&Transaction<'_>) -> Result<CommandHandlerResult>,
     {
         self.gateway.execute(database, envelope, |transaction| {
+            if !crate::memory_capability::enabled(transaction)? {
+                return Ok(rejected(
+                    crate::memory_capability::DISABLED_CODE,
+                    crate::memory_capability::DISABLED_MESSAGE,
+                ));
+            }
             persist_memory_rule_rejection(handler(transaction))
         })
     }
@@ -1240,7 +1246,116 @@ mod slow_tests {
             .query_row("SELECT COUNT(*) FROM memory_fts", [], |row| row.get(0))
             .unwrap();
         assert_eq!(fts_rows, 1);
+        let service = MemoryService::default();
+        let before = crate::memory_capability::snapshot(database.connection()).unwrap();
+        let event_boundary: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(MAX(global_sequence),0) FROM event_log",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(before.enabled);
+        let tx = database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, false).unwrap();
+        tx.commit().unwrap();
+        let off = crate::memory_capability::snapshot(database.connection()).unwrap();
+        assert!(!off.enabled);
+        assert!(off.observed_through_change_sequence > before.observed_through_change_sequence);
+        for result in [
+            service.list(&database).map(|_| ()),
+            service.get(&database, memory_id).map(|_| ()),
+            service.export(&database).map(|_| ()),
+            service.list_hearth_review_items(&database).map(|_| ()),
+        ] {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains(crate::memory_capability::DISABLED_CODE)
+            );
+        }
+        let replay = service
+            .create(
+                &mut database,
+                &user_envelope("memory-create-v2", hearth_candidate(1)),
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, execution.result);
+        assert!(!replay.result.payload.to_string().contains("Durable Hearth"));
+        let denied = service
+            .create(
+                &mut database,
+                &user_envelope("memory-off-new", hearth_candidate(2)),
+            )
+            .unwrap();
+        assert_eq!(denied.result.code, crate::memory_capability::DISABLED_CODE);
+        let retired = service
+            .retire(
+                &mut database,
+                &user_envelope(
+                    "memory-off-retire",
+                    RetireMemoryCommand {
+                        memory_id: memory_id.to_owned(),
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(retired.result.code, crate::memory_capability::DISABLED_CODE);
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM memory", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let tx = database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, true).unwrap();
+        let on = crate::memory_capability::snapshot(&tx).unwrap();
+        assert!(on.enabled);
+        assert!(on.heads_up_after_global_sequence >= event_boundary);
+        assert!(!crate::memory_capability::set(&tx, true).unwrap());
+        assert_eq!(crate::memory_capability::snapshot(&tx).unwrap(), on);
+        tx.commit().unwrap();
+        assert_eq!(
+            service
+                .get(&database, memory_id)
+                .unwrap()
+                .unwrap()
+                .lifecycle,
+            "active"
+        );
+        // A rejected command identity remains a rejection after re-enable.
+        assert!(
+            service
+                .create(
+                    &mut database,
+                    &user_envelope("memory-off-new", hearth_candidate(2))
+                )
+                .unwrap()
+                .replayed
+        );
+        let tx = database.connection_mut().transaction().unwrap();
+        crate::memory_capability::set(&tx, false).unwrap();
+        tx.commit().unwrap();
         drop(database);
+        let reopened = Database::open(&directory).unwrap();
+        assert!(!crate::memory_capability::enabled(reopened.connection()).unwrap());
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM memory WHERE lifecycle_status='active'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3787,6 +3902,7 @@ fn sha256(bytes: &[u8]) -> String {
 
 impl MemoryService {
     pub fn list(&self, database: &Database) -> Result<MemoryListView> {
+        crate::memory_capability::require_enabled(database.connection())?;
         let mut statement = database
             .connection()
             .prepare("SELECT id FROM memory ORDER BY created_at DESC, id")?;
@@ -3796,7 +3912,7 @@ impl MemoryService {
         let memories = ids
             .iter()
             .map(|id| {
-                self.get(database, id)?
+                self.load_view(database, id)?
                     .with_context(|| format!("Memory {id} disappeared while listing"))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -3807,6 +3923,11 @@ impl MemoryService {
     }
 
     pub fn get(&self, database: &Database, memory_id: &str) -> Result<Option<MemoryView>> {
+        crate::memory_capability::require_enabled(database.connection())?;
+        self.load_view(database, memory_id)
+    }
+
+    fn load_view(&self, database: &Database, memory_id: &str) -> Result<Option<MemoryView>> {
         let Some(record) = load_memory_record(database.connection(), memory_id)? else {
             return Ok(None);
         };
@@ -3866,6 +3987,7 @@ impl MemoryService {
         &self,
         database: &Database,
     ) -> Result<Vec<HearthReviewItemView>> {
+        crate::memory_capability::require_enabled(database.connection())?;
         let mut statement = database
             .connection()
             .prepare("SELECT id FROM hearth_review_item ORDER BY created_at DESC, id DESC")?;

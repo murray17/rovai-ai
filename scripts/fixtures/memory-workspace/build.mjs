@@ -10,7 +10,7 @@ const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, enc
 const result = await build({ configFile: false, root: import.meta.dirname, base: './', logLevel: 'warn',
   plugins: [react()],
   resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
-  define: { __SOURCE_COMMIT__: JSON.stringify(sourceCommit) },
+  define: { __SOURCE_COMMIT__: JSON.stringify(sourceCommit), 'process.env.NODE_ENV': JSON.stringify('development') },
   build: { write: false, assetsInlineLimit: Number.MAX_SAFE_INTEGER, cssCodeSplit: false,
     rollupOptions: { output: { inlineDynamicImports: true } } }
 })

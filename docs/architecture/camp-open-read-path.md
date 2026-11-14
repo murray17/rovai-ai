@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-14
 ---
 
 # Thread Open Read Path 架构
@@ -155,6 +155,12 @@ Core 仅选择直接 reply 到目标用户消息的首条有效队员回复，�
 回填到正常正文 coverage。只在展示层按 ID/版本合并；读取窗口与真实 next-row 边界证明缺口，分页入口和自动加载
 均留在正常连续区间之前。已有通知、引用、查找读取不扩展成统一窗口框架。
 
+公共时间线超过 100 个结构项后，`TimelineVirtualList` 按视口与缓冲区调用行渲染，消息关联的产物仍在同一测量行。
+稳定 ID、高度缓存和可见消息锚点管理挂载与滚动；向上分页、宽度变化及异步尺寸变化保留阅读位置，只有原本跟随
+最新内容时跟随尾部。焦点、原生选区和展开入口所需的行单独保留，释放交互状态后卸载；缓存按时间线生命周期回收。
+消息已在数据中但离屏时，搜索、来源、回复和通知定位先挂载目标再走原滚动／聚焦链路，无需再次读取 around。
+真实可见来源仍按视口相交计算，缓冲区与保留项不代表已读；复制／导出继续使用消息数据。
+
 目录材料和水位在同一读事务取得，释放共享 Database 锁后再格式化；直接回复通过 reply 等值前缀组合索引定位。
 旧目录可继续显示，resync／相关失效立即撤销缓存定位可信度，最新有效目录才恢复；缓存点击不主动清除承载目标的窗口。
 
@@ -189,9 +195,10 @@ Command/Ctrl+F in mounted ThreadWorkspace
   -> Renderer thread.messages.find(threadId, query, selectedIndex?, visibleAnchor?)
   -> Core exact scan in one read transaction
   -> response contains total + one target only
-  -> target missing from mounted timeline
+  -> target missing from loaded message data
        -> Renderer thread.messages.around(threadId, messageId)
        -> merge bounded anchored window without changing open coverage
+  -> ensure target row is mounted in the viewport window
   -> center target, keep find input focused, highlight visible body occurrences
 ```
 
@@ -239,6 +246,17 @@ Snapshot/Open 在同一读事务内按当前 Thread 索引读取 `member_creatio
 Evidence/Canonical operation index 在读取事务中计算块边界、完整组计数与代表项；无新增表或后台投影维护。
 Renderer 的 ExecutionWindow 拥有主线块游标，ExecutionGroupWindow 拥有单组子窗口，公开输出仍由既有
 content cache 与精确详情请求拥有。两个窗口同用 Run 原生滚动容器，缓存、展开、内容和 DOM 窗口分别有界。
+
+### Renderer 实时执行订阅
+
+Desktop 公开执行增量由 transport-scoped `RunLiveEvents` 按 Thread、Run、execution epoch 定向合批，
+不进入 BusinessApp 的整页正文状态。只有挂载的执行预览、Run 卡或活动地图订阅对应运行；
+无关运行不积累界面正文。重复或过期增量保持快照引用，多个可见区域共享同一运行的订阅与 32ms 合批。
+最后一个订阅释放时清理该运行与计时器；预览仅保留有界尾部，不拥有完整事实。
+
+收到终态时先提交已到达的本地批次，再结束该 epoch 的实时接纳；不等待完整记录补读才呈现终态。
+关闭重开、失效和重连仍由现有 ExecutionWindow page/changes 与内容读取恢复，Core 保持唯一持久真源。
+Web 保持授权 invalidation 与既有窗口补读，不把 SSE 失效解释成原始 Core 正文事件。
 
 薄索引保留全 Run 元数据扫描与有序候选索引成本，折叠组传输量与子项数脱钩；不把这项优化声称为常数时间数据库查询。初次短内容
 有界自动补齐，失败原位恢复，历史阅读锚点优先于后台更新。协议和预算见

@@ -674,6 +674,8 @@ async fn events(
                     let mut payload = json!({"epoch":state.epoch,"revision":revision});
                     if let Ok(change) = &result {
                         if change["method"] == "preferences.tasks_changed" { payload["tasksChanged"] = json!(true); }
+                        if change["method"] == "preferences.memory_changed" { payload["memoryChanged"] = json!(true); }
+                        if change["method"] == "memory.changed" { payload["memoryContentChanged"] = json!(true); }
                         if rovai_core::thread_reference::invalidates_directory(change["method"].as_str().unwrap_or_default(), &change["params"]) {
                             payload["referencesChanged"] = json!(true);
                         }
