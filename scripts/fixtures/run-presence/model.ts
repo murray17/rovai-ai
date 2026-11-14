@@ -783,11 +783,29 @@ if (Number.isInteger(historyScale) && historyScale >= 20 && historyScale <= 1000
   model.showReplyCase(true, true, false, true, historyScale)
   model.showNarration('持续执行与中文组合输入检查')
   const record = (value: any) => console.log('ROVAI_NATIVE_IME ' + JSON.stringify({ at: performance.now(), ...value }))
+  let nativeRound = 0
+  let calibrationPending = new URLSearchParams(location.search).has('imeTiming')
+  if (calibrationPending) {
+    new PerformanceObserver(list => list.getEntries().filter(entry => entry.name === 'keydown').forEach(entry =>
+      record({ type:'eventTiming', start:entry.startTime, duration:entry.duration,
+        processingStart:(entry as any).processingStart, processingEnd:(entry as any).processingEnd })))
+      .observe({ type:'event', durationThreshold:16 } as any)
+    requestAnimationFrame(() => record({ type:'environment', width:innerWidth, height:innerHeight,
+      devicePixelRatio, userAgent:navigator.userAgent, messageCount:historyScale, eventIntervalMs:32 }))
+  }
   for (const name of ['compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input', 'keydown']) {
     document.addEventListener(name, (event: any) => {
       if (!(event.target instanceof Element) || !event.target.closest('[contenteditable="true"]')) return
-      record({ type: name, data: event.data, key: event.key, inputType: event.inputType,
+      if (name === 'keydown' && event.code === 'KeyA' && event.metaKey) nativeRound++
+      record({ type: name, start:event.timeStamp, round:nativeRound, data: event.data, key: event.key, code:event.code,
+        metaKey:event.metaKey,ctrlKey:event.ctrlKey,altKey:event.altKey,inputType: event.inputType,
         isComposing: event.isComposing, text: event.target.closest('[contenteditable="true"]').textContent })
+      if (name === 'keydown' && calibrationPending && event.code === 'KeyA' && !event.metaKey) {
+        calibrationPending = false
+        record({ type:'calibration', start:event.timeStamp, busyMs:65 })
+        const until = performance.now() + 65
+        while (performance.now() < until) { /* Isolated, once-only endpoint calibration, excluded from samples. */ }
+      }
     }, true)
   }
   let lastMessageId = state.snapshot.messages.at(-1)?.id

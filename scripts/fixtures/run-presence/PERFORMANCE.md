@@ -29,3 +29,10 @@ page/changes 事实，不将完整工具记录作为 Renderer props。默认 `mi
 `ROVAI_PERF_REPLY_ARRIVAL=1` 在输入中点发布一条新的大回复，用于区分大正文初次呈现与稳定内容更新成本。
 输出记录设备、浏览器、源码提交、样本数与逐轮原始样本；小样本 p99 只作观察，不声称稳定尾延迟。
 真实操作系统中文 IME 必须另行验收；CDP 字符注入或合成 composition 事件不能替代该结论。
+
+可见原生输入入口为 `node scripts/benchmark-native-ime.mjs <绝对输出目录>`：使用临时 userData，不启动 Core／Runtime。
+系统已有拼音输入法下，先原生按一次 A 校准（该次含 65ms 明示人工处理延迟，不计入统计），再 Escape、Command+A、Backspace 开始一轮。
+按 100ms 间隔、1ms 持键重复 `ceshi` + Space 30 次，共三轮；每轮保留 180 个按键、30 次提交、完整 60 字。
+自动输入必须用原生按键；粘贴、CDP 输入或合成 composition 不符合此场景。关闭隔离窗口后，用
+`node scripts/benchmark-native-ime.mjs --analyze <输出目录> --rounds 1,2,3` 分析；若前面做了试采，明确指定正式轮次。
+它报告组合期间的 DOM keydown Event Timing，保留 8ms 取整／16ms 截断；候选浮层和物理键盘到像素延迟不在该指标内。
