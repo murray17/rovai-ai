@@ -15,7 +15,7 @@ const emptyState = (threadId: string): SourceState => ({ threadId, messages: [],
 
 /** One bounded, user-requested source window. It never changes the Composer or Run. */
 export function useRunSourceNavigation(threadId: string, messages: readonly ThreadMessageView[],
-  viewportRef: RefObject<HTMLElement | null>) {
+  viewportRef: RefObject<HTMLElement | null>, ensureMounted?: (id: string) => Promise<HTMLElement | null>) {
   const client = useThreadClient()
   const [state, setState] = useState(() => emptyState(threadId))
   const current = useRef({ threadId, messages })
@@ -44,7 +44,7 @@ export function useRunSourceNavigation(threadId: string, messages: readonly Thre
     try {
       let source = displayed.get(messageId)
       if (source?.withdrawn) { unavailable(); return }
-      if (!source || !viewport.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)) {
+      if (!source) {
         const result = await client.request<ThreadMessageAroundSnapshot>('thread.messages.around', { threadId, messageId })
         if (!valid()) return
         if (result.schemaVersion !== 1 || result.threadId !== threadId || result.anchorMessageId !== messageId) {
@@ -58,6 +58,8 @@ export function useRunSourceNavigation(threadId: string, messages: readonly Thre
         setState(value => ({ ...value, messages: result.messages }))
       }
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      if (!valid()) return
+      await ensureMounted?.(messageId)
       if (!valid()) return
       if (current.current.messages.find(message => message.id === messageId)?.withdrawn) { unavailable(); return }
       const target = viewport.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
