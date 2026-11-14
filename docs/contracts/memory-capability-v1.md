@@ -5,7 +5,7 @@ authority: memory-instance-capability
 status: accepted
 version: 1
 source_version: v1.72
-last_updated: 2026-11-12
+last_updated: 2026-11-13
 ---
 
 # Rovai 长期记忆开关 v1
@@ -117,6 +117,9 @@ Memory 页面打开时由其既有审核列表读取与计数回调提供导航�
 Web 既有 SSE 失效元数据以 memoryContentChanged 表达该内容变化，解码/合并保留标记；
 memoryChanged 继续只表示设置变化。Memory 内容只响应自身变更和 resync，普通 Runtime/消息失效不全量读取。
 已有列表刷新失败时保留内容与选择，原错误行提供重试，不新增提示区块。
+Memory 页卸载或更换客户端后，该页异步延续失效：迟到提交回执不启动派生读取，旧列表不向父组件发布计数。
+生命周期仅由组件内的 effect setup/cleanup 标记，setup 重放重新激活当前访问；现有列表序号继续处理访问内乱序。
+不阻止离页，不取消或改判已经提交的写入，不增加会话版本或持久状态。
 管理 list 在入口检查一次后使用私有记录加载；get 保留入口检查，export 复用已检查的 list，
 不逐条重复查询开关，不增加开关缓存。
 

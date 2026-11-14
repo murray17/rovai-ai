@@ -5289,3 +5289,12 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
   普通事件不重复读取与断线/缺口恢复通过。Typecheck 与 Desktop/Web 构建通过。
   默认测试通过（Vitest 3275 passed / 2 skipped、Node 377 passed / 2 skipped），通用文档门禁通过。
   本次没有 Rust、工具输出或模型输入变化，既有 Core 与真实 Runtime 资格记录保持。
+
+- Memory 页异步生命周期补正（User sequence 31，2026-11-13）：当前分支已包含 1c889a25c 的 Desktop
+  全局刷新修正，本轮仅在 MemoryLibrary 拦住过期访问的回执后读取和父计数发布。保留原列表乱序序号，
+  不取消已提交写入或阻止离页；setup/cleanup 重放与客户端切换均按当前组件访问处理，不扩展 Core 或会话机制。
+  新增场景先复现原代码卸载后的两次读取，修正后 Memory UI 11 组交互 / 18 组视口通过，包含
+  菜单及接受/拒绝回执、旧父计数、客户端切换和实际 development StrictMode setup/cleanup 重放。
+  既有 Desktop 跨会话刷新、普通事件去重及恢复回归通过；类型检查通过。仅组件内存标记，无新增界面信息。
+  Desktop/Web 构建、真实隔离 Host/Web 回归及通用文档门禁通过；默认 Vitest 3275 passed / 2 skipped，
+  Node 377 passed / 2 skipped。本轮 Rust/模型代码未变，未重复 Rust 测试或真实模型验收，沿用既有资格边界。

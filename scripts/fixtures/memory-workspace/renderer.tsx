@@ -1,5 +1,5 @@
 import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
-import { useEffect, useMemo, useState } from 'react'
+import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AgentProfile, MemoryRecord, HearthReviewItem } from '@contracts'
 import { MemoryLibrary } from '../../../apps/desktop/src/renderer/src/MemoryLibrary'
@@ -145,13 +145,14 @@ function Fixture() {
   const platformClient = useMemo(() => ({ ...client, platform }), [platform])
   const [target, setTarget] = useState<MemoryNavigationTarget>({ kind: 'memory', memoryId: null })
   const [pending, setPending] = useState(1)
+  const [memoryPageMounted, setMemoryPageMounted] = useState(true)
   const [notice, setNotice] = useState(true)
   const [refresh, setRefresh] = useState(0)
   const [theme, setTheme] = useState('day')
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => { document.documentElement.dataset.rovaiPlatform = platform; document.documentElement.dataset.platform = platform }, [platform])
   useEffect(() => { (window as any).__memoryFixture = {
-    setMemoryEnabled, refreshCapability: invalidateCapability,
+    setMemoryEnabled, setMemoryPageMounted, setPendingCount: setPending, refreshCapability: invalidateCapability,
     invalidate: (change: any) => invalidationListeners.forEach(listener => listener(change)),
     advanceCapabilitySequence: () => { memoryCapability = { ...memoryCapability, observedThroughChangeSequence: memoryCapability.observedThroughChangeSequence + 1 } },
     failCapabilitySave: () => { capabilitySaveFailures++ },
@@ -185,16 +186,16 @@ function Fixture() {
     },
     conflict: () => { const m = memories.find(m => m.id === target.memoryId)!; m.version++; m.currentRevisionId = `${m.id}-external`; m.currentBody = '来自另一操作的最新正文。' },
     stale: () => { reviews[0].stale = true; setRefresh(n => n + 1) },
-    get: () => ({ target, memories, reviews, calls, longBody })
-  } }, [target])
+    get: () => ({ target, memories, reviews, calls, longBody, pending })
+  } }, [target, pending])
   const changes = collectMemoryChanges([], [{ eventType: 'memory.agent_revised', globalSequence: 1, entityType: 'memory', entityId: 'member-1', actorType: 'agent', actorId: 'member-a', payload: { scope: 'companion' } } as any])
   return <ThreadClientProvider client={platformClient}><CapabilityProbe /><MobileLayoutProvider value={mobile}>{platform === 'win32' && <WindowsApplicationMenu />}<NavigationShell platform={platform} browser={mobile}>
     {!mobile && <ThreadNavigation view="memory" state="ready" navigation={null} activeThreadId={null} pendingMemoryCount={pending} onNewConversation={noop} onMembers={noop} onMemory={noop} onSettings={noop} onOpenProject={noop} onThread={noop} onRemoveProject={asyncNoop} onRename={asyncNoop} onDelete={asyncNoop} onError={noop} />}
     {!mobile && <WindowDragStrip page="memory" />}
-    <main className="content memory-content"><MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} /></main>
+    <main className="content memory-content">{memoryPageMounted && <MemoryLibrary agents={agents} navigationTarget={target} onNavigate={setTarget} onPendingCountChange={setPending} refreshSignal={refresh} topNotices={notice && <MemoryChangeNotice onClose={() => setNotice(false)} onOpen={() => { setTarget({ kind: 'memory', memoryId: 'member-1' }); setNotice(false) }}>{memoryChangeText(changes, '林')}</MemoryChangeNotice>} />}</main>
   </NavigationShell></MobileLayoutProvider></ThreadClientProvider>
 }
 document.documentElement.dataset.platform = 'darwin'
 document.documentElement.dataset.rovaiPlatform = 'darwin'
 document.documentElement.dataset.rovaiSurface = 'desktop'
-createRoot(document.getElementById('root')!).render(<Fixture />)
+createRoot(document.getElementById('root')!).render(<StrictMode><Fixture /></StrictMode>)

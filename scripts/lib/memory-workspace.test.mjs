@@ -56,6 +56,63 @@ test('Memory workspace: production components, mutations, notifications and resp
     await viewport(1440, 920)
     await b.send('Page.navigate', { url: pathToFileURL(join(root, 'memory-workspace.html')).href })
     await b.wait('!!window.__memoryFixture && document.querySelectorAll(".memory-catalog-item").length === 7')
+    if (await b.evaluate('!!document.querySelector(".memory-review-dialog")')) await b.key('Escape')
+    // An acknowledged menu write outlives the page; it must not start new reads.
+    const retireId = await b.evaluate('__memoryFixture.get().memories.find(item => item.lifecycle === "active" && item.id !== "shared-2").id')
+    await navigate({ scope: 'all', memoryId: retireId })
+    await b.evaluate('__memoryFixture.holdMutationReceipt()')
+    await click('.memory-more-button'); await button('停止沿用')
+    await b.wait('__memoryFixture.capabilityStats().mutationReceiptWaiting')
+    await b.evaluate('__memoryFixture.setMemoryPageMounted(false)'); await b.wait('!document.querySelector(".memory-library")')
+    await b.evaluate('__memoryFixture.setMemoryEnabled(false)'); await b.wait('!__memoryCapabilityProbe.active')
+    const afterLeaving = await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads')
+    await b.evaluate('__memoryFixture.releaseMutationReceipt()'); await settle()
+    assert.equal(await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads'), afterLeaving, 'an unmounted page must not read Memory after a late menu receipt')
+    assert.equal(await b.evaluate(`__memoryFixture.get().memories.find(item => item.id === ${JSON.stringify(retireId)}).lifecycle`), 'retired', 'the acknowledged write remains committed')
+    await b.evaluate('__memoryFixture.setMemoryEnabled(true)'); await b.wait('__memoryCapabilityProbe.active')
+    await b.evaluate('__memoryFixture.setMemoryPageMounted(true)'); await b.wait('!!document.querySelector(".memory-catalog")')
+
+    // Accept and reject receipts also expire with their page, even while enabled.
+    for (const action of ['接受', '拒绝']) {
+      await b.evaluate(`__memoryFixture.seedReviews(); __memoryFixture.get().reviews.forEach((item, index) => { item.reviewItemId = ${JSON.stringify('lifetime-' + action)} + index })`); await settle()
+      await click('.memory-review-entry'); await b.evaluate('__memoryFixture.holdMutationReceipt()')
+      await button(action, 'document.querySelector(".memory-review-dialog")')
+      await b.wait('__memoryFixture.capabilityStats().mutationReceiptWaiting')
+      await b.evaluate('__memoryFixture.setMemoryPageMounted(false)'); await b.wait('!document.querySelector(".memory-library")')
+      await b.evaluate('__memoryFixture.setPendingCount(3)'); await settle()
+      const reads = await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads')
+      await b.evaluate('__memoryFixture.releaseMutationReceipt()'); await settle()
+      assert.equal(await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads'), reads, 'late review receipt starts no read after leaving an enabled page')
+      assert.equal(await b.evaluate('__memoryFixture.get().pending'), 3, 'old review continuation cannot overwrite the current parent count')
+      await b.evaluate('__memoryFixture.setMemoryPageMounted(true)'); await b.wait('!!document.querySelector(".memory-catalog")')
+    }
+
+    // Hold an old one-item list, remount and publish three, then release the old response.
+    await b.evaluate('__memoryFixture.seedReviews(); __memoryFixture.get().reviews.splice(1); __memoryFixture.holdMemoryRead()')
+    await b.wait('__memoryFixture.capabilityStats().memoryReadWaiting')
+    await b.evaluate('__memoryFixture.setMemoryPageMounted(false)'); await b.wait('!document.querySelector(".memory-library")')
+    await b.evaluate('__memoryFixture.seedReviews()'); await settle()
+    const strictReads = await b.evaluate('__memoryFixture.capabilityStats().reviewListReads')
+    await b.evaluate('__memoryFixture.setMemoryPageMounted(true)'); await b.wait('__memoryFixture.get().pending === 3 && !!document.querySelector(".memory-catalog")')
+    assert.equal(await b.evaluate('__memoryFixture.capabilityStats().reviewListReads'), strictReads + 2, 'the dev StrictMode owner actually replays effect setup/cleanup and restores reads')
+    await b.evaluate('__memoryFixture.releaseMemoryRead()'); await settle()
+    assert.equal(await b.evaluate('__memoryFixture.get().pending'), 3, 'old page list cannot replace the remounted page count')
+
+    // The same component with a new client must reject the old client's continuation.
+    await click('.memory-review-entry'); await b.evaluate('__memoryFixture.holdMutationReceipt()')
+    await button('拒绝', 'document.querySelector(".memory-review-dialog")'); await b.wait('__memoryFixture.capabilityStats().mutationReceiptWaiting')
+    await b.evaluate('__memoryFixture.setPlatform("win32")'); await b.wait('__memoryCapabilityProbe.active && !document.querySelector(".memory-capability-state")'); await settle()
+    const switchedReads = await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads')
+    const switchedPending = await b.evaluate('__memoryFixture.get().pending')
+    await b.evaluate('__memoryFixture.releaseMutationReceipt()'); await settle()
+    assert.equal(await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads'), switchedReads, 'old client receipt starts no read after setup activates the new client')
+    assert.equal(await b.evaluate('__memoryFixture.get().pending'), switchedPending)
+    if (await b.evaluate('!!document.querySelector(".memory-review-dialog")')) await b.key('Escape')
+    report.interactions.push('page lifecycle: late menu and review receipts start no reads after unmount/off or client switch; old lists cannot publish parent counts; StrictMode setup/cleanup replay restores only the current visit')
+
+    // Restore the existing visual/mutation matrix to its original seven records.
+    await b.send('Page.reload')
+    await b.wait('!!window.__memoryFixture && document.querySelectorAll(".memory-catalog-item").length === 7')
     assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".memory-scope-tabs button")].map(e => e.textContent)'), ['全部', '共同', '队员', '队员间'])
     assert.match(await text('.memory-summary-strip'), /正在沿用6队员形成4待复核1/)
     assert.equal(await text('.memory-detail-body'), await b.evaluate('__memoryFixture.get().longBody'))

@@ -11,7 +11,7 @@ confirmation_message_id: f9a37446-9a3f-4716-ac6c-7e0b9cd6aaf0
 authority: proposed-model-input-change-statement
 implementation_status: implemented
 review_baseline: d7b69cb64b33fbc12f8e8cdb10e9876dae8a0633
-last_updated: 2026-11-12
+last_updated: 2026-11-13
 ---
 
 # Rovai 长期记忆实例开关
@@ -95,6 +95,30 @@ User sequence 29（`7321ce5b-de3f-432c-b680-044c6cb68a2a`）指出，选中 Thre
 `pnpm typecheck`、`pnpm build:desktop`、`pnpm test` 与通用文档门禁通过；Vitest 3275 passed / 2 skipped，默认 Node 377 passed / 2 skipped。
 该 owner 使用生产 Desktop App、独立 Electron profile 和受控 API/时钟，不启动 Core 或真实 Runtime。
 本次无 Rust/模型输入变更，既有 Core 和真实模型资格记录保持。
+
+## Memory 页异步生命周期补正（2026-11-13）
+
+User sequence 31（`c2453462-380c-4b37-9490-9ad0757e20b5`）基于 b14 的 Desktop 全局刷新问题已在
+[1c889a25c](https://github.com/murray17/rovai-ai/commit/1c889a25ca222cf6a6a5b4e7cd31c80efdf4377a) 修正，保留其条件与既有回归。
+本轮只补 MemoryLibrary：旧页在卸载后仍保留 memoryActive=true，回执后新启动的 load 会绕开旧列表序号；
+该页还可能向仍挂载的父组件发布过时审核数。
+
+变更后使用组件内的轻量访问标记，effect setup 激活、cleanup 使原访问失效；客户端切换与 setup/cleanup 重放
+均产生当前访问，旧异步流程不能借新访问继续工作。派生读取开始前和向父组件发布结果前均检查有效访问，
+原列表请求序号继续负责同一访问内的乱序。提交事实保留，不取消写入、不阻止切页，不改 Core、Provider、
+数据库、会话或 Bootstrap，也不增加界面信息、后台任务、模型输入 revision 或持久状态。
+
+验证扩展原 Memory 生产组件 owner：离页并关闭后的迟到菜单回执、开启状态下离页后的接受/拒绝回执、
+旧列表晚于新页回包的父计数隔离、客户端切换及实际 development StrictMode effect 重放。
+仅测试夹具启用 development React + 根 StrictMode，不改变产品运行模式。
+
+验证结果：原代码在新增回归中明确复现卸载后两次额外读取（3→5）；补正后
+`pnpm test:memory-workspace-ui` 通过，11 组交互 / 18 组视口配色。迟到菜单、接受/拒绝回执在离页后均零新增读取，
+已提交的停止沿用仍保持 retired；旧列表不覆盖新页的父计数 3；客户端切换后旧回执零新增读取。
+StrictMode 重挂载实际触发两次 setup 读取，验证清理后能重新激活当前访问，旧访问结果仍被排除。
+原生产 Desktop App 的跨 Thread 全局刷新、人工管理、普通轮询去重和断线/缺口回归通过。
+类型检查、Desktop/Web 构建、真实隔离 Host/Web 回归、默认测试及通用文档门禁通过；Vitest 3275 passed / 2 skipped，默认 Node 377 passed / 2 skipped。
+本轮 Rust 代码未变，未重复运行 Rust 测试；真实 Runtime/模型资格记录保持。
 
 ## R3：局部故障隔离与通知/发现收简
 
