@@ -1026,6 +1026,7 @@ function PublishBotDialog({
     && provisioning.remoteAppId === null
   const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
     || provisioning?.failureCode === 'dingtalk_connection_error'
+  const completed = provisioning?.stage === 'completed'
   const recoveringConnection = provisioning?.stage === 'connecting_bot' && !busy
   const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号|重新连接/.test(error))
   const awaitingApprover = presentation.approverSelectionFailureCode !== null
@@ -1102,7 +1103,7 @@ function PublishBotDialog({
               </p>
             )}
           </AppDialogBody>
-          <AppDialogFooter note={recoveringConnection
+          <AppDialogFooter note={completed ? null : recoveringConnection
             ? uiAttribute("关闭此窗口后，Rovai 会继续维护该 Bot 的连接。")
             : connectionFailed
             ? effectiveAppId
@@ -1113,8 +1114,8 @@ function PublishBotDialog({
             : effectiveAppId
               ? uiAttribute("重新发布始终复用已绑定应用，不提供换绑入口。")
               : null}>
-            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>{uiAttribute(recoveringConnection ? "关闭" : "取消")}</button>
-            {sessionUnavailable && onReconnect ? (
+            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>{uiAttribute(completed ? "完成" : recoveringConnection ? "关闭" : "取消")}</button>
+            {!completed && (sessionUnavailable && onReconnect ? (
               <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>
                 {localizedChannelCopy('重新连接{0}', channelCopy`重新连接${providerName}`, providerName)}
               </button>
@@ -1139,7 +1140,7 @@ function PublishBotDialog({
                         ? uiAttribute("重新发布")
                         : uiAttribute("确认发布")}
               </button>
-            )}
+            ))}
           </AppDialogFooter>
         </AppDialogContent>
       </Dialog.Portal>

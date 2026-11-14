@@ -163,8 +163,22 @@ try {
   assert.equal(await browser.evaluate(`document.querySelector('.channel-publish-dialog [role=alert]')===null`), true)
   assert.equal(await browser.evaluate(`document.querySelector('.channel-publish-dialog .primary-button')===null`), true)
   await browser.capture(join(output, 'desktop-web-publish-recovery.png'))
-  await browser.click(`[...document.querySelectorAll('.channel-publish-dialog button')].find(e=>e.textContent.trim()==='关闭')`)
-  await browser.wait(`document.querySelector('.channel-publish-dialog')===null && document.querySelector('.channel-connection-indicator[data-connection-state=reconnecting]')!==null`)
+  // Keep the dialog open while the original publication completes in the
+  // background. A settled request must never become a second publish action.
+  const beforeCompletion = operations.length
+  snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online', connectionFailureCode: null, connectionNeedsAttention: false, canReconcile: false }
+  snapshot.channels[0].provisioning = { ...snapshot.channels[0].provisioning, stage: 'completed', detail: '发布完成。' }
+  await browser.wait(`document.querySelector('.channel-publish-dialog .channel-provisioning-state.is-completed')!==null`)
+  assert.equal(await browser.evaluate(`document.querySelector('.channel-publish-dialog .primary-button')===null`), true)
+  assert.equal(await browser.evaluate(`[...document.querySelectorAll('.channel-publish-dialog .app-dialog-footer button')].map(button=>button.textContent.trim()).join(',')`), '完成')
+  await browser.capture(join(output, 'desktop-web-publish-completed.png'))
+  await browser.click(`document.querySelector('.channel-publish-dialog .app-dialog-footer .quiet-button')`)
+  await browser.wait(`document.querySelector('.channel-publish-dialog')===null`)
+  assert.equal(operations.length, beforeCompletion)
+  // A later post-ready disconnect still restores without a dialog; recovery
+  // also unmounts any currently open connection tooltip.
+  snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'reconnecting', connectionFailureCode: 'transport_error' }
+  await browser.wait(`document.querySelector('.channel-connection-indicator[data-connection-state=reconnecting]')!==null`)
   await browser.click(`document.querySelector('.channel-connection-indicator')`)
   await browser.wait(`document.querySelector('.channel-connection-tooltip')!==null`)
   snapshot.channels[0].memberBots[0] = { ...snapshot.channels[0].memberBots[0], connectionStatus: 'online', connectionFailureCode: null, connectionNeedsAttention: false }
@@ -225,7 +239,7 @@ try {
   await browser.capture(join(output, 'standalone-legacy-channel.png'))
   assert.equal(await browser.evaluate(`document.querySelector('.channel-member-bot-table')===null`), true)
   assert.deepEqual(browser.errors, [])
-  await writeFile(join(output, 'validation.json'), JSON.stringify({ status: 'passed', platform: process.platform, realHost: true, productionWeb: true, productionMainAdapter: true, desktopService: 'fixture', realPlatformPublication: false, electronProcess: false, nativeBridgeInBrowser: false, liveProgressReadback: true, connectionRecoveryVisible: true, compactSignalIndicator: true, connectionIcon: 'link-off', healthySignalHidden: true, recoveryRemovesOpenTooltip: true, hoverTooltipVerified: true, focusClickTooltipVerified: true, blurOutsideScrollResizeDismissed: true, rightEdgeTooltipVerified: true, singleAccessibleReason: true, backgroundConnectionDialog: true, terminalReconcileVisible: true, narrowNoOverflow: true, narrowCellsContained: true, structuredApproverSubmitted: true, originalPublicationIdentity: true, logoutOnlyInRemoteSettings: true, logoutKeepsHost: true, standaloneChannelNavigationHidden: true, standaloneLegacyRouteExplained: true, screenshots: ['desktop-web-channels-recovered.png', 'desktop-web-link-off-tooltip.png', 'desktop-web-channels-narrow-tooltip.png', 'desktop-web-channels-day.png', 'desktop-web-channels-night.png', 'desktop-web-channels-terminal.png', 'desktop-web-channels-narrow.png', 'desktop-web-publish-recovery.png', 'desktop-web-approver.png', 'standalone-legacy-channel.png'] }, null, 2) + '\n')
+  await writeFile(join(output, 'validation.json'), JSON.stringify({ status: 'passed', platform: process.platform, realHost: true, productionWeb: true, productionMainAdapter: true, desktopService: 'fixture', realPlatformPublication: false, electronProcess: false, nativeBridgeInBrowser: false, liveProgressReadback: true, connectionRecoveryVisible: true, compactSignalIndicator: true, connectionIcon: 'link-off', healthySignalHidden: true, recoveryRemovesOpenTooltip: true, hoverTooltipVerified: true, focusClickTooltipVerified: true, blurOutsideScrollResizeDismissed: true, rightEdgeTooltipVerified: true, singleAccessibleReason: true, backgroundConnectionDialog: true, backgroundCompletedDialogReadOnly: true, terminalReconcileVisible: true, narrowNoOverflow: true, narrowCellsContained: true, structuredApproverSubmitted: true, originalPublicationIdentity: true, logoutOnlyInRemoteSettings: true, logoutKeepsHost: true, standaloneChannelNavigationHidden: true, standaloneLegacyRouteExplained: true, screenshots: ['desktop-web-channels-recovered.png', 'desktop-web-link-off-tooltip.png', 'desktop-web-channels-narrow-tooltip.png', 'desktop-web-channels-day.png', 'desktop-web-channels-night.png', 'desktop-web-channels-terminal.png', 'desktop-web-channels-narrow.png', 'desktop-web-publish-recovery.png', 'desktop-web-publish-completed.png', 'desktop-web-approver.png', 'standalone-legacy-channel.png'] }, null, 2) + '\n')
   console.log(JSON.stringify({ status: 'passed', evidence: output }))
 } catch (error) {
   console.error('Channel UI acceptance failed at', stage)

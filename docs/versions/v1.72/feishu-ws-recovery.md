@@ -22,6 +22,7 @@ error 接收者；单次尝试与整个 channel dispose 分开，保持 HTTP sen
 单轮实际重连失败由 SDK 主动发事件，避免轮询和服务端首次周期内的过早提醒。
 watchdog 在 transport ready 时即结束，不覆盖 Core 本地收尾；已在线而保存结果失败时维持在线并重试本地确认。
 endpoint 先分类 code，成功才读取 data；body 错误、HTTP 错误与身份阶段共享安全分类。
+endpoint 显式保留响应头；HTTP 200 业务限流仍取两个等待头的较大值，同时兼容默认客户端包装响应和自定义客户端直接返回业务体。
 限频码 99991400/HTTP 429 可重试并保留平台 reset 秒数与 Retry-After，IP 白名单 99991401 为配置终态；
 Host 不再以通用 permission_denied 标签推断凭据被拒。SDK 导出 connection cause 类型，身份超时与取消使用同一错误形态。
 
@@ -36,6 +37,7 @@ Host 不再以通用 permission_denied 标签推断凭据被拒。SDK 导出 con
 显示需处理并保留“继续核对”。合法 channel 在 WS 重建期间仍可 HTTP 外发及下载附件；身份冲突停止该记录的
 所有传输。Core 原有最多五次 delivery 尝试仍适用，终结的 delivery 不因网络恢复自动重放，不保证入站全部补发。
 首发只差连接时返回“Bot 已发布，正在重连。”进度，不返回普通发布错误；Dialog 可关闭，隐藏重复提交。
+保留窗口直到后台 completed 时只显示“完成”，不能再次发起发布；不自动关闭用户仍在查看的结果。
 仅在自动重连或已观察到离线时于发布文字旁显示用户选定的 A 断链图标，原因通过悬浮、聚焦或点击提示；恢复后图标消失。
 正常在线、首次连接中、运行期未知和本地确认未完成不显示图标或连接描述。
 普通超时、断网和限频合并呈现自动恢复；持续不可用时仅在 Tooltip 中提示检查网络或代理。
@@ -45,7 +47,8 @@ Host 不再以通用 permission_denied 标签推断凭据被拒。SDK 导出 con
 ## 验证归属
 
 - `feishu-ws-lifecycle.test.ts`：真实 ws 子进程、CJS/ESM、超时后迟到 101/endpoint、关闭后请求/socket 不增长、
-  null/缺失 data 与 HTTP 错误分类、身份/Token 限频、无限重连真实计划时间、稳定 channel 终态后复用及去重。
+  null/缺失 data 与 HTTP 错误分类、默认 HTTP 客户端 HTTP 200 endpoint 业务限流与成功解包、身份/Token 限频、
+  无限重连真实计划时间、稳定 channel 终态后复用及去重。
 - `bot-connection.test.ts`：single-flight、责任交接、watchdog 与慢 Core 的时序、只取消当前尝试、HTTP 保留、提醒与终态。
 - `channel-settings.test.ts`：Host/Core 代次边界、Owner 暂缓与补验证、最新 intent/CAS/耗尽且不重放远端 mutation、
   重连期间真实 Host delivery 走 HTTP、身份冲突后 delivery/附件被拒、原发布与消息回归。
@@ -80,11 +83,12 @@ Runtime 兼容矩阵与根 README 无需更新。本地 SDK/Host 夹具不替代
 | 信号图标呈现 | Renderer/Host adapter 定向 38 项、typecheck、Desktop build 通过；生产 Host/Web 验证悬浮提示与恢复动作，离线交互稿 18 项通过，含聚焦、点击、Escape、视口边界；SDK/Core 未变化 |
 | 仅连接异常显示 | 正常在线、首次连接中、未知与本地确认等待均隐藏图标；自动重连/离线显示。上述 38 项、类型与构建通过；生产 Host/Web 验证恢复后图标和已打开的 Tooltip 一同消失，发布事实与动作保留 |
 | A 断链图标定稿 | 用户选定的 A 图形落入正式组件，替换信号强度柱；Renderer 21 项、typecheck、Desktop build 与生产 Host/Web 浏览器验收通过，原 Tooltip 与恢复后隐藏规则保留；SDK/Core 未变化 |
+| 两项 P2 收尾 | 在 `d1890569c` 独立复现 HTTP 200 业务限流丢失 180 秒等待头，以及开窗后台完成后重新出现发布按钮；修复后五个相关测试文件 144 项、typecheck、Desktop build 和真实 Host/Web 浏览器回归通过。CJS/ESM 兼容默认包装与原有自定义业务体；完成态只有“完成”，操作记录未增加发布请求 |
 
 浏览器仅注入 Provider 服务夹具，使用各自临时 data、Skills、MCP 与 Chrome profile，不访问日常数据；
 不执行真实租户发布，也不启动 Electron 或调用模型。验收脚本同步修复既有 TS adapter 加载、登录按钮选择器、
 缺省 presentation preference 假设和 viewport 切换时的等待。截图与 validation.json 位于本次 Thread 附件目录的
-`feishu-ws-recovery-link-off-ui/`；新版单文件交互稿位于 `feishu-ws-recovery-prototype-link-off/`，生成物不进入 Git。日常安装版未替换。
+`feishu-ws-p2-ui/`；新版单文件交互稿位于 `feishu-ws-recovery-prototype-p2/`，生成物不进入 Git。日常安装版未替换。
 真实租户、Electron 进程和 Windows 尚未验收。独立复审建议合并前在隔离 userData 下使用真实飞书或 Lark Bot
 完成一次断网后恢复冒烟，并确认没有未捕获异常；已有自动验收不能替代这项结果。分支保留为 ready，尚未合并。
 

@@ -398,7 +398,8 @@ with failure-specific guidance in its hover/focus/click tooltip, without permane
 The icon appears only for `reconnecting` or observed `offline` states; `online` (including pending local confirmation),
 initial `connecting` and `unknown` states have no icon. Recovery removes the icon. A legacy brand mismatch disables reconciliation on the wrong provider.
 An initial publication whose only remaining work is connection recovery returns its ongoing provisioning snapshot,
-not an action error. Its Dialog can close while the Host continues; an online transport with pending local confirmation
+not an action error. Its Dialog can close while the Host continues; if kept open until `completed`, it allows only
+the finish/close action and cannot submit publication again. An online transport with pending local confirmation
 remains online and reports `connection_confirmation_pending` if that confirmation fails. Fields are projected
 explicitly by Desktop; raw SDK errors and external identity values are never forwarded. An App with no live observation
 is `unknown`; `offline` requires an observed disconnect or terminal failure. A recovery timer or active SDK loop is

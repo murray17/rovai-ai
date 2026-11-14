@@ -8,6 +8,7 @@ const run = promisify(execFile)
 const fixture = String.raw`
 const assert = require('node:assert/strict');
 const net = require('node:net');
+const http = require('node:http');
 const {once} = require('node:events');
 const {dirname, resolve} = require('node:path');
 const {pathToFileURL} = require('node:url');
@@ -231,6 +232,35 @@ const {createRequire} = require('node:module');
  await limited.start({eventDispatcher:{invoke:async()=>{}}});
  for(let i=0;i<100&&!rateError;i++)await new Promise(resolve=>setTimeout(resolve,1));
  assert.equal(rateError.code,429);assert.equal(rateError.retryAfterMs,120000);assert.equal(rateError.retryable,true);limited.close();
+ // Exercise the SDK's real default Axios response interceptor: an HTTP 200
+ // business rejection still needs both platform pacing headers.
+ let endpointReply={code:99991400,data:null};
+ const endpointServer=http.createServer((request,response)=>{
+   request.resume();
+   response.writeHead(200,{'content-type':'application/json','retry-after':'120','x-ogw-ratelimit-reset':'180'});
+   response.end(JSON.stringify(endpointReply));
+ });
+ endpointServer.listen(0,'127.0.0.1');await once(endpointServer,'listening');
+ let businessRateError;
+ const defaultLimited=new WSClient({...options,domain:'http://127.0.0.1:'+endpointServer.address().port,
+   initialConnectRetry:false,onError:error=>businessRateError=error});
+ try {
+   await defaultLimited.start({eventDispatcher:{invoke:async()=>{}}});
+   await until(()=>businessRateError);
+   assert.equal(businessRateError.code,99991400);
+   assert.equal(businessRateError.retryable,true);
+   assert.equal(businessRateError.retryAfterMs,180000);
+   endpointReply={code:0,data:{URL:'ws://127.0.0.1:1?device_id=fixture&service_id=1',
+     ClientConfig:{PingInterval:60,ReconnectCount:-1,ReconnectInterval:120,ReconnectNonce:30}}};
+   const defaultSuccess=new WSClient({...options,domain:'http://127.0.0.1:'+endpointServer.address().port});
+   try {
+     assert.deepEqual(await defaultSuccess.pullConnectConfig(),{ok:true});
+     assert.equal(defaultSuccess.wsConfig.getWS('connectUrl'),endpointReply.data.URL);
+   } finally { defaultSuccess.close(); }
+ } finally {
+   defaultLimited.close();endpointServer.closeAllConnections();
+   await new Promise(resolve=>endpointServer.close(resolve));
+ }
  console.log('lifecycle-ok');
 
 })().catch(error=>{console.error(error);process.exitCode=1});

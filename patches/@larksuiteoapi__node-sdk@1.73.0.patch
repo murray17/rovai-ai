@@ -1,5 +1,5 @@
 diff --git a/es/index.js b/es/index.js
-index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6e8874145 100644
+index c5d5c57488d414e3078f19a235e4db7afebeda80..bc816f938c5107a632f7a8720db6b8eb93ecbce5 100644
 --- a/es/index.js
 +++ b/es/index.js
 @@ -102069,11 +102069,33 @@ var HttpStatusCode;
@@ -78,7 +78,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
                      if (!assertion || !assertion.value) {
                          throw new ClientAssertionError(ERR_CODE_CLIENT_ASSERTION_TOKEN_EMPTY, 'client assertion token is empty');
                      }
-@@ -102201,25 +102227,23 @@ class WSClient {
+@@ -102201,25 +102227,26 @@ class WSClient {
                  else {
                      body.AppSecret = appSecret;
                  }
@@ -91,9 +91,12 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
                      headers,
                      timeout: 15000,
 +                    signal: this.endpointAbort.signal,
++                    $return_headers: true,
                  });
 +                if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
-+                const code = response && response.code;
++                const wrapped = response && response.data && Object.prototype.hasOwnProperty.call(response.data, 'code');
++                const responseBody = wrapped ? response.data : response;
++                const code = responseBody && responseBody.code;
                  if (code !== ErrorCode.ok) {
 -                    const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
 -                    this.logger.error('[ws]', `code: ${code}, ${reason}`);
@@ -106,14 +109,14 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
 -                        error: `pullConnectConfig failed: code=${code}, msg=${reason}`,
 -                    };
 +                    this.logger.error('[ws]', 'endpoint rejected');
-+                    return Object.assign({ ok: false }, larkConnectionCause(response));
++                    return Object.assign({ ok: false }, larkConnectionCause({ data: responseBody, headers: response && response.headers }));
                  }
-+                const { URL, ClientConfig } = response.data || {};
++                const { URL, ClientConfig } = responseBody.data || {};
 +                if (typeof URL !== 'string' || !ClientConfig) return { ok: false, retryable: true, code: 'transport_error' };
                  const { device_id, service_id } = qs.parse(URL);
                  this.wsConfig.updateWs({
                      connectUrl: URL,
-@@ -102234,196 +102258,156 @@ class WSClient {
+@@ -102234,196 +102261,156 @@ class WSClient {
                  return { ok: true };
              }
              catch (e) {
@@ -439,7 +442,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
          const { serviceId, pingInterval } = this.wsConfig.getWS();
          const wsInstance = this.wsConfig.getWSInstance();
          if ((wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.readyState) === WebSocket.OPEN) {
-@@ -102444,8 +102428,10 @@ class WSClient {
+@@ -102444,8 +102431,10 @@ class WSClient {
          this.pingInterval = setTimeout(this.pingLoop.bind(this), pingInterval);
      }
      communicate() {
@@ -450,7 +453,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
              // Any inbound frame proves the connection is alive — cancel the pong
              // watchdog (but don't re-arm; it'll be armed again on the next ping).
              this.clearLiveness();
-@@ -102462,6 +102448,7 @@ class WSClient {
+@@ -102462,6 +102451,7 @@ class WSClient {
              this.logger.error('[ws]', 'ws error');
          });
          wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('close', () => {
@@ -458,7 +461,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
              this.logger.debug('[ws]', 'client closed');
              this.clearLiveness();
              this.reConnect();
-@@ -102576,36 +102563,26 @@ class WSClient {
+@@ -102576,36 +102566,26 @@ class WSClient {
       * @param params.force whether force close (use terminate instead of close)
       */
      close(params = {}) {
@@ -509,7 +512,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
              const { appId } = this.wsConfig.getClient();
              if (!/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
                  this.logger.error('[ws]', `invalid appId: ${appId}`);
-@@ -102632,7 +102609,9 @@ class WSClient {
+@@ -102632,7 +102612,9 @@ class WSClient {
            ->
          Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)`);
              this.eventDispatcher = eventDispatcher;
@@ -520,7 +523,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
          });
      }
  }
-@@ -104906,10 +104885,17 @@ class OutboundSender {
+@@ -104906,10 +104888,17 @@ class OutboundSender {
       */
      patchCard(messageId, card) {
          return __awaiter(this, void 0, void 0, function* () {
@@ -539,7 +542,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
          });
      }
      /**
-@@ -105469,7 +105455,7 @@ class SafetyPipeline {
+@@ -105469,7 +105458,7 @@ class SafetyPipeline {
              const task = () => __awaiter(this, void 0, void 0, function* () {
                  var _e, _f;
                  try {
@@ -548,7 +551,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
                  }
                  catch (e) {
                      (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
-@@ -105483,10 +105469,10 @@ class SafetyPipeline {
+@@ -105483,10 +105472,10 @@ class SafetyPipeline {
                  }
              });
              if (this.queueEnabled) {
@@ -561,7 +564,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
              }
          });
      }
-@@ -106451,99 +106437,112 @@ class LarkChannel {
+@@ -106451,99 +106440,112 @@ class LarkChannel {
      }
      // ─── lifecycle ──────────────────────────────────────────
      connect() {
@@ -755,7 +758,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
      }
      /**
       * Snapshot of the WebSocket lifecycle (state, last/next connect times,
-@@ -106744,35 +106743,53 @@ class LarkChannel {
+@@ -106744,35 +106746,53 @@ class LarkChannel {
          return this.safety.getPolicy();
      }
      // ─── internals: bot identity & dispatch wiring ────────
@@ -821,7 +824,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
          });
      }
      registerDispatcherHandlers() {
-@@ -106829,11 +106846,15 @@ class LarkChannel {
+@@ -106829,11 +106849,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
                      return;
@@ -840,7 +843,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
                  }));
              }),
              // Reactions — dedup only
-@@ -106864,6 +106885,21 @@ class LarkChannel {
+@@ -106864,6 +106888,21 @@ class LarkChannel {
                      this.emitError(e);
                  }
              },
@@ -863,7 +866,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..b9ba4d134d8d64e71ce42621433c98d6
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/lib/index.js b/lib/index.js
-index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86f929295e 100644
+index 0728b1d97ddac688b17642924e359c152dd52fd5..66cb2498f333580c079ee8900bb20520dd6a4bad 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -102087,11 +102087,33 @@ var HttpStatusCode;
@@ -942,7 +945,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
                      if (!assertion || !assertion.value) {
                          throw new ClientAssertionError(ERR_CODE_CLIENT_ASSERTION_TOKEN_EMPTY, 'client assertion token is empty');
                      }
-@@ -102219,25 +102245,23 @@ class WSClient {
+@@ -102219,25 +102245,26 @@ class WSClient {
                  else {
                      body.AppSecret = appSecret;
                  }
@@ -955,9 +958,12 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
                      headers,
                      timeout: 15000,
 +                    signal: this.endpointAbort.signal,
++                    $return_headers: true,
                  });
 +                if (this.closed) return { ok: false, code: 'cancelled', retryable: false };
-+                const code = response && response.code;
++                const wrapped = response && response.data && Object.prototype.hasOwnProperty.call(response.data, 'code');
++                const responseBody = wrapped ? response.data : response;
++                const code = responseBody && responseBody.code;
                  if (code !== ErrorCode.ok) {
 -                    const reason = code === ErrorCode.system_busy ? 'system busy' : msg;
 -                    this.logger.error('[ws]', `code: ${code}, ${reason}`);
@@ -970,14 +976,14 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
 -                        error: `pullConnectConfig failed: code=${code}, msg=${reason}`,
 -                    };
 +                    this.logger.error('[ws]', 'endpoint rejected');
-+                    return Object.assign({ ok: false }, larkConnectionCause(response));
++                    return Object.assign({ ok: false }, larkConnectionCause({ data: responseBody, headers: response && response.headers }));
                  }
-+                const { URL, ClientConfig } = response.data || {};
++                const { URL, ClientConfig } = responseBody.data || {};
 +                if (typeof URL !== 'string' || !ClientConfig) return { ok: false, retryable: true, code: 'transport_error' };
                  const { device_id, service_id } = qs__default["default"].parse(URL);
                  this.wsConfig.updateWs({
                      connectUrl: URL,
-@@ -102252,196 +102276,156 @@ class WSClient {
+@@ -102252,196 +102279,156 @@ class WSClient {
                  return { ok: true };
              }
              catch (e) {
@@ -1303,7 +1309,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
          const { serviceId, pingInterval } = this.wsConfig.getWS();
          const wsInstance = this.wsConfig.getWSInstance();
          if ((wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.readyState) === WebSocket__default["default"].OPEN) {
-@@ -102462,8 +102446,10 @@ class WSClient {
+@@ -102462,8 +102449,10 @@ class WSClient {
          this.pingInterval = setTimeout(this.pingLoop.bind(this), pingInterval);
      }
      communicate() {
@@ -1314,7 +1320,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
              // Any inbound frame proves the connection is alive — cancel the pong
              // watchdog (but don't re-arm; it'll be armed again on the next ping).
              this.clearLiveness();
-@@ -102480,6 +102466,7 @@ class WSClient {
+@@ -102480,6 +102469,7 @@ class WSClient {
              this.logger.error('[ws]', 'ws error');
          });
          wsInstance === null || wsInstance === void 0 ? void 0 : wsInstance.on('close', () => {
@@ -1322,7 +1328,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
              this.logger.debug('[ws]', 'client closed');
              this.clearLiveness();
              this.reConnect();
-@@ -102594,36 +102581,26 @@ class WSClient {
+@@ -102594,36 +102584,26 @@ class WSClient {
       * @param params.force whether force close (use terminate instead of close)
       */
      close(params = {}) {
@@ -1373,7 +1379,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
              const { appId } = this.wsConfig.getClient();
              if (!/^cli_[0-9a-fA-F]{16}$/.test(appId)) {
                  this.logger.error('[ws]', `invalid appId: ${appId}`);
-@@ -102650,7 +102627,9 @@ class WSClient {
+@@ -102650,7 +102630,9 @@ class WSClient {
            ->
          Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)`);
              this.eventDispatcher = eventDispatcher;
@@ -1384,7 +1390,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
          });
      }
  }
-@@ -104924,10 +104903,17 @@ class OutboundSender {
+@@ -104924,10 +104906,17 @@ class OutboundSender {
       */
      patchCard(messageId, card) {
          return __awaiter(this, void 0, void 0, function* () {
@@ -1403,7 +1409,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
          });
      }
      /**
-@@ -105487,7 +105473,7 @@ class SafetyPipeline {
+@@ -105487,7 +105476,7 @@ class SafetyPipeline {
              const task = () => __awaiter(this, void 0, void 0, function* () {
                  var _e, _f;
                  try {
@@ -1412,7 +1418,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
                  }
                  catch (e) {
                      (_f = (_e = this.logger).error) === null || _f === void 0 ? void 0 : _f.call(_e, `safety: action handler threw`, e);
-@@ -105501,10 +105487,10 @@ class SafetyPipeline {
+@@ -105501,10 +105490,10 @@ class SafetyPipeline {
                  }
              });
              if (this.queueEnabled) {
@@ -1425,7 +1431,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
              }
          });
      }
-@@ -106469,99 +106455,112 @@ class LarkChannel {
+@@ -106469,99 +106458,112 @@ class LarkChannel {
      }
      // ─── lifecycle ──────────────────────────────────────────
      connect() {
@@ -1619,7 +1625,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
      }
      /**
       * Snapshot of the WebSocket lifecycle (state, last/next connect times,
-@@ -106762,35 +106761,53 @@ class LarkChannel {
+@@ -106762,35 +106764,53 @@ class LarkChannel {
          return this.safety.getPolicy();
      }
      // ─── internals: bot identity & dispatch wiring ────────
@@ -1685,7 +1691,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
          });
      }
      registerDispatcherHandlers() {
-@@ -106847,11 +106864,15 @@ class LarkChannel {
+@@ -106847,11 +106867,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
                      return;
@@ -1704,7 +1710,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..8533589962e35e46b06e40904e40ee86
                  }));
              }),
              // Reactions — dedup only
-@@ -106882,6 +106903,21 @@ class LarkChannel {
+@@ -106882,6 +106906,21 @@ class LarkChannel {
                      this.emitError(e);
                  }
              },
