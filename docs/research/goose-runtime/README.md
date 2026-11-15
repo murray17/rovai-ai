@@ -27,6 +27,12 @@ User sequence 144 随后恢复尽力撤回，当前边界为 [Runtime Launch v95
 原生无响应 stdio 握手的[局部补丁](upstream/README.md)独立验证，不在 Rovai 增加加载管理层。
 对应[尽力撤回白名单](mcp-best-effort-1.59.0-macos-arm64.json)包含正常官方 Core、迟到删除／重分配和原生补丁三组结果。
 
+User sequence 146 的当前边界见 [Runtime Launch v96](../../contracts/runtime-launch-and-verification-v96.md)：
+新建 Session 提前传入显式 Provider，已成功的参数查询不因临时 Session 删除失败作废。
+[可用性验收白名单](session-availability-1.59.0-macos-arm64.json)区分官方原生对照、Core 实际查询和删除故障。
+无默认 Provider 的创建确实失败；另测的未知 Provider／缺凭据默认可能返回未就绪 Session，不能统一描述为创建失败。
+极端删除拒绝保留了 1 个原生探测 Session，查询仍成功；原生无响应 MCP 初始化限制保持。
+
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。
 以下矩阵保留研究阶段的原生与 Rovai 状态；`Verified` 指原生能力，不代表真实账号已登录或目标平台已取得产品资格。

@@ -143,8 +143,8 @@ function checkBootstrap(start,marker,excluded){
  assert(ordinary.every(r=>r.messages.some(m=>['system','developer'].includes(m.role)&&typeof m.content==='string'&&m.content.includes(bootstrap(marker))&&(!excluded||!m.content.includes(excluded)))))
  return ordinary.length
 }
-async function open(){
- const child=spawn(executable,['acp'],{cwd:join(fixture,'workspace'),env:environment,stdio:['pipe','pipe','pipe'],detached:true})
+async function open(overrides={}){
+ const child=spawn(executable,['acp'],{cwd:join(fixture,'workspace'),env:{...environment,...overrides},stdio:['pipe','pipe','pipe'],detached:true})
  const pending=new Map();let nextId=0,stderr='',exited=false,closePromise
  const closed=new Promise(r=>child.once('close',(code,signal)=>{exited=true;r({code,signal})}))
  const rejectAll=error=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(error)}pending.clear()}
@@ -226,6 +226,16 @@ try{
  checks.native={version,platform:process.platform+'-'+process.arch,command:['goose','acp'],provider:'synthetic-loopback',qualification:false}
  if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='mcp-startup'){
   await checkOfflineMcpLoads()
+ }else if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='session-availability'){
+  const host=await open({GOOSE_PROVIDER:undefined})
+  await assert.rejects(host.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[]}),error=>!!error.rpcError)
+  const session=await host.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[],_meta:{provider:'openai'}})
+  assert.equal(session.configOptions.find(c=>c.id==='provider').currentValue,'openai')
+  const options=await host.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'model',value:'gpt-6.1-sol'})
+  assert(options.configOptions.find(c=>c.id==='thinking_effort').options.some(v=>v.value==='high'))
+  assert.equal((await prompt(host,session.sessionId,'PROBE_EXPLICIT_PROVIDER')).stopReason,'end_turn')
+  await host.rpc('session/delete',{sessionId:session.sessionId})
+  checks.sessionAvailability={unconfiguredDefaultRejected:true,explicitProviderCreatesSession:true,effortAvailable:true,promptCompleted:true,deleted:true}
  }else{
  const host=await open()
  assert.equal(host.initialization.agentInfo.version,version)

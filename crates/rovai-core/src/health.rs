@@ -2329,7 +2329,7 @@ async fn run_acp_probe_with_scope(
             } else {
                 2
             };
-            let session_params = if kind == AdapterKind::GrokBuild {
+            let mut session_params = if kind == AdapterKind::GrokBuild {
                 let attachment_root = probe_root.join("attachments");
                 let run_tmp = probe_root.join("run-tmp");
                 std::fs::create_dir_all(&attachment_root)?;
@@ -2347,6 +2347,11 @@ async fn run_acp_probe_with_scope(
             } else {
                 json!({"cwd": probe_root, "mcpServers": []})
             };
+            if kind == AdapterKind::GooseCli
+                && let Some((model, _)) = target
+            {
+                session_params["_meta"]["provider"] = json!(crate::goose::model_route(model)?.0);
+            }
             write_json_line(
                 stdin,
                 &json!({
@@ -2482,21 +2487,18 @@ async fn run_acp_probe_with_scope(
             Err(_) => Err(anyhow::anyhow!("ACP probe timed out")),
         };
         if let Some(session) = goose_probe_session {
-            let cleanup = tokio::time::timeout_at(deadline, async {
+            let cleanup_deadline =
+                deadline.min(tokio::time::Instant::now() + Duration::from_millis(500));
+            let cleanup = tokio::time::timeout_at(cleanup_deadline, async {
                 write_json_line(stdin, &json!({"jsonrpc":"2.0","id":99,"method":"session/delete","params":{"sessionId":session}})).await?;
                 read_rpc_result(lines, 99).await?;
                 Ok::<_, anyhow::Error>(())
             }).await.context("Goose probe Session cleanup timed out").and_then(|result| result);
-            match (result, cleanup) {
-                (result, Ok(())) => result,
-                (Ok(_), Err(error)) => Err(error.context("Goose probe Session cleanup failed")),
-                (Err(error), Err(cleanup)) => {
-                    Err(error.context(format!("Goose probe Session cleanup failed: {cleanup:#}")))
-                }
+            if let Err(error) = cleanup {
+                eprintln!("Goose probe Session cleanup unconfirmed: {error:#}");
             }
-        } else {
-            result
         }
+        result
     };
     let stderr = match process.finish().await {
         Ok(stderr) => stderr,
@@ -5049,8 +5051,24 @@ while IFS= read -r ignored; do :; done
     async fn acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals() {
         for (case, include_session, target, succeeds, expected_setters) in [
             ("ok", true, None, true, vec![]),
-            ("delete_error", true, None, false, vec![]),
+            ("delete_error", true, Some("native/model-a"), true, vec![]),
+            ("delete_hang", true, Some("native/model-a"), true, vec![]),
             ("session_error", true, None, false, vec![]),
+            ("default_unavailable", true, None, false, vec![]),
+            (
+                "default_unavailable",
+                true,
+                Some("second/model-b"),
+                true,
+                vec![],
+            ),
+            (
+                "target_and_delete_error",
+                true,
+                Some("missing/model"),
+                false,
+                vec!["provider"],
+            ),
             (
                 "target_error",
                 true,
@@ -5115,6 +5133,12 @@ for line in sys.stdin:
     with open({log:?}, 'a') as out: out.write(json.dumps(request) + '\n')
     method = request['method']
     params = request.get('params', {{}})
+    if method == 'session/new' and case == 'default_unavailable':
+        if params.get('_meta', {{}}).get('provider') == 'second': options.update(provider='second', model='model-b')
+        else:
+            print(json.dumps({{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32000,'message':'unrelated default Provider requires authentication'}}}}), flush=True)
+            continue
+    if method == 'session/delete' and case == 'delete_hang': continue
     result = {{'protocolVersion':1}} if method == 'initialize' else {{}}
     if method == 'session/set_config_option':
         key = params['configId']
@@ -5126,11 +5150,12 @@ for line in sys.stdin:
     if method == '_goose/unstable/providers/list': result = {{'entries':[{{'providerId':'native','configured':True,'available':True,'models':[{{'id':'model-a'}}]}}]}}
     if method == '_goose/unstable/defaults/read': result = {{'providerId':'native','modelId':'model-a'}}
     response = {{'jsonrpc':'2.0','id':request['id'],'result':result}}
-    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('delete_error','session/delete'), ('inventory_error','_goose/unstable/providers/list'), ('defaults_error','_goose/unstable/defaults/read')]:
-        response = {{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32602,'message':case}}}}
+    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('target_and_delete_error','session/set_config_option'), ('target_and_delete_error','session/delete'), ('delete_error','session/delete'), ('inventory_error','_goose/unstable/providers/list'), ('defaults_error','_goose/unstable/defaults/read')]:
+        response = {{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32602,'message':case + ':' + method}}}}
     print(json.dumps(response), flush=True)
 "#, log=log.to_string_lossy())).unwrap();
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let started = std::time::Instant::now();
             let result = run_acp_probe_with_scope(
                 &executable,
                 AdapterKind::GooseCli,
@@ -5142,6 +5167,13 @@ for line in sys.stdin:
             )
             .await;
             assert_eq!(result.is_ok(), succeeds, "{case}: {result:?}");
+            if case == "delete_hang" {
+                assert!(started.elapsed() >= Duration::from_millis(500));
+                assert!(
+                    started.elapsed() < Duration::from_secs(3),
+                    "cleanup must not consume the full probe window"
+                );
+            }
             let requests: Vec<Value> = std::fs::read_to_string(&log)
                 .unwrap()
                 .lines()
@@ -5155,10 +5187,30 @@ for line in sys.stdin:
                 .collect();
             assert_eq!(setters, expected_setters, "{case}");
             if target.is_some() {
+                assert_eq!(
+                    requests
+                        .iter()
+                        .find(|r| r["method"] == "session/new")
+                        .unwrap()["params"]["_meta"]["provider"],
+                    target.unwrap().split_once('/').unwrap().0,
+                );
                 assert!(
                     !requests
                         .iter()
                         .any(|r| r["method"] == "_goose/unstable/providers/list")
+                );
+            }
+            if succeeds && include_session {
+                let session = result.as_ref().unwrap().1.as_ref().unwrap();
+                assert_eq!(
+                    crate::goose::selected_option(session, "thinking_effort"),
+                    Some("high")
+                );
+            }
+            if case == "target_and_delete_error" {
+                assert!(
+                    format!("{:#}", result.as_ref().unwrap_err())
+                        .contains("target_and_delete_error:session/set_config_option")
                 );
             }
             if !include_session {
@@ -5195,7 +5247,11 @@ for line in sys.stdin:
                 .collect();
             assert_eq!(
                 removed.len(),
-                usize::from(include_session && case != "session_error"),
+                usize::from(
+                    include_session
+                        && case != "session_error"
+                        && !(case == "default_unavailable" && target.is_none())
+                ),
                 "{case}"
             );
             if let Some(request) = removed.first() {

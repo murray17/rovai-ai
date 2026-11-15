@@ -75,7 +75,9 @@ Goose 以完整官方 `goose acp` 加入独立产品身份，复用共享 ACP、
 完整目录在 initialize 后直接读官方 Provider inventory/defaults，不创建原生 Session；`thinking_effort` 沿共享目标模型按需查询，不重复读取 inventory。
 相同原生选项复用已有会话快照，省略重复 setter；未显式指定模型时不设置 Provider/model/effort，
 新 Session 使用原生初始选择，Warm/冷恢复保留原生 Session 当前选择，不逐轮刷新全局默认。
-目标参数只合并现有目录中的该模型，不推进完整目录时间；实际创建的探测会话在原期限内精确删除。
+显式 Provider 在新建正式／目标参数 Session 的 `_meta.provider` 中提前传入，模型及 effort 沿现有 setter 设置。
+目标参数只合并现有目录中的该模型，不推进完整目录时间；实际创建的探测会话按精确 ID 尽力删除。
+删除共用原探测期限内的短预算，错误／未确认只诊断，不废弃已成功的查询；受管进程仍按原流程回收。
 冷恢复仅缩减客户端回放，不截断模型历史。MCP 每轮传入当前分配，保留既有稳定名称；
 恢复后尽力 list/remove 已撤回的 Rovai 项，整批共用短截止点，独立移除不互相长等。
 失败／未确认只诊断，连接可用就继续任务；当前分配和用户原生扩展保持，不增加后台重试或存储。
@@ -83,7 +85,7 @@ Goose 以完整官方 `goose acp` 加入独立产品身份，复用共享 ACP、
 保存不主动停止 Host；配置不兼容仍沿共享替换和精确恢复，不同 cwd 复用 bundled Rovai 入口。
 用量从原生累计通知建立派发前基线，逐消息只补 cache，不增加数据库轮询。
 原生权限模式、认证和配置仍由 Goose 解析。精确字段、Preview 与已接受差异见
-[Runtime Launch v95](../contracts/runtime-launch-and-verification-v95.md)。
+[Runtime Launch v96](../contracts/runtime-launch-and-verification-v96.md)。
 
 ## Kilo 官方 ACP
 
@@ -320,7 +322,7 @@ Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统�
 取消、协议/进程故障、配置变化、空闲回收和正常关闭保持。新进程沿原入口和 Session 接续，安装版本不改写运行版本。
 Pi 采用相同规则，不预置升级退役例外；真实原地升级证据按当前版本实施记录维护。
 Hermes 共享 Gateway 不在本功能管理范围。自动失败只记日志，手动等待同一读取仍收到具体错误。
-精确来源、顺序及失败边界见 [Runtime Launch v95](../contracts/runtime-launch-and-verification-v95.md)。
+精确来源、顺序及失败边界见 [Runtime Launch v96](../contracts/runtime-launch-and-verification-v96.md)。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。

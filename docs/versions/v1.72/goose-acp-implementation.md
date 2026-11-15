@@ -10,7 +10,7 @@ last_updated: 2026-11-15
 已确认 [R1](model-context-change-goose-acp.md) 后，在 `rovai/goose-acp` 独立 worktree 实施。
 研究起点为 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并
 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`，不修改主 checkout。
-当前合同为 [Runtime Launch v95](../../contracts/runtime-launch-and-verification-v95.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
+当前合同为 [Runtime Launch v96](../../contracts/runtime-launch-and-verification-v96.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
 
 ## 基线差异和共享入口
 
@@ -308,3 +308,41 @@ Core 计划关停后的精确冷恢复。受控两组验证原生审批、取消
 在 Debian 12 x64 用独立的 Rovai、Goose 原生配置与工作区完成 Sub2API 真实执行和受控 ACP 测试。
 Core 平台矩阵允许 Linux x64 Preview。发现、文件操作、公开发送、热续接和精确冷恢复见
 [Linux x64 验收](../../research/goose-runtime/README.md#linux-x64-目标机验收2026-11-15)。
+
+## 新建与参数可用性收尾（User sequence 146）
+
+基线为 `711e66a8f4bc6ccf9e616476ed9405ff89e4f04b`。正式新建与目标参数探测均在现有
+`session/new` 添加显式 `_meta.provider`，随后仍用原有模型／effort setter。
+未指定模型、Warm、精确冷恢复、MCP 尽力撤回及 Fleet 不改；未增加 Provider 回退或配置副本。
+
+已知临时 Session 仍精确删除一次，等待最多 500 ms 且不超过原探测期限。删除错误／未确认只输出诊断，
+保留成功查询；查询失败仍返回原错误，受管探测进程回收仍走原故障处理。
+这是原入口的可逆小改，删除原有“清理失败覆盖有效结果”的分支，没有新增后台清理、存储或运行文件。
+当前精确合同见 [v96](../../contracts/runtime-launch-and-verification-v96.md)。
+
+官方 Homebrew 1.59.0 的独立原生对照：没有默认 Provider 时创建失败；带显式 `openai` 后在同一连接
+创建成功、取得 `gpt-6.1-sol` 的 effort、完成普通模型响应并删除 Session。另测未知 Provider／缺凭据默认，
+原生可能返回缺少模型配置的未就绪 Session，因此没有把所有无效默认都表述为创建失败。
+
+实际 Core 故障组 20 个成功 Run，取消断言通过，58 次受控 Provider 请求。relay 只在验收进程中移除
+默认 Provider 环境，原生配置也无默认项；正式 Run 和参数 probe 的创建请求均实际携带 `openai`。
+删除报错／不回包的查询均返回 `refreshStatus=completed`，约 244／745 ms，排除了用旧缓存冒充成功。
+拒绝删除后留下 1 个原生 probe Session；不回包组原生删除已成功，relay 仅扣住响应。
+
+既有迟到 MCP 删除／重分配组仍为 21 个成功 Run、取消断言通过、60 次受控 Provider 请求，
+原生已接收删除、超时前后重分配、同 Session 后继真实工具调用全部保留。
+两个既有 Rust extended owners 覆盖查询本身失败、同时清理失败、无 ID、目录零 Session、
+同值／缺回显／错误 setter 及未指定模型不覆盖 Provider，未新增或删除 Rust 测试函数。
+
+结果见[本轮白名单](../../research/goose-runtime/session-availability-1.59.0-macos-arm64.json)。
+本轮未重新验真实账号、OAuth 或其他平台。同步远端 `9f152ee32` 的 Windows 资格／跨平台 smoke 和 `91cd7a25c` 的 Linux Preview，
+保留各自独立证据；本轮不新增平台资格。
+无响应 MCP 初始化仍是官方已知限制，未修改原生安装、扩展 timeout 或 Core 恢复期限。
+
+同步 Windows 改动后，组合开启两种故障验收入口再次通过：22 个成功 Run、取消断言通过、
+63 次受控 Provider 请求，显式 Provider、两种探测清理故障和迟到 MCP 重新分配同时覆盖。
+两个 extended owners 在同步后的代码中分别执行 1 项并通过。
+
+完整默认 workspace 通过：438 Core lib／31 CLI／4 host／11 web，保留原 1 ignored。
+该次全量在 Windows 集成后执行；后续 Linux 提交只涉及准入与文档，补测该共享平台 owner 共 5 项通过。
+首次平台补测发现兼容性登记内容与既有修订值不一致，按实际登记同步原常量后通过，原断言保留。

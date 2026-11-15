@@ -5552,13 +5552,16 @@ impl AcpRuntime {
                 (existing_session_id.to_string(), Some(method))
             }
             AcpSessionContinuation::New => {
-                let params = build_acp_new_session_params(
+                let mut params = build_acp_new_session_params(
                     self.host.adapter_kind,
                     &cwd,
                     &mcp_servers,
                     &additional_directories,
                     new_session_native_rules,
                 );
+                if self.host.adapter_kind == AdapterKind::GooseCli && model_source == "explicit" {
+                    params["_meta"]["provider"] = json!(crate::goose::model_route(model)?.0);
+                }
                 let mut result = self.host.rpc("session/new", params).await?;
                 if self.host.adapter_kind == AdapterKind::GooseCli {
                     result["_meta"]["rovaiGooseUsage"] = json!({"sessionId":result["sessionId"],"update":{"sessionUpdate":"usage_update","accumulatedInputTokens":0,"accumulatedOutputTokens":0,"accumulatedCost":0}});
@@ -15554,6 +15557,7 @@ for line in sys.stdin:
         // Optional extension management must not gate restored task execution.
         for (first_target, restore_first, withdrawal_case) in [
             ("native/model-a", false, "unavailable"),
+            ("native/model-a", false, "default_unavailable"),
             ("runtime_default", false, "unavailable"),
             ("runtime_default", true, "unavailable"),
             ("runtime_default", true, "empty"),
@@ -15585,6 +15589,9 @@ for line in sys.stdin:
     method, params = request['method'], request.get('params', {{}})
     result = {{}}
     if method == 'initialize': result = {{'protocolVersion':1,'agentCapabilities':{{}}}}
+    elif method == 'session/new' and case == 'default_unavailable' and params.get('_meta', {{}}).get('provider') != 'native':
+        print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32000,'message':'unrelated default Provider requires authentication'}})), flush=True)
+        continue
     elif method == '_goose/unstable/session/extensions/list':
         if case == 'dead': sys.exit(0)
         if case == 'list_hang': continue
@@ -15778,6 +15785,16 @@ for line in sys.stdin:
                     .map(|r| r["params"]["configId"].as_str().unwrap())
                     .collect();
                 assert_eq!(setters, expected, "Goose round {epoch}");
+                if let Some(new_session) = requests.iter().find(|r| r["method"] == "session/new") {
+                    assert_eq!(
+                        new_session["params"]["_meta"]["provider"],
+                        if first_target == "runtime_default" {
+                            Value::Null
+                        } else {
+                            json!("native")
+                        },
+                    );
+                }
                 let loads: Vec<_> = requests
                     .iter()
                     .filter(|r| r["method"] == "session/load")

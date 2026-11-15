@@ -23,7 +23,7 @@ const root=await realpath(await mkdtemp(join(tmpdir(),'rovai-goose-core-')))
 for(const part of ['home','project','core','config','data','cache','state','evidence','service','goose-root','bundled tools'])await mkdir(join(root,part))
 const project=join(root,'project'),data=join(root,'core'),binaries=join(root,'bundled tools')
 const relayControl=join(root,'relay-control'),relayEvents=join(root,'evidence','relay-events.jsonl')
-if(process.env.ROVAI_GOOSE_SOFT_MCP_FAULTS==='1'){
+if(process.env.ROVAI_GOOSE_SOFT_MCP_FAULTS==='1'||process.env.ROVAI_GOOSE_SESSION_FAULTS==='1'){
  const relay=join(root,windows?'controlled-goose.cmd':'controlled-goose')
  const relayScript=windows?join(root,'controlled-goose.mjs'):relay
  const header=`#!${process.execPath}\nconst officialExecutable=${JSON.stringify(executable)},relayControl=${JSON.stringify(relayControl)},relayEvents=${JSON.stringify(relayEvents)},nativeDatabase=${JSON.stringify(join(root,'goose-root','data','sessions','sessions.db'))};\n`
@@ -416,8 +416,36 @@ try{
  result.checks.cold={sameSession:true,newHost:true}
  assert.equal(nativeProbeRows(),0,'Probe Sessions must remain absent after exact cold recovery')
  result.checks.files={writeAndEdit:true,fullDiff:'unsupported-native-metadata'}
+ if(windows)await owner(cold)
+ if(process.env.ROVAI_GOOSE_SESSION_FAULTS==='1'){
+  await writeFile(relayControl,'provider')
+  const targeted=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',modelId:'openai/gpt-6.1-sol',forceRefresh:true})
+  assert.equal(targeted.refreshStatus,'completed',JSON.stringify(targeted))
+  assert(targeted.models.find(m=>m.id==='openai/gpt-6.1-sol').options.some(o=>o.key==='thinking_effort'&&o.values.some(v=>v.value==='high')))
+  await setMember('openai/gpt-6.1-sol',{thinking_effort:'high'})
+  const explicit=await createConfiguredCampAndSend(core.request.bind(core),{commandId:crypto.randomUUID(),workspace,memberAgentIds:['agent_2'],defaultLeadAgentId:'agent_2',address:{mode:'explicit',agentIds:['agent_2']},body:'CORE_GOOSE_EXPLICIT_PROVIDER',purpose:'Goose explicit Provider availability'})
+  threadId=(explicit.commandResult??explicit).payload.threadId
+  const explicitDone=await settle(explicit)
+  await owner(explicitDone)
+  const nativeStarts=(await readFile(relayEvents,'utf8')).trim().split('\n').map(JSON.parse).filter(e=>e.phase==='session_new'&&e.badDefault)
+  assert(nativeStarts.some(e=>e.probe&&e.provider==='openai'))
+  assert(nativeStarts.some(e=>!e.probe&&e.provider==='openai'))
+  result.checks.explicitProvider={badDefault:true,targetProbe:true,newRun:true}
+  const cleanup=[]
+  for(const mode of ['delete_error','delete_hang']){
+   await writeFile(relayControl,mode)
+   const started=performance.now()
+   const response=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',modelId:'openai/gpt-6.1-sol',forceRefresh:true})
+   assert.equal(response.refreshStatus,'completed',JSON.stringify(response))
+   assert(response.models.find(m=>m.id==='openai/gpt-6.1-sol').options.some(o=>o.key==='thinking_effort'&&o.values.some(v=>v.value==='high')))
+   const ms=performance.now()-started
+   assert(ms<5000,'Probe deletion must not consume the full query window')
+   cleanup.push({mode,ms,optionsRetained:true})
+  }
+  result.checks.probeCleanup={cases:cleanup,remainingNativeProbeSessions:nativeProbeRows()}
+  await writeFile(relayControl,'normal')
+ }
  if(windows){
-  await owner(cold)
   await core.close()
   const mcpStarts=(await readFile(starts,'utf8')).trim().split('\n').map(JSON.parse)
   const observedPids=new Set([...observedHostPids,...mcpStarts.map(start=>start.pid)])

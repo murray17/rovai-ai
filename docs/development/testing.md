@@ -241,7 +241,7 @@ Goose 新接入扩展已有模型目录、数值 parser、权限默认、Skills�
 后续精简扩展已有 `real_acp_session_model_selection_respects_native_adapter_boundaries` 和
 `acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals`：前者验证同选择零 setter、
 模型／Provider／effort／mode 真正改变仍应用及每轮完整 System；后者验证探测成功、选项失败时精确删除，
-没有已知会话 ID 不删除，原生删除拒绝不伪报成功。仍不新增 Rust 测试函数。
+没有已知会话 ID 不删除，原生删除拒绝不伪报已删除。查询与清理成功的关系由后续 v96 收窄。仍不新增 Rust 测试函数。
 官方原生 probe 验证三模式实际工具集合和客户端回放缩减后模型历史保留；Core smoke 验证探测零残留、
 Skills 管理的用户 `.agents/skills` 读取与原共享生命周期。UI 使用既有 `pnpm test:capability-workspace`。
 
@@ -285,6 +285,15 @@ relay、写锁和控制文件均仅存在于独立验收根，不进入生产；
 原生 probe 保留正常及迟到删除；`ROVAI_GOOSE_PROBE_SCOPE=mcp-startup` 可单验失联扩展冷恢复，
 配合 `ROVAI_GOOSE_EXPECT_BOUNDED_MCP_LOAD=1` 要求局部修补后的原生 load 和 prompt 均成功。
 官方未修版本的 silent 超时明确记为原生失败，不当成软撤回已经解决。
+
+Goose 新建与参数可用性按 [v96](../contracts/runtime-launch-and-verification-v96.md) 继续扩展同一
+live-model／health owners：创建时携带显式 Provider，默认不可用不妨碍显式选择；未指定时不覆盖原生。
+原删除错误输入改为“查询成功且保留选项、没有伪报删除成功”，原查询失败／无 ID／目录失败断言保留；
+增加不回包的短预算、查询与删除同时失败、目标查询零 inventory 和模型回显验证。
+Rust 测试函数新增、删除及停用均为零，最低命令为这两个 extended owners 和默认 workspace。
+官方原生 probe 的 `session-availability` scope 验无默认时的失败与 `_meta.provider` 对照；
+Core smoke 的 `ROVAI_GOOSE_SESSION_FAULTS=1` 使用既有验收 relay，验证实际新建与目标查询、删除错误／不回包。
+必须检查 `refreshStatus=completed`，不能仅凭已有缓存选项判定成功。原 MCP relay 场景继续保留。
 
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
