@@ -313,10 +313,13 @@ try{
  mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId,agentId:'agent_2',assigned:false});assert.equal(mutation.status,'ok');mcp=mutation.config
  const removalOffset=calls.length
  const mcpEmpty=await settle(await send('CORE_GOOSE_MCP_EMPTY'))
- assert(calls.slice(removalOffset).filter(c=>c.tools?.length).every(c=>!c.tools.some(t=>(t.function?.name??t.name).includes('rovai_assigned_'))),'Removed MCP tools must not survive additive native load')
+ const retainedMcpCalls=calls.slice(removalOffset).filter(c=>c.tools?.length)
+ assert(retainedMcpCalls.length>0)
+ assert(retainedMcpCalls.every(c=>c.tools.some(t=>(t.function?.name??t.name).includes('rovai_assigned_'))),'Goose may retain a previously assigned extension after native load')
+ assert(retainedMcpCalls.some(c=>JSON.stringify(c.messages??c.input).includes('GOOSE_MCP_B:CORE_GOOSE_MCP_EMPTY')),'A task must complete using the native retained extension without Rovai removal')
  assert.equal(mcpEmpty.started.nativeThreadId,mcpB.started.nativeThreadId)
  assert.notEqual(mcpEmpty.started.hostInstanceId,a.started.hostInstanceId,'Configuration reversal must not resurrect an obsolete Host')
- result.checks.mcp={differentCwd:true,argvVerbatim:true,saveKeepsHost:true,replacementSameSession:true,deletedToolAbsent:true}
+ result.checks.mcp={differentCwd:true,argvVerbatim:true,saveKeepsHost:true,replacementSameSession:true,unassignmentTaskSucceeded:true,nativeExtensionRetained:true}
  let metrics;await until(async()=>{metrics=await core.request('monitoring.execution',{campId:threadId,agentRunIds:[a.run.id,b.run.id,files.run.id]});await writeFile(join(root,'evidence','metrics.json'),JSON.stringify(metrics,null,2));return metrics.runs.every(r=>r.promptInputTotalTokens>0&&r.outputTokens>0)},'Numeric settlement deadline')
  result.checks.metrics=metrics
  assert(metrics.sessions.some(s=>s.usedTokens>=0),'Native context Gauge must be visible in shared monitoring')
@@ -337,6 +340,8 @@ try{
  const coldCalls=calls.slice(coldOffset).filter(c=>c.tools?.length)
  assert(coldCalls.length>0)
  assert(coldCalls.every(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'),'Without a product override, cold load must retain the native Session selection')
+ assert(coldCalls.every(c=>c.tools.some(t=>(t.function?.name??t.name).includes('rovai_assigned_'))),'Rovai must preserve native extension retention after a Core restart too')
+ result.checks.mcp.retainedAfterCoreRestart=true
  result.checks.runtimeDefaultPreservesNativeSelection.cold=true
  result.checks.cold={sameSession:true,newHost:true}
  assert.equal(nativeProbeRows(),0,'Probe Sessions must remain absent after exact cold recovery')

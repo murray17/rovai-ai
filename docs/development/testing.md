@@ -263,6 +263,13 @@ Goose 默认选择精简继续使用同一 live-model owner，验证 Warm 连续
 `cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`，
 再运行默认 workspace 和原 Goose Core smoke。
 
+Goose MCP 可用性精简按 [v94](../contracts/runtime-launch-and-verification-v94.md) 在同一 live-model owner
+增加精确恢复起始场景，可选 extensions list/remove 接口被夹具拒绝时仍完成 load 和完整 System，
+并断言正式路径没有发出这两个调用。原 Core smoke 将“撤回后工具消失”断言替换为原生扩展保留且任务成功，
+保留配置更新、原 Session、不同 cwd、取消和 Core 重启场景；原生 probe 继续拥有官方 remove 能力研究。
+生产主动撤回与对应产品合同同轮退出，Rust 测试函数新增、删除和停用均为零。
+最低命令仍为上述 live-model owner、默认 workspace 与 Goose Core smoke。
+
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

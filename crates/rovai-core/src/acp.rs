@@ -5724,31 +5724,6 @@ impl AcpRuntime {
                 .context("Goose native mode missing")?;
             self.set_config_option(&session_id, "mode", mode).await?;
         }
-        if self.host.adapter_kind == AdapterKind::GooseCli && restore_method.is_some() {
-            let extensions = self
-                .host
-                .rpc(
-                    "_goose/unstable/session/extensions/list",
-                    json!({"sessionId":session_id}),
-                )
-                .await?;
-            for extension in extensions["extensions"]
-                .as_array()
-                .context("Goose Session extensions missing")?
-            {
-                if let Some(key) = extension["extensionKey"].as_str().filter(|key| {
-                    key.starts_with(crate::goose::ASSIGNED_MCP_PREFIX)
-                        && !external_mcp_servers.contains_key(*key)
-                }) {
-                    self.host
-                        .rpc(
-                            "_goose/unstable/session/extensions/remove",
-                            json!({"sessionId":session_id,"extensionKey":key}),
-                        )
-                        .await?;
-                }
-            }
-        }
         if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
             let mode = self
                 .session_permissions
@@ -15463,9 +15438,13 @@ for line in sys.stdin:
             }
         }
 
-        // Reuse the live model owner to prove unchanged Goose selections cause
-        // no native setters, while a changed model/effort still reaches native.
-        for first_target in ["native/model-a", "runtime_default"] {
+        // Cover fresh and restored Goose Sessions in the same model owner.
+        // Optional extension management must not gate restored task execution.
+        for (first_target, restore_first) in [
+            ("native/model-a", false),
+            ("runtime_default", false),
+            ("runtime_default", true),
+        ] {
             let root = std::env::temp_dir()
                 .join(format!("rovai-goose-selection-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&root).unwrap();
@@ -15483,10 +15462,13 @@ for line in sys.stdin:
     method, params = request['method'], request.get('params', {{}})
     result = {{}}
     if method == 'initialize': result = {{'protocolVersion':1,'agentCapabilities':{{}}}}
+    elif method in ('_goose/unstable/session/extensions/list', '_goose/unstable/session/extensions/remove'):
+        print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32601,'message':'optional extension management unavailable'}})), flush=True)
+        continue
     elif method == 'session/set_config_option':
         options[params['configId']] = params['value']
         if params['configId'] == 'model': options['thinking_effort'] = 'off'
-    if method in ('session/new', 'session/set_config_option'):
+    if method in ('session/new', 'session/load', 'session/set_config_option'):
         result = {{'sessionId':'goose-selection','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
     if method == 'session/set_config_option' and params.get('value') == 'model-no-echo': result = {{}}
     print(json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)), flush=True)
@@ -15572,7 +15554,7 @@ for line in sys.stdin:
                 );
                 let session = runtime
                     .start_or_resume_session(
-                        (epoch > 1).then_some("goose-selection"),
+                        (epoch > 1 || restore_first).then_some("goose-selection"),
                         AcpSessionCapabilities {
                             can_resume: false,
                             can_load_history: true,
@@ -15605,6 +15587,15 @@ for line in sys.stdin:
                     .map(|r| r["params"]["configId"].as_str().unwrap())
                     .collect();
                 assert_eq!(setters, expected, "Goose round {epoch}");
+                let loads: Vec<_> = requests
+                    .iter()
+                    .filter(|r| r["method"] == "session/load")
+                    .collect();
+                assert_eq!(loads.len(), usize::from(restore_first && epoch == 1));
+                if let Some(load) = loads.first() {
+                    assert_eq!(load["params"]["sessionId"], "goose-selection");
+                    assert_eq!(load["params"]["_meta"]["replayTail"], 1);
+                }
                 if matches!(epoch, 11 | 12) {
                     let selected = runtime.session_result.read().await;
                     let selected = selected.as_ref().unwrap();
@@ -15621,11 +15612,13 @@ for line in sys.stdin:
                         Some("high")
                     );
                 }
-                assert!(
-                    !requests
-                        .iter()
-                        .any(|r| r["method"] == "_goose/unstable/session/extensions/list")
-                );
+                assert!(!requests.iter().any(|r| matches!(
+                    r["method"].as_str(),
+                    Some(
+                        "_goose/unstable/session/extensions/list"
+                            | "_goose/unstable/session/extensions/remove"
+                    )
+                )));
                 assert_eq!(
                     requests
                         .iter()

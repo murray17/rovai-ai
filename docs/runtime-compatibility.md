@@ -1,10 +1,18 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-13
+last_updated: 2026-11-15
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-15 Goose MCP 沿用原生会话行为
+
+按 User sequence 142，正式执行删除恢复后的 extensions list/remove，不以旧扩展撤回作为任务前置条件。
+每轮仍传入当前适用的 MCP；原生 Session 可保留旧分配，取消分配不再承诺原生工具立即消失。
+既有稳定名称、Host 兼容性替换、精确 Session、cwd 和共享生命周期保持；不新增后台清理或重试。
+当前精确边界见 [Runtime Launch v94](contracts/runtime-launch-and-verification-v94.md)，
+本次不提升既有 Preview 或跨平台资格；下方 2026-11-13 撤回结果是旧产品行为的历史证据。
 
 ## 2026-11-13 Goose 官方 ACP Preview
 
