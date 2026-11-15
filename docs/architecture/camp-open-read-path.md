@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-11-14
+last_updated: 2026-11-15
 ---
 
 # Thread Open Read Path 架构
@@ -253,8 +253,10 @@ Desktop 公开执行增量由 transport-scoped `RunLiveEvents` 按 Thread、Run�
 不进入 BusinessApp 的整页正文状态。只有挂载的执行预览、Run 卡或活动地图订阅对应运行；
 无关运行不积累界面正文。重复或过期增量保持快照引用，多个可见区域共享同一运行的订阅与 32ms 合批。
 最后一个订阅释放时清理该运行与计时器；预览仅保留有界尾部，不拥有完整事实。
-单行摘要使用已有 `live_tail` 投影，将叙述判断限制在末尾 4,000 字符；纯文字可直接证明有可见内容，
-带标记、实体或转义的输入仍经过既有 Markdown／HTML 清理规则。详情和持久记录不受摘要长度影响。
+单行摘要使用已有 `live_tail` 投影，将展示正文限制在末尾 4,000 字符。可见性先按截断前的可用叙述判定，
+再确认尾部本身有可见内容，避免切掉注释、引用定义或图片的起始语法后误显示原本隐藏的内容。
+纯文字使用快速判断；带标记、实体或转义的输入仍经过既有 Markdown／HTML 清理规则，相关成本不承诺仅取决于尾部长度。
+详情和持久记录不受摘要长度影响。
 
 收到终态时先提交已到达的本地批次，再结束该 epoch 的实时接纳；不等待完整记录补读才呈现终态。
 关闭重开、失效和重连仍由现有 ExecutionWindow page/changes 与内容读取恢复，Core 保持唯一持久真源。

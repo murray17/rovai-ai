@@ -197,6 +197,14 @@ describe('conversation Run presence', () => {
     expect(buildLiveExecutionProgress(events, 'a').items).toContainEqual(expect.objectContaining({ kind: 'narration', body }))
   })
 
+  it('does not turn a long hidden HTML comment into a visible activity preview', () => {
+    const body = '<!--' + 'hidden comment '.repeat(500) + '-->'
+    const events: LiveRuntimeEvent[] = [{ id: 'hidden-text', agentRunId: 'a', eventType: 'agent.text.delta',
+      payload: { itemId: 'text', delta: body }, createdAt: '2026-11-15T00:00:00Z' }]
+    expect(runPresencePreview(run('a'), events).kind).toBe('status')
+    expect(runPresencePreview(run('a'), events).text).not.toContain('hidden comment')
+  })
+
   it('shows current-epoch activity before a late ACK while keeping old evidence behind the connection fence', () => {
     const initializing = run('a', 'alice', { waitReason: 'runtime_initializing' })
     const accepted = { ...initializing, waitReason: null }
