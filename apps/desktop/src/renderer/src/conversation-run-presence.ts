@@ -172,7 +172,7 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
   // Older or unscoped evidence must not hide a genuine reconnection.
   const progress = buildLiveExecutionProgress(events.filter(event =>
     event.agentRunId === run.id && (!initializing || event.executionEpoch === run.executionEpoch)
-  ), run.id, { includePublicResults: false, textMode: 'live_tail' })
+  ), run.id, { includePublicResults: false })
   const latest = progress.items.findLast(item => item.kind === 'tool' || item.kind === 'narration' && item.body.trim())
   if (latest?.kind === 'tool') return {
     kind: 'command',

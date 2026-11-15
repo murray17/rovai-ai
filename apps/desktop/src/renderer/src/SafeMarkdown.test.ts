@@ -7,9 +7,9 @@ import { MessageMarkdown } from './MessageMarkdown'
 import { MessageExportContext } from './message-export-context'
 
 describe('SafeMarkdown default HTML sanitization', () => {
-  it('exports a large message synchronously with its final code and sanitized body', () => {
+  it.each([false, true])('renders a complete large message immediately, exporting=%s', (exporting) => {
     const body = '完整正文。'.repeat(3000) + '\n\n<pre><code>全文末尾</code></pre>\n<script>private</script>'
-    const html = renderToStaticMarkup(createElement(MessageExportContext.Provider, { value: true },
+    const html = renderToStaticMarkup(createElement(MessageExportContext.Provider, { value: exporting },
       createElement(MessageMarkdown, { children: body, theme: 'day' })))
     expect(html).toContain('<code>全文末尾</code>')
     expect(html).not.toContain('data-timeline-pending')
