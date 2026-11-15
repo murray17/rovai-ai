@@ -836,12 +836,14 @@ impl AgentRuntimeAdapterRegistry {
                     platform,
                     GOOSE_WINDOWS_X64_EVIDENCE_REVISION,
                 ),
-                HostPlatformKey::MacosArm64 => RuntimePlatformAdmission::preview(
-                    kind,
-                    platform,
-                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-                ),
-                HostPlatformKey::MacosX64 | HostPlatformKey::LinuxX64 => unqualified(),
+                HostPlatformKey::MacosArm64 | HostPlatformKey::LinuxX64 => {
+                    RuntimePlatformAdmission::preview(
+                        kind,
+                        platform,
+                        RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                    )
+                }
+                HostPlatformKey::MacosX64 => unqualified(),
             };
         }
         if kind == AdapterKind::KiloCli {

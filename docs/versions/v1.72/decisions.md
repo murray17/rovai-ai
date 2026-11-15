@@ -8,6 +8,18 @@ last_updated: 2026-11-15
 
 # v1.72 版本决定
 
+<a id="v1-72-d88"></a>
+## V1.72-D88：Goose Linux x64 实测后开放 Preview
+
+- 状态：accepted
+- 日期：2026-11-15
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#goose-linux-x64-preview)。
+
+维护者要求使用真实模型验证 Linux 并提交准入记录。Debian 12 x64 上的实际 Sub2API Run
+和受控 ACP 用例覆盖了普通执行、原生文件操作、会话恢复、审批与进程回收。
+Linux x64 按现有 Goose Preview 范围开放。完整平台资格仍需补齐计划关停场景的进程回收证据。当前证据见
+[目标机记录](../../research/goose-runtime/linux-x64-1.59.0-debian12.json)。
+
 <a id="v1-72-d87"></a>
 ## V1.72-D87：Goose Windows x64 目标机实测后通过资格
 

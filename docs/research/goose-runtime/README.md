@@ -279,3 +279,18 @@ delegate 映射已有子代理卡片；只展示原生给出的任务、child Se
 Goose 在无响应／断连／迟到审批时的 Core 清理、不同 cwd helper、远程 MCP、完整 Skills 选择投递、
 Renderer 的 7.5 KiB 和 Diff、Intel/Linux/Windows 资格。不能用本轮原生夹具宣称 First-Class。
 实施验收按 [接入清单](../../development/runtime-integration-checklist.md)的 14 轴和 9 Golden Flows 继续。
+
+## Linux x64 目标机验收（2026-11-15）
+
+Debian 12 x64（glibc 2.36）运行 [Goose 官方 1.59.0 GNU 归档](https://github.com/aaif-goose/goose/releases/tag/v1.59.0)。
+Rovai 来自 Ubuntu 22.04 上构建的原生 Server 包，核对了归档、manifest、bundled CLI 与 Skills。
+原分支在目标机返回 `runtime_platform_not_qualified`，候选构建仅开放 Linux x64 Preview。
+
+独立 Goose 的 `config.yaml`、`custom_providers` 与 `secrets.yaml` 使用其原生配置格式，Sub2API 走本机回环，
+模型为 `gpt-6`。官方 CLI 本身收到真实回复。随后在隔离 Rovai Thread 实测三个 Run：新增 Unicode／空格路径文件，
+Warm 续接只修改第一行，关闭再启 Core 后，用同一个原生 Session 读回初次消息的记忆标记。三个 Run 各有一条内置 CLI
+公开回复，两个文件操作均有共享事件和实际内容核对。完整红绿 Diff 仍受原生前像缺失限制。
+
+同一候选构建用官方 Goose 跑受控 ACP 用例，21 个 Run 成功，1 个按用例取消。该用例覆盖权限审批、取消后复用、
+正常与超时的 MCP 撤回、Steer、自动压缩、用量与原生 Session 精确恢复。真实 Provider 的完整故障矩阵、
+计划关停的进程回收、HTTP MCP、多 Binding 压力和其他发行版仍待验证。[脱敏验收记录](linux-x64-1.59.0-debian12.json)

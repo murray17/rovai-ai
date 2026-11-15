@@ -71,7 +71,7 @@ Core 与内置 CLI 同目录，未触碰日常 App、SQLite 或用户全局配�
 | Built-in CLI | 正式 CLI、public send、同进程新 lease、旧 lease 拒绝 | 每个 CLI 操作的 Goose 专属真实模型验证 |
 | Usage/Cache/Cost | 累计每轮基线、cache 不双记、独立 Gauge；原生估算费用如实标注 | 真实账单；压缩 cache 缺失保持 partial，不能补零 |
 | Retry/Queue/Cancel | 插话提前 ACK，成功 Warm；普通取消同 PID/Session、新 Run/lease，旧租约拒绝 | Goose 专属全部断连/迟到/无回包注入矩阵 |
-| Ready/Version/Platform | 静态安装与 Provider 认证分离，现有版本读取；macOS arm64 Preview，[Windows x64 有独立资格证据](../../research/goose-runtime/README.md#windows-x64-qualification) | Intel、Linux NotQualified；完整 First-Class Golden Flow 尚缺证据 |
+| Ready/Version/Platform | 静态安装与 Provider 认证分离，现有版本读取；macOS arm64 与 Linux x64 Preview，[Windows x64 有独立资格证据](../../research/goose-runtime/README.md#windows-x64-qualification) | macOS x64 NotQualified；First-Class 矩阵待补齐 |
 
 初次交付时，九项 Golden Flow 尚未全部取得完整真实账号和故障证据，当时只开放 macOS arm64 Preview。
 并发、完整 Safety/Output、真实账单和故障回收不能由一次普通成功或其他 Runtime 的测试推导。
@@ -302,3 +302,9 @@ writer 尚未写入时超时连接仍可用，以及实际进程退出不能假�
 Core 计划关停后的精确冷恢复。受控两组验证原生审批、取消与命名管道旧租约拒绝、正常撤回和迟到删除。
 原生无响应 stdio 在 1 秒扩展配置下仍超出 4 秒的 probe 期限。
 [独立证据](../../research/goose-runtime/README.md#windows-x64-qualification)绑定 [Windows x64 准入](../../contracts/runtime-platform-admission-v2.md#goose-windows-x64-qualification)。
+
+## Linux x64 准入（2026-11-15）
+
+在 Debian 12 x64 用独立的 Rovai、Goose 原生配置与工作区完成 Sub2API 真实执行和受控 ACP 测试。
+Core 平台矩阵允许 Linux x64 Preview。发现、文件操作、公开发送、热续接和精确冷恢复见
+[Linux x64 验收](../../research/goose-runtime/README.md#linux-x64-目标机验收2026-11-15)。

@@ -69,6 +69,8 @@ Goose 原生接入的当前边界：[Runtime Launch v95](../contracts/runtime-la
 [Runtime Catalog](../architecture/runtime-catalog-boundaries.md#goose-官方-acp)、
 [Platform Admission](../contracts/runtime-platform-admission-v2.md#goose-macos-arm64-preview)；
 采用原生扩展与接受 Preview 差异的理由见 [V1.72-D86](../versions/v1.72/decisions.md#v1-72-d86)。
+Linux x64 的 [Preview 范围](../contracts/runtime-platform-admission-v2.md#goose-linux-x64-preview)
+和目标机实测取舍见 [V1.72-D88](../versions/v1.72/decisions.md#v1-72-d88)。
 Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#goose-windows-x64-qualification)与
 [V1.72-D87](../versions/v1.72/decisions.md#v1-72-d87)。
 

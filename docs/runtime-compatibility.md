@@ -6,6 +6,14 @@ last_updated: 2026-11-15
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-15 Goose Linux x64 Preview
+
+Debian 12 x64 上使用官方 Goose 1.59.0 和 Sub2API 的 `gpt-6`。Rovai 能发现并配置 Goose，
+真实 Thread 完成文件新增与修改、公开发送、Warm 续接和 Core 重启后的原生 Session 恢复。
+受控用例补验审批、取消后恢复、Steer、MCP 与输出处理。准入范围见
+[Platform Admission](contracts/runtime-platform-admission-v2.md#goose-linux-x64-preview)，
+详细结果见 [Linux x64 验收](research/goose-runtime/README.md#linux-x64-目标机验收2026-11-15)。
+
 ## 2026-11-15 Goose 旧 MCP 尽力撤回
 
 按 User sequence 144 恢复精确 load 后的尽力撤回：稳定归属名称减去当前分配，list 与全部 remove 共用短绝对截止点。
