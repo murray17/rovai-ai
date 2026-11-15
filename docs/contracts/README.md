@@ -179,7 +179,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v94（当前）](runtime-launch-and-verification-v94.md) | Goose 沿用原生 MCP 扩展保留行为，移除恢复后的 list/remove 前置步骤 |
+| [Runtime Launch and Verification v95（当前）](runtime-launch-and-verification-v95.md) | Goose 旧 MCP 尽力撤回，整批短预算，失败不单独阻断任务 |
+| [Runtime Launch and Verification v94（历史）](runtime-launch-and-verification-v94.md) | Goose 沿用原生 MCP 扩展保留行为，移除恢复后的 list/remove 前置步骤 |
 | [Runtime Launch and Verification v93（历史）](runtime-launch-and-verification-v93.md) | Goose 未显式指定模型时保留原生 Session 选择，不逐轮刷新全局默认 |
 | [Runtime Launch and Verification v92（历史）](runtime-launch-and-verification-v92.md) | Goose 无 Session 目录、目标参数独立查询与默认刷新边界 |
 | [Runtime Launch and Verification v91（历史）](runtime-launch-and-verification-v91.md) | Goose 配置复用、探测会话清理、客户端回放和 Skills 管理边界 |

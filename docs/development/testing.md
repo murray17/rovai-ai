@@ -270,6 +270,22 @@ Goose MCP 可用性精简按 [v94](../contracts/runtime-launch-and-verification-
 生产主动撤回与对应产品合同同轮退出，Rust 测试函数新增、删除和停用均为零。
 最低命令仍为上述 live-model owner、默认 workspace 与 Goose Core smoke。
 
+Goose 尽力撤回按 [v95](../contracts/runtime-launch-and-verification-v95.md) 再次扩展同一 owner，
+保留原 unavailable 输入并改验恢复时 1 次可选 list、出错后同 Session 仍能发送普通 prompt。
+新增表输入覆盖空列表、8 项正常／单项拒绝／单项不回包／全部不回包、list 不回包和真实退出；
+核对当前及用户原生项、所有候选获得机会、pending 清空、整批上限及 writer 尚未开始时超时不损坏连接。
+现有 2 秒历史回放隔离不属于撤回预算，测量不得把它误报成逐项等待；不改变该公共时间规则。
+Rust 测试函数仍无新增或删除。
+
+原官方 Core smoke 验正常撤回；`ROVAI_GOOSE_SOFT_MCP_FAULTS=1` 追加一个仅验收用 stdio relay，
+通过夹具数据库未提交写锁，让官方 Goose 已收到的 remove 在本地超时后才实际完成。
+用户重新分配在迟到删除前提交，后继仍经共享 Host 替换、同 native Session 和真实 MCP 调用验证。
+relay、写锁和控制文件均仅存在于独立验收根，不进入生产；不是本地丢弃响应的假删除。
+
+原生 probe 保留正常及迟到删除；`ROVAI_GOOSE_PROBE_SCOPE=mcp-startup` 可单验失联扩展冷恢复，
+配合 `ROVAI_GOOSE_EXPECT_BOUNDED_MCP_LOAD=1` 要求局部修补后的原生 load 和 prompt 均成功。
+官方未修版本的 silent 超时明确记为原生失败，不当成软撤回已经解决。
+
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

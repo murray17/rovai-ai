@@ -6,6 +6,14 @@ last_updated: 2026-11-15
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-15 Goose 旧 MCP 尽力撤回
+
+按 User sequence 144 恢复精确 load 后的尽力撤回：稳定归属名称减去当前分配，list 与全部 remove 共用短绝对截止点。
+失败／超时只诊断，连接可用即继续；不因可选管理失败退役 Host 或重建 Session，不增加后台重试或存储。
+正常撤回、当前和用户原生项保留、超时后重分配分别验收；本地超时不取消已经发送的原生操作。
+原生 1.59.0 的无响应 stdio MCP 可阻塞 load，是独立的原生初始化等待问题，不由软性撤回冒充解决。
+当前边界见 [Runtime Launch v95](contracts/runtime-launch-and-verification-v95.md)；平台和 Preview 资格不提升。
+
 ## 2026-11-15 Goose MCP 沿用原生会话行为
 
 按 User sequence 142，正式执行删除恢复后的 extensions list/remove，不以旧扩展撤回作为任务前置条件。

@@ -171,9 +171,9 @@ async function open(){
    timings.push({method:p.method,ms:performance.now()-p.start})
    m.error?p.reject(Object.assign(new Error(m.error.message),{rpcError:m.error})):p.resolve(m.result)
  })
- const host={child,pid:child.pid,get stderr(){return stderr},rpc(method,params={}){
+ const host={child,pid:child.pid,get stderr(){return stderr},get pendingCount(){return pending.size},rpc(method,params={},timeoutMs=30000){
    return new Promise((resolve,reject)=>{
-     const id=++nextId,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Timeout '+method+' '+stderr.slice(-1500)))},30000)
+     const id=++nextId,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Timeout '+method+' '+stderr.slice(-1500)))},timeoutMs)
      pending.set(id,{resolve,reject,timer,method,start:performance.now()})
      child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n')
    })
@@ -191,10 +191,42 @@ async function open(){
  host.initialization=initialization
  return host
 }
+async function checkOfflineMcpLoads(){
+ const switchFile=join(fixture,'extension-state'),switchMcp=join(fixture,'switch-mcp.mjs'),pidFile=join(fixture,'extension-pid')
+ await writeFile(switchFile,'ready')
+ await writeFile(switchMcp,"import {readFileSync,writeFileSync} from 'node:fs'; writeFileSync("+JSON.stringify(pidFile)+",String(process.pid)); const mode=readFileSync("+JSON.stringify(switchFile)+",'utf8'); if(mode==='exit')process.exit(7); if(mode==='silent'){process.stdin.resume();setInterval(()=>{},1000)}else await import("+JSON.stringify(new URL('../crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs',import.meta.url).href)+");")
+ const original=await open()
+ const session=await original.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[{name:'rovai_parity_switch',command:process.execPath,args:[switchMcp],env:[],_meta:{timeout:1}}]})
+ await original.close()
+ checks.offlineMcpLoads=[]
+ for(const mode of ['exit','silent']){
+  await writeFile(switchFile,mode)
+  const host=await open(),started=performance.now()
+  try{
+   const loaded=await host.rpc('session/load',{sessionId:session.sessionId,cwd:join(fixture,'workspace'),mcpServers:[],_meta:{replayTail:1}},4000)
+   const ms=performance.now()-started
+   if(mode==='silent'){
+    await sleep(50)
+    const pid=Number(await readFile(pidFile,'utf8'))
+    assert.throws(()=>process.kill(pid,0),e=>e.code==='ESRCH','Timed-out extension must not remain as an unmanaged subprocess')
+   }
+   await setBootstrap(host,session.sessionId,'GOOSE_OFFLINE_MCP_'+mode)
+   const completion=await prompt(host,session.sessionId,'GOOSE_SESSION_ISOLATION')
+   assert.equal(completion.stopReason,'end_turn')
+   checks.offlineMcpLoads.push({mode,ms,loadCompleted:true,promptCompleted:true,unresponsiveChildReaped:mode==='silent'?true:undefined,extensionResults:loaded._meta?.extensionResults??null})
+  }catch(error){
+   if(mode!=='silent'||!error.message.startsWith('Timeout session/load')||process.env.ROVAI_GOOSE_EXPECT_BOUNDED_MCP_LOAD==='1')throw error
+   checks.offlineMcpLoads.push({mode,ms:performance.now()-started,configuredExtensionTimeoutSec:1,loadCompleted:false,promptCompleted:false,knownNativeIssue:'silent MCP initialization outlives configured timeout'})
+  }finally{await host.close()}
+ }
+}
 try{
  const version=execFileSync(executable,['--version'],{encoding:'utf8',env:environment,cwd:join(fixture,'workspace'),timeout:10000}).trim()
  assert.equal(version,'1.59.0','Recheck official protocol/source before changing this pinned research fixture')
  checks.native={version,platform:process.platform+'-'+process.arch,command:['goose','acp'],provider:'synthetic-loopback',qualification:false}
+ if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='mcp-startup'){
+  await checkOfflineMcpLoads()
+ }else{
  const host=await open()
  assert.equal(host.initialization.agentInfo.version,version)
  console.log(JSON.stringify({initialize:host.initialization}))
@@ -408,16 +440,39 @@ try{
  await restored.rpc('_goose/unstable/session/extensions/remove',{sessionId:mcpSession.sessionId,extensionKey:'rovai_parity_b'})
  const removed=await restored.rpc('_goose/unstable/tools/list',{sessionId:mcpSession.sessionId})
  assert(!removed.tools.some(t=>t.name.includes('parity_')))
+ // A local response deadline does not cancel a native database mutation.
+ const lateMcp={...mcp('rovai_parity_late','GOOSE_MCP_LATE'),env:[]}
+ await restored.rpc('_goose/unstable/session/extensions/add',{sessionId:mcpSession.sessionId,extension:{type:'mcp',server:lateMcp}})
+ const nativeDb=new DatabaseSync(join(fixture,'goose-root','data','sessions','sessions.db'))
+ try{
+  nativeDb.exec('BEGIN IMMEDIATE')
+  await assert.rejects(restored.rpc('_goose/unstable/session/extensions/remove',{sessionId:mcpSession.sessionId,extensionKey:lateMcp.name},50),/Timeout/)
+  assert.equal(restored.pendingCount,0)
+  nativeDb.exec('ROLLBACK')
+  await sleep(100)
+  const afterLate=await restored.rpc('_goose/unstable/session/extensions/list',{sessionId:mcpSession.sessionId})
+  assert(!afterLate.extensions.some(e=>e.extensionKey===lateMcp.name),'Native removal can complete after the client has stopped waiting')
+  await restored.rpc('session/load',{sessionId:mcpSession.sessionId,cwd:join(fixture,'workspace'),mcpServers:[lateMcp],_meta:{replayTail:1}})
+  await sleep(100)
+  const reassigned=await restored.rpc('_goose/unstable/tools/list',{sessionId:mcpSession.sessionId})
+  assert(reassigned.tools.some(t=>t.name.includes('parity_late')))
+  checks.lateRemoval={clientWaiterReleased:true,nativeEffectAfterTimeout:true,reassignmentAfterCompletionRetained:true}
+  await restored.rpc('_goose/unstable/session/extensions/remove',{sessionId:mcpSession.sessionId,extensionKey:lateMcp.name})
+ }finally{if(nativeDb.isTransaction)nativeDb.exec('ROLLBACK');nativeDb.close()}
+ await restored.close()
+ await checkOfflineMcpLoads()
+ const afterMcp=await open()
  start=requests.length
- await prompt(restored,mcpSession.sessionId,'GOOSE_SESSION_ISOLATION')
+ await afterMcp.rpc('session/load',{sessionId:mcpSession.sessionId,cwd:join(fixture,'workspace'),mcpServers:[],_meta:{replayTail:1}})
+ await prompt(afterMcp,mcpSession.sessionId,'GOOSE_SESSION_ISOLATION')
  assert(requests.slice(start).filter(r=>r.tools?.length).every(r=>!JSON.stringify(r.messages).includes('ROVAI_GOOSE_BOOTSTRAP_C')))
- await restored.rpc('session/load',{sessionId:session.sessionId,cwd:join(fixture,'workspace'),mcpServers:[]})
+ await afterMcp.rpc('session/load',{sessionId:session.sessionId,cwd:join(fixture,'workspace'),mcpServers:[]})
  start=requests.length
- await setBootstrap(restored,session.sessionId,'ROVAI_GOOSE_BOOTSTRAP_D')
- await prompt(restored,session.sessionId,'GOOSE_COLD_AFTER_COMPACTION')
+ await setBootstrap(afterMcp,session.sessionId,'ROVAI_GOOSE_BOOTSTRAP_D')
+ await prompt(afterMcp,session.sessionId,'GOOSE_COLD_AFTER_COMPACTION')
  checkBootstrap(start,'ROVAI_GOOSE_BOOTSTRAP_D','ROVAI_GOOSE_BOOTSTRAP_C')
  checks.coldAfterCompaction={sameSession:session.sessionId,bootstrapPreserved:true}
- await restored.close()
+ await afterMcp.close()
  const finalHost=await open()
  await finalHost.rpc('session/load',{sessionId:mcpSession.sessionId,cwd:join(fixture,'workspace'),mcpServers:[]})
  const removedAfterCold=await finalHost.rpc('_goose/unstable/tools/list',{sessionId:mcpSession.sessionId})
@@ -444,9 +499,10 @@ try{
  const afterElicitation=await prompt(finalHost,elicitationSession.sessionId,'GOOSE_AFTER_ELICITATION')
  assert.equal(afterElicitation.stopReason,'end_turn')
  checks.elicitation={withoutClientCapability:'native_cancel',noSyntheticAnswers:true,next:afterElicitation.stopReason}
+ await writeFile(join(fixture,'evidence','session.json'),JSON.stringify(session,null,2))
+ }
  await writeFile(join(fixture,'evidence','checks.json'),JSON.stringify(checks,null,2))
  console.log(JSON.stringify({checks,requestCount:requests.length,timings}))
- await writeFile(join(fixture,'evidence','session.json'),JSON.stringify(session,null,2))
 }catch(error){
  await writeFile(join(fixture,'evidence','partial-checks.json'),JSON.stringify({checks,error:error.message},null,2))
  console.error(JSON.stringify({error:error.message,stack:error.stack?.split('\n').slice(0,4),rpcError:error.rpcError,stderr:hosts.map(h=>h.stderr.slice(-4000))}))

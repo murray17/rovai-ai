@@ -4517,10 +4517,23 @@ impl AcpHost {
         &self,
         method: &str,
         params: Value,
-        deadline: Duration,
+        budget: Duration,
+    ) -> Result<Value> {
+        self.rpc_until(method, params, tokio::time::Instant::now() + budget)
+            .await
+    }
+
+    async fn rpc_until(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: tokio::time::Instant,
     ) -> Result<Value> {
         if !self.is_alive() {
             bail!("ACP Host is not alive");
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("ACP request timed out: {method}");
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
@@ -4532,19 +4545,34 @@ impl AcpHost {
                 steer_target: None,
             },
         );
-        if let Err(error) = self
-            .send(json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params}))
-            .await
-        {
-            self.pending.lock().await.remove(&id);
-            return Err(error);
-        }
-        let response = match timeout(deadline, receiver).await {
-            Ok(response) => {
-                response.with_context(|| format!("ACP response channel closed: {method}"))?
+        let mut sent = false;
+        let mut write_started = false;
+        let response = tokio::time::timeout_at(deadline, async {
+            if let Err(error) = self
+                .send_tracking_write(
+                    json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params}),
+                    &mut write_started,
+                )
+                .await
+            {
+                self.alive.store(false, Ordering::Release);
+                return Err(error);
             }
+            sent = true;
+            receiver
+                .await
+                .with_context(|| format!("ACP response channel closed: {method}"))
+        })
+        .await;
+        self.pending.lock().await.remove(&id);
+        let response = match response {
+            Ok(response) => response?,
             Err(_) => {
-                self.pending.lock().await.remove(&id);
+                // An incomplete frame cannot be followed by another request.
+                // A response timeout, in contrast, leaves the transport usable.
+                if write_started && !sent {
+                    self.alive.store(false, Ordering::Release);
+                }
                 bail!("ACP request timed out: {method}");
             }
         };
@@ -4642,7 +4670,12 @@ impl AcpHost {
     }
 
     async fn send(&self, message: Value) -> Result<()> {
+        self.send_tracking_write(message, &mut false).await
+    }
+
+    async fn send_tracking_write(&self, message: Value, write_started: &mut bool) -> Result<()> {
         let mut stdin = self.stdin.lock().await;
+        *write_started = true;
         stdin
             .write_all(serde_json::to_string(&message)?.as_bytes())
             .await?;
@@ -5723,6 +5756,14 @@ impl AcpRuntime {
                 .as_deref()
                 .context("Goose native mode missing")?;
             self.set_config_option(&session_id, "mode", mode).await?;
+            if restore_method.is_some() {
+                self.withdraw_goose_mcp(
+                    &session_id,
+                    external_mcp_servers,
+                    tokio::time::Instant::now() + crate::goose::MCP_WITHDRAWAL_BUDGET,
+                )
+                .await?;
+            }
         }
         if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
             let mode = self
@@ -5813,6 +5854,77 @@ impl AcpRuntime {
         self.finish_session_attachment(&session_id, restore_method)
             .await?;
         Ok(session_id)
+    }
+
+    async fn withdraw_goose_mcp(
+        &self,
+        session_id: &str,
+        current: &BTreeMap<String, McpServerDefinition>,
+        deadline: tokio::time::Instant,
+    ) -> Result<()> {
+        let list = self
+            .host
+            .rpc_until(
+                "_goose/unstable/session/extensions/list",
+                json!({"sessionId":session_id}),
+                deadline,
+            )
+            .await;
+        let mut removals = tokio::task::JoinSet::new();
+        match list {
+            Ok(list) => {
+                if let Some(extensions) = list["extensions"].as_array() {
+                    let keys: BTreeSet<_> = extensions
+                        .iter()
+                        .filter_map(|item| item["extensionKey"].as_str())
+                        .filter(|key| {
+                            key.starts_with(crate::goose::ASSIGNED_MCP_PREFIX)
+                                && !current.contains_key(*key)
+                        })
+                        .map(str::to_owned)
+                        .collect();
+                    for key in keys {
+                        let host = self.host.clone();
+                        let session_id = session_id.to_owned();
+                        removals.spawn(async move {
+                            let result = host
+                                .rpc_until(
+                                    "_goose/unstable/session/extensions/remove",
+                                    json!({"sessionId":session_id,"extensionKey":key}),
+                                    deadline,
+                                )
+                                .await;
+                            (key, result)
+                        });
+                    }
+                } else {
+                    self.host.send_host_diagnostic(
+                        "Goose MCP withdrawal skipped: extension list missing".into(),
+                    );
+                }
+            }
+            Err(error) => self
+                .host
+                .send_host_diagnostic(format!("Goose MCP withdrawal list unconfirmed: {error:#}")),
+        }
+        while let Some(result) = removals.join_next().await {
+            match result {
+                Ok((key, Ok(_))) => self
+                    .host
+                    .send_host_diagnostic(format!("Goose MCP extension withdrawn: {key}")),
+                Ok((key, Err(error))) => self.host.send_host_diagnostic(format!(
+                    "Goose MCP withdrawal unconfirmed for {key}: {error:#}"
+                )),
+                Err(error) => self
+                    .host
+                    .send_host_diagnostic(format!("Goose MCP withdrawal unconfirmed: {error}")),
+            }
+        }
+        ensure!(
+            self.host.is_alive(),
+            "ACP Host disconnected during Goose MCP withdrawal"
+        );
+        Ok(())
     }
 
     async fn finish_session_attachment(
@@ -15440,10 +15552,17 @@ for line in sys.stdin:
 
         // Cover fresh and restored Goose Sessions in the same model owner.
         // Optional extension management must not gate restored task execution.
-        for (first_target, restore_first) in [
-            ("native/model-a", false),
-            ("runtime_default", false),
-            ("runtime_default", true),
+        for (first_target, restore_first, withdrawal_case) in [
+            ("native/model-a", false, "unavailable"),
+            ("runtime_default", false, "unavailable"),
+            ("runtime_default", true, "unavailable"),
+            ("runtime_default", true, "empty"),
+            ("runtime_default", true, "normal"),
+            ("runtime_default", true, "partial"),
+            ("runtime_default", true, "list_hang"),
+            ("runtime_default", true, "remove_hang"),
+            ("runtime_default", true, "all_hang"),
+            ("runtime_default", true, "dead"),
         ] {
             let root = std::env::temp_dir()
                 .join(format!("rovai-goose-selection-{}", uuid::Uuid::new_v4()));
@@ -15455,6 +15574,10 @@ for line in sys.stdin:
                 &format!(
                     r#"#!/usr/bin/python3
 import json, sys
+case = {withdrawal_case:?}
+extensions = ['rovai_assigned_current', 'user_native']
+if case in ('normal', 'partial', 'remove_hang', 'all_hang'):
+    extensions += ['rovai_assigned_old_' + str(i) for i in range(8)]
 options = dict(provider='native', model='model-a', thinking_effort='high', mode='auto')
 for line in sys.stdin:
     request = json.loads(line)
@@ -15462,18 +15585,32 @@ for line in sys.stdin:
     method, params = request['method'], request.get('params', {{}})
     result = {{}}
     if method == 'initialize': result = {{'protocolVersion':1,'agentCapabilities':{{}}}}
-    elif method in ('_goose/unstable/session/extensions/list', '_goose/unstable/session/extensions/remove'):
-        print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32601,'message':'optional extension management unavailable'}})), flush=True)
-        continue
+    elif method == '_goose/unstable/session/extensions/list':
+        if case == 'dead': sys.exit(0)
+        if case == 'list_hang': continue
+        if case == 'unavailable':
+            print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32601,'message':'optional extension management unavailable'}})), flush=True)
+            continue
+        result = {{'extensions':[{{'extensionKey':k,'status':'failed'}} for k in extensions]}}
+    elif method == '_goose/unstable/session/extensions/remove':
+        key = params['extensionKey']
+        if case == 'all_hang' or (case == 'remove_hang' and key.endswith('_0')): continue
+        if case == 'partial' and key.endswith('_0'):
+            print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32603,'message':'one native removal refused'}})), flush=True)
+            continue
+        extensions.remove(key)
     elif method == 'session/set_config_option':
         options[params['configId']] = params['value']
         if params['configId'] == 'model': options['thinking_effort'] = 'off'
     if method in ('session/new', 'session/load', 'session/set_config_option'):
         result = {{'sessionId':'goose-selection','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
     if method == 'session/set_config_option' and params.get('value') == 'model-no-echo': result = {{}}
+    if method == 'session/prompt': result = {{'stopReason':'end_turn'}}
+    if method == 'audit/barrier': result = {{'remaining':extensions}}
     print(json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)), flush=True)
 "#,
-                    log = log.to_string_lossy()
+                    log = log.to_string_lossy(),
+                    withdrawal_case = withdrawal_case,
                 ),
             );
             let mut frozen = frozen_trae_runtime(&executable);
@@ -15482,7 +15619,7 @@ for line in sys.stdin:
             frozen.permissions.values = json!({"mode":"auto"});
             let workspace =
                 AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
-            let (incoming, _receiver) = mpsc::unbounded_channel();
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
             let host = AcpHost::spawn(
                 &root,
                 &workspace,
@@ -15534,6 +15671,9 @@ for line in sys.stdin:
                     vec!["provider", "model", "thinking_effort"],
                 ),
             ] {
+                if withdrawal_case != "unavailable" && epoch > 1 {
+                    break;
+                }
                 let before = std::fs::read_to_string(&log).unwrap().lines().count();
                 let runtime = AcpRuntime::from_test_host(
                     AcpRuntimeOwner {
@@ -15552,6 +15692,11 @@ for line in sys.stdin:
                     },
                     None,
                 );
+                let current_mcp = BTreeMap::from([(
+                    "rovai_assigned_current".to_string(),
+                    serde_json::from_value(json!({"command":"/usr/bin/true","args":[]})).unwrap(),
+                )]);
+                let started = Instant::now();
                 let session = runtime
                     .start_or_resume_session(
                         (epoch > 1 || restore_first).then_some("goose-selection"),
@@ -15566,15 +15711,61 @@ for line in sys.stdin:
                         },
                         target,
                         &json!({"thinking_effort":"high"}),
-                        &BTreeMap::new(),
+                        &current_mcp,
                     )
-                    .await
-                    .unwrap();
+                    .await;
+                if withdrawal_case == "dead" {
+                    assert!(
+                        session.is_err(),
+                        "real disconnection cannot look successful"
+                    );
+                    assert!(!host.is_alive());
+                    host.shutdown().await;
+                    break;
+                }
+                let session = session.unwrap();
+                if withdrawal_case == "empty" {
+                    // Waiting for an occupied writer has not damaged the wire.
+                    let writer = host.stdin.lock().await;
+                    runtime
+                        .withdraw_goose_mcp(
+                            &session,
+                            &current_mcp,
+                            tokio::time::Instant::now() + Duration::from_millis(100),
+                        )
+                        .await
+                        .unwrap();
+                    assert!(host.is_alive());
+                    assert!(host.pending.lock().await.is_empty());
+                    drop(writer);
+                }
+                if matches!(withdrawal_case, "list_hang" | "remove_hang" | "all_hang") {
+                    // Exclude the unchanged shared history replay grace.
+                    let elapsed = started
+                        .elapsed()
+                        .saturating_sub(ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE);
+                    assert!(elapsed >= crate::goose::MCP_WITHDRAWAL_BUDGET);
+                    assert!(
+                        elapsed < Duration::from_secs(2),
+                        "one batch budget, not one per extension"
+                    );
+                }
+                assert!(
+                    host.pending.lock().await.is_empty(),
+                    "no optional RPC waiters leaked"
+                );
                 runtime
                     .bind_managed_bootstrap(&session, "COMPLETE_SYSTEM")
                     .await
                     .unwrap();
-                host.rpc("audit/barrier", json!({})).await.unwrap();
+                if epoch == 1 {
+                    runtime
+                        .start_prompt("goose-business", "TASK")
+                        .await
+                        .unwrap();
+                    receive_through_prompt_completion(&mut receiver).await;
+                }
+                let native = host.rpc("audit/barrier", json!({})).await.unwrap();
                 let requests: Vec<Value> = std::fs::read_to_string(&log)
                     .unwrap()
                     .lines()
@@ -15612,13 +15803,42 @@ for line in sys.stdin:
                         Some("high")
                     );
                 }
-                assert!(!requests.iter().any(|r| matches!(
-                    r["method"].as_str(),
-                    Some(
-                        "_goose/unstable/session/extensions/list"
-                            | "_goose/unstable/session/extensions/remove"
-                    )
-                )));
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| r["method"] == "_goose/unstable/session/extensions/list")
+                        .count(),
+                    usize::from(restore_first && epoch == 1)
+                );
+                let removed: Vec<_> = requests
+                    .iter()
+                    .filter(|r| r["method"] == "_goose/unstable/session/extensions/remove")
+                    .collect();
+                assert!(removed.iter().all(|r| {
+                    r["params"]["extensionKey"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("rovai_assigned_old_")
+                }));
+                if matches!(
+                    withdrawal_case,
+                    "normal" | "partial" | "remove_hang" | "all_hang"
+                ) {
+                    assert_eq!(removed.len(), 8, "every independent removal gets a chance");
+                    let remaining = native["remaining"].as_array().unwrap();
+                    assert!(remaining.contains(&json!("rovai_assigned_current")));
+                    assert!(remaining.contains(&json!("user_native")));
+                    assert_eq!(
+                        remaining.len(),
+                        match withdrawal_case {
+                            "normal" => 2,
+                            "all_hang" => 10,
+                            _ => 3,
+                        }
+                    );
+                } else {
+                    assert!(removed.is_empty());
+                }
                 assert_eq!(
                     requests
                         .iter()

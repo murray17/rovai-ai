@@ -18,10 +18,14 @@ Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收
 目标参数独立发布、MiniMax/Goose 的共享 UI 行为与真实 Sub2API/gpt-6 high 执行。
 User sequence 138 取消逐轮原生默认刷新后，[会话选择精简证据](native-selection-1.59.0-macos-arm64.json)
 另行验证官方 Core 的 Warm／精确冷恢复保留 Session 模型和 effort；不改变上述历史验收结果。
-User sequence 142 进一步取消正式执行中的 MCP 主动撤回，当前边界见
+User sequence 142 进一步取消正式执行中的 MCP 主动撤回，当轮边界见
 [Runtime Launch v94](../../contracts/runtime-launch-and-verification-v94.md)。下方 remove 探针保留为官方能力研究，
 不再作为 Rovai 任务准备的必需步骤。
 对应[原生 MCP 保留验收](mcp-native-retention-1.59.0-macos-arm64.json)分别记录受控接口拒绝与官方 Core 执行。
+User sequence 144 随后恢复尽力撤回，当前边界为 [Runtime Launch v95](../../contracts/runtime-launch-and-verification-v95.md)：
+整批短预算，失败只诊断，连接可用仍继续。正常撤回、原生迟到删除和重新分配、旧扩展冷恢复分开验收。
+原生无响应 stdio 握手的[局部补丁](upstream/README.md)独立验证，不在 Rovai 增加加载管理层。
+对应[尽力撤回白名单](mcp-best-effort-1.59.0-macos-arm64.json)包含正常官方 Core、迟到删除／重分配和原生补丁三组结果。
 
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。

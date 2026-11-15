@@ -10,7 +10,7 @@ last_updated: 2026-11-15
 已确认 [R1](model-context-change-goose-acp.md) 后，在 `rovai/goose-acp` 独立 worktree 实施。
 研究起点为 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并
 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`，不修改主 checkout。
-当前合同为 [Runtime Launch v94](../../contracts/runtime-launch-and-verification-v94.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
+当前合同为 [Runtime Launch v95](../../contracts/runtime-launch-and-verification-v95.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
 
 ## 基线差异和共享入口
 
@@ -23,7 +23,7 @@ last_updated: 2026-11-15
 | 取消 | 共享 2s interrupt / 2.5s flush / 3s 非 Windows 总期限；确认收尾后走原 Reusable，异常沿原回收 |
 | 模型 | 原生 Provider inventory；Provider/Model 不透明路由；`thinking_effort` 按需查询，沿既有表单及历史展示 |
 | 权限 | 原生 auto/approve/smart_approve 与原始审批选项；默认 auto，经原生 mode 选项生效，不建第二权限求值器 |
-| MCP | 保存不清理；每轮传入当前分配并沿用稳定名称；load 采用原生追加／同名更新，不主动撤回旧扩展 |
+| MCP | 保存不清理；当前分配与稳定名称沿用；精确恢复后短预算内尽力撤回旧项，失败只诊断，不单独阻断任务 |
 | cwd | 不同 cwd 的 stdio 使用已有 bundled Rovai launcher；Node 仅为测试 MCP 明确指定的程序 |
 | 工具 | 原生稳定 toolName 映射共享文件、命令及子代理展示；write/edit 无完整前像时不生成 Diff |
 | 用量 | 累计 input/output、累计估算费用与 Context Gauge 分开；逐消息仅补 cache，不读 Goose SQLite |
@@ -64,7 +64,7 @@ Core 与内置 CLI 同目录，未触碰日常 App、SQLite 或用户全局配�
 | Bootstrap/Context | 原生持久 key 与 Provider System 中的完整 B 一致，普通 user 无重复 B | 图片与大附件 Core/App 实测 |
 | Compaction | 原生及 Core 自动阈值、真实 overflow 错误后摘要/重试；后继 B 保留 | 不承诺父 B 进入摘要或子代理；未另建压缩插件/观察器 |
 | Skills | 原生 load_skill 实读项目 .goose/skills；原生探针覆盖更新/删除 | 完整 Toolbox Assignment 和各平台技能目录资格；仍 DocumentationOnly |
-| MCP | A→B→取消分配、原 Session 保持、原生旧扩展可保留、任务继续；不同 cwd、原始 argv、保存不杀 Host | 远程 HTTP 和多 Binding 并发 Core 验收 |
+| MCP | A→B→取消分配、正常撤回、保留当前和用户原生项、超时后重分配仍可用；不同 cwd、原始 argv、保存不杀 Host | 远程 HTTP 和多 Binding 并发 Core 验收 |
 | Tool/Action/Output | write/edit 实际结果、shell 输出去重、7.5 KiB 永久预算、delegate provenance | 原生 write/edit 无完整前像，完整 Diff Unsupported |
 | Narration/Final | 正式内置 send 发布，普通 Run 不产生第二份 final | 所有模型、provider 的叙述形状 |
 | Permission/Workspace | Core 原生 approve 审批 allow_once；原生探针 allow/reject | 完整 Core deny/read-only 矩阵 |
@@ -265,3 +265,33 @@ User sequence 142 明确以可用性为先，撤销“恢复后必须先撤回�
 
 修正后该 owner 与完整默认 workspace 通过：438 Core lib／31 CLI／4 host／11 web，保留原 1 ignored。
 本轮官方 Core 共 19 成功／1 取消、56 次受控 Provider 请求；格式、脚本语法和文档三项门禁通过。
+
+## 恢复尽力撤回，整批有界（2026-11-15）
+
+按 User sequence 144，以 b68105a40af1e40a74ffb2165d9968101bbe00dd 为基线，当前合同更新为
+[v95](../../contracts/runtime-launch-and-verification-v95.md)。只在精确恢复后处理稳定前缀中不再分配的项，
+当前分配及用户原生项保持。list 失败跳过，单项失败诊断后继续；不以可选管理操作的结果阻断任务。
+
+整批使用同一个 500 ms 绝对截止点，独立 remove 使用现有 RPC 并行发出并在方法内收口，不建并发池或后台服务。
+官方原生普通 list/remove 观察为亚毫秒级；既有协议 owner 验证 8 项不回包仍只等待一个预算、pending 清空、
+writer 尚未写入时超时连接仍可用，以及实际进程退出不能假装成功。原模型／effort／mode、完整 System 和新建／Warm 断言保留。
+共享 RPC 新增绝对期限入口，写入与回执共用期限；部分帧未完成等真实通信错误仍沿原故障处理。
+
+普通官方 Core 验正常撤回后旧项消失，当前仍分配的 MCP、用户原生 MCP、同 Session 与普通任务均保持。
+仅验收用 relay 用未提交数据库写锁阻塞官方 Goose 的实际 remove：本地超时后先重新分配同一项，
+原生随后确实删除；后继沿现有配置变化的 Host 回收／精确恢复路径，重新分配的工具仍可实际调用。
+这不是丢弃迟到回包的假取消，也没有为超时增加私有退役条件。relay 和写锁只在夹具中存在。
+
+单独原生验证：MCP 直接退出时 load/prompt 成功；完全不回握手时，即使扩展配置 1 秒超时，
+官方 1.59.0 仍超过客户端期限。首次 30 秒失败记录保留，后续短探针明确记录该原生失败，未伪装为软撤回已解决。
+[原生局部补丁](../../research/goose-runtime/upstream/README.md)将 stdio 握手与失败 stderr 等待纳入既有扩展期限。
+独立本地源码构建已验证 1 秒配置下 load/prompt 成功、无响应子进程退出；用户 Homebrew 和原生配置不修改。
+原生默认 300 秒仍可能晚于 Core 的 30 秒恢复期限；此默认场景不宣称通过。
+
+仍使用同一 Rust owner，未新增、删除或停用测试函数。初次时间断言包含了原有 2 秒历史回放 grace，
+修正为排除该既有开销后验证批次预算，没有修改公共回放规则。Preview、平台资格及未重跑的真实账号范围不变。
+
+最终受控验收：官方 Core 正常组 19 成功／1 取消，55 次 Provider 请求；迟到删除组 21 成功／1 取消，60 次请求。
+局部补丁组配置 1 秒扩展期限，无响应扩展约 1.25 秒完成失败隔离，普通任务成功，子进程已回收。
+完整默认 workspace 438 Core lib／31 CLI／4 host／11 web 通过，保留原 1 ignored；既有扩展 owner、格式、脚本和文档门禁通过。
+可复核结果见[本轮白名单](../../research/goose-runtime/mcp-best-effort-1.59.0-macos-arm64.json)。

@@ -6,7 +6,7 @@ import {createServer} from 'node:http'
 import {createConnection} from 'node:net'
 import {DatabaseSync} from 'node:sqlite'
 import {createInterface} from 'node:readline'
-import {copyFile,mkdtemp,mkdir,realpath,readFile,readdir,writeFile} from 'node:fs/promises'
+import {chmod,copyFile,mkdtemp,mkdir,realpath,readFile,readdir,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,resolve,isAbsolute} from 'node:path'
 import {configureProductRuntime} from './configure-product-runtime.mjs'
@@ -14,19 +14,27 @@ import {createConfiguredCampAndSend,composerDocumentForAddress} from './lib/crea
 import {coreDataDirectoryArguments,removeEphemeralRuntimeCampFilesRoot} from './lib/runtime-camp-files-root.mjs'
 
 assert(process.platform!=='win32','This fixture uses POSIX shell commands; it does not qualify Windows')
-const executable=process.env.ROVAI_GOOSE_BIN
+let executable=process.env.ROVAI_GOOSE_BIN
 assert(executable&&isAbsolute(executable),'ROVAI_GOOSE_BIN must be an absolute official executable')
 const repo=resolve(import.meta.dirname,'..')
 const root=await realpath(await mkdtemp(join(tmpdir(),'rovai-goose-core-')))
 for(const part of ['home','project','core','config','data','cache','state','evidence','service','goose-root','bundled tools'])await mkdir(join(root,part))
 const project=join(root,'project'),data=join(root,'core'),binaries=join(root,'bundled tools')
+const relayControl=join(root,'relay-control'),relayEvents=join(root,'evidence','relay-events.jsonl')
+if(process.env.ROVAI_GOOSE_SOFT_MCP_FAULTS==='1'){
+ const relay=join(root,'controlled-goose')
+ const header=`#!${process.execPath}\nconst officialExecutable=${JSON.stringify(executable)},relayControl=${JSON.stringify(relayControl)},relayEvents=${JSON.stringify(relayEvents)},nativeDatabase=${JSON.stringify(join(root,'goose-root','data','sessions','sessions.db'))};\n`
+ await writeFile(relayControl,'normal');await writeFile(relayEvents,'')
+ await writeFile(relay,header+await readFile(new URL('./lib/goose-acp-relay.mjs',import.meta.url),'utf8'));await chmod(relay,0o700)
+ executable=relay
+}
 for(const name of ['rovai-core','rovai'])await copyFile(join(repo,'target/debug',name),join(binaries,name))
 execFileSync('git',['init','--quiet',project])
 const userSkill=join(root,'home','.agents','skills','rovai-goose-user-probe')
 await mkdir(userSkill,{recursive:true})
 await writeFile(join(userSkill,'SKILL.md'),'---\nname: rovai-goose-user-probe\ndescription: Goose Skills management acceptance\n---\nGOOSE_USER_AGENTS_SKILL\n')
 const calls=[],events=[],result={root,platform:process.platform+'-'+process.arch,provider:'synthetic-loopback',checks:{}}
-let gate,approvalDecision='allow_once',compactInjected=false,overflowInjected=false,newLease
+let gate,approvalDecision='allow_once',compactInjected=false,overflowInjected=false,newLease,mcpTargetName
 function hold(marker){let enter,release;const entered=new Promise(r=>enter=r),wait=new Promise(r=>release=r);return gate={marker,enter,entered,release,wait,held:false}}
 const provider=createServer(async(req,res)=>{
  try{
@@ -51,7 +59,7 @@ const provider=createServer(async(req,res)=>{
   else if(marker==='CORE_GOOSE_FILES'&&!used.includes('edit'))call={name:'edit',args:{path:'测试 空格.txt',before:'第一行',after:'第一行（编辑）'}}
   else if(marker==='CORE_GOOSE_APPROVAL'&&!used.includes('write'))call={name:'write',args:{path:'approved.txt',content:'GOOSE_NATIVE_APPROVAL\n'}}
   else if(marker==='CORE_GOOSE_LARGE'&&!used.includes('shell'))call={name:'shell',args:{command:"printf 'GOOSE_LONG_START'; printf '%09000d' 0; printf 'GOOSE_LONG_DISCARDED'"}}
-  else if(marker?.startsWith('CORE_GOOSE_MCP_')&&!used.some(n=>n.endsWith('__echo'))&&names.some(n=>n.endsWith('__echo')))call={name:names.find(n=>n.endsWith('__echo')),args:{text:marker}}
+  else if(marker?.startsWith('CORE_GOOSE_MCP_')&&!used.some(n=>n.endsWith('__echo'))&&names.some(n=>n.includes(mcpTargetName)&&n.endsWith('__echo')))call={name:names.find(n=>n.includes(mcpTargetName)&&n.endsWith('__echo')),args:{text:marker}}
   else if(marker==='CORE_GOOSE_DELEGATE'&&!used.includes('delegate'))call={name:'delegate',args:{instructions:'GOOSE_CHILD_REPORT',max_turns:2}}
   else if(marker==='CORE_GOOSE_SKILL'&&!used.includes('load_skill'))call={name:'load_skill',args:{name:'rovai-goose-core-smoke'}}
   else if(names.length&&!child&&!cliUsed)call={name:'shell',args:{command:'rovai send --public-only --body GOOSE_CORE_PUBLIC; printf GOOSE_STDOUT; printf GOOSE_STDERR >&2'}}
@@ -84,6 +92,7 @@ await new Promise(r=>provider.listen(0,'127.0.0.1',r))
 const environment={PATH:'/usr/bin:/bin:/usr/sbin:/sbin',HOME:join(root,'home'),XDG_CONFIG_HOME:join(root,'config'),XDG_DATA_HOME:join(root,'data'),XDG_CACHE_HOME:join(root,'cache'),XDG_STATE_HOME:join(root,'state'),GOOSE_PATH_ROOT:join(root,'goose-root'),GOOSE_DISABLE_KEYRING:'1',GOOSE_PROVIDER:'openai',GOOSE_MODEL:'gpt-4o-mini',GOOSE_MODE:'auto',GOOSE_AUTO_COMPACT_THRESHOLD:'0.5',OPENAI_API_KEY:'fixture-key',OPENAI_HOST:'http://127.0.0.1:'+provider.address().port,OPENAI_BASE_PATH:'v1/chat/completions',TERM:'dumb',NO_COLOR:'1',TMPDIR:root,ROVAI_GOOSE_BIN:executable}
 const customProviders=join(root,'goose-root','config','custom_providers')
 await mkdir(customProviders,{recursive:true})
+await writeFile(join(root,'goose-root','config','config.yaml'),JSON.stringify({extensions:{user_native_fixture:{enabled:true,type:'stdio',name:'user_native_fixture',cmd:process.execPath,args:[join(repo,'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')],envs:{},timeout:1}}}))
 await writeFile(join(customProviders,'custom_secondary.json'),JSON.stringify({name:'custom_secondary',engine:'openai',display_name:'Secondary fixture',api_key_env:'OPENAI_API_KEY',base_url:'http://127.0.0.1:'+provider.address().port,models:[{name:'gpt-5',context_limit:128000}],dynamic_models:false,supports_streaming:true,requires_auth:true}))
 assert.throws(()=>execFileSync('node',['--version'],{env:environment,stdio:'pipe'}),e=>e.code==='ENOENT');result.checks.noImplicitNode=true
 let core, index=0
@@ -301,25 +310,54 @@ try{
  let mcp=await core.request('mcp.config.get')
  let mutation=await core.request('mcp.servers.create',{expectedConfigDigest:mcp.configDigest,definitionJson:definition('GOOSE_MCP_A')});assert.equal(mutation.status,'ok',JSON.stringify(mutation));mcp=mutation.config
  const serverId=mcp.servers.find(s=>s.name==='goose_review').serverId
+ mcpTargetName='rovai_assigned_'+serverId
  mutation=await core.request('mcp.servers.setEnabled',{expectedConfigDigest:mcp.configDigest,serverId,enabled:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
  mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId,agentId:'agent_2',assigned:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
+ mutation=await core.request('mcp.servers.create',{expectedConfigDigest:mcp.configDigest,definitionJson:JSON.stringify({mcpServers:{goose_keep:{command:process.execPath,args:[mcpServer],cwd:join(root,'service'),env:{ROVAI_MCP_SMOKE_SOURCE:'GOOSE_KEEP'}}}})});assert.equal(mutation.status,'ok');mcp=mutation.config
+ const keepId=mcp.servers.find(s=>s.name==='goose_keep').serverId,keepName='rovai_assigned_'+keepId
+ mutation=await core.request('mcp.servers.setEnabled',{expectedConfigDigest:mcp.configDigest,serverId:keepId,enabled:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
+ mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId:keepId,agentId:'agent_2',assigned:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
  const mcpA=await settle(await send('CORE_GOOSE_MCP_A'))
- const startup=JSON.parse((await readFile(starts,'utf8')).trim().split('\n').at(-1));assert.equal(startup.cwd,join(root,'service'));assert.deepEqual(startup.argv,literalArgs)
+ const startup=(await readFile(starts,'utf8')).trim().split('\n').map(JSON.parse).find(s=>s.source==='GOOSE_MCP_A');assert.equal(startup.cwd,join(root,'service'));assert.deepEqual(startup.argv,literalArgs)
  const beforeSave=await owner(mcpA)
  mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition('GOOSE_MCP_B')});assert.equal(mutation.status,'ok');mcp=mutation.config
  process.kill(beforeSave.pid,0) // Saving cannot kill the idle managed Host.
  const mcpB=await settle(await send('CORE_GOOSE_MCP_B'));assert.equal(mcpA.started.nativeThreadId,mcpB.started.nativeThreadId)
  assert.throws(()=>process.kill(beforeSave.pid,0),e=>e.code==='ESRCH','An incompatible Binding Host must be reaped, not parked for later reuse')
+ if(process.env.ROVAI_GOOSE_SOFT_MCP_FAULTS==='1'){
+  await writeFile(relayControl,'delay')
+  mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId,agentId:'agent_2',assigned:false});assert.equal(mutation.status,'ok');mcp=mutation.config
+  const delayed=await send('CORE_GOOSE_MCP_DELAYED')
+  let forwarded
+  const relayRecords=async()=>(await readFile(relayEvents,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse)
+  await until(async()=>{forwarded=(await relayRecords()).find(e=>e.phase==='remove_forwarded');return forwarded},'Optional removal must reach official Goose')
+  await until(()=>events.some(e=>e.method==='runtime.host.log'&&e.params?.text?.includes('withdrawal unconfirmed for '+mcpTargetName)&&e.params.text.includes('timed out')),'The real optional RPC deadline must expire')
+  assert(!(await relayRecords()).some(e=>e.phase==='lock_released'))
+  mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId,agentId:'agent_2',assigned:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
+  assert(!(await relayRecords()).some(e=>e.phase==='remove_result'),'Reassignment must precede the original native removal effect')
+  process.kill(forwarded.pid,0);process.kill(forwarded.nativePid,0)
+  const nextOffset=calls.length,reassigned=await send('CORE_GOOSE_MCP_REASSIGNED')
+  const delayedDone=await settle(delayed),reassignedDone=await settle(reassigned)
+  const nativeResult=(await relayRecords()).find(e=>e.phase==='remove_result')
+  assert(nativeResult?.succeeded,'The old native deletion must actually finish after the local timeout')
+  assert.equal(delayedDone.started.nativeThreadId,reassignedDone.started.nativeThreadId)
+  assert.notEqual(delayedDone.started.hostInstanceId,reassignedDone.started.hostInstanceId,'The existing configuration change must replace the previous Host')
+  assert.throws(()=>process.kill(forwarded.nativePid,0),e=>e.code==='ESRCH')
+  assert(calls.slice(nextOffset).some(c=>JSON.stringify(c.messages??c.input).includes('GOOSE_MCP_B:CORE_GOOSE_MCP_REASSIGNED')),'The reassigned native MCP must be usable after the old deletion completed')
+  result.checks.lateRemoval={nativeAlreadyReceived:true,localBudgetExpired:true,reassignedBeforeNativeEffect:true,oldHostKeptUntilRunFinished:true,originalNativeDeleteCompleted:true,successorSameSession:true,configurationReplacedOldHost:true,reassignedToolCallable:true}
+  await writeFile(relayControl,'normal')
+ }
  mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId,agentId:'agent_2',assigned:false});assert.equal(mutation.status,'ok');mcp=mutation.config
  const removalOffset=calls.length
  const mcpEmpty=await settle(await send('CORE_GOOSE_MCP_EMPTY'))
- const retainedMcpCalls=calls.slice(removalOffset).filter(c=>c.tools?.length)
- assert(retainedMcpCalls.length>0)
- assert(retainedMcpCalls.every(c=>c.tools.some(t=>(t.function?.name??t.name).includes('rovai_assigned_'))),'Goose may retain a previously assigned extension after native load')
- assert(retainedMcpCalls.some(c=>JSON.stringify(c.messages??c.input).includes('GOOSE_MCP_B:CORE_GOOSE_MCP_EMPTY')),'A task must complete using the native retained extension without Rovai removal')
+ const withdrawalCalls=calls.slice(removalOffset).filter(c=>c.tools?.length)
+ assert(withdrawalCalls.length>0)
+ assert(withdrawalCalls.every(c=>!c.tools.some(t=>(t.function?.name??t.name).includes(mcpTargetName))),'Normally withdrawn MCP must disappear')
+ assert(withdrawalCalls.every(c=>c.tools.some(t=>(t.function?.name??t.name).includes(keepName))),'Current assigned MCP must remain')
+ assert(withdrawalCalls.every(c=>c.tools.some(t=>(t.function?.name??t.name).includes('user_native_fixture'))),'User native MCP must remain')
  assert.equal(mcpEmpty.started.nativeThreadId,mcpB.started.nativeThreadId)
  assert.notEqual(mcpEmpty.started.hostInstanceId,a.started.hostInstanceId,'Configuration reversal must not resurrect an obsolete Host')
- result.checks.mcp={differentCwd:true,argvVerbatim:true,saveKeepsHost:true,replacementSameSession:true,unassignmentTaskSucceeded:true,nativeExtensionRetained:true}
+ result.checks.mcp={differentCwd:true,argvVerbatim:true,saveKeepsHost:true,replacementSameSession:true,unassignmentTaskSucceeded:true,withdrawnToolAbsent:true,currentAssignedRetained:true,userNativeRetained:true}
  let metrics;await until(async()=>{metrics=await core.request('monitoring.execution',{campId:threadId,agentRunIds:[a.run.id,b.run.id,files.run.id]});await writeFile(join(root,'evidence','metrics.json'),JSON.stringify(metrics,null,2));return metrics.runs.every(r=>r.promptInputTotalTokens>0&&r.outputTokens>0)},'Numeric settlement deadline')
  result.checks.metrics=metrics
  assert(metrics.sessions.some(s=>s.usedTokens>=0),'Native context Gauge must be visible in shared monitoring')
@@ -340,8 +378,8 @@ try{
  const coldCalls=calls.slice(coldOffset).filter(c=>c.tools?.length)
  assert(coldCalls.length>0)
  assert(coldCalls.every(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'),'Without a product override, cold load must retain the native Session selection')
- assert(coldCalls.every(c=>c.tools.some(t=>(t.function?.name??t.name).includes('rovai_assigned_'))),'Rovai must preserve native extension retention after a Core restart too')
- result.checks.mcp.retainedAfterCoreRestart=true
+ assert(coldCalls.every(c=>!c.tools.some(t=>(t.function?.name??t.name).includes(mcpTargetName))),'Withdrawal must persist after a Core restart')
+ result.checks.mcp.withdrawalPersistsAfterCoreRestart=true
  result.checks.runtimeDefaultPreservesNativeSelection.cold=true
  result.checks.cold={sameSession:true,newHost:true}
  assert.equal(nativeProbeRows(),0,'Probe Sessions must remain absent after exact cold recovery')

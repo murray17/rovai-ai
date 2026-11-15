@@ -8,6 +8,7 @@ use crate::agent_profile::{
 
 pub(crate) const BOOTSTRAP_KEY: &str = "rovai-session-bootstrap";
 pub(crate) const ASSIGNED_MCP_PREFIX: &str = "rovai_assigned_";
+pub(crate) const MCP_WITHDRAWAL_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
 pub(crate) fn usage_snapshot(previous: Option<&Value>, incoming: &Value) -> Value {
     let mut snapshot = incoming.clone();
