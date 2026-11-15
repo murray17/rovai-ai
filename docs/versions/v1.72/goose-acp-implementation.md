@@ -10,7 +10,7 @@ last_updated: 2026-11-14
 已确认 [R1](model-context-change-goose-acp.md) 后，在 `rovai/goose-acp` 独立 worktree 实施。
 研究起点为 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并
 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`，不修改主 checkout。
-当前合同为 [Runtime Launch v92](../../contracts/runtime-launch-and-verification-v92.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
+当前合同为 [Runtime Launch v93](../../contracts/runtime-launch-and-verification-v93.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
 
 ## 基线差异和共享入口
 
@@ -167,7 +167,7 @@ User sequence 128 明确要求配置本机官方 Goose 并测试真实模型。�
 ## 目录与参数探测收尾（2026-11-14）
 
 User sequence 130 以 21a086f10447fd9d2ea466597e2fb410f7f15e9e 为审查基线。
-当前合同更新为 [Runtime Launch v92](../../contracts/runtime-launch-and-verification-v92.md)，
+该轮合同更新为 [Runtime Launch v92](../../contracts/runtime-launch-and-verification-v92.md)，
 沿现有 worktree 实施，没有修改 Bootstrap、Dynamic Context、原生会话历史或 R1 输入版本。
 
 | 范围 | 本次结果 |
@@ -206,3 +206,32 @@ write/edit 与 bundled CLI 发送成功，不据此宣称所有档位、Provider
 补齐真实参数观察应有的状态后通过，保留失败记录和拒绝断言。
 默认 workspace 为 438 Core lib、31 CLI、4 host、11 web 通过，保留原 1 ignored；
 原生参数组件 41 项、类型检查、共享 Electron picker（含成员/创建入口）及文档三项门禁通过。
+
+## 取消逐轮原生默认刷新（2026-11-14）
+
+User sequence 138 明确没有“重新采用当前原生默认”的产品要求。
+以 c92219f94ef325a3d84872b79b5d9aac7130cc31 为基线，删除复用／恢复时的 `provider=goose` 分支，
+同时删除通用 setter 中为这个别名保留的强制设置例外。当前边界由 [v93](../../contracts/runtime-launch-and-verification-v93.md) 替代 v92 的默认刷新章节。
+
+`runtime_default` 不再发送 Provider/model/effort 设置：新 Session 由 Goose 初始化，Warm 和冷恢复保留
+原生 Session 当前选择。从显式模型改为不覆盖，也不主动重置原生模型；后续显式选其他模型仍正常生效。
+没有增加来源标记、状态缓存、配置扫描或文件监听。System、权限 mode、模型目录、MCP 和取消路径保持。
+
+同一 live-model owner 保留首次显式／原生默认、同值跳过、改选、跨 Provider、mode、缺回显及完整 System 场景。
+将第 11、12 轮改为无模型 setter 并确认原生状态不变；第 13 轮仍须应用显式选择。
+旧代码在第 11 轮多发 provider 设置而失败，删除分支后通过；Rust 测试函数没有新增、删除或停用。
+原 Core smoke 的“清除覆盖必须恢复全局默认”断言随用户撤销的产品行为退出，改验 Warm／冷恢复保留原生选择。
+
+MCP 恢复撤回仍仅在精确 load 后列出 Session 扩展，再对已不分配的 `rovai_assigned_` 项调用原生 remove。
+这个步骤没有 Rovai 文件创建、额外映射存储或新进程；扩展连接和原生 Session 存储由 Goose 自己更新。
+用户原生扩展不处理，兼容 Warm 不扫描；load 可能已短暂启动旧扩展，remove 在本轮任务投递前执行。
+
+官方 Goose 1.59.0 的隔离 Core 验收完成 19 成功／1 取消、55 次受控 Provider 请求。
+全局默认仍为 gpt-4o-mini，会话显式选 gpt-6.1-sol/high 后取消覆盖，Warm 保持相同 Host/Session 和该选择；
+随后关闭 Core，精确 load 也保持该模型与 high。原 MCP 撤回、审批、文件、自动压缩、Steer、取消后同 PID/新 lease
+等断言继续通过；证据见[会话选择精简白名单](../../research/goose-runtime/native-selection-1.59.0-macos-arm64.json)。
+本轮没有重复真实账号、打包 App 或跨平台验收，不提升原 Preview 和资格。
+
+定向 live-model owner、默认 workspace（438 Core lib／31 CLI／4 host／11 web 通过，原 1 ignored）、
+脚本语法与格式检查通过；文档三项门禁以本轮基线执行通过。原生模型配置保留用受控 loopback Provider 验证，
+不把它记为新一轮真实 Sub2API 验收。

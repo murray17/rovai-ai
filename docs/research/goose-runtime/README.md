@@ -16,6 +16,8 @@ Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收
 已验证普通回复、write/edit 和 Core CLI 发送；平台资格没有提升，当前事实以更新的白名单和实施记录为准。
 后续[目录与参数精简证据](catalog-options-1.59.0-macos-arm64.json)验证无 Session 的完整目录、
 目标参数独立发布、MiniMax/Goose 的共享 UI 行为与真实 Sub2API/gpt-6 high 执行。
+User sequence 138 取消逐轮原生默认刷新后，[会话选择精简证据](native-selection-1.59.0-macos-arm64.json)
+另行验证官方 Core 的 Warm／精确冷恢复保留 Session 模型和 effort；不改变上述历史验收结果。
 
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。

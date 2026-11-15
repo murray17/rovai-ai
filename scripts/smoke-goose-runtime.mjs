@@ -240,15 +240,19 @@ try{
  assert.equal(nativeProbeRows(),0,'Target-model option probes must delete their native Sessions too')
  await setMember('openai/gpt-6.1-sol',{thinking_effort:'high'})
  const reasoningOffset=calls.length
- await settle(await send('CORE_GOOSE_REASONING'))
+ const reasoning=await settle(await send('CORE_GOOSE_REASONING'))
  assert(calls.slice(reasoningOffset).some(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'))
  result.checks.effort={targetModel:'openai/gpt-6.1-sol',nativeKey:'thinking_effort',providerEffort:'high',onDemand:true,otherProvidersRetained:true,directoryFreshnessUnchanged:true,nativeDefaultUnchanged:true}
  const defaultsProfile=await core.request('members.get',{agentId:'agent_2'})
  assert.equal((await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:defaultsProfile.version,adapterKind:'goose-cli',model:{mode:'runtime_default'},permissions:defaultsProfile.runtimeConfiguration.permissions}})).status,'applied')
  const defaultOffset=calls.length
- await settle(await send('CORE_GOOSE_NATIVE_DEFAULT'))
- assert(calls.slice(defaultOffset).filter(c=>c.tools?.length).every(c=>c.model==='gpt-4o-mini'),'Clearing an override must restore the native default on the same Session')
- result.checks.nativeDefaultRestored=true
+ const nativeSelection=await settle(await send('CORE_GOOSE_NATIVE_DEFAULT'))
+ assert.equal(nativeSelection.started.hostInstanceId,reasoning.started.hostInstanceId)
+ assert.equal(nativeSelection.started.nativeThreadId,reasoning.started.nativeThreadId)
+ const defaultCalls=calls.slice(defaultOffset).filter(c=>c.tools?.length)
+ assert(defaultCalls.length>0)
+ assert(defaultCalls.every(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'),'Without a product override, Warm must retain the native Session selection')
+ result.checks.runtimeDefaultPreservesNativeSelection={warm:true,model:'gpt-6.1-sol',effort:'high'}
  await setMember()
  await setMember('openai/gpt-4o-mini',{},'approve')
  const approved=await settle(await send('CORE_GOOSE_APPROVAL'))
@@ -319,11 +323,21 @@ try{
  const numericDb=new DatabaseSync(join(data,'rovai.sqlite'),{readOnly:true})
  try{const costs=[a,b].map(done=>numericDb.prepare('SELECT cost_amount_decimal AS amount FROM runtime_usage_run_summary WHERE agent_run_id=?').get(done.run.id).amount);assert.equal(Number(costs[0]),Number(costs[1]),'Identical first/warm calls must both include the first native cost');result.checks.cost={firstWarmEqual:true,quality:'runtime_estimate',currency:'USD'}}finally{numericDb.close()}
  assert(metrics.runs.every(r=>r.promptInputTotalTokens>0&&r.outputTokens>0),'Every Run needs fresh numeric deltas')
+ // Native Session state, rather than the global default, must also survive a reload.
+ await setMember('openai/gpt-6.1-sol',{thinking_effort:'high'})
+ const beforeCold=await settle(await send('CORE_GOOSE_BEFORE_COLD'))
+ const coldProfile=await core.request('members.get',{agentId:'agent_2'})
+ assert.equal((await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:coldProfile.version,adapterKind:'goose-cli',model:{mode:'runtime_default'},permissions:coldProfile.runtimeConfiguration.permissions}})).status,'applied')
  // Exercise the real Core and Session reload using only this fixture's roots.
  await core.close();core=await openCore()
+ const coldOffset=calls.length
  const cold=await settle(await send('CORE_GOOSE_COLD'))
- assert.notEqual(cold.started.hostInstanceId,b.started.hostInstanceId)
+ assert.notEqual(cold.started.hostInstanceId,beforeCold.started.hostInstanceId)
  assert.equal(cold.started.nativeThreadId,b.started.nativeThreadId,'Cold restore must load the exact native Session')
+ const coldCalls=calls.slice(coldOffset).filter(c=>c.tools?.length)
+ assert(coldCalls.length>0)
+ assert(coldCalls.every(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'),'Without a product override, cold load must retain the native Session selection')
+ result.checks.runtimeDefaultPreservesNativeSelection.cold=true
  result.checks.cold={sameSession:true,newHost:true}
  assert.equal(nativeProbeRows(),0,'Probe Sessions must remain absent after exact cold recovery')
  result.checks.files={writeAndEdit:true,fullDiff:'unsupported-native-metadata'}

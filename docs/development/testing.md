@@ -255,6 +255,14 @@ inventory/defaults 错误不降级建会话、目标查询零 inventory、同选
 空档位和失败保留；Goose 完整目录过期时先单独初始化一次。官方原生 probe 在创建任何 Session 前
 验证 inventory/defaults、零原生 Session 行和零生成；Core smoke 验跨 Provider 条目与目录时间保留。
 
+Goose 默认选择精简继续使用同一 live-model owner，验证 Warm 连续 `runtime_default` 零模型 setter、
+保留 Session 的 Provider/model/effort，后续显式选择仍应用。官方 Core smoke 分别验证 Warm 和精确
+冷恢复保留已保存且不同于全局默认的模型／effort。v92 的“清除显式覆盖就重置全局默认”断言随生产
+行为在 [v93](../contracts/runtime-launch-and-verification-v93.md) 退出；原始冷恢复、MCP、取消等场景保留。
+新增、删除及停用的 Rust 测试函数均为零；最低命令为
+`cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`，
+再运行默认 workspace 和原 Goose Core smoke。
+
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

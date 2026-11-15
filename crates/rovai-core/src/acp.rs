@@ -5716,13 +5716,6 @@ impl AcpRuntime {
                 }
             }
         }
-        if self.host.adapter_kind == AdapterKind::GooseCli
-            && model_source == "runtime_default"
-            && continuation != AcpSessionContinuation::New
-        {
-            self.set_config_option(&session_id, "provider", "goose")
-                .await?;
-        }
         if self.host.adapter_kind == AdapterKind::GooseCli {
             let mode = self
                 .session_permissions
@@ -5923,9 +5916,7 @@ impl AcpRuntime {
         value: &str,
     ) -> Result<()> {
         // Goose setters can rebuild Providers and persist unchanged selections.
-        // The default alias must still resolve current native configuration.
         if self.adapter_kind() == AdapterKind::GooseCli
-            && !(config_id == "provider" && value == "goose")
             && self
                 .session_result
                 .read()
@@ -15495,8 +15486,6 @@ for line in sys.stdin:
     elif method == 'session/set_config_option':
         options[params['configId']] = params['value']
         if params['configId'] == 'model': options['thinking_effort'] = 'off'
-        if params['configId'] == 'provider' and params['value'] == 'goose':
-            options.update(provider='native', model='model-a', thinking_effort='high')
     if method in ('session/new', 'session/set_config_option'):
         result = {{'sessionId':'goose-selection','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
     if method == 'session/set_config_option' and params.get('value') == 'model-no-echo': result = {{}}
@@ -15554,9 +15543,14 @@ for line in sys.stdin:
                     vec!["model", "thinking_effort"],
                 ),
                 (10, "second/model-no-echo", "approve", vec![]),
-                (11, "runtime_default", "approve", vec!["provider"]),
-                (12, "runtime_default", "approve", vec!["provider"]),
-                (13, "native/model-a", "approve", vec![]),
+                (11, "runtime_default", "approve", vec![]),
+                (12, "runtime_default", "approve", vec![]),
+                (
+                    13,
+                    "native/model-a",
+                    "approve",
+                    vec!["provider", "model", "thinking_effort"],
+                ),
             ] {
                 let before = std::fs::read_to_string(&log).unwrap().lines().count();
                 let runtime = AcpRuntime::from_test_host(
@@ -15611,6 +15605,22 @@ for line in sys.stdin:
                     .map(|r| r["params"]["configId"].as_str().unwrap())
                     .collect();
                 assert_eq!(setters, expected, "Goose round {epoch}");
+                if matches!(epoch, 11 | 12) {
+                    let selected = runtime.session_result.read().await;
+                    let selected = selected.as_ref().unwrap();
+                    assert_eq!(
+                        crate::goose::selected_option(selected, "provider"),
+                        Some("second")
+                    );
+                    assert_eq!(
+                        crate::goose::selected_option(selected, "model"),
+                        Some("model-no-echo")
+                    );
+                    assert_eq!(
+                        crate::goose::selected_option(selected, "thinking_effort"),
+                        Some("high")
+                    );
+                }
                 assert!(
                     !requests
                         .iter()
