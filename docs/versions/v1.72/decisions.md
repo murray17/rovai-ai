@@ -3,10 +3,23 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-13
+last_updated: 2026-11-15
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d87"></a>
+## V1.72-D87：Goose Windows x64 目标机实测后通过资格
+
+- 状态：accepted
+- 日期：2026-11-15
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#goose-windows-x64-qualification)。
+
+维护者要求验证 Windows 并提交准入记录，授权使用 Sub2API。官方 1.59.0 Windows x64 CLI 在真实 Core 中
+完成原生认证、首次执行、内置 CLI、热续接及关停后的精确恢复。受控 Provider 验证原生审批、取消、
+MCP 正常撤回、迟到删除与进程回收。产品以独立证据摘要开放 Windows x64，资格覆盖该目标机的 Core 执行路径。
+官方 CLI 无响应 stdio 扩展的原生加载限制已在同一目标机复现。
+[Windows x64 验收](../../research/goose-runtime/README.md#windows-x64-qualification)
 
 <a id="v1-72-d86"></a>
 ## V1.72-D86：Goose 使用原生 Session 扩展和共享 ACP，macOS arm64 开放 Preview

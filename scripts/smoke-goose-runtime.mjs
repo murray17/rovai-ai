@@ -13,7 +13,9 @@ import {configureProductRuntime} from './configure-product-runtime.mjs'
 import {createConfiguredCampAndSend,composerDocumentForAddress} from './lib/create-configured-camp.mjs'
 import {coreDataDirectoryArguments,removeEphemeralRuntimeCampFilesRoot} from './lib/runtime-camp-files-root.mjs'
 
-assert(process.platform!=='win32','This fixture uses POSIX shell commands; it does not qualify Windows')
+const windows = process.platform === 'win32'
+const binaryName = name => windows ? name + '.exe' : name
+const observedHostPids = new Set()
 let executable=process.env.ROVAI_GOOSE_BIN
 assert(executable&&isAbsolute(executable),'ROVAI_GOOSE_BIN must be an absolute official executable')
 const repo=resolve(import.meta.dirname,'..')
@@ -22,18 +24,30 @@ for(const part of ['home','project','core','config','data','cache','state','evid
 const project=join(root,'project'),data=join(root,'core'),binaries=join(root,'bundled tools')
 const relayControl=join(root,'relay-control'),relayEvents=join(root,'evidence','relay-events.jsonl')
 if(process.env.ROVAI_GOOSE_SOFT_MCP_FAULTS==='1'){
- const relay=join(root,'controlled-goose')
+ const relay=join(root,windows?'controlled-goose.cmd':'controlled-goose')
+ const relayScript=windows?join(root,'controlled-goose.mjs'):relay
  const header=`#!${process.execPath}\nconst officialExecutable=${JSON.stringify(executable)},relayControl=${JSON.stringify(relayControl)},relayEvents=${JSON.stringify(relayEvents)},nativeDatabase=${JSON.stringify(join(root,'goose-root','data','sessions','sessions.db'))};\n`
  await writeFile(relayControl,'normal');await writeFile(relayEvents,'')
- await writeFile(relay,header+await readFile(new URL('./lib/goose-acp-relay.mjs',import.meta.url),'utf8'));await chmod(relay,0o700)
+ await writeFile(relayScript,header+await readFile(new URL('./lib/goose-acp-relay.mjs',import.meta.url),'utf8'))
+ if(windows){
+  await writeFile(relay,'@echo off\r\n"'+process.execPath+'" "%~dp0controlled-goose.mjs" %*\r\nexit /b %errorlevel%\r\n')
+ }else{
+  await chmod(relay,0o700)
+ }
  executable=relay
 }
-for(const name of ['rovai-core','rovai'])await copyFile(join(repo,'target/debug',name),join(binaries,name))
+for(const name of ['rovai-core','rovai'].map(binaryName))await copyFile(join(repo,'target/debug',name),join(binaries,name))
 execFileSync('git',['init','--quiet',project])
 const userSkill=join(root,'home','.agents','skills','rovai-goose-user-probe')
 await mkdir(userSkill,{recursive:true})
 await writeFile(join(userSkill,'SKILL.md'),'---\nname: rovai-goose-user-probe\ndescription: Goose Skills management acceptance\n---\nGOOSE_USER_AGENTS_SKILL\n')
 const calls=[],events=[],result={root,platform:process.platform+'-'+process.arch,provider:'synthetic-loopback',checks:{}}
+const outputCommand = windows
+ ? 'rovai send --public-only --body GOOSE_CORE_PUBLIC && echo GOOSE_STDOUT && echo GOOSE_STDERR 1>&2'
+ : 'rovai send --public-only --body GOOSE_CORE_PUBLIC; printf GOOSE_STDOUT; printf GOOSE_STDERR >&2'
+const largeOutputCommand = windows
+ ? "powershell.exe -NoProfile -NonInteractive -Command \"[Console]::Write('GOOSE_LONG_START'+('0'*9000)+'GOOSE_LONG_DISCARDED')\""
+ : "printf 'GOOSE_LONG_START'; printf '%09000d' 0; printf 'GOOSE_LONG_DISCARDED'"
 let gate,approvalDecision='allow_once',compactInjected=false,overflowInjected=false,newLease,mcpTargetName
 function hold(marker){let enter,release;const entered=new Promise(r=>enter=r),wait=new Promise(r=>release=r);return gate={marker,enter,entered,release,wait,held:false}}
 const provider=createServer(async(req,res)=>{
@@ -58,11 +72,11 @@ const provider=createServer(async(req,res)=>{
   else if(marker==='CORE_GOOSE_FILES'&&!used.includes('write'))call={name:'write',args:{path:'测试 空格.txt',content:'第一行\n保留行\n'}}
   else if(marker==='CORE_GOOSE_FILES'&&!used.includes('edit'))call={name:'edit',args:{path:'测试 空格.txt',before:'第一行',after:'第一行（编辑）'}}
   else if(marker==='CORE_GOOSE_APPROVAL'&&!used.includes('write'))call={name:'write',args:{path:'approved.txt',content:'GOOSE_NATIVE_APPROVAL\n'}}
-  else if(marker==='CORE_GOOSE_LARGE'&&!used.includes('shell'))call={name:'shell',args:{command:"printf 'GOOSE_LONG_START'; printf '%09000d' 0; printf 'GOOSE_LONG_DISCARDED'"}}
+  else if(marker==='CORE_GOOSE_LARGE'&&!used.includes('shell'))call={name:'shell',args:{command:largeOutputCommand}}
   else if(marker?.startsWith('CORE_GOOSE_MCP_')&&!used.some(n=>n.endsWith('__echo'))&&names.some(n=>n.includes(mcpTargetName)&&n.endsWith('__echo')))call={name:names.find(n=>n.includes(mcpTargetName)&&n.endsWith('__echo')),args:{text:marker}}
   else if(marker==='CORE_GOOSE_DELEGATE'&&!used.includes('delegate'))call={name:'delegate',args:{instructions:'GOOSE_CHILD_REPORT',max_turns:2}}
   else if(marker==='CORE_GOOSE_SKILL'&&!used.includes('load_skill'))call={name:'load_skill',args:{name:'rovai-goose-core-smoke'}}
-  else if(names.length&&!child&&!cliUsed)call={name:'shell',args:{command:'rovai send --public-only --body GOOSE_CORE_PUBLIC; printf GOOSE_STDOUT; printf GOOSE_STDERR >&2'}}
+  else if(names.length&&!child&&!cliUsed)call={name:'shell',args:{command:outputCommand}}
   const content='GOOSE_CORE_FIXTURE_OK'
   const usage={prompt_tokens:100,completion_tokens:20,total_tokens:120,prompt_tokens_details:{cached_tokens:10}}
   if(names.length&&marker==='CORE_GOOSE_COMPACT'&&!compactInjected){compactInjected=true;usage.prompt_tokens=120000;usage.total_tokens=120020}
@@ -90,6 +104,20 @@ const provider=createServer(async(req,res)=>{
 })
 await new Promise(r=>provider.listen(0,'127.0.0.1',r))
 const environment={PATH:'/usr/bin:/bin:/usr/sbin:/sbin',HOME:join(root,'home'),XDG_CONFIG_HOME:join(root,'config'),XDG_DATA_HOME:join(root,'data'),XDG_CACHE_HOME:join(root,'cache'),XDG_STATE_HOME:join(root,'state'),GOOSE_PATH_ROOT:join(root,'goose-root'),GOOSE_DISABLE_KEYRING:'1',GOOSE_PROVIDER:'openai',GOOSE_MODEL:'gpt-4o-mini',GOOSE_MODE:'auto',GOOSE_AUTO_COMPACT_THRESHOLD:'0.5',OPENAI_API_KEY:'fixture-key',OPENAI_HOST:'http://127.0.0.1:'+provider.address().port,OPENAI_BASE_PATH:'v1/chat/completions',TERM:'dumb',NO_COLOR:'1',TMPDIR:root,ROVAI_GOOSE_BIN:executable}
+if(windows){
+ const systemRoot=process.env.SystemRoot
+ const system32=join(systemRoot,'System32')
+ const home=environment.HOME
+ Object.assign(environment,{
+  SystemRoot:systemRoot,WINDIR:systemRoot,COMSPEC:join(system32,'cmd.exe'),
+  PATH:[system32,join(system32,'WindowsPowerShell','v1.0'),systemRoot].join(';'),
+  PATHEXT:'.COM;.EXE;.BAT;.CMD',USERPROFILE:home,APPDATA:join(home,'AppData','Roaming'),
+  LOCALAPPDATA:join(home,'AppData','Local'),TEMP:root,TMP:root,
+ })
+ if(process.env.ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER==='goose-cli'){
+  environment.ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER='goose-cli'
+ }
+}
 const customProviders=join(root,'goose-root','config','custom_providers')
 await mkdir(customProviders,{recursive:true})
 await writeFile(join(root,'goose-root','config','config.yaml'),JSON.stringify({extensions:{user_native_fixture:{enabled:true,type:'stdio',name:'user_native_fixture',cmd:process.execPath,args:[join(repo,'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')],envs:{},timeout:1}}}))
@@ -97,7 +125,7 @@ await writeFile(join(customProviders,'custom_secondary.json'),JSON.stringify({na
 assert.throws(()=>execFileSync('node',['--version'],{env:environment,stdio:'pipe'}),e=>e.code==='ENOENT');result.checks.noImplicitNode=true
 let core, index=0
 async function openCore(){
-  const child=spawn(join(binaries,'rovai-core'),[...coreDataDirectoryArguments(data,{homeDirectory:join(root,'home')}),'--skill-library-root',join(data,'managed-skill-library'),'--mcp-config-path',join(data,'mcp.json')],{cwd:repo,env:environment,stdio:['pipe','pipe','pipe']})
+  const child=spawn(join(binaries,binaryName('rovai-core')),[...coreDataDirectoryArguments(data,{homeDirectory:join(root,'home')}),'--skill-library-root',join(data,'managed-skill-library'),'--mcp-config-path',join(data,'mcp.json')],{cwd:repo,env:environment,stdio:['pipe','pipe','pipe']})
   const pending=new Map();let id=0,stderr='',closePromise,ended=false
   const closed=new Promise(r=>child.once('close',(code,signal)=>{ended=true;r({code,signal})}))
   child.stderr.on('data',b=>stderr=(stderr+b).slice(-64000))
@@ -165,14 +193,18 @@ async function cliContext(){
  const contexts=[];for(const id of await readdir(join(data,'runtime','builtin-tools'))){const context=await readFile(join(data,'runtime','builtin-tools',id,'context.json'),'utf8').then(JSON.parse).catch(e=>e.code==='ENOENT'?null:Promise.reject(e));if(context?.lease)contexts.push(context)}
  assert.equal(contexts.length,1);return contexts[0]
 }
-const owner=async run=>JSON.parse(await readFile(join(data,'runtime-fleet','owners',run.started.hostInstanceId+'.json'),'utf8'))
+const owner=async run=>{
+ const record=JSON.parse(await readFile(join(data,'runtime-fleet','owners',run.started.hostInstanceId+'.json'),'utf8'))
+ if(windows)observedHostPids.add(record.pid)
+ return record
+}
 try{
  console.log(JSON.stringify({channel:'automatic-acceptance',root,dataDir:data,skillRoot:join(data,'managed-skill-library'),project}))
  core=await openCore();await core.request('health.check')
  await configureProductRuntime(core.request.bind(core),'goose-cli',['agent_2'])
  const managedSkills=await core.request('nativeSkills.list',{adapterKind:'goose-cli',refresh:true})
  const managedSkill=managedSkills.skills.find(s=>s.name==='rovai-goose-user-probe')
- assert(managedSkill?.entryPath.includes('/.agents/skills/'),'Skills management must discover Goose user .agents/skills')
+ assert(managedSkill?.entryPath.replaceAll('\\','/').includes('/.agents/skills/'),'Skills management must discover Goose user .agents/skills')
  const managedBody=await core.request('nativeSkills.read',{skillId:managedSkill.id,path:'SKILL.md'})
  assert(managedBody.content.includes('GOOSE_USER_AGENTS_SKILL'))
  result.checks.skillsManagement={userAgentsDiscovered:true,previewRead:true}
@@ -186,7 +218,7 @@ try{
  assert.equal(calls.length,offset,'Model discovery must not generate a response')
  const nativeProbeRows=()=>{
   const db=new DatabaseSync(join(root,'goose-root','data','sessions','sessions.db'),{readOnly:true})
-  try{return db.prepare("SELECT count(*) AS n FROM sessions WHERE instr(working_dir,'/rovai-acp-probe-')>0").get().n}finally{db.close()}
+  try{return db.prepare("SELECT count(*) AS n FROM sessions WHERE instr(replace(working_dir,char(92),'/'),'/rovai-acp-probe-')>0").get().n}finally{db.close()}
  }
  assert.equal(nativeProbeRows(),0,'Catalog/health probes must not leave native Sessions')
  result.checks.probeSessions={remaining:0}
@@ -297,7 +329,7 @@ try{
  assert.equal(cleanup.params.hostDisposition,'reusable')
  assert(newLease);assert.equal(oldLease.processId,newLease.processId);assert.notEqual(oldLease.lease.leaseId,newLease.lease.leaseId);assert(newLease.lease.leaseGeneration>oldLease.lease.leaseGeneration)
  const stale=await new Promise((resolve,reject)=>{
-  const socket=createConnection(oldLease.coreEndpoint.path);socket.setTimeout(10000,()=>socket.destroy(Error('Old lease deadline')));socket.once('error',reject)
+  const socket=createConnection(windows?oldLease.coreEndpoint.name:oldLease.coreEndpoint.path);socket.setTimeout(10000,()=>socket.destroy(Error('Old lease deadline')));socket.once('error',reject)
   socket.once('connect',()=>socket.write(JSON.stringify({ipcProtocolVersion:oldLease.ipcProtocolVersion,processId:oldLease.processId,processToken:oldLease.processToken,leaseId:oldLease.lease.leaseId,leaseGeneration:oldLease.lease.leaseGeneration,leaseToken:oldLease.lease.leaseToken,kind:'invoke',request_id:crypto.randomUUID(),operation:'thread.message.send',input:{body:'GOOSE_OLD_LEASE_MUST_NOT_PUBLISH',publicOnly:true}})+'\n'))
   createInterface({input:socket}).once('line',line=>{socket.destroy();resolve(JSON.parse(line))})
  })
@@ -318,7 +350,7 @@ try{
  mutation=await core.request('mcp.servers.setEnabled',{expectedConfigDigest:mcp.configDigest,serverId:keepId,enabled:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
  mutation=await core.request('mcp.assignments.set',{expectedConfigDigest:mcp.configDigest,serverId:keepId,agentId:'agent_2',assigned:true,acknowledgeHighRisk:true});assert.equal(mutation.status,'ok');mcp=mutation.config
  const mcpA=await settle(await send('CORE_GOOSE_MCP_A'))
- const startup=(await readFile(starts,'utf8')).trim().split('\n').map(JSON.parse).find(s=>s.source==='GOOSE_MCP_A');assert.equal(startup.cwd,join(root,'service'));assert.deepEqual(startup.argv,literalArgs)
+ const startup=(await readFile(starts,'utf8')).trim().split('\n').map(JSON.parse).find(s=>s.source==='GOOSE_MCP_A');assert.equal(windows?await realpath(startup.cwd):startup.cwd,join(root,'service'));assert.deepEqual(startup.argv,literalArgs)
  const beforeSave=await owner(mcpA)
  mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition('GOOSE_MCP_B')});assert.equal(mutation.status,'ok');mcp=mutation.config
  process.kill(beforeSave.pid,0) // Saving cannot kill the idle managed Host.
@@ -384,6 +416,14 @@ try{
  result.checks.cold={sameSession:true,newHost:true}
  assert.equal(nativeProbeRows(),0,'Probe Sessions must remain absent after exact cold recovery')
  result.checks.files={writeAndEdit:true,fullDiff:'unsupported-native-metadata'}
+ if(windows){
+  await owner(cold)
+  await core.close()
+  const mcpStarts=(await readFile(starts,'utf8')).trim().split('\n').map(JSON.parse)
+  const observedPids=new Set([...observedHostPids,...mcpStarts.map(start=>start.pid)])
+  for(const pid of observedPids)assert.throws(()=>process.kill(pid,0),error=>error.code==='ESRCH')
+  result.checks.cleanup={observedHostAndMcpProcessesReaped:observedPids.size}
+ }
  await writeFile(join(root,'evidence','core-events.json'),JSON.stringify(events,null,2))
  await writeFile(join(root,'evidence','checks.json'),JSON.stringify(result,null,2))
  console.log(JSON.stringify({passed:true,root,checks:result.checks}))

@@ -38,6 +38,9 @@ pub const MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION: &str =
 pub const MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION: &str =
     "sha256:8e6eddd306b3e1d145767f0912facefe4cd255f1e5768e3f2369bc900a566426";
 
+pub const GOOSE_WINDOWS_X64_EVIDENCE_REVISION: &str =
+    "sha256:0182f70f3edd9f172477d6c12fc7f43fa652c96dfc7e816c74558e966a36089e";
+
 pub const KILO_WINDOWS_X64_EVIDENCE_REVISION: &str =
     "sha256:f7c5a470022b84599a7c910a832e591c7b54192137dfb75ab241aafd9806c041";
 
@@ -220,6 +223,11 @@ mod tests {
     fn platform_evidence_revisions_bind_their_frozen_source_bytes() {
         for (revision, bytes) in [
             (
+                GOOSE_WINDOWS_X64_EVIDENCE_REVISION,
+                include_bytes!("../../../qualification/runtime-platform/windows-x64-goose-v1.json")
+                    .as_slice(),
+            ),
+            (
                 KILO_WINDOWS_X64_EVIDENCE_REVISION,
                 include_bytes!("../../../qualification/runtime-platform/windows-x64-kilo-v1.json")
                     .as_slice(),
@@ -368,20 +376,30 @@ mod tests {
             for platform in HostPlatformKey::ALL {
                 if runtime_kind == AdapterKind::GooseCli {
                     let admission = registry.platform_admission(runtime_kind, platform);
-                    assert_eq!(
-                        admission.status(),
-                        if platform == HostPlatformKey::MacosArm64 {
-                            RuntimePlatformAdmissionStatus::Preview
-                        } else {
+                    let expected = match platform {
+                        HostPlatformKey::WindowsX64 => RuntimePlatformAdmissionStatus::Qualified,
+                        HostPlatformKey::MacosArm64 => RuntimePlatformAdmissionStatus::Preview,
+                        HostPlatformKey::MacosX64 | HostPlatformKey::LinuxX64 => {
                             RuntimePlatformAdmissionStatus::NotQualified
                         }
-                    );
+                    };
+                    assert_eq!(admission.status(), expected);
                     assert_eq!(
                         admission.allows_runtime_use(),
-                        platform == HostPlatformKey::MacosArm64
+                        matches!(
+                            platform,
+                            HostPlatformKey::MacosArm64 | HostPlatformKey::WindowsX64
+                        )
                     );
-                    assert!(!admission.is_qualified());
-                    assert!(admission.evidence_revision().is_none());
+                    assert_eq!(
+                        admission.is_qualified(),
+                        platform == HostPlatformKey::WindowsX64
+                    );
+                    assert_eq!(
+                        admission.evidence_revision(),
+                        (platform == HostPlatformKey::WindowsX64)
+                            .then_some(GOOSE_WINDOWS_X64_EVIDENCE_REVISION)
+                    );
                     continue;
                 }
                 if platform == HostPlatformKey::LinuxX64 {
@@ -465,13 +483,17 @@ mod tests {
                     Some(MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION)
                 );
                 assert_eq!(admission.blocker_code(), None);
-            } else if runtime_kind == AdapterKind::KiloCli {
+            } else if matches!(runtime_kind, AdapterKind::KiloCli | AdapterKind::GooseCli) {
                 assert!(admission.is_qualified());
                 assert!(admission.allows_runtime_use());
                 assert_eq!(admission.reason_code(), None);
                 assert_eq!(
                     admission.evidence_revision(),
-                    Some(KILO_WINDOWS_X64_EVIDENCE_REVISION)
+                    Some(if runtime_kind == AdapterKind::GooseCli {
+                        GOOSE_WINDOWS_X64_EVIDENCE_REVISION
+                    } else {
+                        KILO_WINDOWS_X64_EVIDENCE_REVISION
+                    })
                 );
                 assert_eq!(admission.blocker_code(), None);
             } else if runtime_kind == AdapterKind::Pi {
@@ -527,7 +549,6 @@ mod tests {
                 runtime_kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
-                    | AdapterKind::GooseCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
                     | AdapterKind::HermesCli

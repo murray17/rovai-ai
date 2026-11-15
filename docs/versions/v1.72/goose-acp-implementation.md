@@ -71,9 +71,9 @@ Core 与内置 CLI 同目录，未触碰日常 App、SQLite 或用户全局配�
 | Built-in CLI | 正式 CLI、public send、同进程新 lease、旧 lease 拒绝 | 每个 CLI 操作的 Goose 专属真实模型验证 |
 | Usage/Cache/Cost | 累计每轮基线、cache 不双记、独立 Gauge；原生估算费用如实标注 | 真实账单；压缩 cache 缺失保持 partial，不能补零 |
 | Retry/Queue/Cancel | 插话提前 ACK，成功 Warm；普通取消同 PID/Session、新 Run/lease，旧租约拒绝 | Goose 专属全部断连/迟到/无回包注入矩阵 |
-| Ready/Version/Platform | 静态安装与 Provider 认证分离，现有版本读取；macOS arm64 Preview | Intel、Linux、Windows NotQualified；不声明 FirstClass |
+| Ready/Version/Platform | 静态安装与 Provider 认证分离，现有版本读取；macOS arm64 Preview，[Windows x64 有独立资格证据](../../research/goose-runtime/README.md#windows-x64-qualification) | Intel、Linux NotQualified；完整 First-Class Golden Flow 尚缺证据 |
 
-九项 Golden Flow 尚未全部取得完整真实账号/故障证据，因此这次交付是 Preview。
+初次交付时，九项 Golden Flow 尚未全部取得完整真实账号和故障证据，当时只开放 macOS arm64 Preview。
 并发、完整 Safety/Output、真实账单和故障回收不能由一次普通成功或其他 Runtime 的测试推导。
 
 ## 回归和失败证据
@@ -291,7 +291,14 @@ writer 尚未写入时超时连接仍可用，以及实际进程退出不能假�
 仍使用同一 Rust owner，未新增、删除或停用测试函数。初次时间断言包含了原有 2 秒历史回放 grace，
 修正为排除该既有开销后验证批次预算，没有修改公共回放规则。Preview、平台资格及未重跑的真实账号范围不变。
 
-最终受控验收：官方 Core 正常组 19 成功／1 取消，55 次 Provider 请求；迟到删除组 21 成功／1 取消，60 次请求。
+最终受控验收在 macOS arm64 完成。官方 Core 正常组 19 成功／1 取消，55 次 Provider 请求；迟到删除组 21 成功／1 取消，60 次请求。
 局部补丁组配置 1 秒扩展期限，无响应扩展约 1.25 秒完成失败隔离，普通任务成功，子进程已回收。
 完整默认 workspace 438 Core lib／31 CLI／4 host／11 web 通过，保留原 1 ignored；既有扩展 owner、格式、脚本和文档门禁通过。
 可复核结果见[本轮白名单](../../research/goose-runtime/mcp-best-effort-1.59.0-macos-arm64.json)。
+
+## Windows x64 目标机准入（2026-11-15）
+
+官方 Goose 1.59.0 在 Windows 10 Pro 22H2 x64 经 Sub2API `gpt-6` 完成首次执行、热续接并调用分配的 MCP、
+Core 计划关停后的精确冷恢复。受控两组验证原生审批、取消与命名管道旧租约拒绝、正常撤回和迟到删除。
+原生无响应 stdio 在 1 秒扩展配置下仍超出 4 秒的 probe 期限。
+[独立证据](../../research/goose-runtime/README.md#windows-x64-qualification)绑定 [Windows x64 准入](../../contracts/runtime-platform-admission-v2.md#goose-windows-x64-qualification)。

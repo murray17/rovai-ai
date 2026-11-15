@@ -31,6 +31,48 @@ User sequence 144 随后恢复尽力撤回，当前边界为 [Runtime Launch v95
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。
 以下矩阵保留研究阶段的原生与 Rovai 状态；`Verified` 指原生能力，不代表真实账号已登录或目标平台已取得产品资格。
 
+<a id="windows-x64-qualification"></a>
+## Windows x64 目标机验收
+
+2026-11-15 在 Windows 10 Pro 22H2 x64（build 19045，NTFS）运行官方完整 CLI 1.59.0。
+验证使用 `711e66a8f` 构建的 Core、[官方 MSVC 发布包](https://github.com/aaif-goose/goose/releases/tag/v1.59.0)
+和独立的 Core 数据、Skill 文件、MCP、Goose 原生目录及工作区。使用既有 Windows Debug 资格开关采集证据，
+正式准入由 [Windows x64 证据](../../../qualification/runtime-platform/windows-x64-goose-v1.json)绑定。
+
+- 真实 Goose 自定义 Provider 使用 Sub2API 的 `v1/responses` 和 `gpt-6`，3 个 Run 全部成功。
+  首轮通过原生 write/edit 验证含中文、空格的路径，通过内置 `rovai` CLI 恰好发布一次。
+  热续接复用 Host、PID 和原生 Session，实际调用被分配的 stdio MCP。取消分配并计划关停 Core 后，
+  新 Host 精确加载原 Session，原生持久化扩展列表已撤回该项。两次计划关停都写入回执并回收观察到的 Goose 进程。
+- 官方 Core 加受控 Provider 的普通组为 19 成功／1 用例取消，迟到组为 21 成功／1 用例取消。
+  覆盖原生 Bootstrap、项目 Skill、审批、Steer、取消后同 PID 续接、旧命名管道租约拒绝及观察到的 Host/MCP 进程回收。
+  普通撤回后已撤项消失，当前仍分配和用户原生 MCP 均可见。迟到组的 relay 把删除交给官方 Goose，
+  用原生会话数据库写锁延迟提交。Core 在本地预算到期后继续，随后重分配先于原生删除完成，
+  同一 Session 的后继任务成功调用重新分配的工具。
+- 原生 MCP 进程直接退出时，`session/load` 约 211 ms 返回并报告扩展失败，后续 prompt 成功。
+  MCP 完全不回应握手时，配置 1 秒扩展超时，官方 Windows 二进制仍超出 4 秒探针期限。
+  收尾检查时该夹具子进程已退出；[局部原生补丁](upstream/README.md)及原生默认 300 秒的恢复行为未在 Windows 复验。
+
+关闭 Debug 资格开关后，Core 从 PATH 发现同一官方 CLI，返回 `qualified` 和与证据文件匹配的 SHA-256。
+正式路径复跑真实模型 3/3 成功，两次计划关停分别回收当时观测到的 7、3 个 Core 后代进程。
+同一正式准入构建复跑受控普通组 19 成功／1 取消、迟到组 21 成功／1 取消。
+
+Windows 基线的全量 Rust 测试观测到 Codex 证据去重和 Mission Git 私有索引用例失败。
+Goose 的实机验收和准入矩阵测试按独立入口执行。
+
+在独立工作树运行 [Core smoke](../../../scripts/smoke-goose-runtime.mjs) 可复跑两组受控用例。
+Windows 使用原生命令、命名管道和独立用户目录。真实运行可在同样的隔离条件下，将 Sub2API
+配置为 Goose 原生 custom Provider，指定 `base_path = v1/responses` 并由 `api_key_env` 读取凭据。
+
+```powershell
+cargo build --locked -p rovai-core --bins
+$env:ROVAI_GOOSE_BIN = 'D:\path\to\official\goose.exe'
+node scripts/smoke-goose-runtime.mjs
+$env:ROVAI_GOOSE_SOFT_MCP_FAULTS = '1'
+node scripts/smoke-goose-runtime.mjs
+```
+
+准入范围为 Windows x64 的 Core 正式执行链路。打包 Desktop、完整 First-Class Golden Flow 和其他平台各自需要证据。
+
 ## 固定基线与复现
 
 | 项目 | 本轮范围 |
