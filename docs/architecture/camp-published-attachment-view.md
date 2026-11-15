@@ -3,13 +3,13 @@ document_type: architecture
 architecture: camp-attachments
 authority: live-source-references-and-legacy-attachment-reads
 status: accepted
-last_updated: 2026-10-31
+last_updated: 2026-11-15
 ---
 
 # Thread Attachments：原路径引用、默认输出与历史读取
 
 新用户输入和新 Agent 发布复用 `LocalAttachmentSourceRef`；历史 Managed/Prepared/Message Attachment 保留原位读取。
-[Camp Attachment v12](../contracts/camp-attachment-v12.md) 拥有当前合同；
+[Camp Attachment v13](../contracts/camp-attachment-v13.md) 拥有当前合同；
 [V1.59-D08](../versions/v1.59/decisions.md#v1-59-d08) 解释从复制快照转为原路径的选择。
 
 ## 发布和身份
@@ -59,6 +59,9 @@ Run Facts 只投影顶层 attachmentOutputRoot，含义是默认输出位置；�
 直接投影记录位置，单个源失效由实际读取报告。History 为 Agent 外部源返回路径，列表从记录读取。
 路径元数据查询复用 exact owner 授权，不读取全文；本机可显示/复制/定位所有已解析位置，远程标为服务器路径。
 新文件读取当前内容，包括替换保存；旧文件仍按历史合同验证，展示路径不会改变旧权限。
+
+队员普通文件行可以直接下载当前文件。Desktop 由 Main 按 exact owner 解析源，系统保存窗口选择目标后再次核验，
+以字节流保存副本；Web 复用已有附件下载授权。不依赖预览、不额外登记附件或改变原文件生命周期。
 
 Desktop/Web 复用现有预览缓存与更新反馈，候选刷新失败保留旧内容，切 Thread 不冷加载。
 HTML 按真实来源目录解析资源；Web 资源能力绑定已有句柄、Session 和源记录，每次限制在授权目录，

@@ -46,6 +46,11 @@ ipcMain.handle('rovai:general-preferences-set-language', (event, preference) => 
 const pastedText = ' \t\r\n' + '😀'.repeat(10_001) + '\n '
 const pastedId = '11111111-1111-4111-8111-111111111111'
 let pastedPreparations = 0
+const saveLocator = { owner: 'message', threadId: 'save-thread', messageId: 'save-message', attachmentRefId: pastedId }
+ipcMain.handle('rovai:attachment-save', (_event, locator) => {
+  assert.deepEqual(locator, saveLocator)
+  return { saved: true, error: null, availability: 'available' }
+})
 ipcMain.handle('rovai:composer-attachment-prepare-pasted-text', (_event, threadId, displayName, bytes) => {
   pastedPreparations += 1
   assert.equal(threadId, 'paste-thread')
@@ -69,6 +74,7 @@ app.whenReady().then(async () => {
     await window.loadURL('data:text/html,<html><body>Isolated contextBridge regression</body></html>')
     const observations = await window.webContents.executeJavaScript(`(async () => {
       const value = await window.rovai.request('navigation.snapshot', { kind: 'value' })
+      const savedAttachment = await window.rovai.attachments.save(${JSON.stringify(saveLocator)})
       const hostWeb = [await window.rovai.hostWeb.status(), await window.rovai.hostWeb.start({ listen: '127.0.0.1:4317' }), await window.rovai.hostWeb.rotate(), await window.rovai.hostWeb.stop()]
       let hostWebFailure
       try { await window.rovai.hostWeb.token() } catch (error) { hostWebFailure = error }
@@ -128,7 +134,7 @@ app.whenReady().then(async () => {
           ))
         }
       }
-      return { value, failures, savedOnly, enabled, invalidation, projectName, restoredName, hostWeb, hostWebFailure, copyPlan, copyResults, pasted, removedPaste, oversizedReads, oversizedError, boundaryReads,
+      return { value, savedAttachment, failures, savedOnly, enabled, invalidation, projectName, restoredName, hostWeb, hostWebFailure, copyPlan, copyResults, pasted, removedPaste, oversizedReads, oversizedError, boundaryReads,
         initialLanguage, startupLanguage, manualLanguage, systemLanguage, languageEvents, provisioning }
     })()`)
     assert.deepEqual(observations.hostWeb, [
@@ -138,6 +144,7 @@ app.whenReady().then(async () => {
       { operation: 'stop', params: undefined }
     ])
     assert.deepEqual(observations.value, { unchanged: true, values: [1, null, 'ok'] })
+    assert.deepEqual(observations.savedAttachment, { saved: true, error: null, availability: 'available' })
     assert.deepEqual(observations.initialLanguage, observations.startupLanguage)
     assert.equal(observations.initialLanguage.interfaceLanguagePreference, 'system')
     assert.equal(observations.manualLanguage.interfaceLanguage, 'zh-CN')

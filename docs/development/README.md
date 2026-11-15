@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-10-29
+last_updated: 2026-11-15
 ---
 
 # Rovai AI 开发者指南
@@ -121,6 +121,8 @@ App，以受控本机 API 和时钟验证首帧画布、就绪交接与 authorit
 修改文件预览分栏、Tab 或 File Change 详情时运行 `pnpm test:file-preview-layout`：真实 Electron 中组合生产标题栏、分栏、Tab 和 Viewer，
 验证鼠标/键盘调整、关闭与取消、比例持久化、单 Pane 替换、420–480px 会话紧凑排版与阅读位置保留；
 并验证常驻预览按钮、变更 Tab/当前文件切换、历史来源隔离、加载重试与原生拖拽区排除点击控件；不启动 Core 或模型。
+修改队员文件行下载时运行 `pnpm test:attachment-download-ui`：隔离 Chrome 挂载生产附件卡片，验证下载与预览分离、
+键盘、取消与重试、客户端／附件换代、五套主题和触屏；原生保存另由 `attachment-save.test.ts` 与 `pnpm test:desktop-bridge` 验证。
 可折叠分栏共享最小尺寸停留与继续拖动收起行为；导航和预览沿用上述回归，队员列表运行
 `node --test scripts/lib/member-editor.test.mjs`，底部执行台运行 `pnpm test:execution-avatar-rail`。
 定时任务详情运行 `pnpm test:automation-splitter`，用独立 Renderer fixture 验证最小宽度、同次手势反向展开、

@@ -3,10 +3,27 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-14
+last_updated: 2026-11-15
 ---
 
 # v1.72 实施与验收
+
+## 会话文件下载（2026-11-15）
+
+- Work item：队员输出文件行右侧悬浮下载；Owner：爱丽丝。
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-agent-file-download`；Branch：`rovai/agent-file-download`；
+  Base：`origin/main@70aab893810b03e8f45b7281efa7bceb3452ef5c`；Governance：none，同一变更同步当前合同与 UI。
+- Status：ready；本地实施与验证完成，分支交付，未请求创建 PR。
+- 文件行使用 32px 独立动作与主题 `--ink`，悬浮／键盘时显示，触屏命中区 44px；下载不触发预览，既有右键操作保持。
+- Desktop 新增原生保存桥接，系统窗口确认后重验 owner，以字节流暂存并替换选定目标；取消不写入，失败保留目标和原文件。
+  Web 复用既有 exact-owner 下载链路。没有 Rust/Core、数据库或模型输入改动。
+- 验证归属：`attachment-save.test.ts` 的 5 项回归覆盖真实二进制文件、当前源重检、取消、失效、符号链接、目标写入失败、临时文件归属与原文件保护；
+  `pnpm test:desktop-bridge` 覆盖真实隔离 contextBridge；`pnpm test:attachment-download-ui` 挂载生产卡片验证鼠标、键盘、取消／重试、迟到结果、主题和触屏。
+- 验证通过：`pnpm typecheck`、`pnpm build:desktop`、`pnpm test:desktop-bridge`、`pnpm test:attachment-download-ui`、
+  `VITEST_MAX_WORKERS=2 pnpm test`、`pnpm test:rust:pr`、`pnpm docs:test`、`pnpm docs:check` 与以以上 base SHA 运行的 `pnpm docs:check:ci`。
+  默认高并发完整测试首轮出现既有文件监听超时，限制并发后的完整回归通过；未修改或禁用该测试。
+- 自查后让保存沿用已有 Source Ref 符号链接解析，实际持有最终普通文件句柄；最后定向回归验证保存失败不会清理未取得归属的临时名称。
+  隔离 Chrome/ContextBridge 验收未启动 Core 或 Runtime，已查看明暗主题截图；未将这些结果等同 Windows 真机保存窗口或日常安装版验收。
 
 ## 长会话输入性能（2026-11-14）
 

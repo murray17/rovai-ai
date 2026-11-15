@@ -36,6 +36,7 @@ export const desktopThreadClient: ThreadClient = {
     return path ? { path, location: 'local' } : null
   },
   attachments: { kind: 'native',
+    save: locator => window.rovai.attachments.save(locator),
     open: locator => window.rovai.attachments.open(locator),
     reveal: locator => window.rovai.attachments.reveal(locator)
   },

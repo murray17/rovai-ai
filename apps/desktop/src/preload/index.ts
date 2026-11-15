@@ -558,6 +558,9 @@ const api: RovaiApi = {
     }
   },
   attachments: {
+    save(locator) {
+      return ipcRenderer.invoke('rovai:attachment-save', locator)
+    },
     open(locator) {
       return ipcRenderer.invoke('rovai:attachment-open', locator)
     },

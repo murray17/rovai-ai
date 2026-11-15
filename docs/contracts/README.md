@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-12
+last_updated: 2026-11-15
 ---
 
 # 长期接口合同
@@ -572,7 +572,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Pending Camp Activation v3（历史）](pending-camp-activation-v3.md) | AI 创建队员草稿可在同窗口侧栏切换；Core 导航与持久恢复仍排除 Pending |
 | [Pending Camp Activation v2（历史）](pending-camp-activation-v2.md) | 一键 Pending 保留首消息原子激活，未发送输入改为 Renderer-local，不进入导航或恢复 |
 | [Pending Camp Activation v1（历史）](pending-camp-activation-v1.md) | 一键 Pending 创建、Draft-backed Navigation/恢复、首消息原子激活与受控清理 |
-| [Camp Attachment v12（当前）](camp-attachment-v12.md) | 长粘贴附件的有界内容前缀、草稿与发送展示保持，文件生命周期不变 |
+| [Camp Attachment v13（当前）](camp-attachment-v13.md) | 队员普通文件行下载；Desktop exact-owner 原生保存、取消与失败恢复，Web 复用既有下载 |
+| [Camp Attachment v12（历史）](camp-attachment-v12.md) | 长粘贴附件的有界内容前缀、草稿与发送展示保持，文件生命周期不变 |
 | [Camp Attachment v11（历史）](camp-attachment-v11.md) | Source Ref 保留通过展示安全检查的原始显示名；实际落盘入口继续清洗文件名 |
 | [Camp Attachment v10（历史）](camp-attachment-v10.md) | Agent 附件原路径引用、默认输出位置及新旧记录读取分流；详见合同 |
 | [Camp Attachment v9（历史）](camp-attachment-v9.md) | Desktop Source Ref 运行前做宿主重检，随后向 Context 原样投影 stored source path；不再 canonicalize、分流或复制 |

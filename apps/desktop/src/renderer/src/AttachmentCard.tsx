@@ -102,6 +102,8 @@ export function AttachmentCard({
   const contextMenuAvailable = composerImage || timeline || locator.owner === 'composer' || Boolean(menuItems)
   const primaryActionAvailable = contextMenuAvailable || attachment.previewKind !== 'image'
   const agentPresentation = presentation === 'agent-timeline'
+  const downloadable = agentPresentation && attachment.kind === 'file'
+    && (client.attachments.kind === 'download' || Boolean(client.attachments.save))
   const displayClassification = classifyAttachmentDisplay(attachment)
   const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
   const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
@@ -359,6 +361,8 @@ export function AttachmentCard({
                 {content}
                 {attachmentAction && <i className="attachment-action-loading" aria-hidden="true" />}
               </button>
+              {downloadable && <AttachmentDownloadButton key={locatorKey} attachment={attachment} locator={locator}
+                disabled={disabled} onAvailabilityChange={setAvailability} />}
               {contextMenuAvailable && !composerImage && (
                 <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
                   <DropdownMenu.Trigger asChild>
@@ -461,6 +465,70 @@ export function AttachmentCard({
       )}
     </div>
   )
+}
+
+function AttachmentDownloadButton({ attachment, locator, disabled, onAvailabilityChange }: {
+  attachment: ThreadMessageAttachmentView
+  locator: LocalAttachmentOwnerLocator
+  disabled: boolean
+  onAvailabilityChange: (availability: LocalAttachmentAvailability) => void
+}): JSX.Element {
+  const client = useThreadClient()
+  const [state, setState] = useState<'idle' | 'preparing' | 'error'>('idle')
+  const [notice, setNotice] = useState<'saved' | 'started' | 'error' | null>(null)
+  const pending = useRef(false)
+  const generation = useRef(0)
+  useEffect(() => {
+    generation.current++
+    pending.current = false
+    setState('idle')
+    setNotice(null)
+    return () => { generation.current++ }
+  }, [client])
+  const label = state === 'preparing' ? uiAttribute('准备下载…')
+    : state === 'error' ? uiAttribute('下载失败，点击重试') : uiAttribute('下载文件')
+  const download = async (): Promise<void> => {
+    if (disabled || pending.current) return
+    const current = generation.current
+    pending.current = true
+    setState('preparing')
+    setNotice(null)
+    try {
+      if (client.attachments.kind === 'native') {
+        const result = await client.attachments.save!(locator)
+        if (generation.current !== current) return
+        onAvailabilityChange(result.availability)
+        if (result.error) throw new Error(result.error)
+        setNotice(result.saved ? 'saved' : null)
+      } else {
+        const result = await client.attachments.download(locator)
+        if (generation.current !== current) return
+        onAvailabilityChange(result.availability)
+        if (result.error) throw new Error(result.error)
+        setNotice(result.opened ? 'started' : null)
+      }
+      setState('idle')
+    } catch {
+      if (generation.current !== current) return
+      setState('error')
+      setNotice('error')
+    } finally {
+      if (generation.current === current) pending.current = false
+    }
+  }
+  return <>
+    <button type="button" className="attachment-download-action" data-download-state={state}
+      title={label} aria-label={`${label} ${attachment.displayName}`} aria-busy={state === 'preparing'}
+      disabled={disabled || state === 'preparing'} onClick={event => { event.stopPropagation(); void download() }}>
+      <svg viewBox="0 0 20 20" aria-hidden="true" className={state === 'preparing' ? 'attachment-download-spinner' : undefined}>
+        <path d={state === 'preparing' ? 'M17 10a7 7 0 1 1-7-7'
+          : state === 'error' ? 'M16 4v4h-4M16 8a6 6 0 1 0 0 6' : 'M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4'} />
+      </svg>
+    </button>
+    <span className="sr-only" role="status" aria-live="polite">{notice === 'saved' ? uiAttribute('已保存文件 {0}', attachment.displayName)
+      : notice === 'started' ? uiAttribute('已交给浏览器下载 {0}', attachment.displayName)
+      : notice === 'error' ? uiAttribute('下载附件失败，请重试。') : ''}</span>
+  </>
 }
 
 function AttachmentOpenGlyph({ kind }: { kind: 'file' | 'directory' }): JSX.Element {
