@@ -957,10 +957,13 @@ export function buildLiveExecutionProgress(
       const itemId = key.slice('narration:'.length)
       // The trailing line ending is meaningful while a Markdown fence streams.
       const narration = narrationByItem.get(itemId) ?? ''
+      // Tail projection must preserve the full source's visibility. Cutting an
+      // opening comment, reference definition or image can turn hidden syntax
+      // into ordinary text. Plain narration still uses the cheap visibility path.
+      if (!safeMarkdownHasRenderableContent(narration)) return []
       const body = options.textMode === 'live_tail' ? narration.slice(-4_000) : narration
-      return safeMarkdownHasRenderableContent(body)
-        ? [{ key, kind: 'narration', body, ...(completeNarration.has(itemId) && body === narration ? { contentComplete: true } : {}) }]
-        : []
+      if (body !== narration && !safeMarkdownHasRenderableContent(body)) return []
+      return [{ key, kind: 'narration', body, ...(completeNarration.has(itemId) && body === narration ? { contentComplete: true } : {}) }]
     }
     if (key.startsWith('input:')) {
       const input = inputsById.get(key)

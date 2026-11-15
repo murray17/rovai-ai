@@ -6,15 +6,17 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-14
+last_updated: 2026-11-15
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
 
-## 长会话输入性能（2026-11-14）
+## 长会话输入性能（2026-11-15）
 
 按 User 确认方案分批实施：固定可复跑基线、隔离执行更新、控制公共历史挂载，最后依据复测决定大内容优化。
 第一批已移出工作区的高频执行正文状态，第二批完成公共历史虚拟化与定位／选区／滚动回归；复用现有 Run 窗口与局部订阅。
+收尾保留 Composer 选区过滤与搜索返回修复；按 User 反馈撤回单条长消息加载占位和摘要滑动尾部，沿用原有展示。
+搜索返回进一步支持取消：随后发送、回到最新、滚动或定位时，停止旧目标挂载与位置恢复，保留新操作的阅读意图。
 1,000 条混合历史的普通输入组件基准 p95 为 32–48ms，实际挂载 5 条；真实中文功能通过，原生输入 p95 56ms 的投递／显示路径仍需后续定位。
 范围、同负载数据、功能回归与未验收项见[实施记录](long-thread-input-performance.md)。
 
