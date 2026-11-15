@@ -576,6 +576,7 @@ export const model = {
   },
   async send(draft: any, deliveryMode?: string) {
     if (controls.steerReview) {
+      liveSequence = Math.max(liveSequence, ...state.snapshot.messages.map((message: any) => message.sequence))
       const atoms = draft.content.segments.flatMap((s: any) => s.kind === 'atom' && s.atom.type === 'member' ? [s.atom.agentId] : [])
       const recipients = [...new Set<string>(atoms.length ? atoms : [aid(0)])]
       const message = { ...makeMessage(`steer-local-${++serial}`, ++liveSequence, draft.body || '请查看附件。'),

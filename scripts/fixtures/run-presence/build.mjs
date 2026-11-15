@@ -15,8 +15,14 @@ if (baseline) for (const file of execFileSync('git', ['diff', '--diff-filter=MRT
 }
 const result = await build({ configFile: false, root: import.meta.dirname, base: './', logLevel: 'warn',
   plugins: [{ name: 'fixture-source-baseline', enforce: 'pre', load: id => baselineSources.get(id),
-    transform: (code, id) => process.env.ROVAI_FIXTURE_MEASURE_TIMELINE === '1'
-      ? instrumentTimelineMeasurements(code, id) : undefined }, react()],
+    transform: (code, id) => {
+      if (process.env.ROVAI_FIXTURE_READING_NAVIGATION === '1' && id.endsWith('/ThreadWorkspace.tsx')) {
+        const declaration = 'const timelineVirtualRef = useRef<TimelineVirtualListHandle>(null)'
+        if (!code.includes(declaration)) throw Error('Missing timeline controller fixture boundary')
+        code = code.replace(declaration, declaration + '\n  ;(window as any).__timelineControllerRef = timelineVirtualRef')
+      }
+      return process.env.ROVAI_FIXTURE_MEASURE_TIMELINE === '1' ? instrumentTimelineMeasurements(code, id) : code
+    } }, react()],
   resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
   define: { __SOURCE_COMMIT__: JSON.stringify(sourceCommit) },
   build: { write: false, assetsInlineLimit: Number.MAX_SAFE_INTEGER, cssCodeSplit: false,

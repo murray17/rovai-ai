@@ -4,8 +4,8 @@ import { useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, use
 export const PUBLIC_TIMELINE_VIRTUAL_THRESHOLD = 100
 export interface TimelineVirtualListHandle {
   virtual: boolean
-  /** Resolve after the row and any data-timeline-pending content are mounted. */
-  ensureMounted(id: string): Promise<HTMLElement | null>
+  /** Resolve after the row and pending content mount; cancellation resolves null. */
+  ensureMounted(id: string, signal?: AbortSignal): Promise<HTMLElement | null>
   rememberAnchor(): void
   restoreAnchor(): void
 }
@@ -154,13 +154,28 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
 
   useImperativeHandle(controllerRef, () => ({ virtual, restoreAnchor,
     rememberAnchor() { pendingAnchor.current = null; rememberAnchor() },
-    ensureMounted(id) {
+    ensureMounted(id, signal) {
+      if (signal?.aborted) return Promise.resolve(null)
       const mounted = findNode(id)
       if (mounted && !mounted.querySelector('[data-timeline-pending]')
         || !indexesById.has(id) || !virtual && !mounted) return Promise.resolve(mounted)
       pendingMount.current?.resolve(null)
       setTarget(id)
-      return new Promise(resolve => { pendingMount.current = { id, resolve } })
+      return new Promise(resolve => {
+        const pending: PendingMount = { id, resolve(node) {
+          signal?.removeEventListener('abort', cancel)
+          resolve(node)
+        } }
+        const cancel = () => {
+          if (pendingMount.current !== pending) return
+          pendingMount.current = null
+          pendingAnchor.current = null
+          setTarget(null)
+          pending.resolve(null)
+        }
+        pendingMount.current = pending
+        signal?.addEventListener('abort', cancel, { once: true })
+      })
     }
   }), [virtual, indexesById, findNode, restoreAnchor, rememberAnchor])
 

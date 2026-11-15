@@ -48,10 +48,10 @@ test('public history bounds mounting and preserves reading, selection, focus and
     })()`)
     const offset = id => b.evaluate(`(() => {const v=document.querySelector('.timeline-scroll'),e=v.querySelector('[data-message-id=${id}]');return e ? e.getBoundingClientRect().top-v.getBoundingClientRect().top : null})()`)
     for (const count of [20, 200]) {
-      for (const action of ['release', 'remove']) {
+      for (const action of ['release', 'remove', 'abort']) {
         await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + `?timelineReadiness=1&probeCount=${count}&case=${action}` })
         await b.wait('!!window.__timelineReadiness')
-        await b.evaluate(`window.probeResult='pending';__timelineReadiness.mount('probe-0').then(value=>window.probeResult=value);true`)
+        await b.evaluate(`window.probeResult='pending';__timelineReadiness.mount('probe-0',${action === 'abort'}).then(value=>window.probeResult=value);true`)
         await pause(100)
         assert.equal(await b.evaluate('probeResult'), 'pending', 'row navigation must wait for content readiness')
         await b.evaluate(`__timelineReadiness.${action}()`)

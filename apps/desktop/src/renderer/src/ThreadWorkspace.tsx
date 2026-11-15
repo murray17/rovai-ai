@@ -2074,11 +2074,17 @@ export function ThreadWorkspace({
   const workspaceShellRef = useRef<HTMLElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const timelineVirtualRef = useRef<TimelineVirtualListHandle>(null)
+  const conversationFindRestoreController = useRef<AbortController | null>(null)
+  const cancelConversationFindRestore = useCallback((): void => {
+    conversationFindRestoreController.current?.abort()
+    conversationFindRestoreController.current = null
+  }, [])
   const ensureTimelineMessageMounted = useCallback((id: string) => {
+    cancelConversationFindRestore()
     const current = timelineReadingPosition.current
     if (current) timelineReadingPosition.current = { ...current, position: { ...current.position, followingLatest: false } }
     return timelineVirtualRef.current?.ensureMounted(id) ?? Promise.resolve(null)
-  }, [])
+  }, [cancelConversationFindRestore])
   const runSourceNavigation = useRunSourceNavigation(snapshot.thread.id, snapshot.messages, timelineScrollRef, ensureTimelineMessageMounted)
   const historyLoaderRef = useRef<HTMLDivElement>(null)
   const timelineTouchStartY = useRef<number | null>(null)
@@ -2117,11 +2123,13 @@ export function ThreadWorkspace({
   const replyRevealActive = useRef(false)
   const replyRevealCleanup = useRef<(() => void) | null>(null)
   const cancelReplyReveal = useCallback((): void => {
+    // Explicit reading actions supersede both reply reveals and search returns.
+    cancelConversationFindRestore()
     replyRevealGeneration.current++
     replyRevealActive.current = false
     replyRevealCleanup.current?.()
     replyRevealCleanup.current = null
-  }, [])
+  }, [cancelConversationFindRestore])
   const preserveTimelineReadingPosition = useCallback(() => !replyRevealActive.current, [])
   useEffect(() => cancelReplyReveal, [snapshot.thread.id, cancelReplyReveal])
   const approvalDockRef = useRef<HTMLElement>(null)
@@ -3266,6 +3274,7 @@ export function ThreadWorkspace({
   }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id, anchorNavigation.navigation, runSourceNavigation.cancel, cancelReplyReveal])
 
   const closeConversationFind = useCallback((restore = true): void => {
+    cancelConversationFindRestore()
     const generation = ++conversationFindRequestGeneration.current
     if (conversationFindDebounceTimer.current !== null) {
       window.clearTimeout(conversationFindDebounceTimer.current)
@@ -3281,18 +3290,22 @@ export function ThreadWorkspace({
     const restorePoint = conversationFindRestorePoint.current
     conversationFindRestorePoint.current = null
     if (!restore || restorePoint?.threadId !== snapshot.thread.id) return
+    const controller = new AbortController()
+    conversationFindRestoreController.current = controller
+    const isCurrent = (): boolean => !controller.signal.aborted
+      && conversationFindRequestGeneration.current === generation
+      && mountedThreadId.current === restorePoint.threadId && !conversationFindOpenRef.current
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(async () => {
-        if (conversationFindRequestGeneration.current !== generation
-          || mountedThreadId.current !== restorePoint.threadId || conversationFindOpenRef.current) return
-        const timeline = timelineScrollRef.current
-        if (timeline) {
+        try {
+          if (!isCurrent()) return
+          const timeline = timelineScrollRef.current
+          if (!timeline) return
           let nextScrollTop = restorePoint.scrollTop
           const anchor = restorePoint.anchor
           if (anchor && timelineVirtualRef.current) {
-            const mounted = await timelineVirtualRef.current.ensureMounted(anchor.messageId)
-            if (!mounted || conversationFindRequestGeneration.current !== generation
-              || mountedThreadId.current !== restorePoint.threadId || conversationFindOpenRef.current) return
+            const mounted = await timelineVirtualRef.current.ensureMounted(anchor.messageId, controller.signal)
+            if (!mounted || !isCurrent()) return
           }
           const anchorNode = anchor
             ? timeline.querySelector<HTMLElement>(
@@ -3316,10 +3329,12 @@ export function ThreadWorkspace({
               followingLatest: restorePoint.followingLatest
             }
           }
+        } finally {
+          if (conversationFindRestoreController.current === controller) conversationFindRestoreController.current = null
         }
       })
     })
-  }, [snapshot.thread.id])
+  }, [snapshot.thread.id, cancelConversationFindRestore])
 
   const navigateUserAnchor = useCallback((messageId: string): void => {
     cancelReplyReveal()

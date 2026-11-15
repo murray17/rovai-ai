@@ -258,8 +258,13 @@ function TimelineReadinessProbe() {
   const [pending, setPending] = useState(true)
   const [items, setItems] = useState(() => Array.from({ length: Number(params.get('probeCount') ?? 20) }, (_, index) => ({ id: `probe-${index}` })))
   useEffect(() => {
+    let abort: AbortController | undefined
     Object.assign(window, { __timelineReadiness: {
-      mount: (id: string) => controller.current!.ensureMounted(id).then(node => node ? !node.querySelector('[data-timeline-pending]') : null),
+      mount: (id: string, cancellable = false) => {
+        abort = cancellable ? new AbortController() : undefined
+        return controller.current!.ensureMounted(id, abort?.signal).then(node => node ? !node.querySelector('[data-timeline-pending]') : null)
+      },
+      abort: () => abort?.abort(),
       release: () => setPending(false), remove: () => setItems([])
     } })
   }, [])
