@@ -238,6 +238,8 @@ RunCard Token 总量扩展现有 `usage_core_semantics_preserve_unknown_zero_and
 复核继续扩展同一 checkpoint owner，验证 OpenCode V2 缺 reasoning、reasoning 单独补齐、稀疏重放及矛盾补充字段不阻断其他 Run；
 累计父/子字段分批覆盖 Input/cache、Output/reasoning 和 full total。既有 JSONL cursor 与 SQLite metadata owners
 从真实 reader 入口送入 buffer/checkpoint，验证非空稀疏→补齐→重复、历史更新栅栏及 32,768 行历史下的物理后缀查询。
+SQLite 同一 owner 使用生产 Statement 的 `SQLITE_STMTSTATUS_RUN` 验证 1,000 条完整/稀疏调用的实际查询次数、
+逐次采样预算、补采耗尽后不再查询且保留已知消费，以及在途调用与已完成记录分别退出；不以输出去重或 wall-clock 代替查询计数。
 MiniMax 原 error/aborted 一刀切拒绝的 case 随该准入退出，原 owner 内以正消费保留和全零占位拒绝的对照接替；
 user、未知 stopReason、缺 usage、负数与隐私 canary 仍保留。
 Migration 225 的 DDL/回执回滚和旧值/null/zero 保留复用 `async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt`，

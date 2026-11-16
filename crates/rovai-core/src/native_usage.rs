@@ -1,7 +1,7 @@
 //! Numeric Usage from verified, root-agent native journals. No journal content
 //! is retained or forwarded; a prompt starts with a cursor and identity baseline.
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs::{self, File, Metadata, OpenOptions},
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Component, Path, PathBuf},
@@ -875,6 +875,13 @@ const SQLITE_USAGE_CURSOR_QUERY: &str = "SELECT rowid,id FROM message ORDER BY r
 // Seek the primary rowid tree instead; no native database indexes are changed.
 const SQLITE_USAGE_CANDIDATES_QUERY: &str = "SELECT id,time_created FROM message NOT INDEXED
     WHERE rowid>?1 AND rowid<=?2 AND session_id=?3 ORDER BY rowid LIMIT ?4";
+const SQLITE_USAGE_QUERIES_PER_POLL: usize = 64;
+const SQLITE_USAGE_SUPPLEMENT_READS: u8 = 2;
+
+struct PendingSqliteUsage {
+    id: String,
+    supplement_reads: u8,
+}
 
 pub(crate) struct OpenCodeUsageReader {
     kind: AdapterKind,
@@ -883,9 +890,11 @@ pub(crate) struct OpenCodeUsageReader {
     session_id: String,
     file_identity: FileIdentity,
     cursor: Option<(i64, String)>,
-    pending: BTreeSet<(i64, String)>,
+    pending: VecDeque<PendingSqliteUsage>,
     observed: BTreeMap<String, NativeUsageSnapshot>,
     disabled: bool,
+    #[cfg(test)]
+    metadata_query_runs: i32,
 }
 
 impl OpenCodeUsageReader {
@@ -930,9 +939,11 @@ impl OpenCodeUsageReader {
             session_id,
             file_identity: FileIdentity::from_metadata(&metadata),
             cursor: None,
-            pending: BTreeSet::new(),
+            pending: VecDeque::new(),
             observed: BTreeMap::new(),
             disabled: false,
+            #[cfg(test)]
+            metadata_query_runs: 0,
         };
         let database = reader.open()?;
         reader.validate_session(&database)?;
@@ -992,6 +1003,10 @@ impl OpenCodeUsageReader {
     }
 
     fn poll_checked(&mut self) -> Result<Vec<NativeUsageObservation>> {
+        #[cfg(test)]
+        {
+            self.metadata_query_runs = 0;
+        }
         let mut connection = self.open()?;
         let database = connection.transaction()?;
         self.validate_session(&database)?;
@@ -1019,40 +1034,41 @@ impl OpenCodeUsageReader {
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )?;
         for row in ids {
-            let (id, created) = row?;
+            let (id, _created) = row?;
             if !safe_identity(&id) {
                 bail!("native Usage message identity is invalid");
             }
-            self.pending.insert((created, id));
+            self.pending.push_back(PendingSqliteUsage {
+                id,
+                supplement_reads: SQLITE_USAGE_SUPPLEMENT_READS,
+            });
             if self.pending.len() > MAX_IDENTITIES {
                 bail!("native Usage pending identities exceed bound");
             }
         }
         self.cursor = next_cursor;
+        if self.pending.is_empty() {
+            return Ok(Vec::new());
+        }
         // Only metadata scalars leave SQLite. Native parts and message bodies
         // are never selected into Core memory or its public Evidence channel.
-        // Revisit only this prompt's discovered assistant IDs, including completed
-        // failures and sparse successes. Late fields may update the same row.
-        // The physical baseline excludes history; MAX_IDENTITIES bounds rereads.
+        // Completed full calls leave immediately. Sparse/failed completed calls
+        // get only two supplements. Round-robin also bounds work per poll, while
+        // an actual in-flight call keeps the original wait-for-completion path.
         let mut query = database.prepare(
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
             CASE WHEN json_type(data,'$.tokens.reasoning')='integer' THEN json_extract(data,'$.tokens.reasoning') END, CASE WHEN json_type(data,'$.tokens.cache.read')='integer' THEN json_extract(data,'$.tokens.cache.read') END,
             CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, CASE WHEN json_type(data,'$.time.completed')='integer' THEN json_extract(data,'$.time.completed') END, CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END,
-            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END, json_extract(data,'$.role')
+            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END, json_extract(data,'$.role'),
+            COALESCE(json_type(data,'$.error')<>'null',0)
             FROM message WHERE session_id=?1 AND id=?2 AND json_valid(data)
-                AND json_type(data,'$.role')='text'
-                AND (json_extract(data,'$.role')<>'assistant' OR
-                    (json_type(data,'$.time.completed')='integer'
-                    AND (json_type(data,'$.error') IS NULL OR json_type(data,'$.error')='null'
-                        OR (json_type(data,'$.tokens.input')='integer' AND json_extract(data,'$.tokens.input')>0)
-                        OR (json_type(data,'$.tokens.output')='integer' AND json_extract(data,'$.tokens.output')>0)
-                        OR (json_type(data,'$.tokens.reasoning')='integer' AND json_extract(data,'$.tokens.reasoning')>0)
-                        OR (json_type(data,'$.tokens.cache.read')='integer' AND json_extract(data,'$.tokens.cache.read')>0)
-                        OR (json_type(data,'$.tokens.cache.write')='integer' AND json_extract(data,'$.tokens.cache.write')>0))))",
+                AND json_type(data,'$.role')='text'",
         )?;
         let mut result = Vec::new();
-        for (created, id) in std::mem::take(&mut self.pending) {
+        for _ in 0..self.pending.len().min(SQLITE_USAGE_QUERIES_PER_POLL) {
+            let mut candidate = self.pending.pop_front().unwrap();
+            let id = &candidate.id;
             let row = query
                 .query_row(rusqlite::params![self.session_id, id], |row| {
                     Ok((
@@ -1070,17 +1086,44 @@ impl OpenCodeUsageReader {
                         row.get::<_, Option<String>>(8)?,
                         row.get::<_, Option<f64>>(9)?,
                         row.get::<_, String>(10)?,
+                        row.get::<_, bool>(11)?,
                     ))
                 })
                 .optional()?;
-            let Some((id, mut fields, time, provider, model, cost, role)) = row else {
-                self.pending.insert((created, id));
+            let Some((id, mut fields, time, provider, model, cost, role, failed)) = row else {
+                if candidate.supplement_reads > 0 {
+                    candidate.supplement_reads -= 1;
+                    self.pending.push_back(candidate);
+                }
                 continue;
             };
             if role != "assistant" {
                 continue;
             }
-            self.pending.insert((created, id.clone()));
+            if time.is_none() {
+                if !failed {
+                    self.pending.push_back(candidate);
+                } else if candidate.supplement_reads > 0 {
+                    candidate.supplement_reads -= 1;
+                    self.pending.push_back(candidate);
+                }
+                continue;
+            }
+            let counts = [
+                fields.input_tokens,
+                fields.output_tokens,
+                fields.reasoning_output_tokens,
+                fields.cache_read_input_tokens,
+                fields.cache_write_input_tokens,
+            ];
+            let complete = !failed && counts.iter().all(|n| n.is_some_and(|n| n >= 0));
+            if !complete && candidate.supplement_reads > 0 {
+                candidate.supplement_reads -= 1;
+                self.pending.push_back(candidate);
+            }
+            if failed && !counts.into_iter().flatten().any(|n| n > 0) {
+                continue;
+            }
             fields.output_tokens = match (fields.output_tokens, fields.reasoning_output_tokens) {
                 (Some(output), Some(reasoning)) if output >= 0 && reasoning >= 0 => {
                     output.checked_add(reasoning)
@@ -1119,6 +1162,10 @@ impl OpenCodeUsageReader {
             let snapshot = usage_snapshot(&consumption.usage);
             if self.observed.get(&id) == Some(&snapshot) {
                 continue;
+            }
+            if !self.observed.contains_key(&id) && self.observed.len() >= MAX_IDENTITIES {
+                self.disabled = true;
+                break;
             }
             self.observed.insert(id.clone(), snapshot);
             result.push(consumption);
@@ -1162,6 +1209,10 @@ impl OpenCodeUsageReader {
                     .map(|(provider, model)| format!("{provider}/{model}"));
                 result.push(gauge);
             }
+        }
+        #[cfg(test)]
+        {
+            self.metadata_query_runs = query.get_status(rusqlite::StatementStatus::Run);
         }
         Ok(result)
     }
@@ -3134,7 +3185,7 @@ mod tests {
             .unwrap();
         assert!(reader.poll().is_empty());
         assert!(
-            reader.pending.iter().all(|(_, id)| id != "user-record"),
+            reader.pending.iter().all(|item| item.id != "user-record"),
             "non-assistant rows leave the candidate budget"
         );
         database.execute("INSERT INTO message VALUES('sparse','session-1',6,?1)",
@@ -3363,6 +3414,140 @@ mod tests {
                 [],
             )
             .unwrap();
+        // Measure actual SQLite statement executions, rather than counting
+        // returned observations: duplicate filtering happens after each query.
+        for complete in [true, false] {
+            let mut measured = OpenCodeUsageReader::baseline(
+                path.clone(),
+                "/workspace".into(),
+                "session-1".into(),
+            )
+            .unwrap();
+            let data = if complete {
+                history_usage.clone()
+            } else {
+                json!({"role":"assistant","time":{"completed":1},"tokens":{"input":1}}).to_string()
+            };
+            database.execute(
+                "WITH RECURSIVE calls(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM calls WHERE n<1000)
+                 INSERT INTO message SELECT ?1||n,'session-1',1,?2 FROM calls",
+                rusqlite::params![format!("measured-{complete}-"),data],
+            ).unwrap();
+            let mut queries = 0;
+            let mut calls = 0;
+            for _ in 0..64 {
+                let observations = measured.poll();
+                assert!(!measured.disabled);
+                assert!(measured.metadata_query_runs <= SQLITE_USAGE_QUERIES_PER_POLL as i32);
+                queries += measured.metadata_query_runs;
+                calls += observations
+                    .iter()
+                    .filter(|item| item.usage.scope == "model_call")
+                    .count();
+                if measured.pending.is_empty() {
+                    break;
+                }
+            }
+            assert!(measured.pending.is_empty());
+            assert_eq!(
+                calls, 1000,
+                "unchanged supplements cannot duplicate consumption"
+            );
+            assert_eq!(queries, if complete { 1000 } else { 3000 });
+            for _ in 0..10 {
+                assert!(measured.poll().is_empty());
+                assert_eq!(
+                    measured.metadata_query_runs, 0,
+                    "idle queries must not scale with retired calls"
+                );
+            }
+            database
+                .execute(
+                    "UPDATE message SET data=json_set(data,'$.tokens.output',5) WHERE id=?1",
+                    [format!("measured-{complete}-1")],
+                )
+                .unwrap();
+            assert!(
+                measured.poll().is_empty(),
+                "no reliable update signal reopens a retired call"
+            );
+            assert_eq!(measured.metadata_query_runs, 0);
+            println!(
+                "SQLite Usage query budget: complete={complete}, calls=1000, metadata_queries={queries}, idle=0"
+            );
+        }
+        let mut unfinished =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        insert("still-running", "session-1", None);
+        for _ in 0..8 {
+            assert!(unfinished.poll().is_empty());
+            assert_eq!(
+                unfinished.metadata_query_runs, 1,
+                "an in-flight call is distinct from completed supplements"
+            );
+        }
+        database.execute("UPDATE message SET data=json_set(data,'$.time.completed',9) WHERE id='still-running'", []).unwrap();
+        assert_eq!(unfinished.poll().len(), 2);
+        assert!(unfinished.pending.is_empty());
+        assert!(unfinished.poll().is_empty());
+        assert_eq!(unfinished.metadata_query_runs, 0);
+        let mut malformed =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        for (id, data) in [
+            ("unclassified-budget", json!({})),
+            (
+                "failed-unfinished-budget",
+                json!({"role":"assistant","error":{"name":"ProviderError"}}),
+            ),
+            (
+                "failed-zero-budget",
+                json!({"role":"assistant","time":{"completed":9},"error":{"name":"ProviderError"},"tokens":{"input":0,"output":0}}),
+            ),
+        ] {
+            database
+                .execute(
+                    "INSERT INTO message VALUES(?1,'session-1',1,?2)",
+                    rusqlite::params![id, data.to_string()],
+                )
+                .unwrap();
+        }
+        for _ in 0..=SQLITE_USAGE_SUPPLEMENT_READS {
+            assert!(malformed.poll().is_empty());
+            assert_eq!(malformed.metadata_query_runs, 3);
+        }
+        assert!(malformed.pending.is_empty());
+        assert!(malformed.poll().is_empty());
+        assert_eq!(malformed.metadata_query_runs, 0);
+        let mut expired =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database
+            .execute(
+                "INSERT INTO message VALUES('expired-supplement','session-1',1,?1)",
+                [
+                    json!({"role":"assistant","time":{"completed":1},"tokens":{"input":10000}})
+                        .to_string(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &expired.poll()),
+            Some(25000)
+        );
+        for _ in 0..SQLITE_USAGE_SUPPLEMENT_READS {
+            assert!(expired.poll().is_empty());
+        }
+        assert!(expired.pending.is_empty());
+        database.execute("UPDATE message SET data=json_set(data,'$.tokens.output',5000) WHERE id='expired-supplement'", []).unwrap();
+        assert!(expired.poll().is_empty());
+        assert_eq!(expired.metadata_query_runs, 0);
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &[]),
+            Some(25000),
+            "exhausted supplements preserve known consumption"
+        );
         let mut bounded =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();

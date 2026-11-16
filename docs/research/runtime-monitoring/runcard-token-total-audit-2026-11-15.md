@@ -183,7 +183,7 @@ OpenCode V2 缺 reasoning 的普通 Output 也被错误用于反推完整 Input�
 | --- | --- |
 | OpenCode V2 total=175K，U/R/W=100K/40K/20K，普通 O=10K，thought 缺失 | 保留 175K total 与 10K 已知输出；I 只由输入桶得到 160K，不制造 165K。后到 thought=5K（完整帧或 reasoning 单独到达）后 O=15K，旧稀疏帧重放仍为 175K。W 同时缺失时 I 保持未知 |
 | CodeBuddy JSONL 同 message ID：I=50K → 补 O=5K → 重复 | reader 放行变化快照，经真实 buffer/checkpoint 得到 50K→55K→55K；下一 Prompt 的 baseline 仍排除历史身份的后续变化 |
-| OpenCode SQLite 同行：失败时 I=10K → 成功补 O=5K → 重复读取 | reader→buffer→checkpoint 为 10K→15K→15K；仅保留物理 baseline 后本轮根 Session assistant 候选供复读，最多 8,192 个。32,768 行历史的原查询工作量断言保留（cursor 10、suffix discovery 34 VM steps），不回扫历史 |
+| OpenCode SQLite 同行：失败时 I=10K → 成功补 O=5K → 重复读取 | reader→buffer→checkpoint 为 10K→15K→15K；补齐限于下述性能收口预算。32,768 行历史的原查询工作量断言保留（cursor 10、suffix discovery 34 VM steps），不回扫历史 |
 | 累计 I 包含缓存：100K/20K/10K 基线 → 仅 R=40K → I=120K/R=40K/O=10K | 显示新增仅 20K，不是 40K；同一 owner 也验证累计 Output/reasoning 与 full total/分项交错。已有父基线时不改计子项，等父计数推进 |
 | 同调用矛盾补充字段与另一 Run 的有效 O=7K 同批 | 矛盾补充局部跳过，旧 175K/checkpoint 保留；另一 Run 的 7K 正常提交。真实 SQL 失败仍按既有原子回滚/重试路径处理 |
 
@@ -197,3 +197,29 @@ OpenCode V2 缺 reasoning 的普通 Output 也被错误用于反推完整 Input�
 修正后完整 `cargo test --workspace` 再次通过：484 passed、0 failed、1 个既有 ignored；
 `cargo fmt --all -- --check`、`git diff --check`、48 组比较样本重建及源码隔离副本的通用文档治理（10 个测试）通过。
 本次无 Renderer 改动，也未启动完整 App 或真实 Runtime。
+
+## SQLite 补采性能收口（2026-11-16）
+
+`4822e2ab1` 将所有本轮已完成调用重新加入 pending，避免重复计账但没有避免重复 SQL；
+8,192 的身份上限不能证明此开销可接受。该持续复读策略已经替换：完整成功调用读取后立即退出；
+已完成的稀疏/失败记录以及无有效元数据的候选最多补读两次，预算结束保留已知量，不为追补重开历史 ID。
+尚在进行的 assistant 调用沿用原有等待完成流程；候选轮转，每次 poll 最多 64 次逐调用 Usage 查询。
+没有新增更新信号服务、原生索引或定时器；超出补采预算的迟到字段，以及尚未轮到读取而 Run 已结束的候选可能少计，
+保留已采到的可信消费，不为完整采集延长 Run，接受此方案 1 取舍。
+
+复用现有 SQLite owner，直接读取生产数值 Statement 的 `SQLITE_STMTSTATUS_RUN`，而非以返回 observation 数推断查询次数：
+
+| 受控样本 | 实际查询次数 |
+| --- | --- |
+| 1,000 条完整成功调用 | 初始合计 1,000 次；退出后连续 10 次 poll 的逐调用 Usage 查询均为 0 |
+| 1,000 条已完成但缺字段的调用 | 包括补采累计 3,000 次，随后连续 10 次 poll 的逐调用 Usage 查询均为 0 |
+| 每次采样 | 上述大样本每次最多 64 次逐调用 Usage 查询；未处理完的候选轮转，不能同一 poll 内反复读同一 ID |
+| 预算耗尽后原生行更新 | 不再发起该 ID 的 Usage 查询，已落盘的消费保持；没有将缺字段改成零 |
+
+活跃 Run 仍执行原有固定游标、连续性和 Session 检查，表中的 0 不表示关闭整个数据库采样。
+Run finished 后的普通采样由既有 `accepts_native_poll` 前后栅栏停止；生产调用链和原 flush owner 验证此边界，
+不是上述活跃 Run 内逐调用 SQL 计数的替代。证据限于查询次数和工作量边界，未换算成完整 App 的 CPU 或延迟百分比。
+
+收口验证：完整 `cargo test --workspace` 484 passed、0 failed、1 个既有 ignored；monitoring 13 passed、
+native reader 3 passed（含以上查询计数与补采回归）；格式、diff 和源码隔离副本的通用文档治理通过。
+复用既有 owners，未新增、删除或禁用 Rust 测试函数；没有启动真实 Runtime 或完整 App。
