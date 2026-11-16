@@ -7480,6 +7480,32 @@ function metricK(value: number | null): string {
 type RunUsage = RuntimeExecutionMetricsSnapshot['runs'][number]
 type SessionContext = RuntimeExecutionMetricsSnapshot['sessions'][number]
 
+function ExecutionUsagePopover({ run, usage, total }: { run: AgentRunView; usage: RunUsage | null; total: number }): JSX.Element {
+  const rows = [
+    ['Input Token', usage?.promptInputTotalTokens ?? null],
+    ['Output Token', usage?.outputTokens ?? null],
+    ['Cache Read', usage?.cacheReadTokens ?? null],
+    ['Cache Write', usage?.cacheWriteTokens ?? null]
+  ] as const
+  return <Popover.Root>
+    <Popover.Trigger asChild>
+      <button className="execution-usage-trigger" type="button"
+        aria-label={uiAttribute('查看本次执行用量与耗时；{0}', metricK(total).replace(/k$/, 'K'))}
+        title={uiAttribute('查看本次执行用量与耗时')}>
+        {metricK(total).replace(/k$/, 'K')}
+      </button>
+    </Popover.Trigger>
+    <Popover.Portal>
+      <Popover.Content className="execution-metric-popover" sideOffset={6} align="end">
+        <dl>
+          {rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{metricK(value)}</dd></div>)}
+          <div className="execution-usage-duration"><dt>{uiAttribute('执行耗时')}</dt><dd>{executionRunDurationLabel(run, Date.now())}</dd></div>
+        </dl>
+      </Popover.Content>
+    </Popover.Portal>
+  </Popover.Root>
+}
+
 function ExecutionDurationPopover({ run }: { run: AgentRunView }): JSX.Element {
   return <Popover.Root>
     <Popover.Trigger asChild>
@@ -7566,8 +7592,8 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
   return <span className="execution-run-metric-group">
     {(cancelling || starting) ? <span className="execution-run-status" role="status">{uiAttribute(cancelling ? '正在停止…' : '启动中…')}</span>
       : run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
-    {total !== null && <span className="execution-usage-value">{metricK(total).replace(/k$/, 'K')}</span>}
-    <ExecutionDurationPopover run={run} />
+    {total !== null ? <ExecutionUsagePopover run={run} usage={usage} total={total} />
+      : <ExecutionDurationPopover run={run} />}
   </span>
 }
 

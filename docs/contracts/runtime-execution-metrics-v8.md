@@ -10,7 +10,7 @@ last_updated: 2026-11-16
 # Runtime Execution Metrics v8
 
 继承 [v7](runtime-execution-metrics-v7.md) 的 Session Context、绑定栅栏和刷新路径，替换 RunCard 的
-成功/结算/完整性门槛与 Token 分项气泡。Context 和整个监控页面的结构不变。
+成功/结算/完整性门槛。保留原有用量详情、耗时后备入口、Context 和整个监控页面的结构。
 采集与投影规则由 [Usage v12](runtime-usage-monitoring-v12.md)拥有。
 
 ## Run 显示投影
@@ -36,10 +36,10 @@ Core 统一使用方案 1：对当前 logical Run 内可信、可归属、已去
 
 ## RunCard
 
-- 有数值时只显示一个 `xxK`，千进制，保留至多一位小数；显式零显示 `0K`。
+- 卡片摘要有数值时只显示一个可点击的 `xxK`，千进制，保留至多一位小数；显式零显示 `0K`。
 - 无数值时不显示 Token 数字；保留既有运行耗时或终态时钟入口。
-- 不显示“部分”、完整性/覆盖标签、`≥`、`≈`，不回退 Input、Output、Cache Read/Write 分项。
-- Token 数字是只读文本，不作为弹层入口；耗时由独立时钟按钮查看，数字存在时也保留时钟。不在耗时气泡列 Token 分项或重复总量。
+- 卡片摘要不显示“部分”、完整性/覆盖标签、`≥`、`≈`，不回退 Input、Output、Cache Read/Write 分项。
+- 有数值时用量入口替代时钟；点击保留原有 Input Token、Output Token、Cache Read、Cache Write 和执行耗时明细。明细读取已有投影，缺失显示 `—`，不重算总量，不新增采集或详情查询。
 - 迟到投影沿现有 `monitoring.changed`/有界读取更新；可见性、single-flight、旧 epoch 排除和失败保留规则不变。
 
 ## 证据
