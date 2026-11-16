@@ -48,6 +48,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
     super::goose::downgrade_for_test(c);
+
     c.execute_batch("DROP TABLE IF EXISTS memory_preference;
         DELETE FROM schema_migration WHERE version=224;
         UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1 AND projection_schema_version=174;").unwrap();
@@ -109,7 +110,7 @@ pub(crate) fn assert_upgrade(database: &mut Database) {
     assert!(super::goose::schema_matches(database.connection()).unwrap());
     assert!(
         matches!(classify_database_contract(database.connection()).unwrap(),
-        DatabaseContractClassification::Current(ref m) if m.projection_schema_version == 175)
+            DatabaseContractClassification::Current(ref m) if m.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION)
     );
     assert_eq!(
         evidence,

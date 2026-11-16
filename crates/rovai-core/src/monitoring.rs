@@ -45,7 +45,7 @@ pub(crate) fn async_settlement_schema_matches(
     let normalize = |sql: &str| sql.split_whitespace().collect::<String>();
     Ok(actual.as_deref().map(normalize) == Some(normalize(ASYNC_SETTLEMENT_TRIGGER)))
 }
-const USAGE_PARSER_VERSION: i64 = 5;
+const USAGE_PARSER_VERSION: i64 = 6;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const CHECKPOINT_TTL_HOURS: i64 = 72;
 const RETENTION_DAYS: i64 = 45;
@@ -145,6 +145,8 @@ impl RuntimeInputSemantics {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeUsageFields {
+    /// Verified full consumption of this exact unit, never context occupancy.
+    pub total_tokens: Option<i64>,
     pub input_tokens: Option<i64>,
     pub uncached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -157,8 +159,9 @@ pub struct RuntimeUsageFields {
 }
 
 impl RuntimeUsageFields {
-    fn is_empty(&self) -> bool {
-        self.input_tokens.is_none()
+    pub(crate) fn is_empty(&self) -> bool {
+        self.total_tokens.is_none()
+            && self.input_tokens.is_none()
             && self.uncached_input_tokens.is_none()
             && self.output_tokens.is_none()
             && self.reasoning_output_tokens.is_none()
@@ -198,8 +201,9 @@ pub struct ParsedRuntimeUsage {
     pub occurred_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 struct UsageCounters {
+    native_total_tokens: Option<i64>,
     prompt_input_total_tokens: Option<i64>,
     uncached_input_tokens: Option<i64>,
     cache_read_tokens: Option<i64>,
@@ -213,6 +217,7 @@ struct UsageCounters {
 impl UsageCounters {
     fn any_observed(&self) -> bool {
         [
+            self.native_total_tokens,
             self.prompt_input_total_tokens,
             self.uncached_input_tokens,
             self.cache_read_tokens,
@@ -332,7 +337,8 @@ pub struct RuntimeUsageBuffer {
     native_tails: BTreeSet<UsageRunKey>,
     pending: BTreeMap<BufferedUsageKey, Vec<BufferedUsageRecord>>,
     pending_since: BTreeMap<UsageRunKey, Instant>,
-    seen_source_identities: BTreeSet<(BufferedUsageKey, String)>,
+    seen_source_identities:
+        BTreeMap<(BufferedUsageKey, String), (UsageCounters, Option<RuntimeUsageCost>)>,
     latest_context_sources: BTreeMap<
         (UsageRunKey, String, Option<String>),
         (String, RuntimeUsageFields, Option<String>),
@@ -436,11 +442,16 @@ impl RuntimeUsageBuffer {
                         usage.context_model_id.clone(),
                     ),
                 );
-            } else if !self
-                .seen_source_identities
-                .insert((key.clone(), source_identity.to_string()))
-            {
-                continue;
+            } else {
+                let observed = (normalized.clone(), usage.cost.clone());
+                if self
+                    .seen_source_identities
+                    .insert((key.clone(), source_identity.to_string()), observed.clone())
+                    .as_ref()
+                    == Some(&observed)
+                {
+                    continue;
+                }
             }
             self.pending_since.entry(run.key.clone()).or_insert(now);
             let incoming = BufferedUsageRecord {
@@ -538,7 +549,7 @@ impl RuntimeUsageBuffer {
         self.runs.retain(|run, _| !idle.contains(run));
         self.finished.retain(|run| !idle.contains(run));
         self.seen_source_identities
-            .retain(|(key, _)| !idle.contains(&key.run));
+            .retain(|(key, _), _| !idle.contains(&key.run));
         self.latest_context_sources
             .retain(|(run, _, _), _| !idle.contains(run));
     }
@@ -615,7 +626,8 @@ fn execution_run_usage_rows(
             SELECT ar.id, ar.execution_epoch, s.prompt_input_total_tokens, s.output_tokens,
                    s.cache_read_tokens, s.cache_write_tokens,
                    s.finalized_at, s.last_observed_at,
-                   COALESCE(s.parser_version >= 5 AND s.usage_quality = 'runtime_reported', 0)
+                   COALESCE(s.parser_version >= 5 AND s.usage_quality = 'runtime_reported', 0),
+                   s.display_total_tokens
             FROM json_each(?2) requested
             JOIN agent_run ar ON ar.id = requested.value
             JOIN conversation c ON c.id = ar.conversation_id
@@ -643,6 +655,7 @@ fn execution_run_usage_rows(
                     "finalizedAt": row.get::<_, Option<String>>(6)?,
                     "lastObservedAt": row.get::<_, Option<String>>(7)?,
                     "inputOutputComplete": row.get::<_, bool>(8)?,
+                    "displayTotalTokens": row.get::<_, Option<i64>>(9)?.filter(|n| *n >= 0 && *n <= JS_MAX_SAFE_INTEGER as i64),
                 }))
             },
         )?
@@ -1112,19 +1125,20 @@ fn persist_usage_record(
     record: &BufferedUsageRecord,
 ) -> Result<bool> {
     let normalized = &record.normalized;
-    let enrolled: bool = transaction.query_row(
-        r#"
-        SELECT EXISTS(
-            SELECT 1 FROM runtime_usage_run_summary
+    let enrolled_parser: Option<i64> = transaction
+        .query_row(
+            r#"
+        SELECT parser_version FROM runtime_usage_run_summary
             WHERE collection_epoch = ?1 AND agent_run_id = ?2
-        )
         "#,
-        params![collection_epoch, run.key.agent_run_id],
-        |row| row.get(0),
-    )?;
-    if !enrolled {
+            params![collection_epoch, run.key.agent_run_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(enrolled_parser) = enrolled_parser else {
         return Ok(false);
-    }
+    };
+    let legacy = enrolled_parser < 6;
     if record.usage.scope == "session"
         && record.usage.counter_mode == RuntimeUsageCounterMode::Gauge
         && !normalized.any_observed()
@@ -1133,20 +1147,43 @@ fn persist_usage_record(
         // Context has one latest row, no cumulative baseline or value history.
         return persist_session_context(transaction, run, &record.usage);
     }
-    let source_key = checkpoint_key(run, &record.usage)?;
-    let checkpoint_key = if record.usage.counter_mode == RuntimeUsageCounterMode::Delta {
-        // A checkpoint belongs to a native call, not to whichever calls happened
-        // to share a timer tick. Replaying a committed batch is idempotent too.
-        crate::command::canonical_json_digest(&json!({
-            "source": source_key, "identities": record.source_identities,
-        }))?
-    } else {
-        source_key
-    };
+    let mut keyed_usage = record.usage.clone();
+    if legacy {
+        // Retain old durable keys for exact replay; don't invent missing call
+        // relations in an already aggregated historical Run.
+        keyed_usage.identity_suffix = match record.usage.dialect_id.as_str() {
+            "pi-message-end-usage-v1" => "assistant_message".into(),
+            "copilot-native-call-usage-v1" => "native_model_call".into(),
+            _ => keyed_usage.identity_suffix,
+        };
+    }
+    let source_key = checkpoint_key(run, &keyed_usage)?;
+    let native_call_identity = !legacy
+        && matches!(
+            record.usage.dialect_id.as_str(),
+            "pi-message-end-usage-v1"
+                | "copilot-native-call-usage-v1"
+                | "cline-plugin-model-usage-v1"
+                | "dsh-committed-call-usage-v3"
+                | "zcode-native-turn-usage-v1"
+                | "goose-acp-message-cache-v1"
+        );
+    let checkpoint_key =
+        if record.usage.counter_mode == RuntimeUsageCounterMode::Delta && !native_call_identity {
+            // A checkpoint belongs to a native call, not to whichever calls happened
+            // to share a timer tick. Replaying a committed batch is idempotent too.
+            crate::command::canonical_json_digest(&json!({
+                "source": source_key, "identities": record.source_identities,
+            }))?
+        } else {
+            source_key
+        };
     let event_digest = crate::command::canonical_json_digest(&json!({
         "identities": record.source_identities,
         "dialect": record.usage.dialect_id,
         "suffix": record.usage.identity_suffix,
+        "counters": normalized,
+        "cost": record.usage.cost,
     }))?;
     let existing = load_checkpoint(
         transaction,
@@ -1167,54 +1204,175 @@ fn persist_usage_record(
     {
         persist_session_context(transaction, run, &record.usage)?;
     }
-    let (delta, cost_delta) = match record.usage.counter_mode {
-        RuntimeUsageCounterMode::Delta => (normalized.clone(), record.usage.cost.clone()),
-        RuntimeUsageCounterMode::Cumulative | RuntimeUsageCounterMode::Gauge => {
-            let delta = existing
-                .as_ref()
-                .map(|checkpoint| subtract_counters(normalized, &checkpoint.baseline))
-                .unwrap_or_else(|| {
-                    // This verified dialect identifies a root message started
-                    // inside this Run. Its first cumulative call observation
-                    // starts at zero; session/run counters still need history.
-                    if run.runtime_kind == AdapterKind::ClaudeCodeCli
-                        && record.usage.scope == "model_call"
-                        && record.usage.dialect_id == "claude-stream-call-usage-v1"
-                    {
-                        normalized.clone()
-                    } else {
-                        UsageCounters::default()
-                    }
-                });
-            let cost_delta = match (record.usage.cost.as_ref(), existing.as_ref()) {
-                (Some(current), Some(checkpoint))
-                    if checkpoint.cost_currency.as_deref() == Some(current.currency.as_str()) =>
+    let call_snapshot = record.usage.counter_mode == RuntimeUsageCounterMode::Delta
+        || (run.runtime_kind == AdapterKind::ClaudeCodeCli
+            && record.usage.scope == "model_call"
+            && record.usage.dialect_id == "claude-stream-call-usage-v1");
+    let mut baseline = normalized.clone();
+    let (delta, cost_delta) = if call_snapshot {
+        if let Some(previous) = &existing {
+            let Ok(merged) = merge_call_snapshot(normalized, &previous.baseline, &record.usage)
+            else {
+                // An inconsistent supplement cannot replace this call's valid
+                // checkpoint or block unrelated records in the same SQL batch.
+                return Ok(false);
+            };
+            baseline = merged;
+            let cost = match (&record.usage.cost, &previous.cost_baseline) {
+                (Some(cost), Some(old))
+                    if previous.cost_currency.as_deref() == Some(&cost.currency) =>
                 {
-                    match checkpoint.cost_baseline.as_deref() {
-                        Some(baseline) => subtract_decimal_nonnegative(&current.amount, baseline)?
-                            .filter(|amount| !decimal_is_zero(amount))
-                            .map(|amount| RuntimeUsageCost {
-                                amount,
-                                ..current.clone()
-                            }),
-                        None => None,
-                    }
+                    subtract_decimal_nonnegative(&cost.amount, old)?
+                        .filter(|n| !decimal_is_zero(n))
+                        .map(|amount| RuntimeUsageCost {
+                            amount,
+                            ..cost.clone()
+                        })
                 }
+                (Some(cost), None) => Some(cost.clone()),
                 _ => None,
             };
-            (delta, cost_delta)
+            (subtract_call_snapshot(&baseline, &previous.baseline), cost)
+        } else {
+            (baseline.clone(), record.usage.cost.clone())
+        }
+    } else {
+        match record.usage.counter_mode {
+            RuntimeUsageCounterMode::Delta => unreachable!("delta is a call snapshot"),
+            RuntimeUsageCounterMode::Cumulative | RuntimeUsageCounterMode::Gauge => {
+                let reset = existing
+                    .as_ref()
+                    .is_some_and(|old| counter_reset(normalized, &old.baseline));
+                if let Some(old) = &existing
+                    && !reset
+                {
+                    let Ok(merged) = merge_call_snapshot(normalized, &old.baseline, &record.usage)
+                    else {
+                        return Ok(false);
+                    };
+                    baseline = merged;
+                }
+                let delta = existing
+                    .as_ref()
+                    .map(|checkpoint| {
+                        if reset {
+                            UsageCounters::default()
+                        } else {
+                            subtract_counters(&baseline, &checkpoint.baseline)
+                        }
+                    })
+                    .unwrap_or_default();
+                let cost_delta = match (record.usage.cost.as_ref(), existing.as_ref()) {
+                    (Some(current), Some(checkpoint))
+                        if checkpoint.cost_currency.as_deref()
+                            == Some(current.currency.as_str()) =>
+                    {
+                        match checkpoint.cost_baseline.as_deref() {
+                            Some(baseline) => {
+                                subtract_decimal_nonnegative(&current.amount, baseline)?
+                                    .filter(|amount| !decimal_is_zero(amount))
+                                    .map(|amount| RuntimeUsageCost {
+                                        amount,
+                                        ..current.clone()
+                                    })
+                            }
+                            None => None,
+                        }
+                    }
+                    _ => None,
+                };
+                (delta, cost_delta)
+            }
+        }
+    };
+    let display_delta = if legacy || record.usage.dialect_id == "goose-acp-message-cache-v1" {
+        // Migration projects only what the retained summary can prove. New
+        // per-call accounting starts with newly enrolled Runs.
+        // Goose message caches are auxiliary subsets of its Session Input;
+        // retain their metrics without charging them beside the parent delta.
+        None
+    } else if call_snapshot {
+        let current = display_token_total(&baseline)?;
+        let previous = existing
+            .as_ref()
+            .map(|old| display_token_total(&old.baseline))
+            .transpose()?
+            .flatten();
+        match (current, previous) {
+            (Some(current), Some(previous)) => current.checked_sub(previous).filter(|n| *n > 0),
+            (Some(current), None) => Some(current),
+            _ => None,
+        }
+    } else {
+        // A Session/run snapshot first needs a baseline. A falling counter
+        // re-establishes it; it never claims the new absolute value for this Run.
+        match existing.as_ref() {
+            Some(old) if !counter_reset(normalized, &old.baseline) => {
+                // A known cumulative parent continues to own its coverage even
+                // while omitted. Counting a child's advance here would charge
+                // it again when the parent catches up in a later snapshot.
+                let mut display = delta.clone();
+                let mut observed = normalized.clone();
+                for selected in [&mut display, &mut observed] {
+                    if old.baseline.native_total_tokens.is_some() {
+                        *selected = UsageCounters {
+                            native_total_tokens: selected.native_total_tokens,
+                            ..Default::default()
+                        };
+                    } else {
+                        if old.baseline.prompt_input_total_tokens.is_some() {
+                            selected.uncached_input_tokens = None;
+                            selected.cache_read_tokens = None;
+                            selected.cache_write_tokens = None;
+                        }
+                        if old.baseline.output_tokens.is_some() {
+                            selected.reasoning_output_tokens = None;
+                        }
+                    }
+                }
+                display_token_total(&display)?.or_else(|| {
+                    // Only a comparable, unchanged consumption counter proves
+                    // an observed zero interval. Newly appearing fields do not.
+                    [
+                        (
+                            observed.native_total_tokens,
+                            old.baseline.native_total_tokens,
+                        ),
+                        (
+                            observed.prompt_input_total_tokens,
+                            old.baseline.prompt_input_total_tokens,
+                        ),
+                        (
+                            observed.uncached_input_tokens,
+                            old.baseline.uncached_input_tokens,
+                        ),
+                        (observed.cache_read_tokens, old.baseline.cache_read_tokens),
+                        (observed.cache_write_tokens, old.baseline.cache_write_tokens),
+                        (observed.output_tokens, old.baseline.output_tokens),
+                        (
+                            observed.reasoning_output_tokens,
+                            old.baseline.reasoning_output_tokens,
+                        ),
+                    ]
+                    .into_iter()
+                    .any(|(a, b)| a.zip(b).is_some_and(|(a, b)| a == b))
+                    .then_some(0)
+                })
+            }
+            _ => None,
         }
     };
     let now = Utc::now().to_rfc3339();
     let occurred_at = record.usage.occurred_at.as_deref().unwrap_or(&now);
     parse_time(occurred_at)?;
-    if delta.any_observed() || cost_delta.is_some() {
+    if delta.any_observed() || cost_delta.is_some() || display_delta.is_some() {
         update_run_summary(
             transaction,
             collection_epoch,
             run,
             &record.usage,
             &delta,
+            display_delta,
             cost_delta.as_ref(),
             delta.any_observed().then(|| {
                 normalized.prompt_input_total_tokens.is_some()
@@ -1225,7 +1383,7 @@ fn persist_usage_record(
                     && record.usage.dialect_id != "opencode-acp-root-prompt-usage-v2"
                     // Native journals are sampled asynchronously; neither the
                     // initial cursor nor the final tail is a completion barrier.
-                    && record.usage.identity_suffix != "native_model_call"
+                    && !record.usage.identity_suffix.starts_with("native_model_call")
                     && existing.as_ref().is_none_or(|checkpoint| {
                         record.usage.counter_mode == RuntimeUsageCounterMode::Delta
                             || (checkpoint.baseline.prompt_input_total_tokens.is_some()
@@ -1251,7 +1409,7 @@ fn persist_usage_record(
         &record.usage,
         &checkpoint_key,
         &event_digest,
-        normalized,
+        &baseline,
         &now,
     )?;
     Ok(true)
@@ -1437,7 +1595,7 @@ fn load_checkpoint(
                    cache_observable_request_baseline,
                    cache_hit_request_baseline,
                    cumulative_cost_baseline_decimal,
-                   cumulative_cost_currency
+                   cumulative_cost_currency, native_total_baseline
             FROM runtime_usage_checkpoint
             WHERE collection_epoch = ?1 AND agent_run_id = ?2
               AND execution_epoch = ?3 AND checkpoint_key = ?4
@@ -1452,6 +1610,7 @@ fn load_checkpoint(
                 Ok(Checkpoint {
                     last_event_digest: row.get(0)?,
                     baseline: UsageCounters {
+                        native_total_tokens: row.get(11)?,
                         prompt_input_total_tokens: row.get(1)?,
                         uncached_input_tokens: row.get(2)?,
                         cache_read_tokens: row.get(3)?,
@@ -1492,15 +1651,16 @@ fn upsert_checkpoint(
             output_baseline, reasoning_output_baseline,
             cache_observable_request_baseline, cache_hit_request_baseline,
             cumulative_cost_baseline_decimal, cumulative_cost_currency,
-            updated_at, expires_at
+            updated_at, expires_at, native_total_baseline
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-            ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
+            ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
         )
         ON CONFLICT(
             collection_epoch, agent_run_id, execution_epoch, checkpoint_key
         ) DO UPDATE SET
             last_event_digest = excluded.last_event_digest,
+            native_total_baseline = excluded.native_total_baseline,
             prompt_input_total_baseline = excluded.prompt_input_total_baseline,
             uncached_input_baseline = excluded.uncached_input_baseline,
             cache_read_baseline = excluded.cache_read_baseline,
@@ -1511,8 +1671,8 @@ fn upsert_checkpoint(
                 excluded.cache_observable_request_baseline,
             cache_hit_request_baseline = excluded.cache_hit_request_baseline,
             cumulative_cost_baseline_decimal =
-                excluded.cumulative_cost_baseline_decimal,
-            cumulative_cost_currency = excluded.cumulative_cost_currency,
+                COALESCE(excluded.cumulative_cost_baseline_decimal, cumulative_cost_baseline_decimal),
+            cumulative_cost_currency = COALESCE(excluded.cumulative_cost_currency, cumulative_cost_currency),
             updated_at = excluded.updated_at,
             expires_at = excluded.expires_at
         "#,
@@ -1538,6 +1698,7 @@ fn upsert_checkpoint(
             usage.cost.as_ref().map(|cost| cost.currency.as_str()),
             now,
             expires_at,
+            baseline.native_total_tokens,
         ],
     )?;
     Ok(())
@@ -1550,6 +1711,7 @@ fn update_run_summary(
     run: &RuntimeUsageRun,
     usage: &ParsedRuntimeUsage,
     delta: &UsageCounters,
+    display_delta: Option<i64>,
     cost_delta: Option<&RuntimeUsageCost>,
     input_output_complete: Option<bool>,
     occurred_at: &str,
@@ -1600,6 +1762,8 @@ fn update_run_summary(
             cache_hit_request_count = CASE WHEN ?12 IS NULL
                 THEN cache_hit_request_count
                 ELSE COALESCE(cache_hit_request_count, 0) + ?12 END,
+            display_total_tokens = CASE WHEN ?15 IS NULL THEN display_total_tokens
+                ELSE COALESCE(display_total_tokens, 0) + ?15 END,
             first_observed_at = COALESCE(first_observed_at, ?13),
             last_observed_at = CASE
                 WHEN last_observed_at IS NULL OR last_observed_at < ?13 THEN ?13
@@ -1622,6 +1786,7 @@ fn update_run_summary(
             delta.cache_hit_request_count,
             occurred_at,
             input_output_complete,
+            display_delta,
         ],
     )?;
     if let Some(cost) = cost_delta {
@@ -1954,6 +2119,14 @@ fn normalize_usage(usage: &ParsedRuntimeUsage) -> Result<UsageCounters> {
         (Some(reported), _) => Some(reported),
         (None, derived) => derived,
     };
+    if let Some(input) = prompt_total
+        && let Some(known) = sum_known([uncached, read, write])?
+    {
+        anyhow::ensure!(
+            known <= input,
+            "Runtime Usage known input buckets exceed input total"
+        );
+    }
     if let (Some(reasoning), Some(output)) = (
         usage.fields.reasoning_output_tokens,
         usage.fields.output_tokens,
@@ -1965,7 +2138,31 @@ fn normalize_usage(usage: &ParsedRuntimeUsage) -> Result<UsageCounters> {
     // a hit or a miss. Cache-write alone and turn/session totals cannot do so.
     let cache_observable = (usage.scope == "model_call" && read.is_some()).then_some(1);
     let cache_hit = cache_observable.and_then(|_| read.map(|read| i64::from(read > 0)));
+    let known_input = match prompt_total {
+        Some(input) => Some(input),
+        None => sum_known([uncached, read, write])?,
+    };
+    let output = usage.fields.output_tokens;
+    let minimum = known_input
+        .unwrap_or(0)
+        .checked_add(output.or(usage.fields.reasoning_output_tokens).unwrap_or(0))
+        .context("Runtime Usage total overflow")?;
+    let complete_output = complete_output_total(
+        &usage.dialect_id,
+        output,
+        usage.fields.reasoning_output_tokens,
+    );
+    let native_total = usage.fields.total_tokens.filter(|total| {
+        *total >= minimum
+            && match (prompt_total, complete_output) {
+                (Some(input), Some(output)) => input.checked_add(output) == Some(*total),
+                _ => true,
+            }
+    });
+    // Keep reported buckets separate from full total. In particular, known
+    // ordinary output without reasoning cannot manufacture inclusive Input.
     Ok(UsageCounters {
+        native_total_tokens: native_total,
         prompt_input_total_tokens: prompt_total,
         uncached_input_tokens: uncached,
         cache_read_tokens: read,
@@ -1977,8 +2174,202 @@ fn normalize_usage(usage: &ParsedRuntimeUsage) -> Result<UsageCounters> {
     })
 }
 
+fn complete_output_total(
+    dialect: &str,
+    output: Option<i64>,
+    reasoning: Option<i64>,
+) -> Option<i64> {
+    if output_has_separate_reasoning(dialect) && reasoning.is_none() {
+        None
+    } else {
+        output
+    }
+}
+
+fn output_has_separate_reasoning(dialect: &str) -> bool {
+    matches!(
+        dialect,
+        "opencode-acp-root-prompt-usage-v2"
+            | "opencode-native-message-usage-v1"
+            | "kilo-native-message-usage-v1"
+    )
+}
+
+fn sum_known(values: impl IntoIterator<Item = Option<i64>>) -> Result<Option<i64>> {
+    values.into_iter().flatten().try_fold(None, |sum, n| {
+        Ok(Some(
+            sum.unwrap_or(0i64)
+                .checked_add(n)
+                .context("Runtime Usage total overflow")?,
+        ))
+    })
+}
+
+/// Scheme 1: every proven, disjoint consumption bucket can contribute. Null
+/// stays unknown; explicit zero is an observed value. Never add parent/subset.
+fn display_token_total(counters: &UsageCounters) -> Result<Option<i64>> {
+    if counters.native_total_tokens.is_some() {
+        return Ok(counters.native_total_tokens);
+    }
+    let input = match counters.prompt_input_total_tokens {
+        Some(input) => Some(input),
+        None => sum_known([
+            counters.uncached_input_tokens,
+            counters.cache_read_tokens,
+            counters.cache_write_tokens,
+        ])?,
+    };
+    sum_known([
+        input,
+        counters.output_tokens.or(counters.reasoning_output_tokens),
+    ])
+}
+
+fn counter_reset(current: &UsageCounters, previous: &UsageCounters) -> bool {
+    [
+        (current.native_total_tokens, previous.native_total_tokens),
+        (
+            current.prompt_input_total_tokens,
+            previous.prompt_input_total_tokens,
+        ),
+        (
+            current.uncached_input_tokens,
+            previous.uncached_input_tokens,
+        ),
+        (current.cache_read_tokens, previous.cache_read_tokens),
+        (current.cache_write_tokens, previous.cache_write_tokens),
+        (current.output_tokens, previous.output_tokens),
+        (
+            current.reasoning_output_tokens,
+            previous.reasoning_output_tokens,
+        ),
+    ]
+    .into_iter()
+    .any(|(a, b)| a.zip(b).is_some_and(|(a, b)| a < b))
+}
+
+fn merge_call_snapshot(
+    current: &UsageCounters,
+    previous: &UsageCounters,
+    usage: &ParsedRuntimeUsage,
+) -> Result<UsageCounters> {
+    let max = |a: Option<i64>, b: Option<i64>| a.into_iter().chain(b).max();
+    let mut merged = UsageCounters {
+        native_total_tokens: max(current.native_total_tokens, previous.native_total_tokens),
+        prompt_input_total_tokens: max(
+            current.prompt_input_total_tokens,
+            previous.prompt_input_total_tokens,
+        ),
+        uncached_input_tokens: max(
+            current.uncached_input_tokens,
+            previous.uncached_input_tokens,
+        ),
+        cache_read_tokens: max(current.cache_read_tokens, previous.cache_read_tokens),
+        cache_write_tokens: max(current.cache_write_tokens, previous.cache_write_tokens),
+        output_tokens: max(current.output_tokens, previous.output_tokens),
+        reasoning_output_tokens: max(
+            current.reasoning_output_tokens,
+            previous.reasoning_output_tokens,
+        ),
+        cache_observable_request_count: max(
+            current.cache_observable_request_count,
+            previous.cache_observable_request_count,
+        ),
+        cache_hit_request_count: max(
+            current.cache_hit_request_count,
+            previous.cache_hit_request_count,
+        ),
+    };
+    if output_has_separate_reasoning(&usage.dialect_id) {
+        // These parsers add only the reported reasoning to ordinary output.
+        // Recover the ordinary bucket before merging independently arriving
+        // components; a reasoning-only supplement must still increase output.
+        let ordinary = |counts: &UsageCounters| {
+            counts
+                .output_tokens
+                .map(|output| output - counts.reasoning_output_tokens.unwrap_or(0))
+        };
+        merged.output_tokens = match max(ordinary(current), ordinary(previous)) {
+            Some(output) => Some(
+                output
+                    .checked_add(merged.reasoning_output_tokens.unwrap_or(0))
+                    .context("Runtime Usage output overflow")?,
+            ),
+            None => None,
+        };
+    }
+    if usage.input_semantics == RuntimeInputSemantics::ExclusiveBuckets
+        && let (Some(input), Some(read), Some(write)) = (
+            merged.uncached_input_tokens,
+            merged.cache_read_tokens,
+            merged.cache_write_tokens,
+        )
+    {
+        merged.prompt_input_total_tokens = Some(
+            input
+                .checked_add(read)
+                .and_then(|n| n.checked_add(write))
+                .context("Runtime Usage input overflow")?,
+        );
+    }
+    if let Some(input) = merged.prompt_input_total_tokens
+        && let Some(known) = sum_known([
+            merged.uncached_input_tokens,
+            merged.cache_read_tokens,
+            merged.cache_write_tokens,
+        ])?
+    {
+        anyhow::ensure!(known <= input, "Runtime Usage known buckets exceed input");
+    }
+    if let Some(total) = merged.native_total_tokens {
+        let mut buckets = merged.clone();
+        buckets.native_total_tokens = None;
+        anyhow::ensure!(
+            display_token_total(&buckets)?.is_none_or(|known| known <= total),
+            "Runtime Usage known buckets exceed full total"
+        );
+        if let (Some(input), Some(output)) = (
+            merged.prompt_input_total_tokens,
+            complete_output_total(
+                &usage.dialect_id,
+                merged.output_tokens,
+                merged.reasoning_output_tokens,
+            ),
+        ) {
+            anyhow::ensure!(
+                input.checked_add(output) == Some(total),
+                "Runtime Usage full total conflicts with input/output"
+            );
+        }
+    }
+    Ok(merged)
+}
+
+fn subtract_call_snapshot(current: &UsageCounters, previous: &UsageCounters) -> UsageCounters {
+    let mut delta = subtract_counters(current, previous);
+    macro_rules! newly_known { ($($field:ident),+) => { $(
+        if previous.$field.is_none() {delta.$field = current.$field;}
+    )+ }; }
+    newly_known!(
+        native_total_tokens,
+        prompt_input_total_tokens,
+        uncached_input_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        output_tokens,
+        reasoning_output_tokens,
+        cache_observable_request_count,
+        cache_hit_request_count
+    );
+    delta
+}
+
 fn subtract_counters(current: &UsageCounters, baseline: &UsageCounters) -> UsageCounters {
     UsageCounters {
+        native_total_tokens: counter_delta(
+            current.native_total_tokens,
+            baseline.native_total_tokens,
+        ),
         prompt_input_total_tokens: counter_delta(
             current.prompt_input_total_tokens,
             baseline.prompt_input_total_tokens,
@@ -2032,6 +2423,7 @@ fn validate_usage(usage: &ParsedRuntimeUsage) -> Result<()> {
         anyhow::bail!("Runtime Usage scope is unsupported");
     }
     for value in [
+        usage.fields.total_tokens,
         usage.fields.input_tokens,
         usage.fields.uncached_input_tokens,
         usage.fields.output_tokens,
@@ -2473,6 +2865,7 @@ fn load_breakdown(
                 provider_key: row.get(1)?,
                 model_key: row.get(2)?,
                 counters: UsageCounters {
+                    native_total_tokens: None,
                     prompt_input_total_tokens: row.get(3)?,
                     uncached_input_tokens: row.get(4)?,
                     cache_read_tokens: row.get(5)?,
@@ -3048,6 +3441,7 @@ pub fn parse_codex_usage_message(method: &str, params: &Value) -> Vec<ParsedRunt
     let value = &params["tokenUsage"]["last"];
     let native_session_id = string_at_any(params, &["/threadId"]);
     let fields = RuntimeUsageFields {
+        total_tokens: None,
         input_tokens: integer_at_any(value, &["/inputTokens"]),
         uncached_input_tokens: None,
         output_tokens: integer_at_any(value, &["/outputTokens"]),
@@ -3166,6 +3560,7 @@ pub fn parse_antigravity_step_usage(step: &Value) -> Option<ParsedRuntimeUsage> 
         native_session_id: Some(session.into()),
         native_turn_id: None,
         fields: RuntimeUsageFields {
+            total_tokens: None,
             input_tokens: integer_at_any(raw, &["/input_tokens"]),
             output_tokens: output,
             reasoning_output_tokens: integer_at_any(raw, &["/thinking_tokens"])
@@ -3254,6 +3649,7 @@ pub fn parse_acp_usage_message(
             };
             let data = &params["data"];
             let fields = RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: integer_at_any(data, &["/inputTokens"]),
                 output_tokens: integer_at_any(data, &["/outputTokens"]),
                 cache_read_input_tokens: integer_at_any(data, &["/cacheReadTokens"]),
@@ -3265,7 +3661,7 @@ pub fn parse_acp_usage_message(
                 return Vec::new();
             }
             return vec![ParsedRuntimeUsage {
-                identity_suffix: "native_model_call".into(),
+                identity_suffix: format!("native_model_call:{time}"),
                 dialect_id: "copilot-native-call-usage-v1".into(),
                 source: "runtime_private_extension".into(),
                 scope: "model_call".into(),
@@ -3291,6 +3687,7 @@ pub fn parse_acp_usage_message(
         }
         let usage = &update["usage"];
         let fields = RuntimeUsageFields {
+            total_tokens: integer_at_any(usage, &["/totalTokens"]),
             input_tokens: integer_at_any(usage, &["/inputTokens"]),
             output_tokens: integer_at_any(usage, &["/outputTokens"]),
             cache_read_input_tokens: integer_at_any(usage, &["/cachedReadTokens"]),
@@ -3351,6 +3748,7 @@ pub fn parse_acp_usage_message(
                 };
                 let usage = &record["usage"];
                 let mut fields = RuntimeUsageFields {
+                    total_tokens: integer_at_any(usage, &["/totalTokens"]),
                     // DSH TokenUsage defines input/cache buckets as disjoint.
                     input_tokens: integer_at_any(usage, &["/inputTokens"]),
                     uncached_input_tokens: integer_at_any(usage, &["/inputTokens"]),
@@ -3473,6 +3871,7 @@ pub fn parse_acp_usage_message(
                 native_session_id: string_at_any(params, &["/sessionId"]),
                 native_turn_id: Some(turn.to_string()),
                 fields: RuntimeUsageFields {
+                    total_tokens: None,
                     input_tokens: input,
                     // Unknown cache-write usage prevents deriving uncached input.
                     uncached_input_tokens: None,
@@ -3527,6 +3926,7 @@ pub fn parse_acp_usage_message(
         if adapter_kind == AdapterKind::CodebuddyCli && update_kind == Some("usage_update") {
             let usage = update.pointer("/_meta/usage").unwrap_or(&Value::Null);
             let fields = RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: integer_at_any(usage, &["/prompt_tokens"]),
                 uncached_input_tokens: integer_at_any(usage, &["/prompt_cache_miss_tokens"]),
                 output_tokens: integer_at_any(usage, &["/completion_tokens"]),
@@ -3567,6 +3967,7 @@ pub fn parse_acp_usage_message(
         if adapter_kind == AdapterKind::QwenCode && update_kind == Some("agent_message_chunk") {
             let usage = update.pointer("/_meta/usage").unwrap_or(&Value::Null);
             let fields = RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: integer_at_any(usage, &["/inputTokens"]),
                 uncached_input_tokens: None,
                 output_tokens: integer_at_any(usage, &["/outputTokens"]),
@@ -3691,16 +4092,12 @@ pub fn parse_acp_usage_message(
             let reasoning = integer_at_any(usage, &["/thoughtTokens"]);
             let output = integer_at_any(usage, &["/outputTokens"])
                 .and_then(|output| output.checked_add(reasoning.unwrap_or(0)));
-            let total_input = integer_at_any(usage, &["/totalTokens"])
-                .zip(output)
-                .and_then(|(total, output)| total.checked_sub(output))
-                .filter(|input| *input >= 0);
             (
                 "opencode-acp-root-prompt-usage-v2",
-                RuntimeInputSemantics::CacheInclusiveTotal,
+                RuntimeInputSemantics::ExclusiveBuckets,
                 RuntimeUsageFields {
-                    input_tokens: total_input,
-                    uncached_input_tokens: integer_at_any(usage, &["/inputTokens"]),
+                    total_tokens: integer_at_any(usage, &["/totalTokens"]),
+                    input_tokens: integer_at_any(usage, &["/inputTokens"]),
                     output_tokens: output,
                     reasoning_output_tokens: reasoning,
                     cache_read_input_tokens: integer_at_any(usage, &["/cachedReadTokens"]),
@@ -3715,6 +4112,7 @@ pub fn parse_acp_usage_message(
             "command-code-acp-prompt-usage-v1",
             RuntimeInputSemantics::CacheInclusiveTotal,
             RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: integer_at_any(usage, &["/inputTokens"]),
                 output_tokens: integer_at_any(usage, &["/outputTokens"]),
                 cache_read_input_tokens: integer_at_any(usage, &["/cacheReadTokens"]),
@@ -3726,6 +4124,7 @@ pub fn parse_acp_usage_message(
             "acp-copilot-usage-v2",
             RuntimeInputSemantics::CacheInclusiveTotal,
             RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: integer_at_any(usage, &["/inputTokens", "/input_tokens"]),
                 uncached_input_tokens: None,
                 output_tokens: integer_at_any(usage, &["/outputTokens", "/output_tokens"]),
@@ -3899,6 +4298,7 @@ pub fn parse_pi_usage_message(
     }
     let usage = message.get("usage").unwrap_or(&Value::Null);
     let fields = RuntimeUsageFields {
+        total_tokens: integer_at_any(usage, &["/totalTokens"]),
         input_tokens: integer_at_any(usage, &["/input"]),
         uncached_input_tokens: None,
         output_tokens: integer_at_any(usage, &["/output"]),
@@ -3909,11 +4309,30 @@ pub fn parse_pi_usage_message(
         context_size_tokens: None,
         native_context_ratio: None,
     };
+    // Native providers initialize a numeric Usage object before any provider
+    // response. All-zero placeholders have no original presence witness.
+    let reported = [
+        fields.total_tokens,
+        fields.input_tokens,
+        fields.output_tokens,
+        fields.cache_read_input_tokens,
+        fields.cache_write_input_tokens,
+        fields.reasoning_output_tokens,
+    ];
+    if reported.into_iter().flatten().all(|n| n == 0) {
+        return Vec::new();
+    }
     if fields.is_empty() {
         return Vec::new();
     }
+    let Ok(call_id) = crate::command::canonical_json_digest(&json!({
+        "timestamp":message.get("timestamp"), "provider":message.get("provider").and_then(Value::as_str),
+        "model":message.get("model").and_then(Value::as_str),
+    })) else {
+        return Vec::new();
+    };
     vec![ParsedRuntimeUsage {
-        identity_suffix: "assistant_message".to_string(),
+        identity_suffix: format!("assistant_message:{call_id}"),
         dialect_id: "pi-message-end-usage-v1".to_string(),
         source: "runtime_event".to_string(),
         scope: "model_call".to_string(),
@@ -3968,6 +4387,7 @@ pub fn pi_usage_source_identity(
 pub fn parse_claude_result_usage(result: &Value) -> Vec<ParsedRuntimeUsage> {
     let usage = result.get("usage").unwrap_or(&Value::Null);
     let mut fields = RuntimeUsageFields {
+        total_tokens: None,
         input_tokens: integer_at_any(usage, &["/input_tokens"]),
         uncached_input_tokens: None,
         output_tokens: integer_at_any(usage, &["/output_tokens"]),
@@ -4026,6 +4446,7 @@ pub fn parse_claude_observed_usage(event_type: &str, payload: &Value) -> Vec<Par
             RuntimeUsageCounterMode::Cumulative,
             RuntimeInputSemantics::ExclusiveBuckets,
             RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: integer_at_any(payload, &["/usage/input_tokens"]),
                 output_tokens: integer_at_any(payload, &["/usage/output_tokens"]),
                 cache_read_input_tokens: integer_at_any(
@@ -4103,6 +4524,7 @@ mod tests {
             native_session_id: Some("session-1".to_string()),
             native_turn_id: Some("turn-1".to_string()),
             fields: RuntimeUsageFields {
+                total_tokens: None,
                 input_tokens: input,
                 uncached_input_tokens: None,
                 output_tokens: output,
@@ -4249,10 +4671,74 @@ mod tests {
             "prompt-pi",
         );
         assert_eq!(unknown[0].fields.context_used_tokens, None);
+        let zero = json!({"type":"message_end","message":{"role":"assistant","timestamp":1,
+            "stopReason":"aborted","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0}}});
+        assert!(
+            parse_pi_usage_message(&zero, "s", "p").is_empty(),
+            "provider presence was lost in native defaults"
+        );
     }
 
     #[test]
     fn usage_core_semantics_preserve_unknown_zero_and_partial_buckets() {
+        let comparison: Value = serde_json::from_str(include_str!(
+            "../../../docs/research/runtime-monitoring/fixtures/runcard-token-comparison-2026-11-15.json")).unwrap();
+        for sample in comparison["samples"].as_array().unwrap() {
+            let mut permissive = None;
+            let mut paired = None;
+            for call in sample["calls"].as_array().unwrap() {
+                let number = |name| call[name].as_i64();
+                let counts = UsageCounters {
+                    native_total_tokens: number("total"),
+                    prompt_input_total_tokens: number("input"),
+                    uncached_input_tokens: number("uncached"),
+                    cache_read_tokens: number("read"),
+                    cache_write_tokens: number("write"),
+                    output_tokens: number("output"),
+                    reasoning_output_tokens: number("reasoning"),
+                    ..Default::default()
+                };
+                permissive =
+                    sum_known([permissive, display_token_total(&counts).unwrap()]).unwrap();
+                let input = counts.prompt_input_total_tokens.or_else(|| {
+                    counts
+                        .native_total_tokens
+                        .zip(counts.output_tokens)
+                        .map(|(t, o)| t - o)
+                });
+                let output = counts
+                    .output_tokens
+                    .or_else(|| counts.native_total_tokens.zip(input).map(|(t, i)| t - i));
+                paired = sum_known([paired, input.zip(output).map(|(i, o)| i + o)]).unwrap();
+            }
+            assert_eq!(json!(permissive), sample["scheme1"], "{sample}");
+            assert_eq!(json!(paired), sample["scheme2"], "{sample}");
+        }
+        for adapter in [AdapterKind::DeepseekHarness, AdapterKind::OpencodeCli] {
+            let raw = if adapter == AdapterKind::DeepseekHarness {
+                json!({"sessionId":"s","update":{"sessionUpdate":"usage_update","_meta":{"dshUsage":[{
+                    "schemaVersion":1,"sessionId":"s","seq":1,"turn":1,"usage":{"totalTokens":55000}
+                }]}}})
+            } else {
+                json!({"sessionId":"s","promptId":"p","result":{"usage":{"totalTokens":55000}}})
+            };
+            let parsed = parse_acp_usage_message(
+                adapter,
+                Some("2.2.7"),
+                if adapter == AdapterKind::DeepseekHarness {
+                    "session/update"
+                } else {
+                    "rovai/acp_prompt_completed"
+                },
+                &raw,
+            );
+            assert_eq!(parsed.len(), 1);
+            assert_eq!(
+                normalize_usage(&parsed[0]).unwrap().native_total_tokens,
+                Some(55000)
+            );
+            assert_eq!(parsed[0].fields.output_tokens, None);
+        }
         let unknown = normalize_usage(&usage(
             RuntimeUsageCounterMode::Delta,
             RuntimeInputSemantics::CacheInclusiveTotal,
@@ -4311,6 +4797,18 @@ mod tests {
         );
         conflicting.fields.uncached_input_tokens = Some(60);
         assert!(normalize_usage(&conflicting).is_err());
+        let conflicting_partial = usage(
+            RuntimeUsageCounterMode::Delta,
+            RuntimeInputSemantics::CacheInclusiveTotal,
+            Some(50),
+            Some(60),
+            None,
+            Some(5),
+        );
+        assert!(
+            normalize_usage(&conflicting_partial).is_err(),
+            "a missing write bucket cannot excuse an impossible read count"
+        );
     }
 
     #[test]
@@ -4362,16 +4860,17 @@ mod tests {
             CREATE TABLE runtime_usage_run_summary (
                 agent_run_id TEXT, collection_epoch TEXT, prompt_input_total_tokens INTEGER,
                 output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
-                finalized_at TEXT, last_observed_at TEXT, parser_version INTEGER, usage_quality TEXT
+                finalized_at TEXT, last_observed_at TEXT, parser_version INTEGER, usage_quality TEXT,
+                display_total_tokens INTEGER
             );
             INSERT INTO conversation VALUES ('conversation-a', 'camp-a'), ('conversation-b', 'camp-b');
             INSERT INTO agent_run VALUES ('run-a', 'conversation-a', 2, 'succeeded'), ('run-b', 'conversation-a', 1, 'running'), ('foreign', 'conversation-b', 1, 'failed');
             INSERT INTO runtime_usage_collection_state VALUES (1, 'current');
             INSERT INTO runtime_usage_run_summary VALUES
-                ('run-a', 'current', 100, 20, NULL, 0, 'final', 'observed', 5, 'runtime_reported'),
-                ('run-a', 'old', 999, 999, 999, 999, 'old', 'old', 4, 'runtime_reported'),
-                ('run-b', 'current', NULL, NULL, NULL, NULL, NULL, NULL, 5, NULL),
-                ('foreign', 'current', 200, 40, 10, 0, 'final', 'observed', 5, 'runtime_reported');
+                ('run-a', 'current', 100, 20, NULL, 0, 'final', 'observed', 5, 'runtime_reported',77),
+                ('run-a', 'old', 999, 999, 999, 999, 'old', 'old', 4, 'runtime_reported',1998),
+                ('run-b', 'current', NULL, NULL, NULL, NULL, NULL, NULL, 5, NULL,NULL),
+                ('foreign', 'current', 200, 40, 10, 0, 'final', 'observed', 5, 'runtime_reported',240);
         "#).unwrap();
         let params = |ids: Vec<&str>| MonitoringExecutionParams {
             camp_id: "camp-a".into(),
@@ -4392,6 +4891,11 @@ mod tests {
         assert_eq!(rows[1]["cacheWriteTokens"], 0);
         assert_eq!(rows[1]["finalizedAt"], "final");
         assert_eq!(rows[1]["inputOutputComplete"], true);
+        assert_eq!(
+            rows[1]["displayTotalTokens"], 77,
+            "projection, not raw Input+Output"
+        );
+        assert_eq!(rows[0]["displayTotalTokens"], Value::Null);
         assert_eq!(rows[0]["inputOutputComplete"], false);
         for (version, quality) in [(5, "runtime_reported_partial"), (4, "runtime_reported")] {
             connection.execute("UPDATE runtime_usage_run_summary SET parser_version=?1, usage_quality=?2 WHERE agent_run_id='run-a'", params![version,quality]).unwrap();
@@ -4877,7 +5381,7 @@ mod tests {
                 INSERT INTO runtime_usage_run_summary(
                     collection_epoch, agent_run_id, runtime_kind,
                     parser_version, eligible_mask, input_semantics, enrolled_at
-                ) VALUES(?1, 'run-1', 'codex-cli', 2, 127, 'unknown', ?2)
+                ) VALUES(?1, 'run-1', 'codex-cli', 6, 127, 'unknown', ?2)
                 "#,
                 params![epoch, started_at],
             )
@@ -5015,7 +5519,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(retained, (Some(110), Some(35), Some(19), true));
-        database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,'claude-run','claude-code-cli',2,127,'unknown',?2)", params![epoch, started_at]).unwrap();
+        assert_eq!(database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id='run-1'",[],|r|r.get::<_,i64>(0)).unwrap(),129);
+
+        database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,'claude-run','claude-code-cli',6,127,'unknown',?2)", params![epoch, started_at]).unwrap();
         let mut claude_run = run.clone();
         claude_run.key.agent_run_id = "claude-run".into();
         claude_run.runtime_kind = AdapterKind::ClaudeCodeCli;
@@ -5048,6 +5554,375 @@ mod tests {
             (16, 7, 4, 0),
             "new call starts at zero; repeated cumulative fields add only their difference"
         );
+        let mut buffer = RuntimeUsageBuffer::default();
+        for (index, (read, write, output)) in [
+            (None, None, None),
+            (Some(40000), None, Some(5000)),
+            (Some(40000), Some(0), Some(5000)),
+            (None, None, None),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let late = usage(
+                RuntimeUsageCounterMode::Delta,
+                RuntimeInputSemantics::ExclusiveBuckets,
+                Some(10000),
+                read,
+                write,
+                output,
+            );
+            for _ in 0..2 {
+                buffer
+                    .observe_run(
+                        &claude_run,
+                        "same-late-call",
+                        std::slice::from_ref(&late),
+                        Instant::now(),
+                    )
+                    .unwrap();
+            }
+            let batches = buffer.drain(RuntimeUsageFlushTarget::All);
+            MonitoringService::record_usage_batches(&mut database, &batches).unwrap();
+            // The last old partial replay cannot undo a later complete snapshot.
+            let values: (i64,i64,Option<i64>) = database.connection().query_row(
+                "SELECT uncached_input_tokens,output_tokens,prompt_input_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id='claude-run'",
+                [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+            assert_eq!(values.0, 10012, "one call, stage {index}");
+            assert_eq!(values.1, if index == 0 { 7 } else { 5007 });
+            assert_eq!(values.2, Some(if index < 2 { 16 } else { 50016 }));
+        }
+        assert_eq!(database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id='claude-run'",[],|r|r.get::<_,i64>(0)).unwrap(),55023);
+        for stage in 0..4 {
+            let mut total = usage(
+                RuntimeUsageCounterMode::Delta,
+                RuntimeInputSemantics::CacheInclusiveTotal,
+                (stage == 2).then_some(50000),
+                (stage == 2).then_some(40000),
+                None,
+                (stage != 1).then_some(5000),
+            );
+            if stage == 1 {
+                total.fields.total_tokens = Some(55000);
+            }
+            buffer
+                .observe_run(&claude_run, "native-total-call", &[total], Instant::now())
+                .unwrap();
+            let batches = buffer.drain(RuntimeUsageFlushTarget::All);
+            MonitoringService::record_usage_batches(&mut database, &batches).unwrap();
+            assert_eq!(database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id='claude-run'",[],|r|r.get::<_,i64>(0)).unwrap(),
+                55023 + if stage==0 {5000} else {55000},"native total replaces subsets; stage {stage}");
+        }
+
+        // Native call identity survives a changed transport usage fingerprint,
+        // and a fresh buffer cannot charge old sparse frames again.
+        for adapter in [AdapterKind::Pi, AdapterKind::CopilotCli] {
+            let mut native_run = run.clone();
+            native_run.runtime_kind = adapter;
+            native_run.key.agent_run_id = format!("native-{}", adapter.as_str());
+            database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,?2,?3,6,0,'unknown',?4)",
+                params![epoch,native_run.key.agent_run_id,adapter.as_str(),started_at]).unwrap();
+            for stage in 0..3 {
+                let raw = if adapter == AdapterKind::Pi {
+                    json!({"type":"message_end","message":{"role":"assistant","timestamp":123,"provider":"p","model":"m",
+                        "usage": if stage==1 {json!({"input":10000,"output":5000,"cacheRead":40000,"cacheWrite":0,"totalTokens":55000})}
+                        else {json!({"output":5000,"cacheRead":40000})}}})
+                } else {
+                    json!({"type":"assistant.usage","sessionId":"session-1","timestamp":"2026-11-15T00:00:00Z",
+                    "data": if stage==1 {json!({"inputTokens":50000,"outputTokens":5000,"cacheReadTokens":40000})}
+                    else {json!({"outputTokens":5000,"cacheReadTokens":40000})}})
+                };
+                let (parsed, identity) = if adapter == AdapterKind::Pi {
+                    (
+                        parse_pi_usage_message(&raw, "session-1", "prompt"),
+                        pi_usage_source_identity(&raw, "session-1", "prompt")
+                            .unwrap()
+                            .unwrap(),
+                    )
+                } else {
+                    (
+                        parse_acp_usage_message(
+                            adapter,
+                            None,
+                            "github.com/copilot/sessionEvent",
+                            &raw,
+                        ),
+                        acp_usage_source_identity(adapter, "github.com/copilot/sessionEvent", &raw)
+                            .unwrap()
+                            .unwrap(),
+                    )
+                };
+                let mut fresh_buffer = RuntimeUsageBuffer::default();
+                fresh_buffer
+                    .observe_run(&native_run, &identity, &parsed, Instant::now())
+                    .unwrap();
+                MonitoringService::record_usage_batches(
+                    &mut database,
+                    &fresh_buffer.drain(RuntimeUsageFlushTarget::All),
+                )
+                .unwrap();
+                assert_eq!(database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id=?1",[&native_run.key.agent_run_id],|r|r.get::<_,i64>(0)).unwrap(),
+                    if stage==0 {45000} else {55000},"{adapter:?}, stage {stage}");
+            }
+        }
+        // Production parser -> buffer -> checkpoint, including a sparse replay.
+        for with_write in [true, false] {
+            for reasoning_only in [false, true] {
+                let mut opencode = run.clone();
+                opencode.runtime_kind = AdapterKind::OpencodeCli;
+                opencode.key.agent_run_id =
+                    format!("opencode-reasoning-{with_write}-{reasoning_only}");
+                database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,?2,'opencode-cli',6,0,'unknown',?3)",
+                params![epoch,opencode.key.agent_run_id,started_at]).unwrap();
+                for stage in 0..3 {
+                    let mut raw = json!({"sessionId":"root","promptId":"prompt-1","result":{"usage":{
+                    "totalTokens":175000,"inputTokens":100000,"cachedReadTokens":40000,"outputTokens":10000}}});
+                    if with_write {
+                        raw["result"]["usage"]["cachedWriteTokens"] = json!(20000);
+                    }
+                    if stage == 1 {
+                        raw["result"]["usage"]["thoughtTokens"] = json!(5000);
+                        if reasoning_only {
+                            raw["result"]["usage"]
+                                .as_object_mut()
+                                .unwrap()
+                                .remove("outputTokens");
+                        }
+                    }
+                    let parsed = parse_acp_usage_message(
+                        AdapterKind::OpencodeCli,
+                        Some("2.0.26"),
+                        "rovai/acp_prompt_completed",
+                        &raw,
+                    );
+                    buffer
+                        .observe_run(&opencode, "same-prompt", &parsed, Instant::now())
+                        .unwrap();
+                    MonitoringService::record_usage_batches(
+                        &mut database,
+                        &buffer.drain(RuntimeUsageFlushTarget::All),
+                    )
+                    .unwrap();
+                    let values: (Option<i64>,Option<i64>,Option<i64>) = database.connection().query_row(
+                    "SELECT display_total_tokens,prompt_input_total_tokens,output_tokens FROM runtime_usage_run_summary WHERE agent_run_id=?1",
+                    [&opencode.key.agent_run_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+                    assert_eq!(values.0, Some(175000), "write={with_write}, stage={stage}");
+                    assert_eq!(
+                        values.1,
+                        with_write.then_some(160000),
+                        "Input is known only from its reported buckets"
+                    );
+                    assert_eq!(values.2, Some(if stage == 0 { 10000 } else { 15000 }));
+                }
+                if with_write && !reasoning_only {
+                    // Individually valid late output contradicts the previous full
+                    // total. Skip that supplement while committing another Run.
+                    let invalid = parse_acp_usage_message(
+                        AdapterKind::OpencodeCli,
+                        Some("2.0.26"),
+                        "rovai/acp_prompt_completed",
+                        &json!({"sessionId":"root","promptId":"prompt-1","result":{"usage":{
+                        "outputTokens":20000,"thoughtTokens":0}}}),
+                    );
+                    buffer
+                        .observe_run(&opencode, "same-prompt", &invalid, Instant::now())
+                        .unwrap();
+                    let mut other = run.clone();
+                    other.key.agent_run_id = "unrelated-valid-run".into();
+                    database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,?2,'codex-cli',6,0,'unknown',?3)",
+                    params![epoch,other.key.agent_run_id,started_at]).unwrap();
+                    buffer
+                        .observe_run(
+                            &other,
+                            "another-call",
+                            &[usage(
+                                RuntimeUsageCounterMode::Delta,
+                                RuntimeInputSemantics::CacheInclusiveTotal,
+                                None,
+                                None,
+                                None,
+                                Some(7000),
+                            )],
+                            Instant::now(),
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        MonitoringService::record_usage_batches(
+                            &mut database,
+                            &buffer.drain(RuntimeUsageFlushTarget::All)
+                        )
+                        .unwrap(),
+                        1
+                    );
+                    for (run_id, expected) in [
+                        (&opencode.key.agent_run_id, 175000),
+                        (&other.key.agent_run_id, 7000),
+                    ] {
+                        assert_eq!(database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id=?1",[run_id],|row|row.get::<_,i64>(0)).unwrap(), expected);
+                    }
+                }
+            }
+        }
+        let mut cumulative = run.clone();
+        cumulative.key.agent_run_id = "cumulative-subsets".into();
+        database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,?2,'codex-cli',6,0,'unknown',?3)",
+            params![epoch,cumulative.key.agent_run_id,started_at]).unwrap();
+        for (stage, (input, read, output, expected)) in [
+            (Some(100000), 20000, Some(10000), None),
+            (None, 40000, None, None),
+            (Some(120000), 40000, Some(10000), Some(20000)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let parsed = usage(
+                RuntimeUsageCounterMode::Cumulative,
+                RuntimeInputSemantics::CacheInclusiveTotal,
+                input,
+                Some(read),
+                None,
+                output,
+            );
+            buffer
+                .observe_run(&cumulative, "same-session", &[parsed], Instant::now())
+                .unwrap();
+            MonitoringService::record_usage_batches(
+                &mut database,
+                &buffer.drain(RuntimeUsageFlushTarget::All),
+            )
+            .unwrap();
+            let total: Option<i64> = database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id=?1",[&cumulative.key.agent_run_id],|r|r.get(0)).unwrap();
+            assert_eq!(total, expected, "parent/child coverage, stage {stage}");
+        }
+        // Goose was added on main during integration. Session Input includes
+        // message cache subsets; those events enrich metrics, never the total.
+        let mut goose = run.clone();
+        goose.runtime_kind = AdapterKind::GooseCli;
+        goose.runtime_version = Some("1.59.0".into());
+        for (run_id, steps) in [
+            (
+                "goose-current",
+                vec![
+                    (
+                        json!({"sessionUpdate":"usage_update","accumulatedInputTokens":100000,"accumulatedOutputTokens":10000}),
+                        None,
+                    ),
+                    (
+                        json!({"sessionUpdate":"message_usage","messageId":"call","usage":{"cacheReadTokens":40000}}),
+                        None,
+                    ),
+                    (
+                        json!({"sessionUpdate":"usage_update","accumulatedInputTokens":150000,"accumulatedOutputTokens":15000}),
+                        Some(55000),
+                    ),
+                    (
+                        json!({"sessionUpdate":"message_usage","messageId":"call","usage":{"cacheReadTokens":45000,"cacheWriteTokens":1000}}),
+                        Some(55000),
+                    ),
+                    (
+                        json!({"sessionUpdate":"usage_update","accumulatedInputTokens":160000}),
+                        Some(65000),
+                    ),
+                    (
+                        json!({"sessionUpdate":"usage_update","accumulatedInputTokens":160000,"accumulatedOutputTokens":16000}),
+                        Some(66000),
+                    ),
+                    (
+                        json!({"sessionUpdate":"message_usage","messageId":"call","usage":{"cacheReadTokens":45000,"cacheWriteTokens":1000}}),
+                        Some(66000),
+                    ),
+                ],
+            ),
+            (
+                "goose-resumed",
+                vec![
+                    (
+                        json!({"sessionUpdate":"usage_update","accumulatedInputTokens":160000,"accumulatedOutputTokens":16000}),
+                        None,
+                    ),
+                    (
+                        json!({"sessionUpdate":"usage_update","accumulatedInputTokens":165000,"accumulatedOutputTokens":17000}),
+                        Some(6000),
+                    ),
+                ],
+            ),
+        ] {
+            goose.key.agent_run_id = run_id.into();
+            database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,runtime_version,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,?2,'goose-cli','1.59.0',6,0,'unknown',?3)",
+                params![epoch,run_id,started_at]).unwrap();
+            for (stage, (update, expected)) in steps.into_iter().enumerate() {
+                let observations = parse_acp_usage_message(
+                    AdapterKind::GooseCli,
+                    Some("1.59.0"),
+                    "_goose/unstable/session/update",
+                    &json!({"sessionId":"same-goose-session","update":update}),
+                );
+                buffer
+                    .observe_run(
+                        &goose,
+                        &format!("transport-{stage}"),
+                        &observations,
+                        Instant::now(),
+                    )
+                    .unwrap();
+                MonitoringService::record_usage_batches(
+                    &mut database,
+                    &buffer.drain(RuntimeUsageFlushTarget::All),
+                )
+                .unwrap();
+                let actual: Option<i64> = database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id=?1", [run_id], |row| row.get(0)).unwrap();
+                assert_eq!(actual, expected, "{run_id}, stage {stage}");
+            }
+        }
+        let cache: (i64, i64, i64) = database.connection().query_row(
+            "SELECT cache_read_tokens,cache_write_tokens,cache_observable_request_count FROM runtime_usage_run_summary WHERE agent_run_id='goose-current'",
+            [], |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(cache, (45000, 1000, 1));
+        for parent in ["output", "full-total"] {
+            cumulative.key.agent_run_id = format!("cumulative-{parent}");
+            database.connection().execute("INSERT INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at) VALUES(?1,?2,'codex-cli',6,0,'unknown',?3)",
+                params![epoch,cumulative.key.agent_run_id,started_at]).unwrap();
+            for stage in 0..3 {
+                let mut parsed = usage(
+                    RuntimeUsageCounterMode::Cumulative,
+                    RuntimeInputSemantics::CacheInclusiveTotal,
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+                if parent == "output" {
+                    parsed.fields.output_tokens = match stage {
+                        0 => Some(100000),
+                        1 => None,
+                        _ => Some(120000),
+                    };
+                    parsed.fields.reasoning_output_tokens =
+                        Some(if stage == 0 { 20000 } else { 40000 });
+                } else {
+                    parsed.fields.total_tokens = match stage {
+                        0 => Some(110000),
+                        1 => None,
+                        _ => Some(130000),
+                    };
+                    parsed.fields.input_tokens = Some(if stage == 0 { 10000 } else { 30000 });
+                }
+                buffer
+                    .observe_run(&cumulative, "same-session", &[parsed], Instant::now())
+                    .unwrap();
+                MonitoringService::record_usage_batches(
+                    &mut database,
+                    &buffer.drain(RuntimeUsageFlushTarget::All),
+                )
+                .unwrap();
+                let total: Option<i64> = database.connection().query_row("SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id=?1",[&cumulative.key.agent_run_id],|r|r.get(0)).unwrap();
+                assert_eq!(
+                    total,
+                    (stage == 2).then_some(20000),
+                    "{parent}, stage {stage}"
+                );
+            }
+        }
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -5258,7 +6133,13 @@ mod tests {
             ) {
                 assert_eq!(usage.fields.cache_read_input_tokens, None);
                 assert_eq!(usage.fields.reasoning_output_tokens, None);
-                assert_eq!(usage.fields.input_tokens, None);
+                assert_eq!(
+                    usage.fields.input_tokens,
+                    sparse["result"]["usage"]["inputTokens"].as_i64()
+                );
+                let normalized = normalize_usage(&usage).unwrap();
+                assert_eq!(normalized.prompt_input_total_tokens, None);
+                assert_eq!(normalized.uncached_input_tokens, usage.fields.input_tokens);
             }
         }
         let mut child = root_prompt;

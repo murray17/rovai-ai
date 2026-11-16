@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-14
+last_updated: 2026-11-16
 ---
 
 # 测试与 Smoke Test
@@ -232,6 +232,22 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 
 ## Rust 测试准入与退役门槛
 
+RunCard Token 总量扩展现有 `usage_core_semantics_preserve_unknown_zero_and_partial_buckets`、
+`cumulative_checkpoint_dedupes_resets_resume_and_late_terminal_batches`、分区与 parser/native reader owners，
+覆盖外部验收样本、同调用补齐、total 覆盖子集、reset/resume 和失败重试；不新增 Rust 测试函数。
+复核继续扩展同一 checkpoint owner，验证 OpenCode V2 缺 reasoning、reasoning 单独补齐、稀疏重放及矛盾补充字段不阻断其他 Run；
+累计父/子字段分批覆盖 Input/cache、Output/reasoning 和 full total。既有 JSONL cursor 与 SQLite metadata owners
+从真实 reader 入口送入 buffer/checkpoint：JSONL 验证自然追加的非空稀疏→补齐→重复；SQLite 验证首次可信数值采集后退出、
+历史更新栅栏及 32,768 行历史下的物理后缀查询。
+SQLite 同一 owner 使用生产 Statement 的 `SQLITE_STMTSTATUS_RUN` 验证完整、缺字段、失败正消费三组各 1,000 条调用均只查询一次，
+保留逐次采样预算与等待首次可采集结果，已采行无信号迟到更新不再查询且保留已知量。原“两次补读”的期望随该策略撤除，
+由首次采集即退出和自然事件补齐的对照接替；不以输出去重或 wall-clock 代替查询计数，不新增 Rust 测试函数。
+MiniMax 原 error/aborted 一刀切拒绝的 case 随该准入退出，原 owner 内以正消费保留和全零占位拒绝的对照接替；
+user、未知 stopReason、缺 usage、负数与隐私 canary 仍保留。
+Migration 226 的 DDL/回执回滚和旧值/null/zero 保留复用 `async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt`，
+低层纯函数不能证明 SQLite 原子性；原 194 升级断言保留。Renderer owner 直接消费 Core 投影，隔离 Electron owner
+验证所有状态、零/未知、迟到刷新和五主题。命令与实际边界见[核查记录](../research/runtime-monitoring/runcard-token-total-audit-2026-11-15.md)。
+
 Goose 新接入扩展已有模型目录、数值 parser、权限默认、Skills、MCP 投影、数据库闭集迁移、平台矩阵和 Bootstrap owner，
 不新增 Rust 测试函数。原生协议入口 `scripts/probe-goose-runtime.mjs` 与产品入口 `scripts/smoke-goose-runtime.mjs` 分别保留：
 后者使用新建 Core/data/Skills/MCP/Goose 根、同目录 Core/CLI 和官方 `ROVAI_GOOSE_BIN`，模型为隔离 loopback Provider。
@@ -308,6 +324,7 @@ Goose 合主线时将目录迁移顺延为 225/schema 175，保留主线 Memory 
 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 保留原闭集和回滚断言，输入编号随最终迁移更新。
 两者需使用 `--features slow-tests,extended-tests --lib`，确认分别实际执行 1 项；不能把零匹配当成通过。
 Rust 测试函数仍无新增、删除或停用，主线 Memory 的关闭值／缺行／回滚输入继续覆盖。
+
 
 
 飞书/Lark 连接观测扩展既有 `member_bot_app_binding_is_immutable_across_legacy_disabled_reactivation`

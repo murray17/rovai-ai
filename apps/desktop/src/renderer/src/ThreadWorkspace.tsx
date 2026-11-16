@@ -7480,40 +7480,14 @@ function metricK(value: number | null): string {
 type RunUsage = RuntimeExecutionMetricsSnapshot['runs'][number]
 type SessionContext = RuntimeExecutionMetricsSnapshot['sessions'][number]
 
-function ExecutionUsagePopover({ run, usage }: { run: AgentRunView; usage: RunUsage | null }): JSX.Element {
-  const total = executionUsageTotal(run, usage)
-  const complete = total !== null
-  const rows = [
-    ['Input Token', usage?.promptInputTotalTokens ?? null],
-    ['Output Token', usage?.outputTokens ?? null],
-    ['Cache Read', usage?.cacheReadTokens ?? null],
-    ['Cache Write', usage?.cacheWriteTokens ?? null]
-  ] as const
+function ExecutionDurationPopover({ run, total = null }: { run: AgentRunView; total?: number | null }): JSX.Element {
+  const tokens = total === null ? null : metricK(total).replace(/k$/, 'K')
   return <Popover.Root>
     <Popover.Trigger asChild>
-      <button className="execution-usage-trigger" type="button"
-        aria-label={uiAttribute('查看本次执行用量与耗时；{0}', complete ? metricK(total) : uiAttribute('部分或未知'))}
-        title={uiAttribute('查看本次执行用量与耗时')}>
-        {metricK(total)}
-      </button>
-    </Popover.Trigger>
-    <Popover.Portal>
-      <Popover.Content className="execution-metric-popover" sideOffset={6} align="end">
-        <dl>
-          {rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{metricK(value)}</dd></div>)}
-          <div className="execution-usage-duration"><dt>{uiAttribute('执行耗时')}</dt><dd>{executionRunDurationLabel(run, Date.now())}</dd></div>
-        </dl>
-      </Popover.Content>
-    </Popover.Portal>
-  </Popover.Root>
-}
-
-function ExecutionDurationPopover({ run }: { run: AgentRunView }): JSX.Element {
-  return <Popover.Root>
-    <Popover.Trigger asChild>
-      <button className="execution-duration-trigger" type="button"
-        aria-label={uiAttribute('查看本次执行耗时')} title={uiAttribute('查看本次执行耗时')}>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="M8 4.75V8l2.25 1.5" /></svg>
+      <button className={tokens === null ? 'execution-duration-trigger' : 'execution-usage-trigger'} type="button"
+        aria-label={tokens === null ? uiAttribute('查看本次执行耗时') : uiAttribute('本次执行用量：{0}；查看执行耗时', tokens)}
+        title={uiAttribute('查看本次执行耗时')}>
+        {tokens ?? <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="M8 4.75V8l2.25 1.5" /></svg>}
       </button>
     </Popover.Trigger>
     <Popover.Portal>
@@ -7585,15 +7559,15 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
     }, 1_000)
     return () => window.clearInterval(timer)
   }, [live, run.id, run.executionEpoch, run.startedAt, run.createdAt])
-  if (cancelling || starting) return <span className="execution-run-status" role="status">
+  const total = executionUsageTotal(run, usage)
+  if ((cancelling || starting) && total === null) return <span className="execution-run-status" role="status">
     {uiAttribute(cancelling ? '正在停止…' : '启动中…')}
   </span>
-  if (live) return <span className="execution-run-metric">{duration}</span>
-  const hasUsage = usage !== null && [usage.promptInputTotalTokens, usage.outputTokens,
-    usage.cacheReadTokens, usage.cacheWriteTokens].some(value => value !== null)
+  if (live && total === null) return <span className="execution-run-metric">{duration}</span>
   return <span className="execution-run-metric-group">
-    {run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
-    {hasUsage ? <ExecutionUsagePopover run={run} usage={usage} /> : <ExecutionDurationPopover run={run} />}
+    {(cancelling || starting) ? <span className="execution-run-status" role="status">{uiAttribute(cancelling ? '正在停止…' : '启动中…')}</span>
+      : run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
+    <ExecutionDurationPopover run={run} total={total} />
   </span>
 }
 

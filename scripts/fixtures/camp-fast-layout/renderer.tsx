@@ -81,6 +81,7 @@ let draft: ThreadComposerDraftView = { threadId, quotes: [], body: '验收中保
 const requests: Array<{ method: string; params: unknown }> = []
 let metricMode = false
 let metricValue: number | null = null
+let metricProjectedTotal: number | null = null
 let metricInputOutputComplete = false
 let metricGeneration = 1
 let metricSessionVisible = true
@@ -108,7 +109,7 @@ Object.assign(window, { rovai: {
         return run ? [{ agentRunId: id, executionEpoch: run.executionEpoch,
           promptInputTotalTokens: metricValue, outputTokens: metricValue === null ? null : 20,
           cacheReadTokens: null, cacheWriteTokens: metricValue === null ? null : 0,
-          inputOutputComplete: metricInputOutputComplete,
+          inputOutputComplete: metricInputOutputComplete, displayTotalTokens: metricProjectedTotal,
           finalizedAt: run.status === 'succeeded' ? now : null, lastObservedAt: metricValue === null ? null : now }] : []
       }) : [],
       sessions: metricMode && metricSessionVisible ? [{ conversationId: 'conversation-agent-0', agentId: 'agent-0',
@@ -229,8 +230,14 @@ Object.assign(window, { fastTest: {
     metricRuns = current.agentRuns.map(run => run.id === 'run-agent-0' ? { ...run, status: 'succeeded', endedAt: now } : run)
     return { ...current, agentRuns: metricRuns }
   }),
-  metricsCommit: (value: number, generation = metricGeneration, complete = true) => {
+  metricsStatus: (status: AgentRunView['status']) => updateSnapshot(current => {
+    metricRuns = current.agentRuns.map(run => run.id === 'run-agent-0'
+      ? { ...run, status, endedAt: status === 'running' || status === 'waiting' ? null : now } : run)
+    return { ...current, agentRuns: metricRuns }
+  }),
+  metricsCommit: (value: number | null, generation = metricGeneration, complete = true, total = value) => {
     metricValue = value
+    metricProjectedTotal = total
     metricInputOutputComplete = complete
     metricGeneration = generation
     for (const listener of eventListeners) listener({ method: 'monitoring.changed', params: { reason: 'late_fixture_usage' } })

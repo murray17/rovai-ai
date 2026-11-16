@@ -1,7 +1,7 @@
 //! Numeric Usage from verified, root-agent native journals. No journal content
 //! is retained or forwarded; a prompt starts with a cursor and identity baseline.
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs::{self, File, Metadata, OpenOptions},
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Component, Path, PathBuf},
@@ -37,6 +37,16 @@ enum Dialect {
 pub(crate) struct NativeUsageObservation {
     pub source_identity: String,
     pub usage: ParsedRuntimeUsage,
+}
+
+type NativeUsageSnapshot = (RuntimeUsageFields, Option<RuntimeUsageCost>, Option<String>);
+
+fn usage_snapshot(usage: &ParsedRuntimeUsage) -> NativeUsageSnapshot {
+    (
+        usage.fields.clone(),
+        usage.cost.clone(),
+        usage.context_model_id.clone(),
+    )
 }
 
 #[derive(Clone)]
@@ -139,7 +149,8 @@ pub(crate) struct NativeJsonlUsageReader {
     offset: u64,
     file_identity: Option<FileIdentity>,
     skip_partial: bool,
-    seen: BTreeSet<String>,
+    baseline_identities: BTreeSet<String>,
+    observed: BTreeMap<String, NativeUsageSnapshot>,
     disabled: bool,
     context_model: Option<NativeContextModel>,
     // A terminal reader admits only message or tool-call identities observed on
@@ -254,7 +265,8 @@ impl NativeJsonlUsageReader {
             offset: 0,
             file_identity: None,
             skip_partial: false,
-            seen: BTreeSet::new(),
+            baseline_identities: BTreeSet::new(),
+            observed: BTreeMap::new(),
             disabled: false,
             context_model: None,
             minimax_messages: None,
@@ -437,14 +449,14 @@ impl NativeJsonlUsageReader {
                             .unwrap()
                     );
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(baseline_id);
+                        self.baseline_identities.insert(baseline_id);
                         continue;
                     }
-                    if self.seen.contains(&baseline_id) {
+                    if self.baseline_identities.contains(&baseline_id) {
                         continue;
                     }
                     let mut calls: Vec<_> =
@@ -485,11 +497,11 @@ impl NativeJsonlUsageReader {
                         continue;
                     }
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(id);
+                        self.baseline_identities.insert(id);
                         continue;
                     }
                     parse_minimax(&line, &self.session_id).into_iter().collect()
@@ -501,14 +513,14 @@ impl NativeJsonlUsageReader {
                     };
                     let baseline_id = format!("trae-baseline:{}:{}", self.session_id, record.id);
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(baseline_id);
+                        self.baseline_identities.insert(baseline_id);
                         continue;
                     }
-                    if self.seen.contains(&baseline_id) {
+                    if self.baseline_identities.contains(&baseline_id) {
                         continue;
                     }
                     let mut calls: Vec<_> =
@@ -532,14 +544,14 @@ impl NativeJsonlUsageReader {
                     let baseline_id =
                         format!("qoder-baseline:{}:{}", self.session_id, record.message.id);
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(baseline_id);
+                        self.baseline_identities.insert(baseline_id);
                         continue;
                     }
-                    if self.seen.contains(&baseline_id) {
+                    if self.baseline_identities.contains(&baseline_id) {
                         continue;
                     }
                     let mut calls = parse_qoder(record, &self.session_id);
@@ -550,15 +562,39 @@ impl NativeJsonlUsageReader {
                 }
             };
             for observation in incoming {
-                if self.seen.contains(&observation.source_identity) {
+                // Current empty snapshots cannot consume the identity of a
+                // later numeric frame. Historical identities still fence resume.
+                if !baseline
+                    && observation.usage.fields.is_empty()
+                    && observation.usage.cost.is_none()
+                {
                     continue;
                 }
-                if self.seen.len() >= MAX_IDENTITIES {
-                    self.disabled = true;
-                    break;
+                if self
+                    .baseline_identities
+                    .contains(&observation.source_identity)
+                {
+                    continue;
                 }
-                self.seen.insert(observation.source_identity.clone());
-                if !baseline {
+                if baseline {
+                    if self.baseline_identities.len() >= MAX_IDENTITIES {
+                        self.disabled = true;
+                        break;
+                    }
+                    self.baseline_identities.insert(observation.source_identity);
+                } else {
+                    let snapshot = usage_snapshot(&observation.usage);
+                    if self.observed.get(&observation.source_identity) == Some(&snapshot) {
+                        continue;
+                    }
+                    if !self.observed.contains_key(&observation.source_identity)
+                        && self.baseline_identities.len() + self.observed.len() >= MAX_IDENTITIES
+                    {
+                        self.disabled = true;
+                        break;
+                    }
+                    self.observed
+                        .insert(observation.source_identity.clone(), snapshot);
                     observations.push(observation);
                 }
             }
@@ -776,13 +812,16 @@ fn minimax_record(line: &[u8]) -> Option<MinimaxRecord> {
 }
 fn parse_minimax(line: &[u8], session_id: &str) -> Option<NativeUsageObservation> {
     let record = minimax_record(line)?;
-    if !matches!(
-        record.message.stop_reason.as_deref(),
-        Some("stop" | "toolUse" | "length")
-    ) {
-        return None;
-    }
     let raw = record.message.usage?;
+    match record.message.stop_reason.as_deref() {
+        Some("stop" | "toolUse" | "length") => {}
+        Some("error" | "aborted")
+            if [raw.input, raw.output, raw.cache_read, raw.cache_write]
+                .into_iter()
+                .flatten()
+                .any(|n| n > 0) => {}
+        _ => return None,
+    }
     Some(observation(
         session_id,
         format!("minimax-native:{session_id}:{}", record.message_id),
@@ -836,6 +875,7 @@ const SQLITE_USAGE_CURSOR_QUERY: &str = "SELECT rowid,id FROM message ORDER BY r
 // Seek the primary rowid tree instead; no native database indexes are changed.
 const SQLITE_USAGE_CANDIDATES_QUERY: &str = "SELECT id,time_created FROM message NOT INDEXED
     WHERE rowid>?1 AND rowid<=?2 AND session_id=?3 ORDER BY rowid LIMIT ?4";
+const SQLITE_USAGE_QUERIES_PER_POLL: usize = 64;
 
 pub(crate) struct OpenCodeUsageReader {
     kind: AdapterKind,
@@ -844,9 +884,11 @@ pub(crate) struct OpenCodeUsageReader {
     session_id: String,
     file_identity: FileIdentity,
     cursor: Option<(i64, String)>,
-    pending: BTreeSet<(i64, String)>,
+    pending: VecDeque<String>,
     seen: BTreeSet<String>,
     disabled: bool,
+    #[cfg(test)]
+    metadata_query_runs: i32,
 }
 
 impl OpenCodeUsageReader {
@@ -891,9 +933,11 @@ impl OpenCodeUsageReader {
             session_id,
             file_identity: FileIdentity::from_metadata(&metadata),
             cursor: None,
-            pending: BTreeSet::new(),
+            pending: VecDeque::new(),
             seen: BTreeSet::new(),
             disabled: false,
+            #[cfg(test)]
+            metadata_query_runs: 0,
         };
         let database = reader.open()?;
         reader.validate_session(&database)?;
@@ -953,6 +997,10 @@ impl OpenCodeUsageReader {
     }
 
     fn poll_checked(&mut self) -> Result<Vec<NativeUsageObservation>> {
+        #[cfg(test)]
+        {
+            self.metadata_query_runs = 0;
+        }
         let mut connection = self.open()?;
         let database = connection.transaction()?;
         self.validate_session(&database)?;
@@ -980,35 +1028,39 @@ impl OpenCodeUsageReader {
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )?;
         for row in ids {
-            let (id, created) = row?;
+            let (id, _created) = row?;
             if !safe_identity(&id) {
                 bail!("native Usage message identity is invalid");
             }
             if !self.seen.contains(&id) {
-                self.pending.insert((created, id));
+                self.pending.push_back(id);
             }
             if self.pending.len() > MAX_IDENTITIES {
                 bail!("native Usage pending identities exceed bound");
             }
         }
         self.cursor = next_cursor;
+        if self.pending.is_empty() {
+            return Ok(Vec::new());
+        }
         // Only metadata scalars leave SQLite. Native parts and message bodies
         // are never selected into Core memory or its public Evidence channel.
-        // Incomplete candidates stay pending by ID while discovery advances.
+        // Wait only for the first collectible result. Once any trustworthy
+        // tokens are collected, retire the call even if other fields are absent.
+        // Round-robin bounds the original wait-for-completion path per poll.
         let mut query = database.prepare(
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
             CASE WHEN json_type(data,'$.tokens.reasoning')='integer' THEN json_extract(data,'$.tokens.reasoning') END, CASE WHEN json_type(data,'$.tokens.cache.read')='integer' THEN json_extract(data,'$.tokens.cache.read') END,
             CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, CASE WHEN json_type(data,'$.time.completed')='integer' THEN json_extract(data,'$.time.completed') END, CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END,
-            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END, json_extract(data,'$.role')
+            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END, json_extract(data,'$.role'),
+            COALESCE(json_type(data,'$.error')<>'null',0)
             FROM message WHERE session_id=?1 AND id=?2 AND json_valid(data)
-                AND json_type(data,'$.role')='text'
-                AND (json_extract(data,'$.role')<>'assistant' OR
-                    (json_type(data,'$.time.completed')='integer'
-                    AND (json_type(data,'$.error') IS NULL OR json_type(data,'$.error')='null')))",
+                AND json_type(data,'$.role')='text'",
         )?;
         let mut result = Vec::new();
-        for (created, id) in std::mem::take(&mut self.pending) {
+        for _ in 0..self.pending.len().min(SQLITE_USAGE_QUERIES_PER_POLL) {
+            let id = self.pending.pop_front().unwrap();
             if self.seen.contains(&id) {
                 continue;
             }
@@ -1029,25 +1081,39 @@ impl OpenCodeUsageReader {
                         row.get::<_, Option<String>>(8)?,
                         row.get::<_, Option<f64>>(9)?,
                         row.get::<_, String>(10)?,
+                        row.get::<_, bool>(11)?,
                     ))
                 })
                 .optional()?;
-            let Some((id, mut fields, time, provider, model, cost, role)) = row else {
-                self.pending.insert((created, id));
+            let Some((id, mut fields, time, provider, model, cost, role, failed)) = row else {
+                self.pending.push_back(id);
                 continue;
             };
             if role != "assistant" {
                 continue;
             }
-            if self.seen.len() >= MAX_IDENTITIES {
-                self.disabled = true;
-                break;
+            if time.is_none() {
+                self.pending.push_back(id);
+                continue;
             }
-            self.seen.insert(id.clone());
+            let counts = [
+                fields.input_tokens,
+                fields.output_tokens,
+                fields.reasoning_output_tokens,
+                fields.cache_read_input_tokens,
+                fields.cache_write_input_tokens,
+            ];
+            if failed && !counts.into_iter().flatten().any(|n| n > 0) {
+                // Preserve the original exclusion of failed placeholder zeros.
+                self.pending.push_back(id);
+                continue;
+            }
             fields.output_tokens = match (fields.output_tokens, fields.reasoning_output_tokens) {
                 (Some(output), Some(reasoning)) if output >= 0 && reasoning >= 0 => {
                     output.checked_add(reasoning)
                 }
+                (Some(output), None) if output >= 0 => Some(output),
+                (None, Some(reasoning)) if reasoning >= 0 => None,
                 _ => None,
             };
             let mut consumption = observation(
@@ -1077,6 +1143,11 @@ impl OpenCodeUsageReader {
                         grain: "model_call".into(),
                     });
             }
+            if self.seen.len() >= MAX_IDENTITIES {
+                self.disabled = true;
+                break;
+            }
+            self.seen.insert(id.clone());
             result.push(consumption);
             // The installed ACPUsage.contextTokens() defines occupancy as the
             // latest call's input + both cache buckets, excluding output. ACP
@@ -1118,6 +1189,10 @@ impl OpenCodeUsageReader {
                     .map(|(provider, model)| format!("{provider}/{model}"));
                 result.push(gauge);
             }
+        }
+        #[cfg(test)]
+        {
+            self.metadata_query_runs = query.get_status(rusqlite::StatementStatus::Run);
         }
         Ok(result)
     }
@@ -1203,6 +1278,7 @@ struct CodeBuddyProvider {
 }
 #[derive(Deserialize)]
 struct OpenAiUsage {
+    total_tokens: Option<i64>,
     prompt_tokens: Option<i64>,
     completion_tokens: Option<i64>,
     prompt_tokens_details: Option<PromptDetails>,
@@ -1289,6 +1365,7 @@ fn parse_codebuddy(
         None,
         RuntimeInputSemantics::CacheInclusiveTotal,
         RuntimeUsageFields {
+            total_tokens: nonnegative(raw.total_tokens),
             input_tokens: nonnegative(raw.prompt_tokens),
             output_tokens: output,
             cache_read_input_tokens: raw
@@ -1378,6 +1455,7 @@ struct TraeResponseMeta {
 }
 #[derive(Deserialize)]
 struct TraeUsage {
+    total_tokens: Option<i64>,
     prompt_tokens: Option<i64>,
     completion_tokens: Option<i64>,
     prompt_token_details: Option<PromptDetails>,
@@ -1399,6 +1477,7 @@ fn parse_trae(record: TraeRecord, session_id: &str) -> Option<NativeUsageObserva
         .timestamp_millis();
     let usage = record.message.message.response_meta?.usage?;
     let fields = RuntimeUsageFields {
+        total_tokens: nonnegative(usage.total_tokens),
         input_tokens: nonnegative(usage.prompt_tokens),
         output_tokens: nonnegative(usage.completion_tokens),
         cache_read_input_tokens: usage
@@ -1406,7 +1485,8 @@ fn parse_trae(record: TraeRecord, session_id: &str) -> Option<NativeUsageObserva
             .and_then(|v| nonnegative(v.cached_tokens)),
         ..Default::default()
     };
-    if fields.input_tokens.is_none()
+    if fields.total_tokens.is_none()
+        && fields.input_tokens.is_none()
         && fields.output_tokens.is_none()
         && fields.cache_read_input_tokens.is_none()
     {
@@ -1474,7 +1554,7 @@ struct KimiEvent {
     turn_id: Option<String>,
     usage: Option<KimiUsage>,
 }
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KimiUsage {
     input_other: Option<i64>,
@@ -1493,7 +1573,7 @@ fn parse_kimi(line: &[u8], session_id: &str) -> Option<NativeUsageObservation> {
         return None;
     }
     let id = event.uuid.filter(|id| safe_identity(id))?;
-    let raw = event.usage?;
+    let raw = event.usage.unwrap_or_default();
     Some(observation(
         session_id,
         format!("kimi-native:{session_id}:{id}"),
@@ -1775,6 +1855,43 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[cfg(feature = "extended-tests")]
+    fn project_native_usage(
+        database: &mut crate::db::Database,
+        kind: AdapterKind,
+        observations: &[NativeUsageObservation],
+    ) -> Option<i64> {
+        use crate::monitoring::{MonitoringService, RuntimeUsageBuffer, RuntimeUsageFlushTarget};
+        database.connection().execute(
+            "INSERT OR IGNORE INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at)
+             SELECT collection_epoch,'reader-run',?1,6,0,'unknown',datetime('now') FROM runtime_usage_collection_state WHERE singleton_id=1",
+            [kind.as_str()],
+        ).unwrap();
+        let run = MonitoringService::enrolled_usage_run(database, "reader-run", 1)
+            .unwrap()
+            .unwrap();
+        let mut buffer = RuntimeUsageBuffer::default();
+        for observation in observations {
+            buffer
+                .observe_run(
+                    &run,
+                    &observation.source_identity,
+                    std::slice::from_ref(&observation.usage),
+                    std::time::Instant::now(),
+                )
+                .unwrap();
+        }
+        MonitoringService::record_usage_batches(
+            database,
+            &buffer.drain(RuntimeUsageFlushTarget::All),
+        )
+        .unwrap();
+        database.connection().query_row(
+            "SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id='reader-run'",
+            [], |row| row.get(0),
+        ).unwrap()
+    }
+
     fn minimax(id: &str) -> serde_json::Value {
         json!({"message_id":id,"turn_id":"turn-1","message":{"role":"assistant","content":"PRIVATE_MINIMAX_CANARY", "stopReason":"stop", "usage":{"input":100,"output":5,"cacheRead":20,"cacheWrite":3},"timestamp":1}})
     }
@@ -1809,6 +1926,15 @@ mod tests {
     // fields. ACP parser fixtures cannot exercise these persisted envelopes.
     #[test]
     fn native_dialects_select_root_calls_preserve_missing_and_ignore_restated_content() {
+        for reason in ["error", "aborted"] {
+            let positive = json!({"message_id":"partial","turn_id":"turn","message":{"role":"assistant","stopReason":reason,
+                "usage":{"input":100,"output":5,"cacheRead":20}}});
+            let observation = parse_minimax(positive.to_string().as_bytes(), "session").unwrap();
+            assert_eq!(observation.usage.fields.output_tokens, Some(5));
+            let zero = json!({"message_id":"placeholder","message":{"role":"assistant","stopReason":reason,
+                "usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}});
+            assert!(parse_minimax(zero.to_string().as_bytes(), "session").is_none());
+        }
         let frame = minimax("call-1");
         let parsed = parse_minimax(frame.to_string().as_bytes(), "root-1").unwrap();
         assert_eq!(
@@ -1843,9 +1969,8 @@ mod tests {
         );
         for patch in [
             json!({"role":"user"}),
-            json!({"stopReason":"error"}),
-            json!({"stopReason":"aborted"}),
             json!({"usage":null}),
+            json!({"stopReason":"unknown"}),
             json!({"usage":{"input":-1}}),
         ] {
             let mut value = frame.clone();
@@ -1855,6 +1980,25 @@ mod tests {
             let parsed = parse_minimax(value.to_string().as_bytes(), "root-1");
             assert!(parsed.is_none_or(|item| item.usage.fields.input_tokens.is_none()));
         }
+        let mut total_only = trae("total-only");
+        total_only["message"]["message"]["response_meta"]["usage"] = json!({"total_tokens":55000});
+        let total = parse_trae(
+            trae_record(total_only.to_string().as_bytes(), "session-1").unwrap(),
+            "session-1",
+        )
+        .unwrap();
+        assert_eq!(total.usage.fields.total_tokens, Some(55000));
+        assert_eq!(total.usage.fields.input_tokens, None);
+        let mut total_only = codebuddy("total-only");
+        total_only["providerData"]["rawUsage"] = json!({"total_tokens":55000});
+        assert_eq!(
+            parse_codebuddy(total_only.to_string().as_bytes(), "session-1", "/workspace")
+                .unwrap()
+                .usage
+                .fields
+                .total_tokens,
+            Some(55000)
+        );
         let mut frame = trae("call-1");
         let read = |v: &serde_json::Value| {
             trae_record(v.to_string().as_bytes(), "session-1")
@@ -2347,6 +2491,9 @@ mod tests {
                     .unwrap()
                     .remove("usage");
             }
+            if matches!(dialect, Dialect::Kimi) {
+                historical["event"].as_object_mut().unwrap().remove("usage");
+            }
             fs::write(&path, format!("{historical}\n")).unwrap();
             let mut reader = NativeJsonlUsageReader::baseline(
                 dialect,
@@ -2373,6 +2520,62 @@ mod tests {
                 reader.poll().is_empty(),
                 "native repeat cannot claim another model call"
             );
+            if matches!(dialect, Dialect::CodeBuddy) {
+                let mut core = crate::db::Database::open(&root.join("core-projection")).unwrap();
+                let mut sparse = make("sparse-nonempty");
+                sparse["providerData"]["rawUsage"] = json!({"prompt_tokens":50000});
+                writeln!(file, "{sparse}").unwrap();
+                file.flush().unwrap();
+                let first = reader.poll();
+                assert_eq!(first.len(), 1);
+                assert_eq!(first[0].usage.fields.output_tokens, None);
+                assert_eq!(
+                    project_native_usage(&mut core, AdapterKind::CodebuddyCli, &first),
+                    Some(50000)
+                );
+                sparse["providerData"]["rawUsage"]["completion_tokens"] = json!(5000);
+                writeln!(file, "{sparse}\n{sparse}").unwrap();
+                file.flush().unwrap();
+                let completed = reader.poll();
+                assert_eq!(
+                    completed.len(),
+                    1,
+                    "changed snapshot passes, exact replay does not"
+                );
+                assert_eq!(completed[0].source_identity, first[0].source_identity);
+                assert_eq!(
+                    project_native_usage(&mut core, AdapterKind::CodebuddyCli, &completed),
+                    Some(55000)
+                );
+                writeln!(file, "{sparse}").unwrap();
+                file.flush().unwrap();
+                assert!(reader.poll().is_empty());
+                assert_eq!(
+                    project_native_usage(&mut core, AdapterKind::CodebuddyCli, &[]),
+                    Some(55000)
+                );
+            }
+            let mut empty = make("late-fields");
+            let usage = match dialect {
+                Dialect::CodeBuddy => &mut empty["providerData"]["rawUsage"],
+                Dialect::Kimi => &mut empty["event"]["usage"],
+                Dialect::Qoder | Dialect::Minimax => &mut empty["message"]["usage"],
+                Dialect::Trae => &mut empty["message"]["message"]["response_meta"]["usage"],
+            };
+            *usage = json!({});
+            writeln!(file, "{empty}").unwrap();
+            file.flush().unwrap();
+            assert!(
+                reader.poll().is_empty(),
+                "unknown is not an observed zero or a consumed identity"
+            );
+            write!(file, "{}", line("late-fields")).unwrap();
+            file.flush().unwrap();
+            assert_eq!(
+                reader.poll().len(),
+                1,
+                "same-call delayed numeric fields remain admissible"
+            );
             let mut next_run = NativeJsonlUsageReader::baseline(
                 dialect,
                 root.clone(),
@@ -2382,6 +2585,12 @@ mod tests {
             )
             .unwrap();
             write!(file, "{}{}", line("new"), line("next-run")).unwrap();
+            if matches!(dialect, Dialect::CodeBuddy) {
+                let mut historical = make("sparse-nonempty");
+                historical["providerData"]["rawUsage"] =
+                    json!({"prompt_tokens":50000,"completion_tokens":6000});
+                writeln!(file, "{historical}").unwrap();
+            }
             file.flush().unwrap();
             assert_eq!(
                 next_run.poll().len(),
@@ -2860,6 +3069,43 @@ mod tests {
                 .contains("NATIVE_PRIVATE_CANARY")
         );
         assert!(reader.poll().is_empty());
+        // A completed failure contributes its positive sparse usage once.
+        // Unsignalled in-place updates do not reopen a collected native call.
+        let mut core = crate::db::Database::open(&root.join("core-projection")).unwrap();
+        database.execute("INSERT INTO message VALUES('failed-positive-sparse','session-1',5,?1)",
+            [json!({"role":"assistant","time":{"completed":5},"error":{"name":"ProviderError"},
+                "tokens":{"input":10000}}).to_string()]).unwrap();
+        let failed = reader.poll();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &failed),
+            Some(10000)
+        );
+        let mut resumed =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database.execute("UPDATE message SET data=json_remove(json_set(data,'$.tokens.output',5000),'$.error') WHERE id='failed-positive-sparse'", []).unwrap();
+        let completed = reader.poll();
+        assert!(completed.is_empty());
+        assert!(
+            !reader
+                .pending
+                .iter()
+                .any(|id| id == "failed-positive-sparse")
+        );
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &completed),
+            Some(10000)
+        );
+        assert!(reader.poll().is_empty());
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &[]),
+            Some(10000)
+        );
+        assert!(
+            resumed.poll().is_empty(),
+            "a baseline row's later update still belongs to history"
+        );
         database.execute("UPDATE message SET data=json_set(data,'$.time.completed',4) WHERE id='new-pending'", []).unwrap();
         assert_eq!(reader.poll().len(), 2);
         // Positive cache write and independent reasoning formerly lived in the
@@ -2924,7 +3170,7 @@ mod tests {
             .unwrap();
         assert!(reader.poll().is_empty());
         assert!(
-            reader.pending.is_empty(),
+            reader.pending.iter().all(|id| id != "user-record"),
             "non-assistant rows leave the candidate budget"
         );
         database.execute("INSERT INTO message VALUES('sparse','session-1',6,?1)",
@@ -2934,6 +3180,37 @@ mod tests {
         assert_eq!(sparse[0].usage.fields.input_tokens, None);
         assert_eq!(sparse[0].usage.fields.output_tokens, Some(11));
         assert_eq!(sparse[0].usage.fields.cache_write_input_tokens, None);
+        // Partial reasoning cannot erase a known ordinary-output count. A
+        // failed completed call may still report real consumption.
+        for (id, tokens, error, output) in [
+            (
+                "missing-reasoning",
+                json!({"output":9}),
+                serde_json::Value::Null,
+                Some(9),
+            ),
+            (
+                "reasoning-only",
+                json!({"reasoning":2}),
+                serde_json::Value::Null,
+                None,
+            ),
+            (
+                "failed-with-usage",
+                json!({"input":3,"output":2}),
+                json!({"name":"ProviderError"}),
+                Some(2),
+            ),
+        ] {
+            database.execute("INSERT INTO message VALUES(?1,'session-1',7,?2)",
+                rusqlite::params![id,json!({"role":"assistant","time":{"completed":7},"error":error,"tokens":tokens}).to_string()]).unwrap();
+            let known = reader.poll();
+            assert_eq!(known.len(), 1);
+            assert_eq!(known[0].usage.fields.output_tokens, output);
+            if id == "reasoning-only" {
+                assert_eq!(known[0].usage.fields.reasoning_output_tokens, Some(2));
+            }
+        }
         assert!(!reader.disabled);
         let mut next =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
@@ -3122,6 +3399,184 @@ mod tests {
                 [],
             )
             .unwrap();
+        // Measure actual SQLite statement executions, rather than counting
+        // returned observations: duplicate filtering happens after each query.
+        for (case, data) in [
+            ("complete", history_usage.clone()),
+            ("sparse", json!({"role":"assistant","time":{"completed":1},"tokens":{"input":1}}).to_string()),
+            ("failed-sparse", json!({"role":"assistant","time":{"completed":1},"error":{"name":"ProviderError"},"tokens":{"input":1}}).to_string()),
+        ] {
+            let mut measured = OpenCodeUsageReader::baseline(
+                path.clone(),
+                "/workspace".into(),
+                "session-1".into(),
+            )
+            .unwrap();
+            database.execute(
+                "WITH RECURSIVE calls(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM calls WHERE n<1000)
+                 INSERT INTO message SELECT ?1||n,'session-1',1,?2 FROM calls",
+                rusqlite::params![format!("measured-{case}-"),data],
+            ).unwrap();
+            let mut queries = 0;
+            let mut calls = BTreeSet::new();
+            for _ in 0..64 {
+                let observations = measured.poll();
+                assert!(!measured.disabled);
+                assert!(measured.metadata_query_runs <= SQLITE_USAGE_QUERIES_PER_POLL as i32);
+                queries += measured.metadata_query_runs;
+                for item in observations.iter().filter(|item| item.usage.scope == "model_call") {
+                    assert!(calls.insert(item.source_identity.clone()), "each call is collected only once");
+                }
+                if measured.pending.is_empty() {
+                    break;
+                }
+            }
+            assert!(measured.pending.is_empty());
+            assert_eq!(
+                calls.len(), 1000,
+                "all calls with known consumption must be collected"
+            );
+            assert_eq!(queries, 1000, "sparse fields cannot add follow-up queries");
+            for _ in 0..10 {
+                assert!(measured.poll().is_empty());
+                assert_eq!(
+                    measured.metadata_query_runs, 0,
+                    "idle queries must not scale with retired calls"
+                );
+            }
+            database
+                .execute(
+                    "UPDATE message SET data=json_set(data,'$.tokens.output',5) WHERE id=?1",
+                    [format!("measured-{case}-1")],
+                )
+                .unwrap();
+            assert!(
+                measured.poll().is_empty(),
+                "no reliable update signal reopens a retired call"
+            );
+            assert_eq!(measured.metadata_query_runs, 0);
+            println!(
+                "SQLite Usage first collection: case={case}, calls=1000, metadata_queries={queries}, idle=0"
+            );
+        }
+        let mut unfinished =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        insert("still-running", "session-1", None);
+        for _ in 0..8 {
+            assert!(unfinished.poll().is_empty());
+            assert_eq!(
+                unfinished.metadata_query_runs, 1,
+                "an in-flight call is distinct from completed supplements"
+            );
+        }
+        database.execute("UPDATE message SET data=json_set(data,'$.time.completed',9) WHERE id='still-running'", []).unwrap();
+        assert_eq!(unfinished.poll().len(), 2);
+        assert!(unfinished.pending.is_empty());
+        assert!(unfinished.poll().is_empty());
+        assert_eq!(unfinished.metadata_query_runs, 0);
+        let mut unknown =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database
+            .execute(
+                "INSERT INTO message VALUES('completed-no-usage','session-1',1,?1)",
+                [json!({"role":"assistant","time":{"completed":9}}).to_string()],
+            )
+            .unwrap();
+        let empty = unknown.poll();
+        assert_eq!(empty.len(), 1);
+        assert!(
+            empty[0].usage.fields.is_empty(),
+            "missing usage stays unknown rather than becoming zero"
+        );
+        assert!(
+            unknown.pending.is_empty(),
+            "a completed result without usage does not start field chasing"
+        );
+        assert!(unknown.poll().is_empty());
+        assert_eq!(unknown.metadata_query_runs, 0);
+        let mut malformed =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        for (id, data) in [
+            ("awaiting-metadata", json!({})),
+            (
+                "awaiting-failure-completion",
+                json!({"role":"assistant","error":{"name":"ProviderError"}}),
+            ),
+            (
+                "awaiting-real-zero",
+                json!({"role":"assistant","time":{"completed":9},"error":{"name":"ProviderError"},"tokens":{"input":0,"output":0}}),
+            ),
+        ] {
+            database
+                .execute(
+                    "INSERT INTO message VALUES(?1,'session-1',1,?2)",
+                    rusqlite::params![id, data.to_string()],
+                )
+                .unwrap();
+        }
+        for _ in 0..8 {
+            assert!(malformed.poll().is_empty());
+            assert_eq!(malformed.metadata_query_runs, 3);
+        }
+        assert_eq!(
+            malformed.pending.len(),
+            3,
+            "wait for the first collectible result, without a supplement budget"
+        );
+        for id in [
+            "awaiting-metadata",
+            "awaiting-failure-completion",
+            "awaiting-real-zero",
+        ] {
+            database
+                .execute(
+                    "UPDATE message SET data=?2 WHERE id=?1",
+                    rusqlite::params![
+                        id,
+                        json!({"role":"assistant","time":{"completed":9},"tokens":{"input":0}})
+                            .to_string()
+                    ],
+                )
+                .unwrap();
+        }
+        let zeros = malformed.poll();
+        assert_eq!(zeros.len(), 3);
+        assert!(
+            zeros
+                .iter()
+                .all(|item| item.usage.fields.input_tokens == Some(0))
+        );
+        assert!(malformed.pending.is_empty());
+        assert!(malformed.poll().is_empty());
+        assert_eq!(malformed.metadata_query_runs, 0);
+        let mut retired =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database
+            .execute(
+                "INSERT INTO message VALUES('retired-sparse','session-1',1,?1)",
+                [
+                    json!({"role":"assistant","time":{"completed":1},"tokens":{"input":10000}})
+                        .to_string(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &retired.poll()),
+            Some(20000)
+        );
+        assert!(retired.pending.is_empty());
+        database.execute("UPDATE message SET data=json_set(data,'$.tokens.output',5000) WHERE id='retired-sparse'", []).unwrap();
+        assert!(retired.poll().is_empty());
+        assert_eq!(retired.metadata_query_runs, 0);
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &[]),
+            Some(20000),
+            "retiring a sparse call preserves its known consumption"
+        );
         let mut bounded =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();
