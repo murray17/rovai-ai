@@ -49,8 +49,6 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'claude-code-cli', label: 'Claude Code' },
   { value: 'copilot-cli', label: 'GitHub Copilot' },
   { value: 'opencode-cli', label: 'OpenCode' },
-  { value: 'kilo-cli', label: 'Kilo' },
-  { value: 'goose-cli', label: 'Goose' },
   { value: 'kiro-cli', label: 'Kiro' },
   { value: 'qoder-cli', label: 'Qoder' },
   { value: 'codebuddy-cli', label: 'CodeBuddy' },
@@ -65,7 +63,9 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'cline-cli', label: 'Cline' },
   { value: 'command-code-cli', label: 'Command Code' },
   { value: 'zcode-app', label: 'ZCode' },
-  { value: 'antigravity-app', label: 'Antigravity' }
+  { value: 'antigravity-app', label: 'Antigravity' },
+  { value: 'kilo-cli', label: 'Kilo' },
+  { value: 'goose-cli', label: 'Goose' }
 ]
 
 const SUMMARY_METRICS = [

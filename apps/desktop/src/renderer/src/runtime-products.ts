@@ -27,8 +27,6 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'codex-cli',
   'copilot-cli',
   'opencode-cli',
-  'kilo-cli',
-  'goose-cli',
   'kiro-cli',
   'qoder-cli',
   'codebuddy-cli',
@@ -44,7 +42,9 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'command-code-cli',
   'zcode-app',
   'antigravity-app',
-  'pi'
+  'pi',
+  'kilo-cli',
+  'goose-cli'
 ]
 
 export const VISIBLE_PRODUCT_RUNTIMES: AdapterKind[] = PRODUCT_RUNTIMES.filter(
