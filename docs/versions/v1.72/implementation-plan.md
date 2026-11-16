@@ -16,6 +16,8 @@ User sequence 12 已授权创建到 `main` 的 PR 并合并，继续复用 `rova
 按新基线复跑类型检查、默认 Node/Vitest、默认 Rust workspace、桌面构建、真实桥接、下载 UI 和通用文档门禁；
 PR 的 `CI / gate` 另复跑真实 Linux 取消／替换窗口并保留提交关联的报告。
 检查通过后合入并清理该干净 worktree；精确 PR、合入 SHA、验收结果与清理状态以 GitHub 和最终交接为准。
+本地默认回归发现主干产品合同指纹测试仍期待 schema 174，而主干 DB 已为 175；仅将该既有断言同步到当前权威值，
+保留其余字段与不可用证据断言，生产协议不作改动。合入 PR 为 [#1100](https://github.com/murray17/rovai-ai/pull/1100)。
 
 ## 会话文件下载评审修复（2026-11-16）
 
