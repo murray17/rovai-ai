@@ -36,15 +36,17 @@ test('Linux native Electron asks before replacing an edited attachment download'
     const bundle = join(fixture, 'attachment-save.cjs')
     await esbuild.build({ entryPoints: [join(root, 'apps/desktop/src/main/attachment-save.ts')], outfile: bundle,
       bundle: true, platform: 'node', format: 'cjs' })
-    const env = { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', NO_AT_BRIDGE: '0', GTK_MODULES: 'atk-bridge', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+    const env = { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ACCESSIBILITY_ENABLED: '1', GNOME_ACCESSIBILITY: '1', NO_AT_BRIDGE: '0', GTK_MODULES: 'atk-bridge', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete env.ELECTRON_RUN_AS_NODE
     console.log(`Linux automatic acceptance userData: ${userData}; unused Skill Library: ${join(userData, 'managed-skill-library')}; no Core/Runtime`)
     start('openbox', ['--sm-disable'], env)
     const app = start(electron, [join(root, 'scripts/fixtures/attachment-download/native-save.cjs'), bundle, userData, evidence, '--no-sandbox'], env)
     const driver = start('/usr/bin/python3', [join(root, 'scripts/fixtures/attachment-download/native-save-driver.py'), evidence], env)
     timer = setTimeout(() => { for (const { child } of children) child.kill('SIGKILL') }, 90_000)
-    const results = await Promise.all([app, driver])
-    assert.ok(results.every(([code]) => code === 0), log)
+    await Promise.all([app, driver].map(async completed => {
+      const [code] = await completed
+      assert.equal(code, 0, log)
+    }))
     const native = JSON.parse(await readFile(join(evidence, 'native-report.json'), 'utf8'))
     const dialogs = JSON.parse(await readFile(join(evidence, 'native-dialog-report.json'), 'utf8'))
     assert.deepEqual(native.cases.map(item => item.result.saved), [false, true])
@@ -62,11 +64,11 @@ test('Linux native Electron asks before replacing an edited attachment download'
     if (process.env.ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS) {
       const out = join(resolve(process.env.ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS), 'linux-native')
       await mkdir(out, { recursive: true })
-      for (const name of ['native-report.json', 'native-dialog-report.json', 'overwrite-cancel.png', 'overwrite-confirm.png', 'electron.log']) {
+      for (const name of ['native-report.json', 'native-dialog-report.json', 'overwrite-cancel.png', 'overwrite-confirm.png', 'native-failure.png', 'electron.log']) {
         await copyFile(join(evidence, name), join(out, name)).catch(() => undefined)
       }
     }
     if (!passed || process.env.ROVAI_KEEP_ATTACHMENT_DOWNLOAD_FIXTURE === '1') console.log(`Native attachment save fixture: ${fixture}`)
-    else await rm(fixture, { recursive: true, force: true })
+    else await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })

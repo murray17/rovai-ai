@@ -31,6 +31,8 @@ Linux 原生覆盖使用 `xvfb-run -a dbus-run-session -- pnpm test:attachment-s
 Linux 原生覆盖确认不使用本地跳过记录证明；远端结果保存在提交关联的 `CI / gate` 日志和 artifact 中。
 首次远端执行 `43852076068` 在桌面悬浮断言失败：Linux 无头浏览器启用了无悬浮设备的常显样式。
 CI 改用独立 Xvfb 的有窗口 Chrome，并校验／记录 `hover:hover` 和 `pointer:fine`；触屏场景仍独立启用模拟后验收。
+第二轮 `43852964274` 的全部 Renderer 行为断言通过，退出清理发生 `ENOTEMPTY`；沿用现有浏览器夹具的有限目录清理重试。
+原生窗口驱动未取得辅助功能树，夹具显式启用 Chromium 辅助功能桥接并保留失败窗口截图；不改变生产 App 的辅助功能设置。
 
 API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/dialog/)、
 [Windows 文件命名](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。

@@ -126,6 +126,7 @@ App，以受控本机 API 和时钟验证首帧画布、就绪交接与 authorit
 Linux 覆盖确认运行 `xvfb-run -a dbus-run-session -- pnpm test:attachment-save-linux`：使用独立 Electron userData、GTK 3
 和 AT-SPI 操作真实保存／覆盖窗口，检查取消保留已有编辑、确认后替换。依赖 `openbox`、`scrot`、`at-spi2-core`、
 `gir1.2-atspi-2.0` 与 `python3-gi`；非 Linux 本地显式跳过，不能作为 Linux 验收。
+夹具显式启用 Chromium 的辅助功能桥接，仅影响该临时 Electron 进程；窗口操作失败保存截图与树诊断。
 上述下载 UI 与 Linux 原生窗口验收进入 `CI / gate`，报告和截图随提交关联的 Actions artifact 保存。
 可折叠分栏共享最小尺寸停留与继续拖动收起行为；导航和预览沿用上述回归，队员列表运行
 `node --test scripts/lib/member-editor.test.mjs`，底部执行台运行 `pnpm test:execution-avatar-rail`。

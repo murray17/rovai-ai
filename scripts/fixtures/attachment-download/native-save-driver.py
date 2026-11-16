@@ -62,6 +62,7 @@ def wait_for(check, message):
             tree.append([node.get_role_name(), node.get_name()])
         except Exception:
             pass
+    subprocess.run(['scrot', str(root / 'native-failure.png')], timeout=5, check=False)
     raise AssertionError(message + '\n' + json.dumps({'state': state(), 'tree': tree}, ensure_ascii=False))
 
 

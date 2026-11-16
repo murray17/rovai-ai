@@ -187,6 +187,6 @@ test('production attachment downloads preserve preview, ownership, input and the
       }
     }
     if (!passed || process.env.ROVAI_KEEP_ATTACHMENT_DOWNLOAD_FIXTURE === '1') console.log(`Attachment download fixture: ${fixture}`)
-    else await rm(fixture, { recursive: true, force: true })
+    else await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })
