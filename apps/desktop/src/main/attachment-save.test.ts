@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAttachmentTarget } from './attachment-desktop'
-import { saveDesktopAttachment } from './attachment-save'
+import { attachmentSaveDialogOptions, normalizeAttachmentSaveName, saveDesktopAttachment } from './attachment-save'
 
 vi.mock('node:crypto', () => ({ randomUUID: () => 'fixture-copy' }))
 
@@ -22,6 +22,31 @@ async function fixture() {
 }
 
 describe('native attachment saving', () => {
+  it('requests native Linux overwrite confirmation', () => {
+    expect(attachmentSaveDialogOptions('/downloads', 'report.txt', 'linux').properties).toContain('showOverwriteConfirmation')
+    expect(attachmentSaveDialogOptions('/downloads', 'report.txt', 'darwin').properties).toBeUndefined()
+    expect(attachmentSaveDialogOptions('/downloads', 'report.txt', 'win32').properties).toBeUndefined()
+  })
+
+  it.each(['CON.txt', 'nul.json', 'PRN', 'AUX.tar.gz', 'COM1.log', 'LPT9', 'COM¹.txt', 'LPT².csv', 'CONIN$'])
+    ('avoids the reserved Windows destination name %s', name => {
+      expect(normalizeAttachmentSaveName(name)).toBe('_' + name)
+    })
+
+  it('bounds destination components without breaking Unicode or common extensions', () => {
+    for (const name of ['文'.repeat(200) + '.pdf', '😀'.repeat(200) + '.json', 'a'.repeat(400) + '.md']) {
+      const normalized = normalizeAttachmentSaveName(name)
+      expect(Buffer.byteLength(normalized, 'utf8')).toBeLessThanOrEqual(240)
+      expect(normalized.length).toBeLessThanOrEqual(240)
+      expect(normalized.endsWith(name.slice(name.lastIndexOf('.')))).toBe(true)
+      expect(Buffer.from(normalized, 'utf8').toString('utf8')).toBe(normalized)
+    }
+    for (const name of ['', '   ', '.', '..']) expect(normalizeAttachmentSaveName(name)).toBe('file')
+    expect(normalizeAttachmentSaveName('report:2026?.txt. ')).toBe('report_2026_.txt')
+    expect(normalizeAttachmentSaveName('CONSOLE.txt')).toBe('CONSOLE.txt')
+    expect(normalizeAttachmentSaveName('con .txt')).toBe('_con.txt')
+    expect(normalizeAttachmentSaveName('.gitignore')).toBe('.gitignore')
+  })
   it('reauthorizes after the dialog and saves the current binary bytes without changing the source', async () => {
     const f = await fixture()
     const updated = Buffer.concat([f.bytes, Buffer.from([42])])
@@ -75,7 +100,7 @@ describe('native attachment saving', () => {
       await symlink(f.root, alias, 'dir')
       return f.destination
     })
-    expect(result).toEqual({ saved: false, error: 'save_failed', availability: 'available' })
+    expect(result).toEqual({ saved: false, error: 'target_unavailable', availability: 'kind_changed' })
     expect(await readFile(f.destination, 'utf8')).toBe('keep destination')
     expect(JSON.stringify(result)).not.toContain(f.root)
     expect((await readdir(f.root)).filter(name => name.startsWith('.rovai-download-'))).toEqual([])
@@ -98,6 +123,37 @@ describe('native attachment saving', () => {
     expect(result).toMatchObject({ saved: false, error: 'save_failed' })
     expect(await readFile(foreign, 'utf8')).toBe('unowned file')
     expect(await readFile(f.destination, 'utf8')).toBe('keep destination')
+    expect(await readFile(f.source)).toEqual(f.bytes)
+  })
+
+  it('reports a source deleted after reauthorization as missing without replacing the destination', async () => {
+    const f = await fixture()
+    await writeFile(f.destination, 'keep destination')
+    let calls = 0
+    const resolve = async () => {
+      if (++calls === 2) await rm(f.source)
+      return { target: f.target, availability: 'available' as const }
+    }
+    expect(await saveDesktopAttachment(resolve, async () => f.destination))
+      .toEqual({ saved: false, error: 'target_unavailable', availability: 'missing' })
+    expect(await readFile(f.destination, 'utf8')).toBe('keep destination')
+  })
+
+  it('distinguishes a missing source parent from a missing destination parent', async () => {
+    const f = await fixture()
+    const parent = join(f.root, 'parent')
+    await mkdir(parent)
+    const source = join(parent, 'source.bin')
+    await writeFile(source, f.bytes)
+    let calls = 0
+    const resolve = async () => {
+      if (++calls === 2) { await rm(parent, { recursive: true }); await writeFile(parent, 'now a file') }
+      return { target: { ...f.target, path: source }, availability: 'available' as const }
+    }
+    expect(await saveDesktopAttachment(resolve, async () => f.destination))
+      .toEqual({ saved: false, error: 'target_unavailable', availability: 'missing' })
+    expect(await saveDesktopAttachment(async () => ({ target: f.target, availability: 'available' }), async () => join(f.root, 'missing', 'target.bin')))
+      .toEqual({ saved: false, error: 'save_failed', availability: 'available' })
     expect(await readFile(f.source)).toEqual(f.bytes)
   })
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { extname, join, resolve } from 'node:path'
@@ -123,12 +123,66 @@ test('production attachment downloads preserve preview, ownership, input and the
     await browser.capture(join(fixture, 'touch.png'))
     await browser.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await browser.wait(`getComputedStyle(${first}).transitionDuration.split(',').every(value=>parseFloat(value)<=.001)`)
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
+    await browser.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?virtual` })
+    await browser.wait(`!!${first} && document.querySelectorAll('[data-timeline-key]').length<40`)
+    await browser.click(first)
+    await browser.wait('window.downloadQA.pending.length===1')
+    await browser.evaluate("document.getElementById('virtual-outside').focus();const v=document.getElementById('virtual-viewport');v.scrollTop=v.scrollHeight")
+    await browser.wait("!document.querySelector('[data-message-id=virtual-0]')")
+    assert.equal(await browser.evaluate('window.downloadQA.pending.length'), 1)
+    await browser.evaluate("document.getElementById('virtual-viewport').scrollTop=0")
+    await browser.wait(`!!${first} && ${first}.disabled && ${first}.dataset.downloadState==='preparing'`)
+    await browser.evaluate(`${first}.click()`)
+    assert.equal(await browser.evaluate('window.downloadQA.pending.length'), 1, 'Returning to the virtual row must not open another native save dialog')
+    await browser.evaluate("window.downloadQA.complete(0,'success')")
+    await browser.wait(`${first}.dataset.downloadState==='idle'`)
+    assert.equal(await browser.evaluate('document.activeElement.id'), 'virtual-outside')
+    await browser.click(first)
+    await browser.wait('window.downloadQA.pending.length===2')
+    await browser.evaluate("window.downloadQA.complete(1,'cancel');window.downloadQA.setMode('web')")
+    await browser.wait(`${first}.dataset.downloadState==='idle'`)
+    await browser.click(first)
+    await browser.wait('window.downloadQA.pending.length===3')
+    await browser.evaluate('window.downloadQA.setMounted(false)')
+    await browser.wait(`!${first}`)
+    await browser.evaluate('window.downloadQA.setMounted(true)')
+    await browser.wait(`!!${first} && ${first}.disabled`)
+    await browser.evaluate(`${first}.click()`)
+    assert.equal(await browser.evaluate('window.downloadQA.pending.length'), 3, 'Web downloads also survive a full list unmount without duplicate requests')
+    await browser.evaluate("window.downloadQA.complete(2,'error')")
+    await browser.wait(`${first}.dataset.downloadState==='error'`)
+    await browser.click(first)
+    await browser.wait('window.downloadQA.pending.length===4')
+    await browser.evaluate('window.downloadQA.setMounted(false)')
+    await browser.wait(`!${first}`)
+    await browser.evaluate('window.downloadQA.reject(3)')
+    await browser.evaluate('window.downloadQA.setMounted(true)')
+    await browser.wait(`!!${first} && ${first}.dataset.downloadState==='idle'`)
+    await browser.click(first)
+    await browser.wait('window.downloadQA.pending.length===5')
+    await browser.evaluate("window.downloadQA.complete(4,'cancel')")
+    await browser.wait(`${first}.dataset.downloadState==='idle'`)
+    assert.equal(await browser.evaluate('window.downloadQA.opened.length'), 0)
     assert.deepEqual(browser.errors, [])
     passed = true
-    console.log(JSON.stringify({ native: 'cancel, retry, duplicate guard', web: 'source download', keyboard: 'Tab/Enter', stale: 'client and attachment', themes: 5, touch: '44px', errors: browser.errors }))
+    const report = { commit: process.env.GITHUB_SHA ?? null, platform: process.platform, native: 'cancel, retry, duplicate guard', web: 'source download', keyboard: 'Tab/Enter', stale: 'client and attachment', virtualization: '160 rows; scroll unmount/return; full unmount/return; no duplicate request; retry after settle', themes: 5, touch: '44px', errors: browser.errors }
+    await writeFile(join(fixture, 'report.json'), JSON.stringify(report, null, 2))
+    console.log(JSON.stringify(report))
+  } catch (error) {
+    await browser?.capture(join(fixture, 'failure.png')).catch(() => undefined)
+    throw error
   } finally {
     await browser?.close()
     if (server) await new Promise(resolve => server.close(resolve))
+    if (process.env.ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS) {
+      const out = join(resolve(process.env.ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS), 'renderer')
+      await mkdir(out, { recursive: true })
+      for (const name of ['report.json', 'day.png', 'night.png', 'horizon.png', 'classic-red.png', 'ember.png', 'touch.png', 'failure.png']) {
+        await copyFile(join(fixture, name), join(out, name)).catch(() => undefined)
+      }
+    }
     if (!passed || process.env.ROVAI_KEEP_ATTACHMENT_DOWNLOAD_FIXTURE === '1') console.log(`Attachment download fixture: ${fixture}`)
     else await rm(fixture, { recursive: true, force: true })
   }

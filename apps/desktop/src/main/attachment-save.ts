@@ -1,10 +1,49 @@
 import { randomUUID } from 'node:crypto'
 import { constants, createWriteStream } from 'node:fs'
 import { lstat, open, realpath, rename, stat, unlink } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, extname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
+import type { SaveDialogOptions } from 'electron'
 import type { AttachmentSaveResult, LocalAttachmentAvailability } from '@contracts'
 import type { DesktopAttachmentTarget } from './attachment-desktop'
+
+/** A default destination component, never a change to stored display metadata. */
+export function normalizeAttachmentSaveName(displayName: string): string {
+  let name = displayName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim().replace(/[. ]+$/u, '') || 'file'
+  const device = name.split('.')[0].replace(/[ ]+$/u, '')
+  if (/^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³]|conin\$|conout\$)$/iu.test(device)) name = '_' + name
+  const extension = extname(name)
+  const suffix = extension.length <= 32 && Buffer.byteLength(extension, 'utf8') <= 32 ? extension : ''
+  const byteBudget = 240 - Buffer.byteLength(suffix, 'utf8')
+  const unitBudget = 240 - suffix.length
+  let stem = '', bytes = 0
+  for (const point of name.slice(0, name.length - suffix.length)) {
+    const size = Buffer.byteLength(point, 'utf8')
+    if (bytes + size > byteBudget || stem.length + point.length > unitBudget) break
+    stem += point
+    bytes += size
+  }
+  return (stem.replace(/[. ]+$/u, '') || 'file') + suffix
+}
+
+export function attachmentSaveDialogOptions(directory: string, name: string, platform = process.platform): SaveDialogOptions {
+  const options: SaveDialogOptions = { defaultPath: join(directory, name) }
+  if (platform === 'linux') options.properties = ['showOverwriteConfirmation']
+  return options
+}
+
+class AttachmentSourceUnavailable extends Error {
+  constructor(readonly availability: LocalAttachmentAvailability) { super('Attachment source unavailable') }
+}
+
+async function inspectSource<T>(operation: () => Promise<T>): Promise<T> {
+  try { return await operation() } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : null
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new AttachmentSourceUnavailable('missing')
+    if (code === 'EACCES' || code === 'EPERM' || code === 'ELOOP') throw new AttachmentSourceUnavailable('unreadable')
+    throw error
+  }
+}
 
 /** Only Main supplies the owner-authorized source and the native dialog's destination. */
 export async function saveDesktopAttachment(
@@ -18,7 +57,7 @@ export async function saveDesktopAttachment(
     if (!initial.target || initial.target.kind !== 'file') {
       return { saved: false, error: 'target_unavailable', availability }
     }
-    const name = initial.target.displayName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/[. ]+$/u, '') || 'file'
+    const name = normalizeAttachmentSaveName(initial.target.displayName)
     const destination = await chooseDestination(name)
     if (!destination) return { saved: false, error: null, availability }
     // A native dialog can remain open while a message or its source disappears.
@@ -29,7 +68,8 @@ export async function saveDesktopAttachment(
     }
     await copyAttachmentFile(current.target.path, destination)
     return { saved: true, error: null, availability: 'available' }
-  } catch {
+  } catch (error) {
+    if (error instanceof AttachmentSourceUnavailable) return { saved: false, error: 'target_unavailable', availability: error.availability }
     return { saved: false, error: 'save_failed', availability }
   }
 }
@@ -37,13 +77,13 @@ export async function saveDesktopAttachment(
 async function copyAttachmentFile(source: string, destination: string): Promise<void> {
   // Source Refs already permit links; follow that authorized reference once,
   // then hold the final regular file rather than reopening its name mid-copy.
-  const canonicalSource = await realpath(source)
-  if (!(await lstat(canonicalSource)).isFile()) throw new Error('Attachment is no longer a regular file')
-  const input = await open(canonicalSource, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  const canonicalSource = await inspectSource(() => realpath(source))
+  if (!(await inspectSource(() => lstat(canonicalSource))).isFile()) throw new AttachmentSourceUnavailable('kind_changed')
+  const input = await inspectSource(() => open(canonicalSource, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)))
   let temporary: string | null = null
   try {
-    const sourceInfo = await input.stat()
-    if (!sourceInfo.isFile()) throw new Error('Attachment is no longer a regular file')
+    const sourceInfo = await inspectSource(() => input.stat())
+    if (!sourceInfo.isFile()) throw new AttachmentSourceUnavailable('kind_changed')
     const existing = await stat(destination).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return null
       throw error

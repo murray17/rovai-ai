@@ -3,10 +3,35 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # v1.72 实施与验收
+
+## 会话文件下载评审修复（2026-11-16）
+
+复用 `rovai/agent-file-download` 与原 worktree。合并 `origin/main@855a3c2a7a4a3827ff3308a540e38a7dc8cbac1b`，
+合并提交 `80a1e37ac`；只有本版总览的相邻章节发生内容冲突，保留下载章节与主干最新输入性能章节。
+
+- Linux 保存选项显式请求覆盖确认；真实 GTK 窗口验收分别取消和确认对已编辑文件的覆盖。
+- 二次授权后源删除／父路径变化按 `missing` 呈现，源访问拒绝与类型变化分别归入 `unreadable`／`kind_changed`；目标写入失败保持独立。
+- 默认文件名独立规范化，覆盖 Windows 设备保留名、空名称和超长 Unicode；不改写原附件显示名。
+- 下载中的虚拟行卸载后，按客户端和 exact owner 保留同一请求；重新挂载保持忙碌。生产 `TimelineVirtualList` 的 160 行夹具验证滚出／返回、整表卸载／返回、终态重试和重复点击。
+- `CI / gate` 增加生产下载 UI 与真实 Linux 覆盖窗口验收；报告携带 `GITHUB_SHA`，截图与 JSON 作为 `attachment-download-<sha>` artifact 保存。
+  使用现有 workflow_dispatch 在功能分支触发远端验收，无需创建 PR；结果以该提交关联的 CI run 为准。
+
+复跑命令：`pnpm typecheck`、`VITEST_MAX_WORKERS=2 pnpm test`、`pnpm test:rust:pr`、`pnpm build:desktop`、
+`pnpm test:desktop-bridge`、`pnpm test:attachment-download-ui`、`pnpm docs:test`、`pnpm docs:check`、
+`DOCS_BASE_REF=855a3c2a7a4a3827ff3308a540e38a7dc8cbac1b pnpm docs:check:ci`。
+Linux 原生覆盖使用 `xvfb-run -a dbus-run-session -- pnpm test:attachment-save-linux`；macOS 上该项跳过不计为通过。
+所有 App/浏览器夹具使用独立临时 profile，不启动 Core 或 Runtime，不指向日常 userData。
+
+主干同步后的 macOS 本地记录：类型检查、桌面构建、真实 contextBridge、下载 UI／虚拟列表和文档门禁通过；
+完整 Vitest 为 280 文件、3338 项通过（2 项既有跳过），Node 回归 388 项通过（2 项平台跳过），默认 Rust workspace 回归通过。
+Linux 原生覆盖确认不使用本地跳过记录证明；远端结果保存在提交关联的 `CI / gate` 日志和 artifact 中。
+
+API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/dialog/)、
+[Windows 文件命名](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。
 
 ## 会话文件下载（2026-11-15）
 

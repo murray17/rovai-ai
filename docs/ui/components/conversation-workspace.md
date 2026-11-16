@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Thread 会话工作区
@@ -1175,6 +1175,8 @@ Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原�
 操作位始终预留，显隐和按下不移动文件名、行或按钮；触屏直接显示并将命中区增至 44×44px。
 下载不触发预览，右键操作保留。准备期间原位显示转圈并禁止重复触发，失败保留重试入口及可访问说明，
 取消静默恢复，成功只作无障碍通知；不增加常驻说明或成功 Toast。用户文件卡、Composer、目录及图片缩略图不增加此按钮。
+下载请求不归虚拟行挂载周期所有；下载期间滚动卸载并返回同一附件时，仍显示忙碌并禁止重复触发。
+同一请求结束后再次点击可以重新下载，换客户端／owner 时不投递旧结果。
 Desktop 经系统保存窗口保存副本，Web 沿用浏览器下载。`previewKind`
 不是图片的 image MIME/扩展名对象进入 Agent 文件区的 Image 家族。
 

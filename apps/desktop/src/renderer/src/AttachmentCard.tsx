@@ -14,6 +14,7 @@ import {
 import { UiText, uiAttribute } from './interface-language'
 import { ImageContextMenu, type ImageAction, type ImageMenuPosition } from './ImageContextMenu'
 import { writeClipboardImage } from './clipboard'
+import { pendingAttachmentDownload, startAttachmentDownload, type AttachmentDownloadResult } from './attachment-download'
 
 type AttachmentKind = 'file' | 'directory'
 
@@ -474,39 +475,30 @@ function AttachmentDownloadButton({ attachment, locator, disabled, onAvailabilit
   onAvailabilityChange: (availability: LocalAttachmentAvailability) => void
 }): JSX.Element {
   const client = useThreadClient()
-  const [state, setState] = useState<'idle' | 'preparing' | 'error'>('idle')
+  const [state, setState] = useState<'idle' | 'preparing' | 'error'>(() => pendingAttachmentDownload(client, locator) ? 'preparing' : 'idle')
   const [notice, setNotice] = useState<'saved' | 'started' | 'error' | null>(null)
   const pending = useRef(false)
   const generation = useRef(0)
   useEffect(() => {
     generation.current++
-    pending.current = false
-    setState('idle')
+    const request = pendingAttachmentDownload(client, locator)
+    pending.current = Boolean(request)
+    setState(request ? 'preparing' : 'idle')
     setNotice(null)
+    if (request) void observe(request, generation.current)
     return () => { generation.current++ }
   }, [client])
   const label = state === 'preparing' ? uiAttribute('准备下载…')
     : state === 'error' ? uiAttribute('下载失败，点击重试') : uiAttribute('下载文件')
-  const download = async (): Promise<void> => {
-    if (disabled || pending.current) return
-    const current = generation.current
-    pending.current = true
+  const observe = async (request: Promise<AttachmentDownloadResult>, current: number): Promise<void> => {
     setState('preparing')
     setNotice(null)
     try {
-      if (client.attachments.kind === 'native') {
-        const result = await client.attachments.save!(locator)
-        if (generation.current !== current) return
-        onAvailabilityChange(result.availability)
-        if (result.error) throw new Error(result.error)
-        setNotice(result.saved ? 'saved' : null)
-      } else {
-        const result = await client.attachments.download(locator)
-        if (generation.current !== current) return
-        onAvailabilityChange(result.availability)
-        if (result.error) throw new Error(result.error)
-        setNotice(result.opened ? 'started' : null)
-      }
+      const result = await request
+      if (generation.current !== current) return
+      onAvailabilityChange(result.availability)
+      if (result.error) throw new Error(result.error)
+      setNotice(result.notice)
       setState('idle')
     } catch {
       if (generation.current !== current) return
@@ -515,6 +507,11 @@ function AttachmentDownloadButton({ attachment, locator, disabled, onAvailabilit
     } finally {
       if (generation.current === current) pending.current = false
     }
+  }
+  const download = (): void => {
+    if (disabled || pending.current) return
+    pending.current = true
+    void observe(startAttachmentDownload(client, locator), generation.current)
   }
   return <>
     <button type="button" className="attachment-download-action" data-download-state={state}

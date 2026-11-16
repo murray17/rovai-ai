@@ -23,12 +23,15 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Fetch pull request base
-        if: github.event_name == 'pull_request'
+      - name: Fetch validation baseline
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          else
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          fi
 
       - name: Detect fast-check scopes
         id: changes
@@ -138,13 +141,35 @@ jobs:
           pnpm typecheck
           pnpm exec vitest run
 
+      - name: Install native UI acceptance dependencies
+        if: steps.changes.outputs.node == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb dbus-x11 openbox scrot at-spi2-core gir1.2-atspi-2.0 python3-gi
+
+      - name: Run attachment download UI acceptance
+        if: steps.changes.outputs.node == 'true'
+        env:
+          ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS: ${{ runner.temp }}/attachment-download-artifacts
+        run: |
+          export ROVAI_TEST_CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$ROVAI_TEST_CHROME"
+          pnpm test:attachment-download-ui
+
+      - name: Exercise native Linux overwrite confirmations
+        if: steps.changes.outputs.node == 'true'
+        env:
+          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
+          ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS: ${{ runner.temp }}/attachment-download-artifacts
+        run: xvfb-run -a dbus-run-session -- pnpm test:attachment-save-linux
+
       - name: Run diff-aware documentation governance
         if: steps.changes.outputs.docs == 'true'
         env:
           DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: |
           if [[ -z "$DOCS_BASE_REF" ]]; then
-            export DOCS_BASE_REF="$GITHUB_SHA"
+            export DOCS_BASE_REF="$(git rev-parse origin/main)"
           fi
           pnpm docs:check:ci
 
@@ -173,3 +198,12 @@ jobs:
       - name: Report no-op gate
         if: steps.changes.outputs.node != 'true' && steps.changes.outputs.rust != 'true' && steps.changes.outputs.docs != 'true' && steps.changes.outputs.skills != 'true'
         run: echo "No relevant fast checks were required."
+
+      - name: Preserve attachment download acceptance evidence
+        if: always() && steps.changes.outputs.node == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: attachment-download-${{ github.sha }}
+          path: ${{ runner.temp }}/attachment-download-artifacts
+          if-no-files-found: ignore
+          retention-days: 14

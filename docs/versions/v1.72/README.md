@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -17,6 +17,8 @@ last_updated: 2026-11-15
 Desktop 通过系统保存窗口保存经 exact-owner 重验的文件副本，Web 复用既有下载授权。
 范围与验证见[本版实施记录](implementation-plan.md#会话文件下载2026-11-15)，规则归
 [Camp Attachment v13](../../contracts/camp-attachment-v13.md) 与[会话附件 UI](../../ui/components/conversation-workspace.md)。
+2026-11-16 的评审修复同步 `main@855a3c2a`，补齐 Linux 覆盖确认、源失效分类、默认文件名边界及虚拟列表请求去重；
+验证归属与命令见[评审修复记录](implementation-plan.md#会话文件下载评审修复2026-11-16)。
 
 ## 长会话输入性能（2026-11-15）
 

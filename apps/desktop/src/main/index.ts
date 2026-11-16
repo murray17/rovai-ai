@@ -121,7 +121,7 @@ import {
   type DesktopAttachmentTarget
 } from './attachment-desktop'
 import { createPastedTextAttachment, LocalComposerAttachmentRegistry } from './local-composer-attachments'
-import { saveDesktopAttachment } from './attachment-save'
+import { attachmentSaveDialogOptions, saveDesktopAttachment } from './attachment-save'
 import {
   prepareWindowsBootstrapRoot,
   prepareWindowsDataRoot,
@@ -2473,7 +2473,7 @@ ipcMain.handle(
 ipcMain.handle('rovai:attachment-save', async (_event, value: unknown) => {
   const locator = requireAttachmentOwnerLocator(value)
   return saveDesktopAttachment(() => resolveDesktopAttachmentTarget(locator), async name => {
-    const options = { defaultPath: join(app.getPath('downloads'), name) }
+    const options = attachmentSaveDialogOptions(app.getPath('downloads'), name)
     const result = mainWindow
       ? await dialog.showSaveDialog(mainWindow, options)
       : await dialog.showSaveDialog(options)

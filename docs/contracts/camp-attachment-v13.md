@@ -4,7 +4,7 @@ contract: camp-attachment
 version: 13
 status: accepted
 authority: live-source-attachment-download
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Camp Attachment v13
@@ -16,7 +16,11 @@ last_updated: 2026-11-15
 
 `RovaiApi.attachments.save(locator)` 通过 `rovai:attachment-save` 只接收现有 `LocalAttachmentOwnerLocator`，
 不接收 Renderer 提交的源路径或目标路径。Main 验证 locator，并复用已有 Desktop 附件解析器取得普通文件。
-默认文件名从已授权显示名派生，去除路径分隔符与平台非法字符；目标位置只能来自系统保存窗口。
+默认文件名从已授权显示名派生，去除路径分隔符与平台非法字符、首尾空白及末尾句点，空名称回退为 `file`。
+Windows 设备保留名及其带扩展名形式加 `_` 前缀，包括 COM/LPT 的上标 ¹/²/³ 形式。
+名称最多 240 个 UTF-8 字节且不超过 240 个 UTF-16 code units，不切断 Unicode 码点；32 字节以内的普通扩展名保留。
+这些清理只影响系统保存窗口的默认目标名，不改写消息中的原显示名。目标位置只能来自系统保存窗口。
+Linux 显式设置 `properties: ['showOverwriteConfirmation']`，让已有文件的替换由系统窗口请求确认。
 取消窗口不写入文件，不作为失败。
 
 系统窗口确认后再次按同一 owner 解析当前源，归属失效、源缺失或变为目录时不保存。
@@ -30,6 +34,9 @@ last_updated: 2026-11-15
 - 成功：`saved=true`、`error=null`、`availability=available`。
 - 取消：`saved=false`、`error=null`，保留已观察的 availability。
 - 源不可用：`saved=false`、`error=target_unavailable`，返回对应 availability。
+- 二次授权后的源检查／打开阶段发生 `ENOENT` 或 `ENOTDIR`，同样返回 `target_unavailable/missing`；
+  `EACCES`、`EPERM`、`ELOOP` 返回 `target_unavailable/unreadable`，实际目标不再是普通文件返回 `target_unavailable/kind_changed`。
+  目标目录或写入阶段的错误不冒充源失效。
 - 其他失败：`saved=false`、`error=save_failed`；结果不包含源路径、目标路径或底层异常。
 
 ## Renderer 与 Web
@@ -38,5 +45,7 @@ last_updated: 2026-11-15
 Web 复用既有 exact-owner 附件下载能力与短期授权，下载当前文件，不为下载打开预览。
 用户文件卡、Composer、目录和图片缩略图维持原有操作。
 进行中禁止重复触发，取消静默恢复；失败原位提供重试，成功只作无障碍通知。
+进行中请求按客户端与 exact owner 在内存中去重；虚拟行滚出视口或卸载不取消请求，返回时沿用忙碌状态。
+请求结束后释放去重记录，后续明确点击可以重新下载；不缓存终态，不新增持久队列或后台恢复协议。
 附件或客户端 scope 改变后不以迟到结果更新新卡片，也不打开旧预览或抢焦点。
 视觉、悬浮、键盘与触屏规则归[会话附件 UI](../ui/components/conversation-workspace.md)。
