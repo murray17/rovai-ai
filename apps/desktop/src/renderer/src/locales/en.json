@@ -3446,7 +3446,6 @@
   "查看本次执行用量与耗时；{0}": "View usage and elapsed time for this run; {0}",
   "查看本次执行用量与耗时": "View usage and elapsed time for this run",
   "查看本次执行耗时": "View elapsed time for this run",
-  "本次执行用量：{0}；查看执行耗时": "Token usage for this run: {0}; view elapsed time",
   "执行耗时": "Elapsed time",
   "当前原生会话上下文：{0} / {1}，{2}": "Current native session context: {0} / {1}, {2}",
   "当前原生会话上下文": "Current native session context",

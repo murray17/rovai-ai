@@ -2419,9 +2419,7 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 :is(.process-content, .single-chat-agent-response, .tool-activity-group).is-stopping :is(.tool-group-current, .tool-group-state.status-running, .tool-group-state.status-waiting, .tool-call-state.status-running, .tool-call-state.status-waiting) { color: var(--muted); }
 :is(.process-content, .single-chat-agent-response, .tool-activity-group).is-stopping :is(.tool-group-state, .tool-call-state, .tool-call-icon) svg { animation: none; }
 .execution-run-metric-group { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.execution-usage-trigger { min-height: 26px; padding: 2px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font: 400 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
-.execution-usage-trigger:is(:hover, [data-state="open"]) { color: var(--ink); border-color: var(--line); background: var(--surface-hover); }
-.execution-usage-trigger:focus-visible,
+.execution-usage-value { color: var(--muted); font: 400 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .execution-duration-trigger:focus-visible,
 .execution-context-trigger:focus-visible { outline: 2px solid var(--conversation-focus); outline-offset: 1px; }
 .execution-duration-trigger { display: inline-grid; width: 26px; height: 28px; flex: 0 0 26px; place-items: center; padding: 5px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
@@ -2454,6 +2452,8 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 .execution-run-operations button:disabled { cursor: wait; opacity: .65; }
 .execution-process-stage.status-running .execution-run-trailing { position: relative; width: 77px; }
 .execution-process-stage.status-running .execution-run-operations { position: absolute; right: 9px; opacity: 0; pointer-events: none; }
+.execution-process-stage.status-running .execution-run-trailing:has(.execution-usage-value) { width: auto; }
+.execution-process-stage.status-running .execution-run-trailing:has(.execution-usage-value) .execution-run-operations { position: static; }
 .execution-process-stage.status-running .execution-run-card-header:is(:hover, :has(:focus-visible)) .execution-run-metric { opacity: 0; }
 .execution-process-stage.status-running .execution-run-card-header:is(:hover, :has(:focus-visible)) .execution-run-operations { opacity: 1; pointer-events: auto; }
 @media (hover: none), (pointer: coarse) {
