@@ -200,6 +200,8 @@ const allowedMethods = new Set<CoreMethod>([
   'projectFiles.request',
   'projectFileReferences.resolve',
   'health.check',
+  'preferences.memory.get',
+  'preferences.memory.set',
   'preferences.tasks.get',
   'preferences.tasks.set',
   'diagnostics.check',
