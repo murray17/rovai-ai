@@ -150,14 +150,15 @@ jobs:
       - name: Run attachment download UI acceptance
         if: steps.changes.outputs.node == 'true'
         env:
+          ROVAI_TEST_HEADED: '1'
           ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS: ${{ runner.temp }}/attachment-download-artifacts
         run: |
           export ROVAI_TEST_CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           test -n "$ROVAI_TEST_CHROME"
-          pnpm test:attachment-download-ui
+          xvfb-run -a pnpm test:attachment-download-ui
 
       - name: Exercise native Linux overwrite confirmations
-        if: steps.changes.outputs.node == 'true'
+        if: (success() || failure()) && steps.changes.outputs.node == 'true'
         env:
           ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
           ROVAI_ATTACHMENT_DOWNLOAD_ARTIFACTS: ${{ runner.temp }}/attachment-download-artifacts

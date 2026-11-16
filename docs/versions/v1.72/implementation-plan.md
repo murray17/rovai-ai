@@ -29,6 +29,8 @@ Linux 原生覆盖使用 `xvfb-run -a dbus-run-session -- pnpm test:attachment-s
 主干同步后的 macOS 本地记录：类型检查、桌面构建、真实 contextBridge、下载 UI／虚拟列表和文档门禁通过；
 完整 Vitest 为 280 文件、3338 项通过（2 项既有跳过），Node 回归 388 项通过（2 项平台跳过），默认 Rust workspace 回归通过。
 Linux 原生覆盖确认不使用本地跳过记录证明；远端结果保存在提交关联的 `CI / gate` 日志和 artifact 中。
+首次远端执行 `43852076068` 在桌面悬浮断言失败：Linux 无头浏览器启用了无悬浮设备的常显样式。
+CI 改用独立 Xvfb 的有窗口 Chrome，并校验／记录 `hover:hover` 和 `pointer:fine`；触屏场景仍独立启用模拟后验收。
 
 API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/dialog/)、
 [Windows 文件命名](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。

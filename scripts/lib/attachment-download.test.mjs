@@ -31,9 +31,12 @@ test('production attachment downloads preserve preview, ownership, input and the
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     browser = await launchAcceptanceBrowser({ executable: process.env.ROVAI_TEST_CHROME ?? (process.platform === 'darwin'
       ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '/usr/bin/chromium'),
-      args: ['--headless=new', `--user-data-dir=${join(fixture, 'browser')}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--remote-debugging-port=0', 'about:blank'] })
+      args: [...(process.env.ROVAI_TEST_HEADED === '1' ? [] : ['--headless=new']), `--user-data-dir=${join(fixture, 'browser')}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--remote-debugging-port=0', 'about:blank'] })
     await browser.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/` })
     await browser.wait("document.querySelectorAll('.attachment-download-action').length===2")
+    const desktopInput = await browser.evaluate("({hover:matchMedia('(hover:hover)').matches,finePointer:matchMedia('(pointer:fine)').matches})")
+    console.log(JSON.stringify({ desktopInput }))
+    assert.deepEqual(desktopInput, { hover: true, finePointer: true }, 'Desktop hover acceptance requires a mouse-capable display; use ROVAI_TEST_HEADED=1 with Xvfb on Linux')
     const first = "document.querySelector('.attachment-download-action')"
     const row = "document.querySelector('.agent-timeline')"
     const both = "[...document.querySelectorAll('.attachment-download-action')]"
@@ -167,7 +170,7 @@ test('production attachment downloads preserve preview, ownership, input and the
     assert.equal(await browser.evaluate('window.downloadQA.opened.length'), 0)
     assert.deepEqual(browser.errors, [])
     passed = true
-    const report = { commit: process.env.GITHUB_SHA ?? null, platform: process.platform, native: 'cancel, retry, duplicate guard', web: 'source download', keyboard: 'Tab/Enter', stale: 'client and attachment', virtualization: '160 rows; scroll unmount/return; full unmount/return; no duplicate request; retry after settle', themes: 5, touch: '44px', errors: browser.errors }
+    const report = { commit: process.env.GITHUB_SHA ?? null, platform: process.platform, desktopInput, native: 'cancel, retry, duplicate guard', web: 'source download', keyboard: 'Tab/Enter', stale: 'client and attachment', virtualization: '160 rows; scroll unmount/return; full unmount/return; no duplicate request; retry after settle', themes: 5, touch: '44px', errors: browser.errors }
     await writeFile(join(fixture, 'report.json'), JSON.stringify(report, null, 2))
     console.log(JSON.stringify(report))
   } catch (error) {
