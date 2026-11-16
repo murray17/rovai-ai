@@ -51,7 +51,9 @@ User 要求清空强度后与 DSH 一样恢复原生默认。官方 1.59.0 的�
 继承 Session 参数，[继承键](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-provider-types/src/model.rs#L17)
 包含 `thinking_effort`；[设置强度](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/agents/services.rs#L1259)
 的普通 Provider 路径只接受具体档位，没有默认重置值。1.59.2 的相关源码相同，未另行运行其二进制。
-因此不能把“重新选模”或“换回默认文案”记成已经恢复默认；产品行为仍保持当前合同，Goose 继续隐藏。
+因此不能把“重新选模”或“换回默认文案”记成已经恢复默认。
+统一的默认选项只表达取消 Rovai 覆盖，原生如何处理由各 Runtime 决定；该限制不妨碍复用共用默认文案。
+产品执行仍保持当前合同，Goose 继续隐藏。
 
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。

@@ -25,6 +25,6 @@
     "nativeSelectionInheritsThinkingEffort": true,
     "ordinaryProviderAcceptsDefaultSentinel": false
   },
-  "productionChanges": false,
+  "executionChanges": false,
   "conclusion": "Removing same-value setter skipping does not restore the native model's default thinking effort."
 }

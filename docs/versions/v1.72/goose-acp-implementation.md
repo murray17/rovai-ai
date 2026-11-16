@@ -347,6 +347,19 @@ Core 平台矩阵允许 Linux x64 Preview。发现、文件操作、公开发送
 该次全量在 Windows 集成后执行；后续 Linux 提交只涉及准入与文档，补测该共享平台 owner 共 5 项通过。
 首次平台补测发现兼容性登记内容与既有修订值不一致，按实际登记同步原常量后通过，原断言保留。
 
+## 统一默认展示（User sequence 172）
+
+对照现有 Runtime 后收敛默认选项的共同含义：删除 Rovai 的显式覆盖，由原生处理。
+Claude 省略 `--effort`，Codex 的 turn 请求省略 `effort`；DSH 的原生选模会恢复模型默认，
+Hermes 支持原生 `default`，这些原生行为差异不要求界面另造名称。
+Goose 恢复模型“默认”、摘要“智能体默认”和强度“跟随模型默认值”，删除专属提示、标签 helper、
+模型菜单的单用途覆盖参数及其翻译。保存值、原生 setter、Session、Bootstrap 和隐藏状态均不改变。
+
+官方 1.59.0 隔离反例确认同模型重选仍继承 `high`，`thinking_effort=default` 被拒绝；
+它只说明不能直接实现 DSH 的重置效果，不阻止共用默认控件。
+本轮不增加默认值快照、临时 Session 或查询到正式执行；证据与复跑入口见
+[默认恢复反例](../../research/goose-runtime/README.md#默认思考强度的原生限制2026-11-16)。
+
 ## 参数探测空扩展与不覆盖文案（User sequence 148）
 
 基线为 `7181fb4d7416f295d4ccebb13f3ff44e88d27cdd`。生产后端仅在目标参数的现有创建请求中

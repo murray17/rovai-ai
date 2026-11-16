@@ -39,7 +39,7 @@ Linux x64 在 Debian 12 通过真实 Sub2API 与受控 ACP 验收后开放 Previ
 [D88](decisions.md#v1-72-d88) 与[目标机证据](../../research/goose-runtime/linux-x64-1.59.0-debian12.json)。
 User sequence 146 将显式 Provider 提前传给新建 Session；目标参数成功不再依赖临时 Session 删除成功，
 清理有界且只诊断，未扩展后台工作或存储。
-目标参数探测另显式选择空扩展；Goose 的模型／effort 控件和摘要准确表达“不覆盖”，不增加恢复默认值动作。
+目标参数探测另显式选择空扩展；Goose 的模型／effort 控件和摘要沿用统一默认文案，默认表示取消 Rovai 覆盖，由原生处理，不增加恢复默认值动作。
 
 ## 长会话输入性能（2026-11-15）
 
