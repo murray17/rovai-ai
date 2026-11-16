@@ -44,6 +44,7 @@ use rovai_core::{
     },
     runtime_discovery::{RuntimeLaunchPurpose, runtime_launch_allowed},
     runtime_failure::sanitize_public_runtime_error,
+    runtime_probe_process::{BoundedLineReader, protocol_frame_bytes},
     runtime_search_operation,
     storage_layout::ThreadOutputDirectory,
 };
@@ -257,8 +258,6 @@ struct AcpSessionRoute {
 #[derive(Debug, Clone)]
 enum AcpSessionPhase {
     LoadingReplay {
-        replay_event_count: u64,
-        replay_byte_count: u64,
         started_at: Instant,
         last_event_at: Option<Instant>,
     },
@@ -273,8 +272,6 @@ enum AcpSessionPhase {
 impl AcpSessionPhase {
     fn loading_replay() -> Self {
         Self::LoadingReplay {
-            replay_event_count: 0,
-            replay_byte_count: 0,
             started_at: Instant::now(),
             last_event_at: None,
         }
@@ -639,28 +636,10 @@ fn is_kiro_context_gauge(message: &Value) -> bool {
             .is_some_and(|n| n.is_finite() && (0.0..=100.0).contains(&n))
 }
 
-const ACP_HISTORY_RESTORE_MAX_EVENTS: u64 = 4_096;
-const ACP_HISTORY_RESTORE_MAX_BYTES: u64 = 8 * 1024 * 1024;
-const ACP_HISTORY_RESTORE_TIMEOUT: Duration = Duration::from_secs(30);
+const ACP_HISTORY_RESTORE_TIMEOUT: Duration = Duration::from_secs(120);
 const ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE: Duration = Duration::from_secs(2);
 const ACP_HISTORY_RESTORE_QUIET_PERIOD: Duration = Duration::from_millis(100);
 const GROK_NATIVE_RULES_REVISION: i64 = 1;
-
-fn replay_budget_violation(
-    event_count: u64,
-    byte_count: u64,
-    elapsed: Duration,
-) -> Option<&'static str> {
-    if event_count > ACP_HISTORY_RESTORE_MAX_EVENTS {
-        Some("ACP History Restore exceeded its replay event limit")
-    } else if byte_count > ACP_HISTORY_RESTORE_MAX_BYTES {
-        Some("ACP History Restore exceeded its replay byte limit")
-    } else if elapsed > ACP_HISTORY_RESTORE_TIMEOUT {
-        Some("ACP History Restore exceeded its replay time limit")
-    } else {
-        None
-    }
-}
 
 #[derive(Debug, Clone)]
 struct AcpCompactionObserverRoute {
@@ -1843,6 +1822,7 @@ impl AcpHost {
         ) {
             bail!("Runtime launch policy rejected Agent execution");
         }
+        let max_frame_bytes = protocol_frame_bytes()?;
         let mut private_config =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
@@ -2115,7 +2095,7 @@ impl AcpHost {
             grok_context_windows,
         });
         Self::spawn_exit_watcher(&host);
-        Self::spawn_stdout_reader(host.clone(), stdout);
+        Self::spawn_stdout_reader(host.clone(), stdout, max_frame_bytes);
         Self::spawn_stderr_reader(host.clone(), stderr);
         if host.adapter_kind == AdapterKind::DeepseekHarness {
             let root = host
@@ -2310,9 +2290,13 @@ impl AcpHost {
         }
     }
 
-    fn spawn_stdout_reader<R: AsyncRead + Send + Unpin + 'static>(host: Arc<Self>, stdout: R) {
+    fn spawn_stdout_reader<R: AsyncRead + Send + Unpin + 'static>(
+        host: Arc<Self>,
+        stdout: R,
+        max_frame_bytes: usize,
+    ) {
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let mut lines = BoundedLineReader::new(stdout, max_frame_bytes);
             loop {
                 match lines.next_line().await {
                     Ok(Some(line)) if !line.trim().is_empty() => {
@@ -2508,8 +2492,7 @@ impl AcpHost {
                         let (session_id, route) = match declared_session_id.as_deref() {
                             Some(session_id) => (
                                 declared_session_id.clone(),
-                                host.route_session_message(session_id, &message, line.len())
-                                    .await,
+                                host.route_session_message(session_id, &message).await,
                             ),
                             None if host.adapter_kind == AdapterKind::CursorAgent
                                 && method.is_some_and(is_cursor_blocking_request) =>
@@ -2664,7 +2647,11 @@ impl AcpHost {
                     Ok(Some(_)) => {}
                     Ok(None) => break,
                     Err(error) => {
-                        host.send_host_diagnostic(format!("ACP stdout failed: {error}"));
+                        let reason = format!("Rovai local ACP protocol read failed: {error}");
+                        host.send_host_diagnostic(reason.clone());
+                        if host.has_loading_replay().await {
+                            host.reject_loading_replay(reason).await;
+                        }
                         break;
                     }
                 }
@@ -3452,6 +3439,9 @@ impl AcpHost {
                 if &route.owner != owner {
                     bail!("ACP Session loading route failed Host/Run fencing");
                 }
+                if let AcpSessionPhase::ProtocolViolated { reason } = &route.phase {
+                    bail!("{reason}");
+                }
                 let AcpSessionPhase::LoadingReplay {
                     started_at,
                     last_event_at,
@@ -3593,7 +3583,6 @@ impl AcpHost {
         &self,
         session_id: &str,
         message: &Value,
-        message_bytes: usize,
     ) -> AcpSessionMessageRoute {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
@@ -3770,26 +3759,17 @@ impl AcpHost {
                 }
             }
             AcpSessionPhase::LoadingReplay {
-                replay_event_count,
-                replay_byte_count,
                 started_at,
                 last_event_at,
             } => {
-                let event_count = replay_event_count.saturating_add(1);
-                let byte_count = replay_byte_count
-                    .saturating_add(u64::try_from(message_bytes).unwrap_or(u64::MAX));
-                if let Some(reason) =
-                    replay_budget_violation(event_count, byte_count, started_at.elapsed())
-                {
-                    let reason = reason.to_string();
+                if started_at.elapsed() > ACP_HISTORY_RESTORE_TIMEOUT {
+                    let reason = "ACP History Restore exceeded its replay time limit".to_string();
                     route.phase = AcpSessionPhase::ProtocolViolated {
                         reason: reason.clone(),
                     };
                     self.protocol_violated.store(true, Ordering::Release);
                     return AcpSessionMessageRoute::ReplayRejected(reason);
                 }
-                *replay_event_count = event_count;
-                *replay_byte_count = byte_count;
                 *last_event_at = Some(Instant::now());
                 AcpSessionMessageRoute::ReplayQuarantined
             }
@@ -6085,10 +6065,7 @@ impl AcpRuntime {
                 owner,
                 active_prompt,
                 sequence,
-            } = self
-                .host
-                .route_session_message(&session_id, &message, 0)
-                .await
+            } = self.host.route_session_message(&session_id, &message).await
             {
                 self.host
                     .incoming
@@ -14157,7 +14134,7 @@ while IFS= read -r ignored; do :; done
                 ] {
                     host.route_session_message("session-steer", &json!({
                         "method":"session/update","params":{"sessionId":"session-steer","update":update}
-                    }), 0).await;
+                    })).await;
                     assert!(
                         receiver.try_recv().is_err(),
                         "metadata/user echo is not input acceptance"
@@ -14166,7 +14143,7 @@ while IFS= read -r ignored; do :; done
                 for update in ["tool_call", "agent_thought_chunk"] {
                     host.route_session_message("session-steer", &json!({
                         "method":"session/update","params":{"sessionId":"session-steer", "update":{"sessionUpdate":update,"_meta":{"codebuddy.ai/conversationRequestId":"original-request"}}}
-                    }), 0).await;
+                    })).await;
                 }
                 assert!(
                     matches!(receiver.try_recv(), Ok(AcpIncoming::InputAccepted { native_prompt_id, .. }) if native_prompt_id == prompt),
@@ -14622,7 +14599,7 @@ while IFS= read -r ignored; do :; done
                                 host.routes.read().await["session-steer"].phase,
                                 AcpSessionPhase::PromptActive(_)
                             ));
-                            let forwarded = host.route_session_message("session-steer", &json!({"method":"session/update","params":{"sessionId":"session-steer","update":{"sessionUpdate":"tool_call","toolCallId":"continuation"}}}), 0).await;
+                            let forwarded = host.route_session_message("session-steer", &json!({"method":"session/update","params":{"sessionId":"session-steer","update":{"sessionUpdate":"tool_call","toolCallId":"continuation"}}})).await;
                             assert!(matches!(forwarded, AcpSessionMessageRoute::Forward { .. }));
                             let id = prepared.request_id + index + 1;
                             let pending = host.pending.lock().await.remove(&id).unwrap();
@@ -15911,6 +15888,20 @@ printf '%s\n' "$load" >> '{}'
             };
             let restore_response_id = if resume_fallback { 3 } else { 2 };
             let first_prompt_id = restore_response_id + 1;
+            // One streamed replay exceeds both former cumulative gates and the
+            // default 64 MiB frame capacity in total; each frame stays small.
+            let large_replay = if kind == AdapterKind::TraeCnCli && !resume_fallback {
+                r#"python3 - <<'PY'
+import json, sys
+line = json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'session-old','update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'historical' * 2048}}}}) + '\n'
+for _ in range(4097):
+    sys.stdout.write(line)
+sys.stdout.flush()
+PY
+"#
+            } else {
+                ""
+            };
             make_executable(
                 &executable,
                 &format!(
@@ -15926,6 +15917,7 @@ printf '%s\n' "$resume" >> '{}'
 {fallback_response}
 printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{{"sessionId":"session-old","toolCall":{{"toolCallId":"historical-tool"}},"options":[]}}}}'
 IFS= read -r quarantined_permission || exit 1
+{large_replay}
 printf '%s\n' '{{"jsonrpc":"2.0","id":{restore_response_id},"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
 prompt_id={first_prompt_id}
 if [ -n "$ROVAI_COMMAND_CODE_BOOTSTRAP_ROOT" ]; then
@@ -16127,6 +16119,7 @@ while IFS= read -r ignored; do :; done
                     }
                 }
                 for invalid in ["owner", "epoch", "protocol", "ready"] {
+                    let capacity_reason = "Rovai local ACP protocol read failed: runtime_probe_frame_capacity_exceeded";
                     host.bind_session(
                         &session_id,
                         &runtime.owner,
@@ -16142,18 +16135,27 @@ while IFS= read -r ignored; do :; done
                             "epoch" => route.owner.execution_epoch += 1,
                             "protocol" => {
                                 route.phase = AcpSessionPhase::ProtocolViolated {
-                                    reason: "test violation".into(),
+                                    reason: capacity_reason.into(),
                                 }
                             }
                             _ => route.phase = AcpSessionPhase::Ready,
                         }
                     }
-                    assert!(
-                        runtime
-                            .finish_session_attachment(&session_id, Some("session/resume"))
+                    for method in ["session/resume", "session/load"] {
+                        let error = runtime
+                            .finish_session_attachment(&session_id, Some(method))
                             .await
-                            .is_err()
-                    );
+                            .unwrap_err();
+                        assert_eq!(
+                            error.to_string(),
+                            if invalid == "protocol" {
+                                capacity_reason
+                            } else {
+                                "ACP Session loading route failed Host/Run fencing"
+                            },
+                            "{invalid}: {method}"
+                        );
+                    }
                     if invalid == "protocol" {
                         assert!(matches!(
                             host.routes.read().await[&session_id].phase,
@@ -16178,6 +16180,14 @@ while IFS= read -r ignored; do :; done
                 resume_fallback
             );
             assert!(!protocol.contains("\"method\":\"session/list\""));
+            assert_eq!(
+                protocol
+                    .lines()
+                    .filter(|line| line.contains("\"method\":\"session/prompt\""))
+                    .count(),
+                1 + usize::from(kind == AdapterKind::CommandCodeCli),
+                "restore must dispatch the current input exactly once"
+            );
             std::fs::remove_dir_all(root).unwrap();
         }
     }
@@ -17892,34 +17902,6 @@ while IFS= read -r ignored; do :; done
         assert_eq!(
             select_acp_session_continuation(AdapterKind::TraeCnCli, false, None, resume_and_load,),
             AcpSessionContinuation::New
-        );
-    }
-
-    #[test]
-    fn history_restore_budget_rejects_events_bytes_and_elapsed_time_independently() {
-        assert!(
-            replay_budget_violation(
-                ACP_HISTORY_RESTORE_MAX_EVENTS,
-                ACP_HISTORY_RESTORE_MAX_BYTES,
-                ACP_HISTORY_RESTORE_TIMEOUT,
-            )
-            .is_none()
-        );
-        assert_eq!(
-            replay_budget_violation(
-                ACP_HISTORY_RESTORE_MAX_EVENTS + 1,
-                ACP_HISTORY_RESTORE_MAX_BYTES,
-                Duration::ZERO,
-            ),
-            Some("ACP History Restore exceeded its replay event limit")
-        );
-        assert_eq!(
-            replay_budget_violation(1, ACP_HISTORY_RESTORE_MAX_BYTES + 1, Duration::ZERO,),
-            Some("ACP History Restore exceeded its replay byte limit")
-        );
-        assert_eq!(
-            replay_budget_violation(1, 1, ACP_HISTORY_RESTORE_TIMEOUT + Duration::from_nanos(1),),
-            Some("ACP History Restore exceeded its replay time limit")
         );
     }
 
