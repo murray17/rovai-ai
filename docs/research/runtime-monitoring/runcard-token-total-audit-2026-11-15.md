@@ -35,7 +35,7 @@ I=含缓存输入，U=普通输入，R/W=互斥缓存读/写，O=含 reasoning �
 | Claude stream-json | 根 message 的 `message_delta` 累计快照；每 message 从 0 起 | U+R+W；O 已含思考；无独立 total | 合并同 message 的已报告字段；message_start 的全零暂定值不当真实消费；缺桶仍未知 | 当前 Session/根 message，排除 parent_tool_use_id；result 出现 `model_calls_observed` 后只保留费用，避免覆盖已观测调用；没有 stream 调用时 result 是当前 Run 数值后备。S/R/T |
 | Claude result 后备 | `result.usage` 当前 Run Delta | U+R+W+O | 失败/取消只有已到达的数值可保留；不以 succeeded 为准入 | 只能与 stream 二选一，不能以 result 补齐不确定的子调用；子代理总覆盖未证明。S/R/T |
 | OpenCode V1 | 根 Session SQLite 已完成 assistant 元数据；逐调用 Delta | U+R+W；原生 output 与 reasoning 互斥，先合成 O | 缺 reasoning 仍保留普通 output；已完成失败调用的正数不因 error 标记丢弃；占位零排除；异步可漏头尾 | 物理 rowid baseline +精确 Session/cwd +message ID；不读取 part；子 Session 排除；V1 terminal 最后调用不另计。[增量 reader](../../versions/v1.72/native-sqlite-usage-incremental.md)。S/R/T |
-| OpenCode V2 | prompt response 当前根 Prompt 的聚合 Delta | 原生 full total；U/R/W，普通 output 与 thought 互斥 | 修复仅有 total 时被丢弃；有 I/O 可推导时保留；缺终态可能无数字 | V2 禁用 V1 reader；Prompt ID 去重；不包含原生委派 Session；原有 partial quality 不应阻挡已知数值。[源码](../../../crates/rovai-core/src/monitoring.rs)。S/T；本轮无新真实逐调用样本 |
+| OpenCode V2 | prompt response 当前根 Prompt 的聚合 Delta | 原生 full total；U/R/W，普通 output 与 thought 互斥 | 保留 total 与已知输入桶/输出；缺 reasoning 不反推 Input，输入桶未齐则 I 总量未知；缺终态可能无数字 | V2 禁用 V1 reader；Prompt ID 去重；不包含原生委派 Session；原有 partial quality 不应阻挡已知数值。[源码](../../../crates/rovai-core/src/monitoring.rs)。S/T；本轮无新真实逐调用样本 |
 | Kilo ACP | 共用 V1 SQLite 根调用 reader | U+R+W；普通 output + reasoning=O | reader 同上，稀疏字段、异步漏报边界同上；失败调用有可信正计数仍接纳，占位零不计 | 使用 Kilo 有效 DB 路径，禁止 ACP Token 双来源；[既有实施 R/T](../../versions/v1.72/kilo-acp-implementation.md)。真实完整逐调用数值样本本轮未新增 |
 | Copilot ACP | 订阅根 `assistant.usage` 逐调用 Delta | I 含 R/W；O 含 reasoning | timestamp 调用身份；忽略 dataOmitted、子 Agent；终态 Session 累计不计 | [真实六调用 R](all-runtime-app-verification-2026-10-03.md)，[parser](../../../crates/rovai-core/src/monitoring.rs)。原 transport 数值见证保留，parser 6 使用稳定调用 checkpoint；同 timestamp 补齐只修正既有贡献。S/R/T |
 | Cline ACP Plugin | `afterModel` 私有数字文件，根 native Run/message，逐调用 Delta | I 已含 R/W；reasoning 属 O | 未报告继续 null；live 与 terminal 读同有界序号文件 | 精确 Prompt lease、Run、Session、sequence；恢复不导入历史；[真实/受控 R/T](command-cline-verification-2026-10-04.md)、[故障 R/T](command-cline-fault-recovery-2026-10-05.md)。S/R/T |
@@ -118,7 +118,7 @@ Antigravity stream total 排除了缓存，不是同范围权威全量，不能�
 
 ## 采集修正与选型
 
-确认并修复可证明的原生 full total 丢失、同调用字段补齐被去重拒绝，以及
+确认并修复可证明的原生 full total 丢失、Core 层同调用字段补齐被去重拒绝，以及
 OpenCode/Kilo 缺 reasoning 时已报告的普通 output 被清空。复核另补上 OpenCode/Kilo 和 MiniMax 已完成失败/取消调用
 的正计数准入；其初始化全零失败占位仍不构成真实零。修正不能改变 Session 范围或扩大未知字段的含义。
 Pi 的全零 native 占位无法辨别 provider presence 时不认作可信显式零；其他已验证方言的显式零独立保留。
@@ -172,3 +172,28 @@ UI 自动验收使用新建临时 `userData` 与其下的 Skill 目录，不启�
 本轮未重新实跑所有 Runtime 的真实模型/Provider/操作系统组合；历史真实数值、协议判断与受控测试不能彼此替代。
 本次不改变原生 Runtime 资格、Activity、监控页、定价、模型输入或版本生命周期。当前规范是
 [Usage v12](../../contracts/runtime-usage-monitoring-v12.md) 与 [Execution Metrics v8](../../contracts/runtime-execution-metrics-v8.md)。
+
+## 计量链路复核（2026-11-16）
+
+`79b1bf17d` 的“同调用补齐已处理”只覆盖了 Core 和 reader 空帧补齐，未闭合非空稀疏帧的 reader 路径；
+OpenCode V2 缺 reasoning 的普通 Output 也被错误用于反推完整 Input。以下修正保留方案 1 与 Renderer，
+只修改原有 parser、reader、checkpoint，不增加服务、定时器、表或数据库字段。
+
+| 生产入口与受控输入 | 修正及核对结果 |
+| --- | --- |
+| OpenCode V2 total=175K，U/R/W=100K/40K/20K，普通 O=10K，thought 缺失 | 保留 175K total 与 10K 已知输出；I 只由输入桶得到 160K，不制造 165K。后到 thought=5K（完整帧或 reasoning 单独到达）后 O=15K，旧稀疏帧重放仍为 175K。W 同时缺失时 I 保持未知 |
+| CodeBuddy JSONL 同 message ID：I=50K → 补 O=5K → 重复 | reader 放行变化快照，经真实 buffer/checkpoint 得到 50K→55K→55K；下一 Prompt 的 baseline 仍排除历史身份的后续变化 |
+| OpenCode SQLite 同行：失败时 I=10K → 成功补 O=5K → 重复读取 | reader→buffer→checkpoint 为 10K→15K→15K；仅保留物理 baseline 后本轮根 Session assistant 候选供复读，最多 8,192 个。32,768 行历史的原查询工作量断言保留（cursor 10、suffix discovery 34 VM steps），不回扫历史 |
+| 累计 I 包含缓存：100K/20K/10K 基线 → 仅 R=40K → I=120K/R=40K/O=10K | 显示新增仅 20K，不是 40K；同一 owner 也验证累计 Output/reasoning 与 full total/分项交错。已有父基线时不改计子项，等父计数推进 |
+| 同调用矛盾补充字段与另一 Run 的有效 O=7K 同批 | 矛盾补充局部跳过，旧 175K/checkpoint 保留；另一 Run 的 7K 正常提交。真实 SQL 失败仍按既有原子回滚/重试路径处理 |
+
+上述均为 S/T 证据，不是新一轮真实模型观测。正式 parser 中仅 Claude 发出消费 `Cumulative`，
+其已验证根 message 进入零基线的单调用快照分支；其余 Gauge 是 Context。
+当前未发现正式 Runtime 进入通用 Session/Run 消费累计分支，因此父子交错是算法反例与防御回归，不能记为已发生的线上重复计量。
+
+定向验证：`cargo test -p rovai-core --features extended-tests --lib monitoring::tests::` 13 passed，
+`cargo test -p rovai-core --features extended-tests --lib native_usage::tests::` 3 passed。
+复用原有 owners，未增加、删除或禁用 Rust 测试函数；最初的失败复现确认在原生 parser→buffer 处触发输入桶矛盾。
+修正后完整 `cargo test --workspace` 再次通过：484 passed、0 failed、1 个既有 ignored；
+`cargo fmt --all -- --check`、`git diff --check`、48 组比较样本重建及源码隔离副本的通用文档治理（10 个测试）通过。
+本次无 Renderer 改动，也未启动完整 App 或真实 Runtime。

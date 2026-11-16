@@ -59,6 +59,8 @@ summary/hourly 只加已归一的 contribution；缺 Input/Output 时仍保留�
 RunCard 统一显示 Core 按方案 1 计算的 `displayTotalTokens`：保留可信、可归属、去重后的已知消费，
 不受 Run 状态、结算或完整性限制。同单位 full total/含缓存 Input/Output 各自覆盖子集，不重复相加。
 同调用后到字段修正已有贡献；失败恢复保留有序数值帧，Session 累计首值/reset 只建立 baseline。
+原生 reader 的历史身份栅栏与本轮数值去重分开，变化快照进入既有 checkpoint；SQLite 仅复读本轮有界候选。
+累计父字段暂缺时不切到其子项计费；矛盾补充字段局部跳过，数据库故障仍维持整批原子重试。
 Delta checkpoint 按调用身份暂存，终态后仍保留，现有过期清理任务在 72 小时后分批删除。
 Migration 225（schema 175）只增加显示投影和原生 total 基线；旧 Run 从已有 summary 作保守投影并固定，
 不补猜已丢失的调用关系或扫描原生历史。字段与兼容边界见 Usage v12。

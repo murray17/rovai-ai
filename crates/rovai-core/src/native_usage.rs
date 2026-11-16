@@ -39,6 +39,16 @@ pub(crate) struct NativeUsageObservation {
     pub usage: ParsedRuntimeUsage,
 }
 
+type NativeUsageSnapshot = (RuntimeUsageFields, Option<RuntimeUsageCost>, Option<String>);
+
+fn usage_snapshot(usage: &ParsedRuntimeUsage) -> NativeUsageSnapshot {
+    (
+        usage.fields.clone(),
+        usage.cost.clone(),
+        usage.context_model_id.clone(),
+    )
+}
+
 #[derive(Clone)]
 pub(crate) struct NativeContextModel {
     pub model_id: String,
@@ -139,7 +149,8 @@ pub(crate) struct NativeJsonlUsageReader {
     offset: u64,
     file_identity: Option<FileIdentity>,
     skip_partial: bool,
-    seen: BTreeSet<String>,
+    baseline_identities: BTreeSet<String>,
+    observed: BTreeMap<String, NativeUsageSnapshot>,
     disabled: bool,
     context_model: Option<NativeContextModel>,
     // A terminal reader admits only message or tool-call identities observed on
@@ -254,7 +265,8 @@ impl NativeJsonlUsageReader {
             offset: 0,
             file_identity: None,
             skip_partial: false,
-            seen: BTreeSet::new(),
+            baseline_identities: BTreeSet::new(),
+            observed: BTreeMap::new(),
             disabled: false,
             context_model: None,
             minimax_messages: None,
@@ -437,14 +449,14 @@ impl NativeJsonlUsageReader {
                             .unwrap()
                     );
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(baseline_id);
+                        self.baseline_identities.insert(baseline_id);
                         continue;
                     }
-                    if self.seen.contains(&baseline_id) {
+                    if self.baseline_identities.contains(&baseline_id) {
                         continue;
                     }
                     let mut calls: Vec<_> =
@@ -485,11 +497,11 @@ impl NativeJsonlUsageReader {
                         continue;
                     }
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(id);
+                        self.baseline_identities.insert(id);
                         continue;
                     }
                     parse_minimax(&line, &self.session_id).into_iter().collect()
@@ -501,14 +513,14 @@ impl NativeJsonlUsageReader {
                     };
                     let baseline_id = format!("trae-baseline:{}:{}", self.session_id, record.id);
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(baseline_id);
+                        self.baseline_identities.insert(baseline_id);
                         continue;
                     }
-                    if self.seen.contains(&baseline_id) {
+                    if self.baseline_identities.contains(&baseline_id) {
                         continue;
                     }
                     let mut calls: Vec<_> =
@@ -532,14 +544,14 @@ impl NativeJsonlUsageReader {
                     let baseline_id =
                         format!("qoder-baseline:{}:{}", self.session_id, record.message.id);
                     if baseline {
-                        if self.seen.len() >= MAX_IDENTITIES {
+                        if self.baseline_identities.len() >= MAX_IDENTITIES {
                             self.disabled = true;
                             break;
                         }
-                        self.seen.insert(baseline_id);
+                        self.baseline_identities.insert(baseline_id);
                         continue;
                     }
-                    if self.seen.contains(&baseline_id) {
+                    if self.baseline_identities.contains(&baseline_id) {
                         continue;
                     }
                     let mut calls = parse_qoder(record, &self.session_id);
@@ -558,15 +570,31 @@ impl NativeJsonlUsageReader {
                 {
                     continue;
                 }
-                if self.seen.contains(&observation.source_identity) {
+                if self
+                    .baseline_identities
+                    .contains(&observation.source_identity)
+                {
                     continue;
                 }
-                if self.seen.len() >= MAX_IDENTITIES {
-                    self.disabled = true;
-                    break;
-                }
-                self.seen.insert(observation.source_identity.clone());
-                if !baseline {
+                if baseline {
+                    if self.baseline_identities.len() >= MAX_IDENTITIES {
+                        self.disabled = true;
+                        break;
+                    }
+                    self.baseline_identities.insert(observation.source_identity);
+                } else {
+                    let snapshot = usage_snapshot(&observation.usage);
+                    if self.observed.get(&observation.source_identity) == Some(&snapshot) {
+                        continue;
+                    }
+                    if !self.observed.contains_key(&observation.source_identity)
+                        && self.baseline_identities.len() + self.observed.len() >= MAX_IDENTITIES
+                    {
+                        self.disabled = true;
+                        break;
+                    }
+                    self.observed
+                        .insert(observation.source_identity.clone(), snapshot);
                     observations.push(observation);
                 }
             }
@@ -856,7 +884,7 @@ pub(crate) struct OpenCodeUsageReader {
     file_identity: FileIdentity,
     cursor: Option<(i64, String)>,
     pending: BTreeSet<(i64, String)>,
-    seen: BTreeSet<String>,
+    observed: BTreeMap<String, NativeUsageSnapshot>,
     disabled: bool,
 }
 
@@ -903,7 +931,7 @@ impl OpenCodeUsageReader {
             file_identity: FileIdentity::from_metadata(&metadata),
             cursor: None,
             pending: BTreeSet::new(),
-            seen: BTreeSet::new(),
+            observed: BTreeMap::new(),
             disabled: false,
         };
         let database = reader.open()?;
@@ -995,9 +1023,7 @@ impl OpenCodeUsageReader {
             if !safe_identity(&id) {
                 bail!("native Usage message identity is invalid");
             }
-            if !self.seen.contains(&id) {
-                self.pending.insert((created, id));
-            }
+            self.pending.insert((created, id));
             if self.pending.len() > MAX_IDENTITIES {
                 bail!("native Usage pending identities exceed bound");
             }
@@ -1005,7 +1031,9 @@ impl OpenCodeUsageReader {
         self.cursor = next_cursor;
         // Only metadata scalars leave SQLite. Native parts and message bodies
         // are never selected into Core memory or its public Evidence channel.
-        // Incomplete candidates stay pending by ID while discovery advances.
+        // Revisit only this prompt's discovered assistant IDs, including completed
+        // failures and sparse successes. Late fields may update the same row.
+        // The physical baseline excludes history; MAX_IDENTITIES bounds rereads.
         let mut query = database.prepare(
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
@@ -1025,9 +1053,6 @@ impl OpenCodeUsageReader {
         )?;
         let mut result = Vec::new();
         for (created, id) in std::mem::take(&mut self.pending) {
-            if self.seen.contains(&id) {
-                continue;
-            }
             let row = query
                 .query_row(rusqlite::params![self.session_id, id], |row| {
                     Ok((
@@ -1055,11 +1080,7 @@ impl OpenCodeUsageReader {
             if role != "assistant" {
                 continue;
             }
-            if self.seen.len() >= MAX_IDENTITIES {
-                self.disabled = true;
-                break;
-            }
-            self.seen.insert(id.clone());
+            self.pending.insert((created, id.clone()));
             fields.output_tokens = match (fields.output_tokens, fields.reasoning_output_tokens) {
                 (Some(output), Some(reasoning)) if output >= 0 && reasoning >= 0 => {
                     output.checked_add(reasoning)
@@ -1095,6 +1116,11 @@ impl OpenCodeUsageReader {
                         grain: "model_call".into(),
                     });
             }
+            let snapshot = usage_snapshot(&consumption.usage);
+            if self.observed.get(&id) == Some(&snapshot) {
+                continue;
+            }
+            self.observed.insert(id.clone(), snapshot);
             result.push(consumption);
             // The installed ACPUsage.contextTokens() defines occupancy as the
             // latest call's input + both cache buckets, excluding output. ACP
@@ -1798,6 +1824,43 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[cfg(feature = "extended-tests")]
+    fn project_native_usage(
+        database: &mut crate::db::Database,
+        kind: AdapterKind,
+        observations: &[NativeUsageObservation],
+    ) -> Option<i64> {
+        use crate::monitoring::{MonitoringService, RuntimeUsageBuffer, RuntimeUsageFlushTarget};
+        database.connection().execute(
+            "INSERT OR IGNORE INTO runtime_usage_run_summary(collection_epoch,agent_run_id,runtime_kind,parser_version,eligible_mask,input_semantics,enrolled_at)
+             SELECT collection_epoch,'reader-run',?1,6,0,'unknown',datetime('now') FROM runtime_usage_collection_state WHERE singleton_id=1",
+            [kind.as_str()],
+        ).unwrap();
+        let run = MonitoringService::enrolled_usage_run(database, "reader-run", 1)
+            .unwrap()
+            .unwrap();
+        let mut buffer = RuntimeUsageBuffer::default();
+        for observation in observations {
+            buffer
+                .observe_run(
+                    &run,
+                    &observation.source_identity,
+                    std::slice::from_ref(&observation.usage),
+                    std::time::Instant::now(),
+                )
+                .unwrap();
+        }
+        MonitoringService::record_usage_batches(
+            database,
+            &buffer.drain(RuntimeUsageFlushTarget::All),
+        )
+        .unwrap();
+        database.connection().query_row(
+            "SELECT display_total_tokens FROM runtime_usage_run_summary WHERE agent_run_id='reader-run'",
+            [], |row| row.get(0),
+        ).unwrap()
+    }
+
     fn minimax(id: &str) -> serde_json::Value {
         json!({"message_id":id,"turn_id":"turn-1","message":{"role":"assistant","content":"PRIVATE_MINIMAX_CANARY", "stopReason":"stop", "usage":{"input":100,"output":5,"cacheRead":20,"cacheWrite":3},"timestamp":1}})
     }
@@ -2426,6 +2489,41 @@ mod tests {
                 reader.poll().is_empty(),
                 "native repeat cannot claim another model call"
             );
+            if matches!(dialect, Dialect::CodeBuddy) {
+                let mut core = crate::db::Database::open(&root.join("core-projection")).unwrap();
+                let mut sparse = make("sparse-nonempty");
+                sparse["providerData"]["rawUsage"] = json!({"prompt_tokens":50000});
+                writeln!(file, "{sparse}").unwrap();
+                file.flush().unwrap();
+                let first = reader.poll();
+                assert_eq!(first.len(), 1);
+                assert_eq!(first[0].usage.fields.output_tokens, None);
+                assert_eq!(
+                    project_native_usage(&mut core, AdapterKind::CodebuddyCli, &first),
+                    Some(50000)
+                );
+                sparse["providerData"]["rawUsage"]["completion_tokens"] = json!(5000);
+                writeln!(file, "{sparse}\n{sparse}").unwrap();
+                file.flush().unwrap();
+                let completed = reader.poll();
+                assert_eq!(
+                    completed.len(),
+                    1,
+                    "changed snapshot passes, exact replay does not"
+                );
+                assert_eq!(completed[0].source_identity, first[0].source_identity);
+                assert_eq!(
+                    project_native_usage(&mut core, AdapterKind::CodebuddyCli, &completed),
+                    Some(55000)
+                );
+                writeln!(file, "{sparse}").unwrap();
+                file.flush().unwrap();
+                assert!(reader.poll().is_empty());
+                assert_eq!(
+                    project_native_usage(&mut core, AdapterKind::CodebuddyCli, &[]),
+                    Some(55000)
+                );
+            }
             let mut empty = make("late-fields");
             let usage = match dialect {
                 Dialect::CodeBuddy => &mut empty["providerData"]["rawUsage"],
@@ -2456,6 +2554,12 @@ mod tests {
             )
             .unwrap();
             write!(file, "{}{}", line("new"), line("next-run")).unwrap();
+            if matches!(dialect, Dialect::CodeBuddy) {
+                let mut historical = make("sparse-nonempty");
+                historical["providerData"]["rawUsage"] =
+                    json!({"prompt_tokens":50000,"completion_tokens":6000});
+                writeln!(file, "{historical}").unwrap();
+            }
             file.flush().unwrap();
             assert_eq!(
                 next_run.poll().len(),
@@ -2860,7 +2964,7 @@ mod tests {
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();
         assert!(
-            reader.seen.is_empty(),
+            reader.observed.is_empty(),
             "history is not copied into this Run"
         );
         assert!(
@@ -2934,6 +3038,38 @@ mod tests {
                 .contains("NATIVE_PRIVATE_CANARY")
         );
         assert!(reader.poll().is_empty());
+        // A completed failure with positive sparse usage is revisited by ID,
+        // without allowing the next prompt to claim the same historical row.
+        let mut core = crate::db::Database::open(&root.join("core-projection")).unwrap();
+        database.execute("INSERT INTO message VALUES('failed-positive-sparse','session-1',5,?1)",
+            [json!({"role":"assistant","time":{"completed":5},"error":{"name":"ProviderError"},
+                "tokens":{"input":10000}}).to_string()]).unwrap();
+        let failed = reader.poll();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &failed),
+            Some(10000)
+        );
+        let mut resumed =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database.execute("UPDATE message SET data=json_remove(json_set(data,'$.tokens.output',5000),'$.error') WHERE id='failed-positive-sparse'", []).unwrap();
+        let completed = reader.poll();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].source_identity, failed[0].source_identity);
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &completed),
+            Some(15000)
+        );
+        assert!(reader.poll().is_empty());
+        assert_eq!(
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &[]),
+            Some(15000)
+        );
+        assert!(
+            resumed.poll().is_empty(),
+            "a baseline row's later update still belongs to history"
+        );
         database.execute("UPDATE message SET data=json_set(data,'$.time.completed',4) WHERE id='new-pending'", []).unwrap();
         assert_eq!(reader.poll().len(), 2);
         // Positive cache write and independent reasoning formerly lived in the
@@ -2998,7 +3134,7 @@ mod tests {
             .unwrap();
         assert!(reader.poll().is_empty());
         assert!(
-            reader.pending.is_empty(),
+            reader.pending.iter().all(|(_, id)| id != "user-record"),
             "non-assistant rows leave the candidate budget"
         );
         database.execute("INSERT INTO message VALUES('sparse','session-1',6,?1)",

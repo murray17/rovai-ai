@@ -23,23 +23,32 @@ RunCard 读取/展示由 [Execution Metrics v8](runtime-execution-metrics-v8.md)
 Pi、CodeBuddy、TRAE、DSH 与 OpenCode V2 的已验证 full total 经各自 parser 保留；缺失字段不补零。
 Pi 原生全零 placeholder 已丢失 Provider presence 时保持未知；这不影响其他已验证方言的显式零。
 OpenCode/Kilo 的普通 output 与 reasoning 互斥：两者存在先合成；缺 reasoning 时仍可保留已知普通输出消费，
-缺普通输出时保留原生 reasoning 子集。已完成失败调用的有效正计数仍可贡献，失败占位全零没有原始 presence 时排除。
+缺普通输出时保留原生 reasoning 子集。两桶分批到达时分别合并，不能把已合成 Output 再与 reasoning 相加。
+OpenCode V2 的 Input 只由已报告的互斥输入桶构成；缺 reasoning 的普通输出不是完整 Output，
+不能用它从 total 反推 Input。原生 full total 独立保留并覆盖已知桶；通用归一化/checkpoint 层不从 total 补造缺失的 Input。
+已完成失败调用的有效正计数仍可贡献，失败占位全零没有原始 presence 时排除。
 MiniMax 的 error/aborted 记录同样保留已知正消费，不把初始化占位当真实零。不能因桶缺失或失败状态把其他可信数值清空。
 
 新 parser 版本为 6。单调用/Prompt Delta 实际是有身份的计数快照，同单位后到字段按已有 checkpoint
 补齐，仅将贡献的变化进入 Run summary。原生 total/含缓存 Input/Output 各自覆盖其子集，不能与子集重复加。
 旧稀疏帧重放不能撤回新的有效数值。本轮没有任何数值的 journal frame 不占用后续同调用的去重身份；
 恢复 baseline 仍冻结历史消息身份，包括 Kimi 已存在但没有 usage 的根 step。缓存请求命中也按同调用修正，不能每到一个字段增加一次请求数。
+JSONL reader 分开保存历史身份和本轮最新数值：历史身份始终排除，本轮非空稀疏快照允许补齐，
+仅完全相同的数值、费用和模型快照跳过。OpenCode/Kilo SQLite reader 只复读物理 baseline 后发现的当前根 Session
+assistant 候选（包括已完成失败/稀疏成功），每个 ID 对比最新数值；候选上限为 8,192，不回扫历史，非 assistant 退出候选。
 Pi 的时间戳与 Provider/模型、Copilot 原生调用时间、Cline native Run/message、DSH seq/turn、ZCode native event
 共同提供各方言的稳定来源身份；消费数值变化不是新调用。无独立调用 ID 的 Qwen 当前仍保守使用原生
 usage fingerprint，可能少计相同数值的独立调用，不能改用通知序号冒险重复计账。
 
 累计 Session/Run 的首帧只建立 baseline。后续只计算已有基线字段的非负差；任一消费 counter 下降时重建
 该来源的整组 baseline，不计 reset 帧。省略字段保留已有基线，不能把迟到的绝对累计归给当前 Run。
+已有累计 total、含缓存 Input 或 Output 父基线时，显示贡献沿用该覆盖范围；父字段暂缺不能改计其子项，
+待父计数推进后再计差值。显式零也只由该覆盖范围内可比较的不变计数证明。
 已验证 Claude 根 message 在本 Run 内从零开始，使用相同的单调用快照修正规则，不能套用 Session 累计首帧语义。
 可靠基线后的显式不变计数可以证明已观测区间的零；完全没有可信计数仍为未知。
 
 后台事务继续原子提交 checkpoint、Run summary、hourly；失败恢复有序 batch，不抹旧数值。
+纯计量校验无法协调的同调用补充字段局部跳过，保留旧 checkpoint，不阻断同批其他记录；数据库错误仍回滚整批并重试。
 终态不清短期 checkpoint，迟到补齐不另收费。原生与 streaming/terminal 来源继续在 Adapter 中择一，
 不为显示总量新增原生日志轮询、历史扫描、网络调用或正文保存。
 

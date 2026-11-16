@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-11
+last_updated: 2026-11-16
 ---
 
 # 测试与 Smoke Test
@@ -235,6 +235,9 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 RunCard Token 总量扩展现有 `usage_core_semantics_preserve_unknown_zero_and_partial_buckets`、
 `cumulative_checkpoint_dedupes_resets_resume_and_late_terminal_batches`、分区与 parser/native reader owners，
 覆盖外部验收样本、同调用补齐、total 覆盖子集、reset/resume 和失败重试；不新增 Rust 测试函数。
+复核继续扩展同一 checkpoint owner，验证 OpenCode V2 缺 reasoning、reasoning 单独补齐、稀疏重放及矛盾补充字段不阻断其他 Run；
+累计父/子字段分批覆盖 Input/cache、Output/reasoning 和 full total。既有 JSONL cursor 与 SQLite metadata owners
+从真实 reader 入口送入 buffer/checkpoint，验证非空稀疏→补齐→重复、历史更新栅栏及 32,768 行历史下的物理后缀查询。
 MiniMax 原 error/aborted 一刀切拒绝的 case 随该准入退出，原 owner 内以正消费保留和全零占位拒绝的对照接替；
 user、未知 stopReason、缺 usage、负数与隐私 canary 仍保留。
 Migration 225 的 DDL/回执回滚和旧值/null/zero 保留复用 `async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt`，
