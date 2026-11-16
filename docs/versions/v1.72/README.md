@@ -6,10 +6,19 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 会话文件下载（2026-11-15）
+
+按已确认交互稿在队员普通文件行右侧增加悬浮下载入口，使用主题正文字色；主体预览、右键菜单与原有文件列表几何保持。
+Desktop 通过系统保存窗口保存经 exact-owner 重验的文件副本，Web 复用既有下载授权。
+范围与验证见[本版实施记录](implementation-plan.md#会话文件下载2026-11-15)，规则归
+[Camp Attachment v13](../../contracts/camp-attachment-v13.md) 与[会话附件 UI](../../ui/components/conversation-workspace.md)。
+2026-11-16 的评审修复同步 `main@855a3c2a`，补齐 Linux 覆盖确认、源失效分类、默认文件名边界及虚拟列表请求去重；
+验证归属与命令见[评审修复记录](implementation-plan.md#会话文件下载评审修复2026-11-16)。
 
 ## Goose 官方 ACP（2026-11-13）
 

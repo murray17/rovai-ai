@@ -1650,6 +1650,12 @@ export interface AttachmentRevealResult {
   availability: LocalAttachmentAvailability
 }
 
+export interface AttachmentSaveResult {
+  saved: boolean
+  error: 'target_unavailable' | 'save_failed' | null
+  availability: LocalAttachmentAvailability
+}
+
 export type OpenFilePreviewRequest =
   | {
       kind: 'project_file'
@@ -4797,6 +4803,7 @@ export interface RovaiApi {
   attachments: {
     open(locator: LocalAttachmentOwnerLocator): Promise<AttachmentOpenResult>
     reveal(locator: LocalAttachmentOwnerLocator): Promise<AttachmentRevealResult>
+    save(locator: LocalAttachmentOwnerLocator): Promise<AttachmentSaveResult>
   }
   filePreview: FilePreviewApi
   clipboard: {

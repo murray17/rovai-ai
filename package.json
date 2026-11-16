@@ -46,6 +46,8 @@
     "typecheck": "tsc --noEmit",
     "test:electron-sandbox-capability": "node --test scripts/lib/electron-sandbox-capability.test.mjs",
     "test:desktop-bridge": "node --test scripts/lib/rovai-request-context-bridge.test.mjs",
+    "test:attachment-download-ui": "node --test scripts/lib/attachment-download.test.mjs",
+    "test:attachment-save-linux": "node --test scripts/lib/attachment-save-linux.test.mjs",
     "test:window-close": "node --test scripts/lib/window-close-guard.test.mjs",
     "test:windows-close": "node --test scripts/lib/windows-window-close.test.mjs",
     "test:feishu-login": "node --test scripts/lib/feishu-login-integration.test.mjs",

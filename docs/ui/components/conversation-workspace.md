@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Thread 会话工作区
@@ -1170,8 +1170,15 @@ Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原�
 单行省略，不撑宽或撑高卡片。悬停保留完整名称，右键或 Shift+F10 菜单中的名称允许换行，展示原始文件名。
 文件不可用时，第二行用既有错误提示替代格式标签。Agent 文件使用 Web、Code、Notes、PDF、Word、Sheet、Slide、Image、Archive、Generic
 十个主题 token 家族，未知格式回退 Generic；文件列表统一单列，宽度上限与文件变更卡一致为 620px，窄容器内随可用宽度收缩。
-每行 56px，整行点击打开。文件名下显示格式与大小，
-目录仍显示文件数量与大小；卡片不显示独立预览或下载按钮。`previewKind`
+每行 56px，主体点击打开。文件名下显示格式与大小，目录仍显示文件数量与大小。队员普通文件行右侧提供独立下载按钮，
+鼠标悬浮该行或键盘聚焦行内时显示，使用 `--ink` 正文字色、18px 下载图标与 32px 命中区。
+操作位始终预留，显隐和按下不移动文件名、行或按钮；触屏直接显示并将命中区增至 44×44px。
+下载不触发预览，右键操作保留。准备期间原位显示转圈并禁止重复触发，失败保留重试入口及可访问说明，
+取消静默恢复，成功只作无障碍通知；不增加常驻说明或成功 Toast。用户文件卡、Composer、目录及图片缩略图不增加此按钮。
+下载请求不归虚拟行挂载周期所有；下载期间滚动卸载并返回同一附件时，仍显示忙碌并禁止重复触发。
+同一请求结束后再次点击可以重新下载，换客户端／owner 时不投递旧结果。
+Desktop 经系统保存窗口保存副本；Linux 的已有目标另需 Main 原生替换确认，默认与关闭均为取消。
+Web 沿用浏览器下载。`previewKind`
 不是图片的 image MIME/扩展名对象进入 Agent 文件区的 Image 家族。
 
 新生成的长粘贴文件在第一行显示原文开头（空白折叠、纯文本、单行省略），第二行显示“粘贴内容 / Pasted text”。
