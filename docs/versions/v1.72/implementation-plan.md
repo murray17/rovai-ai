@@ -36,6 +36,7 @@ CI 改用独立 Xvfb 的有窗口 Chrome，并校验／记录 `hover:hover` 和 
 第三轮 `43853998756` 的 Renderer 门禁通过；截图确认原生 GTK 保存窗口可见，但 Electron 的 AT-SPI 树没有包含该窗口。
 原生驱动改用独占 Xvfb display 上的 X11 真实键盘，校验保存窗口的子模态确认出现、响应前目标字节不变和最终取消／替换结果。
 移除无效的辅助功能桥接设置与依赖，保留截图和窗口属性作为可核查证据。
+X11 驱动遵守 Chromium 保存窗口的 500ms 输入保护期，使用 GTK 的保存助记键；文件名输入框的 Enter 不作为保存按钮替代。
 
 API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/dialog/)、
 [Windows 文件命名](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。

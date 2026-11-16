@@ -58,7 +58,11 @@ def chooser():
 for scenario in ['cancel', 'confirm']:
     wait_for(lambda: state().get('scenario') == scenario and state().get('phase') == 'dialog-open', 'Save operation did not start')
     save_window = wait_for(chooser, 'Native chooser window missing')
-    key(save_window, 'Return')  # Activate the chooser's default Save action.
+    # Chromium ignores acceptance during its 500ms input-protection window.
+    # GTK's Save button has an explicit _Save mnemonic; filename Enter need
+    # not activate a default response in the native chooser.
+    time.sleep(.6)
+    key(save_window, 'alt+s')
     confirmation = wait_for(lambda: next((window for window in windows()
         if window['parent'] == save_window['id'] and '_NET_WM_STATE_MODAL' in window['properties']
         and '_NET_WM_WINDOW_TYPE_DIALOG' in window['properties']), None),
