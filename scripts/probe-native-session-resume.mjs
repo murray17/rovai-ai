@@ -3,9 +3,11 @@
 // Usage: node scripts/probe-native-session-resume.mjs <adapter-kind> <private-output-root>
 // --continue sends a NEW input in an interrupted fixture before testing missing history.
 // --missing-only tests deletion after a completed cold stage, without replaying inputs.
+// --cold-only verifies ACP model replies and exact cold restoration without deleting history.
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { parse as parseYaml } from 'yaml'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -19,6 +21,7 @@ const kind = process.argv[2]
 const outputRoot = process.argv[3]
 const missingOnly = process.argv[4] === '--missing-only'
 const continueFixture = process.argv[4] === '--continue' || missingOnly
+const coldOnly = process.argv[4] === '--cold-only'
 assert.ok(outputRoot && isAbsolute(outputRoot))
 const specifications = {
   'codex-cli': ['codex', 'ROVAI_CODEX_BIN', 'CODEX_HOME', '.codex', ['config.toml', 'auth.json']],
@@ -35,10 +38,18 @@ const specifications = {
   'trae-cn-cli': ['trae-cli', 'ROVAI_TRAE_CN_BIN'],
   'deepseek-harness': ['dsh', 'ROVAI_DEEPSEEK_HARNESS_BIN', 'DSH_HOME', '.dsh', ['.credentials.yaml', 'settings.yaml', '.env', 'cordis.patch.yml', 'profiles']],
   'antigravity-app': ['agy', 'ROVAI_ANTIGRAVITY_BIN'],
-  'zcode-app': ['zcode', 'ROVAI_ZCODE_BIN']
+  'zcode-app': ['zcode', 'ROVAI_ZCODE_BIN'],
+  'kilo-cli': ['kilo', 'ROVAI_KILO_BIN'],
+  'goose-cli': ['goose', 'ROVAI_GOOSE_BIN'],
+  'minimax-code-cli': ['mcode', 'ROVAI_MINIMAX_CODE_BIN', 'MINIMAX_DATA_DIR', '.minimax', ['config.yaml', 'auth']],
+  'cursor-agent': ['cursor-agent', 'ROVAI_CURSOR_BIN', 'CURSOR_CONFIG_DIR', '.cursor', ['cli-config.json']],
+  'command-code-cli': ['command-code', 'ROVAI_COMMAND_CODE_BIN', null],
+  'cline-cli': ['cline', 'ROVAI_CLINE_BIN', 'CLINE_DIR', '.cline', ['data/settings', 'data/secrets.json', 'data/globalState.json']],
+  'hermes-cli': ['hermes', 'ROVAI_HERMES_BIN']
 }
 const spec = specifications[kind]
 assert.ok(spec, `Unsupported or excluded runtime: ${kind}`)
+assert.ok(!coldOnly || !['codex-cli','claude-code-cli','pi','antigravity-app'].includes(kind), '--cold-only currently verifies shared ACP runtimes')
 const fixture = join(await realpath(outputRoot), kind)
 const project = join(fixture, 'project'), data = join(fixture, 'core'), native = join(fixture, 'native')
 if (!continueFixture) {
@@ -48,7 +59,7 @@ if (!continueFixture) {
 }
 const wirePath = join(fixture, 'wire.jsonl')
 const stagePath = join(fixture, 'stage.txt')
-let core, campId, stage = 'setup'
+let core, campId, gateway, gatewayLog = '', stage = 'setup'
 const result = continueFixture ? JSON.parse(await readFile(join(fixture, 'result.json'), 'utf8'))
   : { adapter: kind, base: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).stdout.trim(), fixture, stages: [], startedAt: new Date().toISOString() }
 assert.equal(result.adapter, kind)
@@ -58,7 +69,7 @@ if (continueFixture) {
   if (result.failure) (result.previousFailures ??= []).push(result.failure)
   delete result.failure
 }
-const executable = spawnSync('/usr/bin/which', [spec[0]], { encoding: 'utf8' }).stdout.trim()
+let executable = process.env.ROVAI_RESUME_AUDIT_EXECUTABLE || spawnSync('/usr/bin/which', [spec[0]], { encoding: 'utf8' }).stdout.trim()
 assert.ok(executable && isAbsolute(executable), `${spec[0]} is not installed`)
 result.executable = executable
 if (!continueFixture) {
@@ -95,6 +106,39 @@ if (kind === 'opencode-cli') {
     for (const name of ['opencode.json', 'cli.json']) await copyOptional(join(homedir(), '.config/opencode', name), join(native, 'config/opencode', name))
     await copyOptional(join(homedir(), '.local/share/opencode/auth.json'), join(native, 'data/opencode/auth.json'))
   }
+}
+if (kind === 'kilo-cli') {
+  for (const [key, suffix] of [['XDG_CONFIG_HOME','config'],['XDG_DATA_HOME','data'],['XDG_STATE_HOME','state'],['XDG_CACHE_HOME','cache']]) process.env[key] = join(native, suffix)
+  if (!continueFixture) {
+    await copyOptional(join(homedir(), '.config/kilo/kilo.jsonc'), join(native, 'config/kilo/kilo.jsonc'))
+    await copyOptional(join(homedir(), '.local/share/kilo/auth.json'), join(native, 'data/kilo/auth.json'))
+  }
+}
+if (kind === 'goose-cli') {
+  process.env.GOOSE_PATH_ROOT = native
+  if (!continueFixture) {
+    for (const name of ['config.yaml','secrets.yaml','custom_providers','chatgpt_codex','gemini_oauth','xai_oauth']) await copyOptional(join(homedir(), '.config/goose', name), join(native, 'config', name))
+  }
+}
+if (kind === 'minimax-code-cli') process.env.MAVIS_DATA_DIR = native
+if (kind === 'hermes-cli') {
+  // Reuse the isolated real-provider setup of hermes-real-model-probe: a
+  // disposable user Home and its own Gateway, using unmodified native code.
+  const userHome = join(fixture, 'user'), nativeHome = join(userHome, '.hermes')
+  await mkdir(nativeHome, { recursive: true, mode: 0o700 })
+  await mkdir(join(userHome, '.local/bin'), { recursive: true })
+  if (!continueFixture) {
+    await symlink(join(repo, 'target/debug/rovai'), join(userHome, '.local/bin/rovai'))
+    // Reuse the installed native dependency generations; profiles and Session
+    // data remain in the disposable Home. No dependency repair is run.
+    for (const name of ['installs','tools']) await symlink(join(homedir(), '.hermes', name), join(nativeHome, name))
+    const config = parseYaml(await readFile(join(homedir(), '.hermes/config.yaml'), 'utf8'))
+    await writeFile(join(nativeHome, 'config.yaml'), JSON.stringify({model: config.model, providers: config.providers,
+      updates: {check: false}, session_title: {enabled: false}, platform_toolsets: {acp: ['terminal','file','skills']}, agent: {max_turns: 10}}), {mode: 0o600})
+    await copyOptional(join(homedir(), '.hermes/.env'), join(nativeHome, '.env'))
+  }
+  // Keep the installed launcher responsible for selecting its dependency environment.
+  Object.assign(process.env, {HOME: userHome, HERMES_HOME: nativeHome, HERMES_DISABLE_LAZY_INSTALLS: '1'})
 }
 if (kind === 'zcode-app') {
   process.env.ZCODE_STORAGE_DIR = native
@@ -137,8 +181,14 @@ def observe(line, direction):
     if direction=='in' and rpc_id is not None: pending[str(rpc_id)]=method
     row={'direction':direction,'id':rpc_id,'method':method,'requestMethod':pending.get(str(rpc_id)), 'sessionId':params.get('sessionId',params.get('threadId',value.get('session_id')))}
     if 'conversation_id' in value: row['sessionId']=value['conversation_id']
-    if method=='v4/command': row['commandType']=(params.get('command') or {}).get('type')
-    if method=='session/update': row['updateType']=(params.get('update') or {}).get('sessionUpdate')
+    if method=='v4/command': row['commandType']=params.get('type',(params.get('command') or {}).get('type'))
+    if method=='session/update':
+        update=params.get('update') or {}
+        row['updateType']=update.get('sessionUpdate')
+        if row['updateType']=='agent_message_chunk': row['publicText']=(update.get('content') or {}).get('text','')[:1000]
+    if direction=='in' and method=='session/prompt':
+        content=params.get('prompt') or []
+        row['bootstrapControl']=bool(content and str(content[0].get('text','')).startswith('/rovai-bootstrap '))
     if direction=='in' and method=='switch_session': row['sessionPath']=value.get('sessionPath')
     body=value.get('result',value.get('data'))
     if isinstance(body,dict):
@@ -250,7 +300,7 @@ async function sendStage(label, body) {
   const record = { stage: label, runId: run.id, status: run.status, error: run.last_error_code, timeoutError, previousId, currentId,
     input: query('SELECT status FROM runtime_input_delivery WHERE agent_run_id=?', run.id),
     notices: query("SELECT event_type,json_extract(payload_json,'$.continuation') AS continuation FROM event_log WHERE entity_id=? AND event_type='agent_run.native_session_continuity_lost'", run.id),
-    output: messages.map(row => row.body).join('\n').slice(-1000), requests }
+    output: (messages.map(row => row.body).join('\n') || requests.map(row => row.publicText ?? '').join('')).slice(-1000), requests }
   result.stages.push(record)
   await save()
   console.log(JSON.stringify({ adapter: kind, stage: label, status: record.status, previousId, currentId, error: record.error }))
@@ -307,6 +357,11 @@ async function save() { await writeFile(join(fixture, 'result.json'), JSON.strin
 
 try {
   console.log(JSON.stringify({ adapter: kind, channel: 'automatic-acceptance', data, skills: join(data, 'managed-skill-library'), mcp: join(data, 'mcp.json') }))
+  if (kind === 'hermes-cli') {
+    gateway = spawn(executable, ['--profile','default','gateway','run','--quiet'], {cwd: project, env: process.env, detached: true, stdio: ['ignore','pipe','pipe']})
+    gateway.stdout.on('data', value => { gatewayLog += value }); gateway.stderr.on('data', value => { gatewayLog += value })
+    await waitUntil(async () => { if (gateway.exitCode !== null) throw new Error('Isolated Hermes Gateway exited'); return stat(join(process.env.HERMES_HOME, 'gateway.lock')).catch(() => false) }, 30000)
+  }
   if (continueFixture) {
     assert.ok(!result.deletedPaths?.length || (missingOnly && kind === 'zcode-app'), 'The original history was already removed; do not repeat this fixture')
     if (!missingOnly) {
@@ -349,17 +404,35 @@ try {
   const cold = await sendStage('cold', '继续本次隔离验收。不要调用工具，只回复 RESUME_COLD_OK。')
   if (cold.currentId !== seed.currentId) throw new Error('Cold resume unexpectedly changed the Session; preserve evidence before deleting any history')
   await stopCore()
+  if (coldOnly) {
+    for (const step of result.stages) {
+      assert.equal(step.status, 'succeeded', `${step.stage} must finish successfully`)
+      assert.equal(step.currentId, seed.currentId, `${step.stage} must retain the native Session`)
+      assert.ok(step.output.includes(`RESUME_${step.stage.toUpperCase()}_OK`), `${step.stage} must contain the actual requested model reply`)
+      assert.equal(step.requests.filter(row => row.direction === 'in' && ((row.method === 'session/prompt' && !row.bootstrapControl) || (row.method === 'v4/command' && row.commandType === 'sendText'))).length, 1, `${step.stage}: dispatch the business input once`)
+    }
+    assert.ok(cold.requests.some(row => row.direction === 'in' && ['session/resume','session/load'].includes(row.method) && row.sessionId === seed.currentId), 'Cold turn must restore the exact native Session')
+    result.coldOnlyVerified = true
+  } else {
   result.deletedPaths = await removeTestHistory(seed.currentId)
   await setStage('missing-start'); await startCore()
   await sendStage('missing', '继续本次隔离验收。不要调用工具，只回复 RESUME_MISSING_OK。')
+  }
   }
 } catch (error) {
   result.failure = error.message
   console.log(JSON.stringify({ adapter: kind, stage, failure: error.message }))
 } finally {
   await stopCore()
+  if (gateway) {
+    try { process.kill(-gateway.pid, 'SIGTERM') } catch (error) { if (error.code !== 'ESRCH') throw error }
+    await new Promise(done => setTimeout(done, 3000))
+    try { process.kill(-gateway.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
+    await writeFile(join(fixture, 'gateway.log'), gatewayLog, {mode: 0o600})
+  }
   result.notifications = notifications
   result.finishedAt = new Date().toISOString()
   await save()
   await removeEphemeralRuntimeCampFilesRoot(data).catch(() => {})
+  if (coldOnly && !result.coldOnlyVerified) process.exitCode = 1
 }
