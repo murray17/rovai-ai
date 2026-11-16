@@ -2351,6 +2351,7 @@ async fn run_acp_probe_with_scope(
                 && let Some((model, _)) = target
             {
                 session_params["_meta"]["provider"] = json!(crate::goose::model_route(model)?.0);
+                session_params["_meta"]["enabledExtensions"] = json!([]);
             }
             write_json_line(
                 stdin,
@@ -5191,6 +5192,13 @@ for line in sys.stdin:
                     requests
                         .iter()
                         .find(|r| r["method"] == "session/new")
+                        .unwrap()["params"]["_meta"]["enabledExtensions"],
+                    json!([]),
+                );
+                assert_eq!(
+                    requests
+                        .iter()
+                        .find(|r| r["method"] == "session/new")
                         .unwrap()["params"]["_meta"]["provider"],
                     target.unwrap().split_once('/').unwrap().0,
                 );
@@ -5198,6 +5206,12 @@ for line in sys.stdin:
                     !requests
                         .iter()
                         .any(|r| r["method"] == "_goose/unstable/providers/list")
+                );
+            } else if let Some(request) = requests.iter().find(|r| r["method"] == "session/new") {
+                assert!(
+                    request["params"]["_meta"]
+                        .get("enabledExtensions")
+                        .is_none()
                 );
             }
             if succeeds && include_session {

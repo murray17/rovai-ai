@@ -220,12 +220,45 @@ async function checkOfflineMcpLoads(){
   }finally{await host.close()}
  }
 }
+async function checkModelOptionsWithoutExtensions(){
+ const configRoot=join(fixture,'goose-root','config'),mode=join(fixture,'probe-mcp-mode'),starts=join(fixture,'probe-mcp-starts'),mcp=join(fixture,'probe-mcp.mjs')
+ await mkdir(configRoot,{recursive:true})
+ await writeFile(mode,'silent');await writeFile(starts,'')
+ await writeFile(mcp,"import {appendFileSync,readFileSync} from 'node:fs';appendFileSync("+JSON.stringify(starts)+",String(process.pid)+'\\n');if(readFileSync("+JSON.stringify(mode)+",'utf8')==='silent'){process.stdin.resume();setInterval(()=>{},1000)}else await import("+JSON.stringify(new URL('../crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs',import.meta.url).href)+");")
+ await writeFile(join(configRoot,'config.yaml'),JSON.stringify({extensions:{native_probe_fixture:{enabled:true,type:'stdio',name:'native_probe_fixture',cmd:process.execPath,args:[mcp],envs:{},timeout:1}}}))
+ const baseline=await open()
+ try{
+  await assert.rejects(baseline.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[],_meta:{provider:'openai'}},4000),error=>error.message.startsWith('Timeout session/new'))
+ }finally{await baseline.close()}
+ const startedBefore=(await readFile(starts,'utf8')).trim().split('\n').filter(Boolean)
+ assert.equal(startedBefore.length,1,'The failing comparison must actually start the native MCP')
+ const probe=await open(),offset=requests.length,start=performance.now()
+ const session=await probe.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[],_meta:{provider:'openai',enabledExtensions:[]}},4000)
+ assert.deepEqual(session._meta.extensionResults,[])
+ const selected=await probe.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'model',value:'gpt-6.1-sol'})
+ assert(selected.configOptions.find(c=>c.id==='thinking_effort').options.some(v=>v.value==='high'))
+ assert.equal((await probe.rpc('_goose/unstable/tools/list',{sessionId:session.sessionId})).tools.length,0)
+ assert.equal(requests.length,offset,'Reading model options must not generate a model response')
+ assert.equal((await readFile(starts,'utf8')).trim().split('\n').filter(Boolean).length,1,'The parameter Session must not start the configured MCP')
+ const queryMs=performance.now()-start
+ await probe.rpc('session/delete',{sessionId:session.sessionId});await probe.close()
+ await writeFile(mode,'ready')
+ const business=await open()
+ const normal=await business.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[],_meta:{provider:'openai'}})
+ const tools=(await business.rpc('_goose/unstable/tools/list',{sessionId:normal.sessionId})).tools.map(t=>t.name)
+ for(const name of ['write','edit','shell'])assert(tools.includes(name))
+ assert(tools.some(name=>name.endsWith('__echo')),'A normal Session must still inherit native MCP tools')
+ await business.rpc('session/delete',{sessionId:normal.sessionId});await business.close()
+ checks.modelOptionsProbe={configuredSilentMcpStartedInComparison:true,comparisonTimedOut:true,emptyExtensionToolCount:0,effortResolved:true,modelGenerations:0,queryMs,businessNativeToolsRetained:true}
+}
 try{
  const version=execFileSync(executable,['--version'],{encoding:'utf8',env:environment,cwd:join(fixture,'workspace'),timeout:10000}).trim()
  assert.equal(version,'1.59.0','Recheck official protocol/source before changing this pinned research fixture')
  checks.native={version,platform:process.platform+'-'+process.arch,command:['goose','acp'],provider:'synthetic-loopback',qualification:false}
  if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='mcp-startup'){
   await checkOfflineMcpLoads()
+ }else if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='model-options'){
+  await checkModelOptionsWithoutExtensions()
  }else if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='session-availability'){
   const host=await open({GOOSE_PROVIDER:undefined})
   await assert.rejects(host.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[]}),error=>!!error.rpcError)

@@ -10,7 +10,7 @@ last_updated: 2026-11-15
 已确认 [R1](model-context-change-goose-acp.md) 后，在 `rovai/goose-acp` 独立 worktree 实施。
 研究起点为 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并
 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`，不修改主 checkout。
-当前合同为 [Runtime Launch v96](../../contracts/runtime-launch-and-verification-v96.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
+当前合同为 [Runtime Launch v97](../../contracts/runtime-launch-and-verification-v97.md)，差异选择见 [D86](decisions.md#v1-72-d86)。
 
 ## 基线差异和共享入口
 
@@ -346,3 +346,31 @@ Core 平台矩阵允许 Linux x64 Preview。发现、文件操作、公开发送
 完整默认 workspace 通过：438 Core lib／31 CLI／4 host／11 web，保留原 1 ignored。
 该次全量在 Windows 集成后执行；后续 Linux 提交只涉及准入与文档，补测该共享平台 owner 共 5 项通过。
 首次平台补测发现兼容性登记内容与既有修订值不一致，按实际登记同步原常量后通过，原断言保留。
+
+## 参数探测空扩展与不覆盖文案（User sequence 148）
+
+基线为 `7181fb4d7416f295d4ccebb13f3ff44e88d27cdd`。生产后端仅在目标参数的现有创建请求中
+添加 `_meta.enabledExtensions: []`。固定 Goose 1.59.0 的请求解析器实际读取这个字段；
+正式 Session、普通健康检查、完整目录、500 ms 尽力删除和 MCP 撤回沿原入口运行。
+不创建配置副本、Host 池、监控或重试系统。
+
+Goose 现有模型控件与摘要使用“沿用 Goose 会话选择”，effort 空项使用“不覆盖原生思考强度”；
+在现有菜单提示位置解释新／已有 Session 的差异，并补英文翻译。
+共享展示文件内的小型标签函数统一这些文字，未改变保存值、执行选项或增加原生重置动作。
+具体字段见 [v97](../../contracts/runtime-launch-and-verification-v97.md)，文案归[队员配置页](../../ui/components/member-identity.md#队员配置页)。
+
+官方未修改的 Homebrew 1.59.0 原生对照：启用 1 秒 timeout 的失联 stdio MCP，继承扩展的创建
+实际启动该进程并超过 4 秒客户端期限。显式空扩展后约 55 ms 取得 `gpt-6.1-sol` effort，
+工具数为零、模型生成数为零、该 MCP 没有再次启动。正常 Session 仍有 write/edit/shell 与原生 MCP。
+夹具中的两个原生 MCP 进程在结束后均已退出。
+
+实际 Core 组合组通过 23 个成功 Run、取消断言、65 次受控 Provider 请求。参数查询期间在原生配置
+加入失联 MCP，查询明确 `completed` 且没有启动它；夹具配置随后恢复，正式工具路径继续验证。
+同 Host 清空 effort 覆盖的后继 Run 仍向 Provider 发送原生 high；没有把清空表述为重置默认值。
+原先显式 Provider、两种 Session 删除故障、迟到 MCP 删除和重新分配的断言继续保留。
+
+两个 Rust extended owners、TypeScript、51 项相关 Vitest 和原 Runtime picker Electron 交互通过。
+成员／引导入口均验证新文案、清除保存值、零额外目标查询；检查了两处模型选择截图。
+现有键盘、IME、主题、尺寸和缩放验收仍通过。结果见[本轮白名单](../../research/goose-runtime/probe-extensions-1.59.0-macos-arm64.json)。
+默认 workspace 为 438 Core lib／31 CLI／4 host／11 web 通过，保留原 1 ignored；格式、脚本和文档门禁通过。
+本轮未重新验真实账号、OAuth 或其他平台；正式业务 Session 的无响应 MCP 初始化限制保持。

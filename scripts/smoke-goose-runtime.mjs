@@ -271,7 +271,26 @@ try{
  }
  result.checks.compaction={automaticThreshold:true,overflowRecovery:true}
  const directoryBeforeTarget=(await core.request('runtime.installations.list')).find(i=>i.adapterKind==='goose-cli')
- const target=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',modelId:'openai/gpt-6.1-sol',forceRefresh:true})
+ const probeConfigPath=join(root,'goose-root','config','config.yaml')
+ const probeConfig=await readFile(probeConfigPath,'utf8')
+ if(process.env.ROVAI_GOOSE_PROBE_MCP_FAULT==='1'){
+  const silent=join(root,'probe-only-silent-mcp.mjs'),marker=join(root,'probe-mcp-started')
+  await writeFile(silent,"import {writeFileSync} from 'node:fs';writeFileSync("+JSON.stringify(marker)+",String(process.pid));process.stdin.resume();setInterval(()=>{},1000)")
+  const native=JSON.parse(probeConfig)
+  native.extensions.probe_blocker={enabled:true,type:'stdio',name:'probe_blocker',cmd:process.execPath,args:[silent],envs:{},timeout:1}
+  await writeFile(probeConfigPath,JSON.stringify(native))
+ }
+ let target
+ try{
+  target=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',modelId:'openai/gpt-6.1-sol',forceRefresh:true})
+  assert.equal(target.refreshStatus,'completed',JSON.stringify(target))
+  if(process.env.ROVAI_GOOSE_PROBE_MCP_FAULT==='1'){
+   assert(!(await readdir(root)).includes('probe-mcp-started'),'Target model options must not start native MCP')
+   result.checks.probeExtensions={unresponsiveNativeMcpConfigured:true,nativeMcpStarted:false,queryCompleted:true}
+  }
+ }finally{
+  if(process.env.ROVAI_GOOSE_PROBE_MCP_FAULT==='1')await writeFile(probeConfigPath,probeConfig)
+ }
  assert.deepEqual(target.models.map(m=>m.id),directoryBeforeTarget.snapshot.models.map(m=>m.id),'A target read must retain models from other Providers')
  assert.equal(target.cache.observedAt,directoryBeforeTarget.modelCatalog.observedAt,'Target parameters must not renew directory freshness')
  assert.equal(target.models.find(m=>m.isDefault)?.id,directoryBeforeTarget.snapshot.models.find(m=>m.isDefault)?.id,'A target probe must not change the native default')
@@ -284,6 +303,12 @@ try{
  const reasoning=await settle(await send('CORE_GOOSE_REASONING'))
  assert(calls.slice(reasoningOffset).some(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'))
  result.checks.effort={targetModel:'openai/gpt-6.1-sol',nativeKey:'thinking_effort',providerEffort:'high',onDemand:true,otherProvidersRetained:true,directoryFreshnessUnchanged:true,nativeDefaultUnchanged:true}
+ await setMember('openai/gpt-6.1-sol',{})
+ const effortClearOffset=calls.length
+ const withoutEffort=await settle(await send('CORE_GOOSE_NO_EFFORT_OVERRIDE'))
+ assert.equal(withoutEffort.started.hostInstanceId,reasoning.started.hostInstanceId)
+ assert(calls.slice(effortClearOffset).every(c=>c.model==='gpt-6.1-sol'&&c.reasoning?.effort==='high'))
+ result.checks.effort.clearingOverridePreservesNativeSelection=true
  const defaultsProfile=await core.request('members.get',{agentId:'agent_2'})
  assert.equal((await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:defaultsProfile.version,adapterKind:'goose-cli',model:{mode:'runtime_default'},permissions:defaultsProfile.runtimeConfiguration.permissions}})).status,'applied')
  const defaultOffset=calls.length

@@ -295,6 +295,14 @@ Rust 测试函数新增、删除及停用均为零，最低命令为这两个 ex
 Core smoke 的 `ROVAI_GOOSE_SESSION_FAULTS=1` 使用既有验收 relay，验证实际新建与目标查询、删除错误／不回包。
 必须检查 `refreshStatus=completed`，不能仅凭已有缓存选项判定成功。原 MCP relay 场景继续保留。
 
+Goose 参数探测按 [v97](../contracts/runtime-launch-and-verification-v97.md) 继续扩展同一 health／live-model owners：
+目标 Session 显式空扩展，普通检查和正式执行不传该字段。Rust 测试函数新增、删除及停用仍为零。
+原生 probe 的 `model-options` scope 先复现用户原生 MCP 失联，再验证空扩展的真实 effort、零工具和零生成；
+Core smoke 的 `ROVAI_GOOSE_PROBE_MCP_FAULT=1` 验参数查询期间不启动失联 MCP，并保留普通业务工具。
+已有 Renderer presentation 和参数单测，以及 Runtime picker 的 member/onboarding 交互覆盖不覆盖文案、
+清空后的保存值和零额外目标查询。最低命令为两个 Rust owners、默认 workspace、`pnpm typecheck`、
+相关 Vitest 及 `pnpm test:runtime-model-picker`，复用原验收入口，不建立另一套夹具系统。
+
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

@@ -15786,6 +15786,11 @@ for line in sys.stdin:
                     .collect();
                 assert_eq!(setters, expected, "Goose round {epoch}");
                 if let Some(new_session) = requests.iter().find(|r| r["method"] == "session/new") {
+                    assert!(
+                        new_session["params"]["_meta"]
+                            .get("enabledExtensions")
+                            .is_none()
+                    );
                     assert_eq!(
                         new_session["params"]["_meta"]["provider"],
                         if first_target == "runtime_default" {

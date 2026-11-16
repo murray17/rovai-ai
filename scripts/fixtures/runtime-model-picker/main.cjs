@@ -620,6 +620,21 @@ app.whenReady().then(async () => {
       assert.deepEqual((await draft()).model.options, {[effortKey]:'saved-unlisted'})
       await click(modelTrigger); await key('Escape')
       assert.equal(await run(`window.runtimeTest.catalogRequests.filter(request=>request.kind===${JSON.stringify(runtime)}).some(request=>"dshSource" in request)`), false)
+      if (runtime === 'goose-cli') {
+        await run('window.runtimeTest.setDshReadMode("normal"); window.runtimeTest.setModel({mode:"explicit",modelId:"vendor/model-1",options:{thinking_effort:"high"}})'); await settle()
+        const readsBeforeClear = await run('window.runtimeTest.dshReads.length')
+        await click('button[aria-label^="思考强度，"]')
+        assert.equal(await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).at(-1).textContent'), '不覆盖原生思考强度')
+        await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).at(-1).click()'); await settle()
+        assert.deepEqual((await draft()).model, { mode:'explicit', modelId:'vendor/model-1', options:{} })
+        assert.equal(await run('window.runtimeTest.dshReads.length'), readsBeforeClear)
+        await click(modelTrigger)
+        assert.equal(await run('document.querySelector(".runtime-picker-default button").textContent'), '沿用 Goose 会话选择')
+        assert.equal(await run('document.querySelector(".runtime-picker-default button").title'), '新会话使用原生初始值；已有会话保留当前值。')
+        await click('.runtime-picker-default button'); await settle()
+        assert.deepEqual((await draft()).model, { mode:'runtime_default' })
+        assert.equal(await run(`document.querySelector(${JSON.stringify(modelTrigger)}).textContent`), '沿用 Goose 会话选择')
+      }
       await capture(`${runtime}-target-${page}`)
     }
     for (const page of ['member', 'onboarding']) {
