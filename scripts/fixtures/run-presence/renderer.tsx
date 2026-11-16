@@ -17,6 +17,7 @@ import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/sr
 import { MobileConversationDrawer, MobileLayoutProvider } from '../../../apps/desktop/src/renderer/src/MobileLayout'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from '../../../apps/desktop/src/renderer/src/AppDialog'
 import { model, profiles, scenarios, installations } from './model'
+import { TimelineVirtualList, type TimelineVirtualListHandle } from '../../../apps/desktop/src/renderer/src/TimelineVirtualList'
 import { conversationRunPresenceTimeline } from '../../../apps/desktop/src/renderer/src/conversation-run-presence'
 import { liveRuntimeEventFromExecutionEvidence } from '../../../apps/desktop/src/renderer/src/ui-model'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
@@ -126,7 +127,8 @@ function Workbench() {
       revealExportHistory: model.revealExportHistory,
       removeExportMessage: model.removeExportMessage,
       showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
-      showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setMemberAvailability: model.setMemberAvailability,
+      appendHistoryMessage: model.appendHistoryMessage, emitCoreEvent: model.emitCoreEvent,
+      showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setHistoryModel: model.setHistoryModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot
         const ids = [...document.querySelectorAll<HTMLElement>('[data-message-id]')].map(e => e.dataset.messageId)
@@ -178,6 +180,9 @@ function Workbench() {
           <ThreadWorkspace key={`${state.generation}:${visibleSnapshot.thread.id}`} snapshot={params.has('windowed') ? { ...visibleSnapshot, executionEvidence: [] } : visibleSnapshot}
             liveRuntimeEvents={model.controls.liveEvidence ? visibleSnapshot.executionEvidence.map(liveRuntimeEventFromExecutionEvidence) : undefined}
             workspaceEntrySnapshotReady={!model.controls.holdEntrySnapshot}
+            messageHistory={params.has('virtualHistory') ? model.historyCoverage() : undefined}
+            onLoadEarlierMessages={params.has('virtualHistory') ? model.loadEarlierHistory : undefined}
+            onVisibleNotificationSources={params.has('virtualHistory') ? sources => model.controls.visibleSources.push(sources) : undefined}
             openCoverage={params.has('windowed') ? openCoverage : null} projectName="rovai-ai" agents={profiles.map((profile, index) => index === 0 ? { ...profile, ...identityFields } : profile) as any}
             installations={installations as any} initialComposerDraft={state.draft} busy={state.busy}
             onSend={model.send} onWithdrawMessage={model.withdrawMessage} onReconcileDelivery={async () => 'delivery_unknown'} onChangeLead={model.changeLead} onTasksChanged={async () => {}}
@@ -245,5 +250,32 @@ function Workbench() {
     </FilePreviewProvider></CurrentUserProfileContext.Provider>
   </ThreadClientProvider></MobileLayoutProvider>
 }
+// Deterministic row-readiness acceptance: same-height deferred content must
+// settle explicit navigation in both short and windowed histories.
+function TimelineReadinessProbe() {
+  const viewport = useRef<HTMLDivElement>(null)
+  const controller = useRef<TimelineVirtualListHandle | null>(null)
+  const [pending, setPending] = useState(true)
+  const [items, setItems] = useState(() => Array.from({ length: Number(params.get('probeCount') ?? 20) }, (_, index) => ({ id: `probe-${index}` })))
+  useEffect(() => {
+    let abort: AbortController | undefined
+    Object.assign(window, { __timelineReadiness: {
+      mount: (id: string, cancellable = false) => {
+        abort = cancellable ? new AbortController() : undefined
+        return controller.current!.ensureMounted(id, abort?.signal).then(node => node ? !node.querySelector('[data-timeline-pending]') : null)
+      },
+      abort: () => abort?.abort(),
+      release: () => setPending(false), remove: () => setItems([])
+    } })
+  }, [])
+  return <div ref={viewport} style={{ height: 300, overflow: 'auto' }}>
+    <TimelineVirtualList items={items} viewportRef={viewport} controllerRef={controller}
+      followingLatest={() => false} preserveReadingPosition={() => true}>
+      {item => <div data-message-id={item.id} style={{ height: 40 }}>
+        <span data-timeline-pending={pending && item.id === 'probe-0' ? '' : undefined}>{pending ? '等待正文' : '正文已可用'}</span>
+      </div>}
+    </TimelineVirtualList>
+  </div>
+}
 if (params.get('startup') === 'queued') model.showStartupStatus(null, false, 'queued')
-createRoot(document.getElementById('root')!).render(<Workbench />)
+createRoot(document.getElementById('root')!).render(params.has('timelineReadiness') ? <TimelineReadinessProbe /> : <Workbench />)

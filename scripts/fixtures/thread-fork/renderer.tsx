@@ -72,6 +72,7 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
       // Controlled API projections for the production UI consumer. The Rust
       // transaction owner separately verifies normalization and copy boundaries.
       target.messages=copied.map((m:any)=>({...m,id:ids.get(m.id),presentation:m.authorType==='agent'?{}:null,
+        sourceAgentRunId:null,threadTurnId:null,runtimeModel:null,
         quotes:(m.quotes??[]).map((q:any)=>({...q,source:q.source?.scope==='camp'&&q.source.campId===params.sourceThreadId&&ids.has(q.source.messageId)
           ?{...q.source,campId:id,messageId:ids.get(q.source.messageId)}:undefined}))}))
       threads.set(id,target);const result=applied({threadId:id});receipts.set(params.commandId,result);checkpoint()

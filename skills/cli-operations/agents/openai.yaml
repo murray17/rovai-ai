@@ -1,4 +1,4 @@
 interface:
   display_name: "CLI 操作协调"
-  short_description: "消息、Mission、检索与 Memory 操作协调"
+  short_description: "在消息、Mission 与历史检索之间选择操作，协调多步工作并处理恢复"
   default_prompt: "使用 $cli-operations 选择正确的 Rovai 操作，协调并行消息或必要的多步流程，并安全处理复杂恢复。"

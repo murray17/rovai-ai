@@ -40,6 +40,10 @@ pub enum Operation {
     #[serde(rename = "missions.linkPr")]
     MissionLinkPr,
 
+    #[serde(rename = "preferences.memory.get")]
+    MemoryPreferencesGet,
+    #[serde(rename = "preferences.memory.set")]
+    MemoryPreferencesSet,
     #[serde(rename = "preferences.tasks.get")]
     TasksGet,
     #[serde(rename = "preferences.tasks.set")]
@@ -461,6 +465,8 @@ impl Operation {
         match self {
             Self::ProjectFileReferencesResolve => "projectFileReferences.resolve",
             Self::ProjectFiles => "projectFiles.request",
+            Self::MemoryPreferencesGet => "preferences.memory.get",
+            Self::MemoryPreferencesSet => "preferences.memory.set",
             Self::TasksGet => "preferences.tasks.get",
             Self::TasksSet => "preferences.tasks.set",
             Self::TeamsList => "teams.list",

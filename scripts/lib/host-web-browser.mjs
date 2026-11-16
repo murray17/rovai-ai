@@ -53,8 +53,10 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
     const errors = []
     const responses = []
     const fileChoosers = []
+    const protocolListeners = new Set()
     socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data))
+      if (message.method) for (const listener of protocolListeners) listener(message)
       const request = pending.get(message.id)
       if (request) {
         pending.delete(message.id)
@@ -95,6 +97,7 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
     }
     return {
       send, evaluate, errors, responses, fileChoosers, close,
+      onProtocolEvent(listener) { protocolListeners.add(listener); return () => protocolListeners.delete(listener) },
       async key(key) {
         const params = { key, code: key, windowsVirtualKeyCode: key === 'Enter' ? 13 : 27 }
         await send('Input.dispatchKeyEvent', { type: 'keyDown', ...params })

@@ -20,6 +20,19 @@ live-authorized retrieval 与用户审核面。长期决策见
 Architecture/Contract `accepted` 不表示代码已实现；当前完成度只从
 [v0.78 实施计划](../versions/v0.78/implementation-plan.md)判断。
 
+## Core 实例可用性
+
+`memory_capability` 统一拥有默认开启的实例设置、快照、实时检查和操作识别。关闭暂停 Agent 与用户管理的
+所有新 Memory 业务；数据和审核项原样保留，控制设置和已提交回执可用。读取回放进入现有实时读取服务，
+写入在既有幂等回放之后的业务事务检查；发现文件只作投影。
+新生成 Bootstrap 条件省略入口和记忆技能，不触及旧会话、冻结输入或 Bootstrap 生命周期。
+设置缺行、非法值或读取失败时，Memory 操作保持拒绝；普通输入只省略 Memory，普通事件继续返回并
+单独标明 Memory 状态不可用，Task 发现继续投影有效状态。控制接口不把失败写回为关闭。
+最终读取结果在成功活动记录之前与设置提交串行选择，记录和回包共用该结果，不在记录后再次改判。
+内容失效与提示过滤分开；恢复连接刷新数据同时抑制旧提示，Web 现有通道只以元数据标记 Memory 内容变化。
+Desktop/Web/Mobile 共用 Provider，关闭页只保留说明和开启入口。协议见
+[Memory Capability v1](../contracts/memory-capability-v1.md)。
+
 ## 总体路径
 
 ```text

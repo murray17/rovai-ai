@@ -1,3 +1,4 @@
+import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { useThreadClient } from './camp-client'
 import { MobileBack, useMobileLayout } from './MobileLayout'
 import { newCommandId } from '../../shared/command-id'
@@ -101,6 +102,23 @@ const scopeTabs: Array<[LibraryScope, string]> = [
   ['relationship', '队员间']
 ]
 
+function MemoryCapabilitySwitch(): React.JSX.Element {
+  const memory = useMemoryCapability()
+  return <button
+    className="memory-capability-switch"
+    type="button"
+    role="switch"
+    aria-label={uiAttribute('Rovai 长期记忆')}
+    aria-checked={memory.enabled}
+    aria-busy={memory.saving}
+    disabled={!memory.ready || memory.error === 'read' || memory.saving}
+    onClick={() => void memory.setEnabled(!memory.enabled)}
+  >
+    <span><UiText zh="Rovai 长期记忆" /></span>
+    <span className="memory-capability-switch-track" aria-hidden="true" />
+  </button>
+}
+
 export function MemoryLibrary({
   agents,
   topNotices,
@@ -127,9 +145,20 @@ export function MemoryLibrary({
   startupFeedbackVisible?: boolean
 }): React.JSX.Element {
   const client = useThreadClient()
+  const memory = useMemoryCapability()
+  const memoryActive = useRef(memory.active)
+  const previousActive = memoryActive.current
+  memoryActive.current = memory.active
+  const pageLifetime = useRef({ client, active: false })
+  const isCurrentPage = useCallback((lifetime = pageLifetime.current) =>
+    lifetime === pageLifetime.current && lifetime.active && lifetime.client === client, [client])
   const libraryGeneration = useRef(0)
   const reviewGeneration = useRef(0)
-  useEffect(() => () => { libraryGeneration.current++; reviewGeneration.current++ }, [client])
+  if (previousActive !== memory.active) { libraryGeneration.current++; reviewGeneration.current++ }
+  const memoryRequest = useCallback(<T,>(method: Parameters<typeof client.request>[0], params?: unknown): Promise<T> => {
+    if (!isCurrentPage() || !memoryActive.current) return Promise.reject(new Error(uiAttribute('Rovai 长期记忆状态暂不可用，请重试。')))
+    return client.request<T>(method, params)
+  }, [client, isCurrentPage])
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const mobile = useMobileLayout()
   const [reviewItems, setReviewItems] = useState<HearthReviewItem[]>([])
@@ -171,57 +200,89 @@ export function MemoryLibrary({
   const [feedback, setFeedback] = useState<string | null>(null)
   const startupContentVisible = startupFeedbackVisible || Boolean(error)
 
-  const loadMemoryLibrary = useCallback(async (): Promise<MemoryLibraryView> => {
-    const request = ++libraryGeneration.current
-    const nextLibrary = await client.request<MemoryLibraryView>('memory.list')
-    if (request === libraryGeneration.current) setLibrary(nextLibrary)
-    return nextLibrary
+  useEffect(() => {
+    // Each effect visit owns its continuations, including setup/cleanup replay.
+    const lifetime = { client, active: true }
+    pageLifetime.current = lifetime
+    reviewActionPending.current = false
+    setBusy(null)
+    setReviewScheduleBusyAction(null)
+    return () => {
+      lifetime.active = false
+      libraryGeneration.current++
+      reviewGeneration.current++
+    }
   }, [client])
 
+  const loadMemoryLibrary = useCallback(async (): Promise<MemoryLibraryView> => {
+    const lifetime = pageLifetime.current
+    const request = ++libraryGeneration.current
+    const nextLibrary = await memoryRequest<MemoryLibraryView>('memory.list')
+    if (isCurrentPage(lifetime) && memoryActive.current && request === libraryGeneration.current) setLibrary(nextLibrary)
+    return nextLibrary
+  }, [memoryRequest, isCurrentPage])
+
   const load = useCallback(async (): Promise<MemorySnapshot> => {
+    const lifetime = pageLifetime.current
     const libraryRequest = ++libraryGeneration.current
     const reviewRequest = ++reviewGeneration.current
     const [nextLibrary, nextReviewItems] = await Promise.all([
-      client.request<MemoryLibraryView>('memory.list'),
-      client.request<HearthReviewItem[]>('memory.hearthReviewItems.list')
+      memoryRequest<MemoryLibraryView>('memory.list'),
+      memoryRequest<HearthReviewItem[]>('memory.hearthReviewItems.list')
     ])
-    if (libraryRequest === libraryGeneration.current) setLibrary(nextLibrary)
-    if (reviewRequest === reviewGeneration.current) {
+    if (isCurrentPage(lifetime) && memoryActive.current && libraryRequest === libraryGeneration.current) setLibrary(nextLibrary)
+    if (isCurrentPage(lifetime) && memoryActive.current && reviewRequest === reviewGeneration.current) {
       setReviewItems(nextReviewItems)
       onPendingCountChange?.(nextReviewItems.filter((reviewItem) => reviewItem.status === 'pending').length)
     }
     return { library: nextLibrary, reviewItems: nextReviewItems }
-  }, [client, onPendingCountChange])
+  }, [memoryRequest, onPendingCountChange, isCurrentPage])
+
+  const retryLibrary = (): void => {
+    const lifetime = pageLifetime.current
+    if (!isCurrentPage(lifetime) || !memoryActive.current) return
+    setError(null)
+    void load().catch(nextError => { if (isCurrentPage(lifetime) && memoryActive.current) setError(errorMessage(nextError)) })
+  }
 
   useEffect(() => {
-    if (library) onReady?.()
-  }, [library, onReady])
+    if (memory.active ? library : memory.ready || memory.error) onReady?.()
+  }, [library, memory.ready, memory.error, onReady])
 
   useEffect(() => {
-    void load().catch((nextError) => setError(errorMessage(nextError)))
-  }, [load])
-
-  useEffect(() => client.onEvent?.((event) => {
-    if (event.method !== 'runtime.state') return
-    const params = typeof event.params === 'object' && event.params !== null
-      ? event.params as Record<string, unknown>
-      : {}
-    if (params.status === 'ready') void load().catch((nextError) => setError(errorMessage(nextError)))
-  }), [client, load])
-
-  useEffect(() => client.onInvalidated?.(() => {
-    void load().catch((nextError) => setError(errorMessage(nextError)))
-  }), [client, load])
+    if (!memory.active) return
+    const lifetime = pageLifetime.current
+    setError(null)
+    void load().catch((nextError) => { if (isCurrentPage(lifetime) && memoryActive.current) setError(errorMessage(nextError)) })
+  }, [load, isCurrentPage, memory.active, memory.headsUpAfterGlobalSequence, refreshSignal])
 
   useEffect(() => {
-    if (refreshSignal > 0) void load().catch((nextError) => setError(errorMessage(nextError)))
-  }, [load, refreshSignal])
+    const lifetime = pageLifetime.current
+    return client.onEvent?.((event) => {
+      if (!isCurrentPage(lifetime) || event.method !== 'runtime.state') return
+      const params = typeof event.params === 'object' && event.params !== null
+        ? event.params as Record<string, unknown>
+        : {}
+      if (memoryActive.current && params.status === 'ready') void load().catch((nextError) => {
+        if (isCurrentPage(lifetime) && memoryActive.current) setError(errorMessage(nextError))
+      })
+    })
+  }, [client, load, isCurrentPage])
 
   useEffect(() => {
-    if (reviewDrawerSignal <= 0) return
+    const lifetime = pageLifetime.current
+    return client.onInvalidated?.((change) => {
+      if (!isCurrentPage(lifetime) || !memoryActive.current || (change && !change.resync && !change.memoryContentChanged)) return
+      setError(null)
+      void load().catch((nextError) => { if (isCurrentPage(lifetime) && memoryActive.current) setError(errorMessage(nextError)) })
+    })
+  }, [client, load, isCurrentPage])
+
+  useEffect(() => {
+    if (!memory.active || reviewDrawerSignal <= 0) return
     setReviewDialogOpen(true)
     onReviewDrawerSignalConsumed?.()
-  }, [onReviewDrawerSignalConsumed, reviewDrawerSignal])
+  }, [memory.active, onReviewDrawerSignalConsumed, reviewDrawerSignal])
 
   useEffect(() => {
     if (navigationTarget || !focusMemoryId || !library) return
@@ -230,6 +291,10 @@ export function MemoryLibrary({
     setLocalScope(memory.scope)
     setLocalMemoryId(memory.id)
   }, [focusMemoryId, library, navigationTarget])
+
+  useEffect(() => {
+    if (!memory.active) setFeedback(null)
+  }, [memory.active])
 
   useEffect(() => {
     if (!feedback) return undefined
@@ -282,25 +347,29 @@ export function MemoryLibrary({
   const loading = library === null && error === null
 
   const run = async (key: string, operation: () => Promise<void>): Promise<void> => {
+    const lifetime = pageLifetime.current
+    if (!isCurrentPage(lifetime) || !memoryActive.current) return
     setBusy(key)
     setError(null)
     try {
       await operation()
-      await load()
+      if (isCurrentPage(lifetime) && memoryActive.current) await load()
     } catch (nextError) {
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return
       if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
         try {
           const snapshot = await load()
+          if (!isCurrentPage(lifetime) || !memoryActive.current) return
           setEditor((current) => refreshEditorAuthority(current, snapshot))
           setError(uiAttribute('审核状态或记忆版本已经变化。已刷新权威状态并保留当前草稿，请核对后明确重试。'))
         } catch (refreshError) {
-          setError(uiAttribute("状态冲突，且刷新失败：{0}", String(errorMessage(refreshError))))
+          if (isCurrentPage(lifetime) && memoryActive.current) setError(uiAttribute("状态冲突，且刷新失败：{0}", String(errorMessage(refreshError))))
         }
       } else {
         setError(errorMessage(nextError))
       }
     } finally {
-      setBusy(null)
+      if (isCurrentPage(lifetime)) setBusy(null)
     }
   }
 
@@ -357,18 +426,19 @@ export function MemoryLibrary({
 
   const submitEditor = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!editor || busy) return
+    const lifetime = pageLifetime.current
+    if (!isCurrentPage(lifetime) || !memoryActive.current || !editor || busy) return
     let createdMemoryId: string | null = null
     await run(`editor-${editor.kind}`, async () => {
       let result: StoredCommandResult
       if (editor.kind === 'create') {
-        result = await client.request('memory.create', {
+        result = await memoryRequest('memory.create', {
           commandId: newCommandId(),
           command: createCommand()
         })
       } else {
         if (!editor.memory.currentRevisionId) throw new Error(uiAttribute('当前记忆没有可修订的版本。'))
-        result = await client.request('memory.revise', {
+        result = await memoryRequest('memory.revise', {
           commandId: newCommandId(),
           command: {
             memoryId: editor.memory.id,
@@ -381,40 +451,43 @@ export function MemoryLibrary({
         })
       }
       assertApplied(result)
+      if (!isCurrentPage(lifetime)) return
       editorDrafts.current.delete(editorKey(editor))
       if (editor.kind === 'create' && typeof result.payload.memoryId === 'string') createdMemoryId = result.payload.memoryId
       setEditor(null)
-      setFeedback(uiAttribute('记忆已保存。'))
+      if (memoryActive.current) setFeedback(uiAttribute('记忆已保存。'))
     })
     // Select after the refreshed library contains the new identity.
-    if (createdMemoryId) navigateMemory({ scope: draft.scope, search: '', memoryId: createdMemoryId }, 'replace')
+    if (createdMemoryId && isCurrentPage(lifetime) && memoryActive.current) navigateMemory({ scope: draft.scope, search: '', memoryId: createdMemoryId }, 'replace')
   }
 
   const refreshReview = async (): Promise<void> => {
-    if (reviewActionPending.current) return
+    const lifetime = pageLifetime.current
+    if (!isCurrentPage(lifetime) || !memoryActive.current || reviewActionPending.current) return
     reviewActionPending.current = true
     setBusy('review-refresh')
     try {
       await load()
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return
       setReviewNeedsRefresh(false)
       setReviewError(null)
     } catch (nextError) {
-      setReviewError(uiAttribute('无法确认最新审核状态，请刷新后再处理。{0}', errorMessage(nextError)))
+      if (isCurrentPage(lifetime) && memoryActive.current) setReviewError(uiAttribute('无法确认最新审核状态，请刷新后再处理。{0}', errorMessage(nextError)))
     } finally {
-      reviewActionPending.current = false
-      setBusy(null)
+      if (isCurrentPage(lifetime)) { reviewActionPending.current = false; setBusy(null) }
     }
   }
 
   const resolveReview: ReviewResolution = async (reviewItem, action, content) => {
-    if (reviewActionPending.current || busy || reviewNeedsRefresh || reviewItem.status !== 'pending'
+    const lifetime = pageLifetime.current
+    if (!isCurrentPage(lifetime) || !memoryActive.current || reviewActionPending.current || busy || reviewNeedsRefresh || reviewItem.status !== 'pending'
       || (action === 'accept' && reviewItem.stale)) return false
     reviewActionPending.current = true
     setBusy(`review-${action}-${reviewItem.reviewItemId}`)
     setReviewError(null)
     let applied = false
     try {
-      const result = await client.request<StoredCommandResult>(`memory.hearthReviewItems.${action}`, {
+      const result = await memoryRequest<StoredCommandResult>(`memory.hearthReviewItems.${action}`, {
         commandId: newCommandId(),
         command: {
           reviewItemId: reviewItem.reviewItemId,
@@ -424,23 +497,29 @@ export function MemoryLibrary({
       })
       assertApplied(result)
       applied = true
+      if (!isCurrentPage(lifetime)) return true
       // Only Core's acknowledgement clears the candidate. Do not reconstruct a
       // terminal record or leave its body editable if the following read fails.
       reviewGeneration.current++
       setReviewItems((items) => items.filter((item) => item.reviewItemId !== reviewItem.reviewItemId))
+      if (!memoryActive.current) return true
       await load()
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return true
       setFeedback(action === 'accept'
         ? uiAttribute('已接受，候选内容现在成为正式共同记忆。')
         : uiAttribute('已拒绝这条审核项；候选内容已清除。'))
     } catch (nextError) {
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return applied
       if (applied) {
         setReviewNeedsRefresh(true)
         setReviewError(uiAttribute('处理已完成，但列表刷新失败。请刷新列表，无需再次提交。'))
       } else if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
         try {
           await load()
+          if (!isCurrentPage(lifetime) || !memoryActive.current) return applied
           setReviewError(uiAttribute('审核状态或记忆版本已经变化。已刷新权威状态并保留当前草稿，请核对后明确重试。'))
         } catch {
+          if (!isCurrentPage(lifetime) || !memoryActive.current) return applied
           setReviewNeedsRefresh(true)
           setReviewError(uiAttribute('无法确认最新审核状态，请刷新后再处理。{0}', errorMessage(nextError)))
         }
@@ -451,8 +530,7 @@ export function MemoryLibrary({
         setReviewError(uiAttribute('无法确认最新审核状态，请刷新后再处理。{0}', errorMessage(nextError)))
       }
     } finally {
-      reviewActionPending.current = false
-      setBusy(null)
+      if (isCurrentPage(lifetime)) { reviewActionPending.current = false; setBusy(null) }
     }
     return applied
   }
@@ -461,7 +539,7 @@ export function MemoryLibrary({
     method: 'memory.retire' | 'memory.reactivate',
     memory: MemoryRecord
   ): Promise<void> => run(`${method}-${memory.id}`, async () => {
-    const result = await client.request<StoredCommandResult>(method, {
+    const result = await memoryRequest<StoredCommandResult>(method, {
       commandId: newCommandId(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
@@ -469,12 +547,13 @@ export function MemoryLibrary({
   })
 
   const forget = (memory: MemoryRecord): Promise<void> => run(`forget-${memory.id}`, async () => {
-    const result = await client.request<StoredCommandResult>('memory.forget', {
+    const lifetime = pageLifetime.current
+    const result = await memoryRequest<StoredCommandResult>('memory.forget', {
       commandId: newCommandId(),
       command: { memoryId: memory.id, expectedVersion: memory.version }
     })
     assertApplied(result)
-    setForgetTarget(null)
+    if (isCurrentPage(lifetime)) setForgetTarget(null)
   })
 
   const reviewScheduleTrigger = useRef<HTMLElement | null>(null)
@@ -492,8 +571,9 @@ export function MemoryLibrary({
   }
 
   const submitReviewSchedule = async (action: ReviewScheduleAction): Promise<void> => {
+    const lifetime = pageLifetime.current
     const current = reviewScheduleEditor
-    if (!current || reviewScheduleBusyAction !== null) return
+    if (!isCurrentPage(lifetime) || !memoryActive.current || !current || reviewScheduleBusyAction !== null) return
 
     let desiredReviewAfter: string | null = null
     if (action === 'save') {
@@ -519,7 +599,7 @@ export function MemoryLibrary({
     })
 
     try {
-      const result = await client.request<StoredCommandResult>('memory.review.schedule', {
+      const result = await memoryRequest<StoredCommandResult>('memory.review.schedule', {
         commandId: newCommandId(),
         command: {
           memoryId: current.memory.id,
@@ -528,10 +608,14 @@ export function MemoryLibrary({
         }
       })
       assertApplied(result)
+      if (!isCurrentPage(lifetime)) return
+      if (!isCurrentPage(lifetime) || !memoryActive.current) { setReviewScheduleEditor(null); return }
 
       try {
         await loadMemoryLibrary()
+        if (!isCurrentPage(lifetime) || !memoryActive.current) return
       } catch (refreshError) {
+        if (!isCurrentPage(lifetime) || !memoryActive.current) return
         const completion = action === 'clear' ? uiAttribute('复核提醒已清除') : uiAttribute('下次复核已设置')
         setReviewScheduleEditor((editorState) => editorState && {
           ...editorState,
@@ -549,9 +633,11 @@ export function MemoryLibrary({
       setReviewScheduleEditor(null)
       setFeedback(action === 'clear' ? uiAttribute('复核提醒已清除') : uiAttribute('下次复核已设置'))
     } catch (nextError) {
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return
       if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
         try {
           const nextLibrary = await loadMemoryLibrary()
+          if (!isCurrentPage(lifetime) || !memoryActive.current) return
           const latest = nextLibrary.memories.find((memory) => memory.id === current.memory.id)
           if (!latest) {
             setReviewScheduleEditor((editorState) => editorState && {
@@ -578,6 +664,7 @@ export function MemoryLibrary({
             notice: reviewScheduleConflictNotice(latest, desiredAlreadyApplied, action)
           })
         } catch (refreshError) {
+          if (!isCurrentPage(lifetime) || !memoryActive.current) return
           setReviewScheduleEditor((editorState) => editorState && {
             ...editorState,
             phase: 'authority-unknown',
@@ -602,18 +689,19 @@ export function MemoryLibrary({
         })
       }
     } finally {
-      setReviewScheduleBusyAction(null)
-      setBusy(null)
+      if (isCurrentPage(lifetime)) { setReviewScheduleBusyAction(null); setBusy(null) }
     }
   }
 
   const retryReviewScheduleRefresh = async (): Promise<void> => {
+    const lifetime = pageLifetime.current
     const current = reviewScheduleEditor
-    if (!current || reviewScheduleBusyAction !== null || current.phase === 'ready') return
+    if (!isCurrentPage(lifetime) || !memoryActive.current || !current || reviewScheduleBusyAction !== null || current.phase === 'ready') return
     setReviewScheduleBusyAction('refresh')
     setBusy(`review-refresh-${current.memory.id}`)
     try {
       const nextLibrary = await loadMemoryLibrary()
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return
       if (current.phase === 'applied-refresh-failed') {
         setReviewScheduleEditor(null)
         setFeedback(current.appliedAction === 'clear' ? uiAttribute('复核提醒已清除') : uiAttribute('下次复核已设置'))
@@ -634,6 +722,7 @@ export function MemoryLibrary({
         notice: reviewScheduleConflictNotice(latest, desiredAlreadyApplied, attemptedAction)
       })
     } catch (refreshError) {
+      if (!isCurrentPage(lifetime) || !memoryActive.current) return
       setReviewScheduleEditor((editorState) => editorState && {
         ...editorState,
         notice: {
@@ -642,10 +731,50 @@ export function MemoryLibrary({
         }
       })
     } finally {
-      setReviewScheduleBusyAction(null)
-      setBusy(null)
+      if (isCurrentPage(lifetime)) { setReviewScheduleBusyAction(null); setBusy(null) }
     }
   }
+
+  // Keep local review drafts while the capability hides all business UI.
+  const reviewDialog = <MemoryReviewDialog
+    key="hearth-review"
+    open={memory.active && reviewDialogOpen}
+    reviewItems={reviewItems}
+    memories={library?.memories ?? []}
+    agents={agents}
+    busy={busy}
+    onOpenChange={setReviewDialogOpen}
+    error={reviewError}
+    needsRefresh={reviewNeedsRefresh}
+    onResolve={resolveReview}
+    onRefresh={refreshReview}
+    onRestoreFocus={() => {
+      const trigger = reviewTrigger.current?.isConnected ? reviewTrigger.current : document.querySelector<HTMLElement>('.memory-review-entry')
+      trigger?.focus()
+    }}
+  />
+
+  const capabilityFeedback = <>
+    <span className="sr-only" role="status">{memory.saving && <UiText zh="正在保存…" />}</span>
+    {memory.error && <div className="memory-capability-error" role="alert">
+      <span><UiText zh={memory.error === 'read' ? '无法读取长期记忆设置，请重试。' : '未能保存，请重试。'} /></span>
+      <button className="quiet-button compact" type="button" disabled={memory.saving} onClick={() => void memory.retry()}><UiText zh="重试" /></button>
+    </div>}
+  </>
+
+  if (!memory.active) return (
+    <section className="memory-library memory-workspace memory-workspace-inactive" aria-labelledby="memory-library-title" data-startup-route="memory" data-startup-status={memory.ready || memory.error ? 'ready' : 'loading'}>
+      <div className="memory-capability-state">
+        <AppDialogGlyph name="brain" />
+        <h2 id="memory-library-title"><UiText zh={memory.ready && !memory.enabled && memory.error !== 'read' ? 'Rovai 长期记忆已关闭' : 'Rovai 长期记忆'} /></h2>
+        {memory.ready && !memory.enabled && memory.error !== 'read' ? <p><UiText zh="已保存的记忆会保留，重新开启后可继续使用和管理。" /></p>
+          : !memory.error && <p role="status"><UiText zh="正在读取记忆设置…" /></p>}
+        <MemoryCapabilitySwitch />
+        {capabilityFeedback}
+      </div>
+      {reviewDialog}
+    </section>
+  )
 
   return (
     <section
@@ -660,7 +789,10 @@ export function MemoryLibrary({
       {mobile && selectedMemory && <div className="mobile-memory-back"><MobileBack label={uiAttribute("返回记忆列表")} onClick={() => setSelectedMemoryId(null)} /><span><UiText zh={"记忆"} /></span></div>}
       <header className="memory-library-header">
         <div>
-          <h2 id="memory-library-title"><UiText zh={"记忆"} /></h2>
+          <div className="memory-title-line">
+            <h2 id="memory-library-title"><UiText zh={"记忆"} /></h2>
+            <MemoryCapabilitySwitch />
+          </div>
           <p><UiText zh={"查看、搜索和管理长期记忆。"} /></p>
         </div>
         <div className="memory-header-actions">
@@ -672,13 +804,15 @@ export function MemoryLibrary({
         </div>
       </header>
 
+      {capabilityFeedback}
+
       <div className="memory-summary-strip" aria-label={uiAttribute("记忆概览")}>
         <div><span><UiText zh="正在沿用" /></span><strong>{library ? activeCount : '—'}</strong></div>
         <div><span><UiText zh="队员形成" /></span><strong>{library ? agentCount : '—'}</strong></div>
         <div><span><UiText zh="待复核" /></span><strong>{library ? reviewCount : '—'}</strong></div>
       </div>
       {topNotices && <div className="memory-page-notices">{topNotices}</div>}
-      {error && <div className="memory-error" role="alert"><strong><UiText zh="操作未完成" /></strong><span>{error}</span>{!library && <button className="quiet-button compact" type="button" onClick={() => { setError(null); void load().catch((nextError) => setError(errorMessage(nextError))) }}><UiText zh="重试" /></button>}</div>}
+      {error && <div className="memory-error" role="alert"><strong><UiText zh="操作未完成" /></strong><span>{error}</span><button className="quiet-button compact" type="button" onClick={retryLibrary}><UiText zh="重试" /></button></div>}
       {feedback && <div className="memory-feedback" role="status">{feedback}</div>}
       <div className="memory-library-tools">
         <nav className="memory-scope-tabs" aria-label={uiAttribute("记忆范围")}>
@@ -719,22 +853,7 @@ export function MemoryLibrary({
         />
       </div>
 
-      <MemoryReviewDialog
-        open={reviewDialogOpen}
-        reviewItems={reviewItems}
-        memories={library?.memories ?? []}
-        agents={agents}
-        busy={busy}
-        onOpenChange={setReviewDialogOpen}
-        error={reviewError}
-        needsRefresh={reviewNeedsRefresh}
-        onResolve={resolveReview}
-        onRefresh={refreshReview}
-        onRestoreFocus={() => {
-          const trigger = reviewTrigger.current?.isConnected ? reviewTrigger.current : document.querySelector<HTMLElement>('.memory-review-entry')
-          trigger?.focus()
-        }}
-      />
+      {reviewDialog}
 
       <ReviewScheduleDialog
         editor={reviewScheduleEditor}

@@ -32,14 +32,15 @@ function ModelInformation({ identity, presentation, adapterKind, className = '' 
   presentation: Presentation | null
   adapterKind?: string
   className?: string
-}): React.JSX.Element {
-  const summary = presentation ? modelSummary(presentation) : uiAttribute('模型未记录')
+}): React.JSX.Element | null {
+  if (!presentation) return null
+  const summary = modelSummary(presentation)
   const label = uiAttribute('{0}的模型信息', identity.displayName)
   return <Popover.Root>
     <Popover.Trigger asChild>
       <button type="button" className={`thread-model-summary ${className}`} title={summary}
         aria-label={`${label} · ${summary}`}>
-        {presentation ? <ModelSummaryText presentation={presentation} /> : <span>{summary}</span>}
+        <ModelSummaryText presentation={presentation} />
         <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg>
       </button>
     </Popover.Trigger>
@@ -52,9 +53,7 @@ function ModelInformation({ identity, presentation, adapterKind, className = '' 
             <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg>
           </Popover.Close>
         </header>
-        {presentation
-          ? <ModelFields presentation={presentation} adapterKind={adapterKind} />
-          : <p className="thread-model-unrecorded"><UiText zh="模型未记录" /></p>}
+        <ModelFields presentation={presentation} adapterKind={adapterKind} />
       </Popover.Content>
     </Popover.Portal>
   </Popover.Root>

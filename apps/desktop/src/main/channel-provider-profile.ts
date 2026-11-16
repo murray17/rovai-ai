@@ -7,7 +7,7 @@ import {
 
 export type OpenPlatformProviderKind = 'feishu' | 'lark'
 
-// Lark Channel v1 §2: twelve provider-owned requests and nine actor-bound ones.
+// Lark Channel v1 §2: thirteen provider-owned requests and nine actor-bound ones.
 export type ProviderChannelRequest =
   | 'snapshot'
   | 'account.upsert'
@@ -15,6 +15,7 @@ export type ProviderChannelRequest =
   | 'account.disconnect'
   | 'account.expire'
   | 'memberBot.upsert'
+  | 'memberBot.observeConnection'
   | 'owner.verify'
   | 'pendingBinding.resolve'
   | 'publicationIntent.create'

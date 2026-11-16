@@ -303,6 +303,19 @@ Core smoke 的 `ROVAI_GOOSE_PROBE_MCP_FAULT=1` 验参数查询期间不启动失
 清空后的保存值和零额外目标查询。最低命令为两个 Rust owners、默认 workspace、`pnpm typecheck`、
 相关 Vitest 及 `pnpm test:runtime-model-picker`，复用原验收入口，不建立另一套夹具系统。
 
+Goose 合主线时将目录迁移顺延为 225/schema 175，保留主线 Memory 224。
+原 `current_schema_contains_required_contract_objects` helper 增加 Goose 预览 224 来源的升级与历史摘要保留；
+`runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 保留原闭集和回滚断言，输入编号随最终迁移更新。
+两者需使用 `--features slow-tests,extended-tests --lib`，确认分别实际执行 1 项；不能把零匹配当成通过。
+Rust 测试函数仍无新增、删除或停用，主线 Memory 的关闭值／缺行／回滚输入继续覆盖。
+
+
+飞书/Lark 连接观测扩展既有 `member_bot_app_binding_is_immutable_across_legacy_disabled_reactivation`
+与 `wrong_provider_hosts_are_rejected_by_every_lark_capable_handler`：原 SQLite binding fixture 覆盖填空、no-op、
+显示名更新、身份冲突、版本 CAS 与 Owner/发布时间不变；原 Provider owner 覆盖交叉 Host 拒绝、双 Provider 的
+Owner 空 digest、快照与观测判定一致、disabled 和绑定不符拒绝。无新增 Rust
+测试函数或 fixture。SDK 异步错误由真实 ws 子进程覆盖，Host 状态/停止与 Renderer 由相关 Vitest 覆盖，不能
+用纯函数代替 socket 生命周期。命令和证据见[实施记录](../versions/v1.72/feishu-ws-recovery.md)。
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和

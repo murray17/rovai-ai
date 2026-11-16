@@ -43,7 +43,7 @@ Core 只从请求名决定 actor；请求 payload 不能声明或改写 actor。
 Lark 服务，只读写 `lark_account` 与 `provider = 'lark'` 的 Developer Session。其余 `channels.lark.` 前缀请求
 一律以 `lark-channel-host` 执行。未列出的 `channels.lark.*` 请求返回未知方法。
 
-Lark 专属请求 12 个，与飞书同名请求一一对应，命令语义相同但只读写 Lark 表：
+Lark 专属请求 13 个，与飞书同名请求一一对应，命令语义相同但只读写 Lark 表：
 
 | 请求 | 对应飞书请求 |
 | --- | --- |
@@ -52,6 +52,7 @@ Lark 专属请求 12 个，与飞书同名请求一一对应，命令语义相�
 | `channels.lark.account.disconnect` | `channels.feishu.account.disconnect` |
 | `channels.lark.account.expire` | `channels.feishu.account.expire` |
 | `channels.lark.memberBot.upsert` | `channels.feishu.memberBot.upsert` |
+| `channels.lark.memberBot.observeConnection` | `channels.feishu.memberBot.observeConnection` |
 | `channels.lark.owner.verify` | `channels.feishu.owner.verify` |
 | `channels.lark.pendingBinding.resolve` | `channels.feishu.pendingBinding.resolve` |
 | `channels.lark.publicationIntent.create` | `channels.feishu.publicationIntent.create` |

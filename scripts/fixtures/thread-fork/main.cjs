@@ -40,6 +40,17 @@ app.whenReady().then(async () => {
     await run('forkQA.trackLoading()');await menu();await select()
     await wait('(document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId??"").startsWith("copy-")')
     await pause(250);assert.deepEqual(await run('forkQA.loadingEvents'),[]);await quiet()
+    const modelCopy=await active()
+    const copiedAgentId=await run(`forkQA.threads.get(${JSON.stringify(modelCopy)}).messages.find(m=>m.authorType==='agent').id`)
+    const copiedMessage=`[data-message-id="${copiedAgentId}"]`
+    for(const record of ['null','undefined']) {
+      await run(`forkQA.threads.get(${JSON.stringify(modelCopy)}).messages.filter(m=>m.authorType==='agent').forEach(m=>{m.runtimeModel=${record}})`)
+      await row('other');await row(modelCopy)
+      await wait(`!!document.querySelector(${JSON.stringify(copiedMessage)})`)
+      assert.equal(await active(),modelCopy)
+      assert.equal(await run(`!!document.querySelector(${JSON.stringify(`${copiedMessage} .message-model-summary`)})`),false)
+      assert.equal(await run('!!document.querySelector(".thread-model-popover")'),false)
+    }
     await row('source');await run('forkQA.trackLoading()');await fork();await run('forkQA.release()')
     await wait('(document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId??"").startsWith("copy-")')
     assert(await run('!!document.querySelector(".app-toast-spinner")'))

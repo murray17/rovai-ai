@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@larksuiteoapi/node-sdk@1.73.0': 97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8
+  '@larksuiteoapi/node-sdk@1.73.0': e9ce9fc20c6d676f5bcb082e3605cb40de5a872f30a477b7f1970acccc4eb376
 
 importers:
 
@@ -13,7 +13,7 @@ importers:
     dependencies:
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.0
-        version: 1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+        version: 1.73.0(patch_hash=e9ce9fc20c6d676f5bcb082e3605cb40de5a872f30a477b7f1970acccc4eb376)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       acorn:
         specifier: 8.15.0
         version: 8.15.0
@@ -4862,7 +4862,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@larksuiteoapi/node-sdk@1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)':
+  '@larksuiteoapi/node-sdk@1.73.0(patch_hash=e9ce9fc20c6d676f5bcb082e3605cb40de5a872f30a477b7f1970acccc4eb376)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)':
     dependencies:
       axios: 1.19.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       lodash.identity: 3.0.0

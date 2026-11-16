@@ -1,6 +1,7 @@
 import { useThreadClient, type ThreadClient } from './camp-client'
 import { feishuLoginFailureDetail } from '../../shared/feishu-login-progress'
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
@@ -779,7 +780,7 @@ function ChannelMemberBotTable({
           const bot = bots.get(agent.agentId)
           const status = bot?.publicationStatus ?? 'unpublished'
           const published = status === 'published'
-          const failed = status === 'failed'
+          const failed = status === 'failed' || bot?.canReconcile === true
           const disabled = status === 'disabled'
           const provisioning = status === 'provisioning'
           const action = failed ? onRetryPublish : onPublish
@@ -797,11 +798,13 @@ function ChannelMemberBotTable({
                   : <span><UiText zh={"发布后沿用队员身份"} /></span>}
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
-                <span>{bot?.published && status !== 'published' ? uiAttribute("已发布 · {0}", String(publicationLabel(status))) : publicationLabel(status)}</span>
-                {bot?.appId && <small className="channel-live-status">{bot.connectionStatus === 'online' ? uiAttribute("连接在线") : bot.connectionStatus === 'offline' ? uiAttribute("连接离线") : uiAttribute("连接状态未知")}</small>}
+                <span className="channel-publication-label">{bot?.published && status !== 'published' ? uiAttribute("已发布 · {0}", String(publicationLabel(status))) : publicationLabel(status)}</span>
+                {bot?.appId && (bot.connectionStatus === 'reconnecting' || bot.connectionStatus === 'offline') && (
+                  <BotConnectionIndicator bot={bot} />
+                )}
               </span>
               <div className="channel-member-action" role="cell">
-                {published && bot?.managementUrl ? (
+                {published && bot?.managementUrl && (
                   <a
                     className="channel-row-action"
                     href={bot.managementUrl}
@@ -811,16 +814,17 @@ function ChannelMemberBotTable({
                   >
                     {localizedChannelCopy('{0}管理', channelCopy`${providerName}管理`, providerName)}
                   </a>
-                ) : (
+                )}
+                {(!published || bot?.canReconcile || !bot?.managementUrl) && (
                   <button
                     className="channel-row-action"
                     type="button"
-                    disabled={!connected || busy !== null || provisioning || !action || published}
+                    disabled={!connected || busy !== null || provisioning || !action || (published && !bot?.canReconcile)}
                     onClick={() => action?.(channel, agent)}
                   >
                     {actionBusy || provisioning
                       ? uiAttribute("处理中…")
-                      : published
+                      : published && !bot?.canReconcile
                         ? uiAttribute("管理不可用")
                         : failed
                           ? bot?.appId ? uiAttribute("继续核对") : uiAttribute("重试")
@@ -836,6 +840,77 @@ function ChannelMemberBotTable({
       </div>
     </div>
   )
+}
+
+function BotConnectionIndicator({ bot }: { bot: ChannelMemberBotView }): React.JSX.Element {
+  const id = useId()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [position, setPosition] = useState<{ left: number; top: number; width: number; above: boolean } | null>(null)
+  const state = bot.connectionStatus ?? 'unknown'
+  const code = bot.connectionFailureCode
+  const label = code === 'identity_conflict' ? uiAttribute('Bot 身份与已绑定应用不符，请检查凭据')
+    : code?.includes('brand_moved') ? uiAttribute('应用所属平台已变更，当前连接已停用')
+      : code === 'ip_not_allowed' ? uiAttribute('当前网络不在应用的 IP 白名单内，请检查平台配置')
+        : state === 'online' ? code === 'connection_confirmation_pending' ? uiAttribute('连接已建立，正在保存结果') : uiAttribute('连接在线')
+          : state === 'reconnecting' ? bot.connectionNeedsAttention
+            ? uiAttribute('连接暂不可用，请检查网络或代理') : uiAttribute('连接不畅，正在重连')
+            : state === 'connecting' ? uiAttribute('正在连接')
+              : state === 'offline' ? bot.connectionNeedsAttention && bot.canReconcile
+                ? uiAttribute('连接需处理，请继续核对') : uiAttribute('连接离线')
+                : uiAttribute('连接状态未知')
+  const attention = bot.connectionNeedsAttention && state !== 'online'
+  const clearTimer = (): void => { clearTimeout(closeTimer.current) }
+  const close = (): void => { clearTimer(); setPosition(null) }
+  const show = (): void => {
+    clearTimer()
+    const rect = trigger.current?.getBoundingClientRect()
+    if (!rect) return
+    const width = Math.min(256, window.innerWidth - 24)
+    const above = rect.top > 96
+    setPosition({ width, above, left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
+      top: above ? rect.top - 6 : rect.bottom + 6 })
+  }
+  const leave = (): void => {
+    clearTimer()
+    if (document.activeElement !== trigger.current) closeTimer.current = setTimeout(close, 120)
+  }
+  useEffect(() => clearTimer, [])
+  useEffect(() => {
+    if (!position) return
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() }
+    }
+    const outside = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !trigger.current?.contains(event.target)
+        && !document.getElementById(id)?.contains(event.target)) close()
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    document.addEventListener('keydown', escape, true)
+    document.addEventListener('pointerdown', outside, true)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+      document.removeEventListener('keydown', escape, true)
+      document.removeEventListener('pointerdown', outside, true)
+    }
+  }, [position !== null])
+  return <>
+    <button ref={trigger} type="button" className={`channel-connection-indicator${attention ? ' needs-attention' : ''}`}
+      data-connection-state={state} aria-label={`${bot.botDisplayName ?? 'Bot'} · ${label}`}
+      onMouseEnter={show} onMouseLeave={leave}
+      onFocus={show} onBlur={close} onClick={show}>
+      <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true" data-connection-icon="link-off">
+        <path d="M9 7H7a5 5 0 0 0 0 10h2M15 7h2a5 5 0 0 1 4.5 7.17M15 17h2a5 5 0 0 0 1.9-.37M8 12h4M2 2l20 20" />
+      </svg>
+    </button>
+    {position && createPortal(<span id={id} role="tooltip" className="channel-connection-tooltip"
+      style={{ left: position.left, top: position.top, maxWidth: position.width,
+        transform: position.above ? 'translateY(-100%)' : undefined }}
+      onMouseEnter={clearTimer} onMouseLeave={leave}>{label}</span>, document.body)}
+  </>
 }
 
 export function QrDialog({
@@ -951,6 +1026,8 @@ function PublishBotDialog({
     && provisioning.remoteAppId === null
   const connectionFailed = provisioning?.failureCode === 'feishu_connection_error'
     || provisioning?.failureCode === 'dingtalk_connection_error'
+  const completed = provisioning?.stage === 'completed'
+  const recoveringConnection = provisioning?.stage === 'connecting_bot' && !busy
   const sessionUnavailable = Boolean(error && /登录已过期|账号已变化|重新连接账号|重新连接/.test(error))
   const awaitingApprover = presentation.approverSelectionFailureCode !== null
     && provisioning?.failureCode === presentation.approverSelectionFailureCode
@@ -1026,7 +1103,9 @@ function PublishBotDialog({
               </p>
             )}
           </AppDialogBody>
-          <AppDialogFooter note={connectionFailed
+          <AppDialogFooter note={completed ? null : recoveringConnection
+            ? uiAttribute("关闭此窗口后，Rovai 会继续维护该 Bot 的连接。")
+            : connectionFailed
             ? effectiveAppId
               ? uiAttribute("已保留原应用绑定；关闭后可以稍后重试。")
               : localizedChannelCopy('{0}连接异常；关闭后可以稍后重试。', channelCopy`${providerName}连接异常；关闭后可以稍后重试。`, providerName)
@@ -1035,8 +1114,8 @@ function PublishBotDialog({
             : effectiveAppId
               ? uiAttribute("重新发布始终复用已绑定应用，不提供换绑入口。")
               : null}>
-            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}><UiText zh={"取消"} /></button>
-            {sessionUnavailable && onReconnect ? (
+            <button className="quiet-button" type="button" disabled={busy && !terminal} onClick={onClose}>{uiAttribute(completed ? "完成" : recoveringConnection ? "关闭" : "取消")}</button>
+            {!completed && (sessionUnavailable && onReconnect ? (
               <button className="primary-button" type="button" disabled={busy} onClick={onReconnect}>
                 {localizedChannelCopy('重新连接{0}', channelCopy`重新连接${providerName}`, providerName)}
               </button>
@@ -1049,7 +1128,7 @@ function PublishBotDialog({
               >
                 {busy ? uiAttribute("正在提交审批…") : uiAttribute("提交审批并继续发布")}
               </button>
-            ) : !retryLocked && (
+            ) : !retryLocked && !recoveringConnection && (
               <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
                 {busy
                   ? effectiveAppId ? uiAttribute("核对中…") : uiAttribute("发布中…")
@@ -1061,7 +1140,7 @@ function PublishBotDialog({
                         ? uiAttribute("重新发布")
                         : uiAttribute("确认发布")}
               </button>
-            )}
+            ))}
           </AppDialogFooter>
         </AppDialogContent>
       </Dialog.Portal>

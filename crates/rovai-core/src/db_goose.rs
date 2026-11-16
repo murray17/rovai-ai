@@ -25,22 +25,27 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(classify_database_contract(&tx)?,
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                if marker.contract_version == "v1.72" && marker.projection_schema_version == 173),
-            "Goose catalog migration requires v1.72/schema 173"
+                if marker.contract_version == "v1.72" && marker.projection_schema_version == 174),
+            "Goose catalog migration requires v1.72/schema 174"
         );
         let tables: Vec<_> = DSH_RUNTIME_TABLES
             .iter()
             .chain(DSH_SKILL_TABLES.iter())
             .copied()
             .collect();
-        rewrite(&tx, false)?;
-        tx.execute_batch("INSERT INTO schema_migration VALUES(224,datetime('now'));
-            UPDATE rovai_data_contract SET projection_schema_version=174,updated_at=datetime('now') WHERE singleton=1;")?;
+        if !super::memory_capability::schema_matches(&tx)? {
+            super::memory_capability::create(&tx)?;
+        }
+        if !schema_matches(&tx)? {
+            rewrite(&tx, false)?;
+        }
+        tx.execute_batch("INSERT INTO schema_migration VALUES(225,datetime('now'));
+            UPDATE rovai_data_contract SET projection_schema_version=175,updated_at=datetime('now') WHERE singleton=1;")?;
         validate_migration_foreign_keys(&tx, &tables)?;
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::Current(ref marker) if marker.projection_schema_version == 174
+                DatabaseContractClassification::Current(ref marker) if marker.projection_schema_version == 175
             ),
             "Goose catalog migration failed schema admission"
         );
@@ -57,7 +62,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 pub(super) fn downgrade_for_test(c: &Connection) {
     let applied: bool = c
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=224)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=225)",
             [],
             |r| r.get(0),
         )
@@ -68,7 +73,7 @@ pub(super) fn downgrade_for_test(c: &Connection) {
     c.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
     let tx = c.unchecked_transaction().unwrap();
     rewrite(&tx, true).unwrap();
-    tx.execute_batch("DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1;").unwrap();
+    tx.execute_batch("DELETE FROM schema_migration WHERE version=225; UPDATE rovai_data_contract SET projection_schema_version=174 WHERE singleton=1;").unwrap();
     tx.commit().unwrap();
     c.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
 }

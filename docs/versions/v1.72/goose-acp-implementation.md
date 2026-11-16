@@ -16,7 +16,7 @@ last_updated: 2026-11-15
 
 | 范围 | 最终实现 |
 | --- | --- |
-| 产品身份 | `goose-cli`、官方 `goose acp`、现有入口发现与版本检查；Migration 224 将闭集扩至 schema 174 |
+| 产品身份 | `goose-cli`、官方 `goose acp`、现有入口发现与版本检查；主线整合后 Migration 225 将闭集扩至 schema 175 |
 | Bootstrap | 共享冻结全文，经原生 keyed append RPC 每轮更新；成功后才发 Dynamic Context，不生成 instructions 文件 |
 | Session/Host | 共享 ACP/Fleet，精确 `session/load`；配置不兼容时通过现有获取入口回收旧 Host，不能停放后复活旧 Host |
 | 插话 | 原生活动 Run ID 先确认初始接收，原生 steer 的 runId/messageId 确认补充输入；成功不强制退役 |
@@ -374,3 +374,14 @@ Goose 现有模型控件与摘要使用“沿用 Goose 会话选择”，effort 
 现有键盘、IME、主题、尺寸和缩放验收仍通过。结果见[本轮白名单](../../research/goose-runtime/probe-extensions-1.59.0-macos-arm64.json)。
 默认 workspace 为 438 Core lib／31 CLI／4 host／11 web 通过，保留原 1 ignored；格式、脚本和文档门禁通过。
 本轮未重新验真实账号、OAuth 或其他平台；正式业务 Session 的无响应 MCP 初始化限制保持。
+
+## 主线整合（User sequence 154）
+
+从 `d4162f92c` 合入 `origin/main@855a3c2a7`。主线 Memory 与 Goose 预览均使用过 224/schema 174，
+现保留主线 Memory 224，Goose 顺延为 225/schema 175。174 准入只接受已有 Memory 或 Goose 的已知结构；
+225 在同一事务内补齐缺失部分，保留主线已有 Memory 选择及预览已有 Goose 配置，不改写历史 Run、事件和冻结输入。
+当前来源的初始化与 marker 提交仍沿原迁移入口，不建立兼容数据库或旁路迁移系统。
+
+现有 catalog migration owner 继续验证闭集、行保留和 receipt 回滚；原 schema owner 增加预览来源升级与历史摘要保留。
+主线 Memory 的关闭值、缺行和回滚测试保留，未新增 Rust 测试函数。原 224/schema 174 的记录是当时预览事实，
+本节解释最终主线编号，不回写原生验收证据。

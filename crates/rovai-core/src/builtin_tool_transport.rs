@@ -23,6 +23,14 @@ pub const COMPACTION_HOOK_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const COMPACTION_OBSERVATION_IPC_KIND: &str = "compaction_observation";
 pub const COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION: u32 = 1;
 
+/// The two existing instance capabilities projected into CLI discovery.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinToolCapabilities {
+    pub tasks_enabled: bool,
+    pub memory_enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "transport", rename_all = "snake_case")]
 pub enum LocalIpcEndpoint {
@@ -83,6 +91,8 @@ pub struct BuiltinToolCliContext {
     pub lease: Option<BuiltinToolLeaseContext>,
     #[serde(default)]
     pub tasks_enabled: bool,
+    #[serde(default)]
+    pub memory_enabled: bool,
 }
 
 impl BuiltinToolCliContext {
@@ -344,6 +354,7 @@ pub struct BuiltinToolAuth {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BuiltinToolIpcRequestBody {
+    Capabilities,
     Invoke {
         request_id: String,
         operation: String,
@@ -403,6 +414,9 @@ pub fn builtin_tool_discovery_path() -> Result<std::path::PathBuf> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BuiltinToolIpcResponse {
+    Capabilities {
+        capabilities: BuiltinToolCapabilities,
+    },
     Envelope {
         envelope: BuiltinToolInvocationEnvelope,
     },
@@ -609,13 +623,22 @@ pub fn builtin_tool_identity_by_command(
 }
 
 pub fn builtin_tool_list(tasks_enabled: bool) -> Result<BuiltinToolList> {
+    builtin_tool_list_with_memory(tasks_enabled, true)
+}
+
+pub fn builtin_tool_list_with_memory(
+    tasks_enabled: bool,
+    memory_enabled: bool,
+) -> Result<BuiltinToolList> {
     let definitions = catalog_operations()?;
     Ok(BuiltinToolList {
         contract_version: BUILTIN_TOOL_CONTRACT_VERSION,
         operations: definitions
             .iter()
             .filter(|definition| {
-                tasks_enabled || !crate::task_capability::is_task_operation(&definition.name)
+                (tasks_enabled || !crate::task_capability::is_task_operation(&definition.name))
+                    && (memory_enabled
+                        || !crate::memory_capability::is_memory_operation(&definition.name))
             })
             .map(|definition| BuiltinToolListItem {
                 name: definition.name.clone(),
@@ -624,6 +647,20 @@ pub fn builtin_tool_list(tasks_enabled: bool) -> Result<BuiltinToolList> {
             })
             .collect(),
     })
+}
+
+pub fn builtin_tool_description_with_memory(
+    operation: &str,
+    tasks_enabled: bool,
+    memory_enabled: bool,
+) -> Result<BuiltinToolDescription> {
+    anyhow::ensure!(
+        memory_enabled || !crate::memory_capability::is_memory_operation(operation),
+        "{}: {}",
+        crate::memory_capability::DISABLED_CODE,
+        crate::memory_capability::DISABLED_MESSAGE
+    );
+    builtin_tool_description(operation, tasks_enabled)
 }
 
 pub fn builtin_tool_description(
@@ -867,6 +904,12 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
         errors.push(BuiltinToolErrorContract {
             code: "camp.invalid_argument".to_string(),
             recovery: BuiltinToolRecovery::FixInput,
+        });
+    }
+    if crate::memory_capability::is_memory_operation(operation) {
+        errors.push(BuiltinToolErrorContract {
+            code: crate::memory_capability::DISABLED_CODE.into(),
+            recovery: BuiltinToolRecovery::Stop,
         });
     }
     if crate::task_capability::is_task_operation(operation) {
@@ -1253,6 +1296,39 @@ mod tests {
 
     #[test]
     fn list_and_describe_share_the_current_catalog() {
+        for tasks in [false, true] {
+            for memory in [false, true] {
+                let list = builtin_tool_list_with_memory(tasks, memory).unwrap();
+                assert_eq!(
+                    list.operations.iter().any(|op| op.name == "memory.read"),
+                    memory
+                );
+                assert_eq!(
+                    list.operations
+                        .iter()
+                        .any(|op| op.name == "team.create_task"),
+                    tasks
+                );
+                for operation in [
+                    "memory.view",
+                    "memory.search",
+                    "memory.read",
+                    "memory.write",
+                ] {
+                    assert_eq!(
+                        builtin_tool_description_with_memory(operation, tasks, memory).is_ok(),
+                        memory
+                    );
+                    assert_eq!(
+                        recovery_for_operation_error(
+                            operation,
+                            crate::memory_capability::DISABLED_CODE
+                        ),
+                        BuiltinToolRecovery::Stop
+                    );
+                }
+            }
+        }
         let list = builtin_tool_list(true).unwrap();
         assert!(
             serde_json::to_value(&list)

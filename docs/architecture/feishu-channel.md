@@ -179,6 +179,21 @@ manifest 头像元数据；不得创建 App 或改变 App ID。
 `failed_recoverable | failed_unknown_remote_state` 进入 `credentials_read` 后继续完成；Core 拒绝更换 App ID。头像读取、
 远端核对或连接失败时保持 `failed_recoverable`；只有缺少可信 App ID 的 create outcome unknown 继续锁住，不允许创建第二个 App。
 
+## Bot 连接恢复
+
+Host 的 `BotConnection` module 保留 stable LarkChannel，管理首连尝试、timer、故障分类与停止；SDK
+拥有成功建立后的同一 WSClient 重连循环。只有原 transport 已结束才交接重试责任。HTTP sender、附件下载
+与 safety cache 独立于 WS 是否在线；一个 Bot 的网络等待不阻塞 Host 启动、维护或 Core 代次切换。
+关闭使用永久生命周期 token，旧 socket/endpoint/identity 回包不能复活连接。SDK 通过单轮失败事件报告真实
+下一次计划；Host 不轮询 SDK 状态，也不把普通 handler error 当成断线。
+
+Core 的 `memberBot.observeConnection` 是身份补写的窄入口，不重写 Owner 或发布时间；同 App 不同非空
+Bot open ID 拒绝为配置终态。首连恢复后的 exact 最新 intent 可只在本地完成连接验证与收尾。
+历史 Owner 未验证时保持入站连接，暂缓身份观测及 intent 收尾；可信 Owner 入站补验证后继续。传输 ready
+结束 Host watchdog；Core 确认失败不能伪装成断网，也不能关闭已在线的传输。
+精确准入、失败及 delivery 限制见 [Feishu Channel v17 §5](../contracts/feishu-channel-v17.md#5-连接观测与恢复)，
+实施与验证见[连接恢复记录](../versions/v1.72/feishu-ws-recovery.md)。Lark 使用同一 module 和独立 Provider 实例。
+
 ## Owner-only 入站与会话执行范围
 
 连接开发者账号时 Core 建立 canonical Feishu Owner。每个 Bot 发布或同 App reconciliation 完成在线配置后，

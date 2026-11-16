@@ -237,7 +237,7 @@ Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admissi
 
 ## Memory
 
-- 当前规范：[Memory 基础不变量](../architecture/foundational-invariants.md#memory-lifecycle)、[Online Memory Capture](../architecture/online-memory-capture.md)、[Memory Capture v3](../contracts/memory-capture-v3.md)。
+- 当前规范：[Memory 基础不变量](../architecture/foundational-invariants.md#memory-lifecycle)、[Online Memory Capture](../architecture/online-memory-capture.md)、[Memory Capture v3](../contracts/memory-capture-v3.md)、[Memory Capability v1](../contracts/memory-capability-v1.md)。
 - 理由来源：[v0.10](../versions/v0.10/decisions.md)、[v0.21](../versions/v0.21/decisions.md)、[v0.73](../versions/v0.73/decisions.md)、[v0.78](../versions/v0.78/decisions.md)。
 
 ## Skills、MCP 与 Built-ins

@@ -20,7 +20,8 @@ User sequence 117 已确认[接入及模型输入 R1](goose-acp-proposal.md)，
 候选复用共享 ACP/Fleet；采用原生 keyed System append、独立 Steer 回执和用量通知，
 不复制 Kilo 的 instructions 文件、第二 prompt、SQLite reader 或已退役权限 Hook。
 MCP 原生恢复不删除旧项、write 缺完整前像等差异已明示。
-现已实施独立 identity、Migration 224/schema 174、共享执行与现有表单，macOS arm64 开放 Preview。
+现已实施独立 identity、Migration 225/schema 175、共享执行与现有表单，macOS arm64 开放 Preview。
+合入时保留主线 Memory 224；225 兼容主线和 Goose 预览分支两种 174 来源，保留已有设置及历史。
 字段边界见[Runtime Launch v97](../../contracts/runtime-launch-and-verification-v97.md)，选择理由见 [D86](decisions.md#v1-72-d86)，
 实际验证与未验证范围见[实施记录](goose-acp-implementation.md)。
 User sequence 123 的精简已收窄重复选项设置、MCP 核对与客户端回放，并清理探测原生会话；
@@ -30,6 +31,21 @@ Linux x64 在 Debian 12 通过真实 Sub2API 与受控 ACP 验收后开放 Previ
 User sequence 146 将显式 Provider 提前传给新建 Session；目标参数成功不再依赖临时 Session 删除成功，
 清理有界且只诊断，未扩展后台工作或存储。
 目标参数探测另显式选择空扩展；Goose 的模型／effort 控件和摘要准确表达“不覆盖”，不增加恢复默认值动作。
+
+## 长会话输入性能（2026-11-15）
+
+按 User 确认方案分批实施：固定可复跑基线、隔离执行更新、控制公共历史挂载，最后依据复测决定大内容优化。
+第一批已移出工作区的高频执行正文状态，第二批完成公共历史虚拟化与定位／选区／滚动回归；复用现有 Run 窗口与局部订阅。
+收尾保留 Composer 选区过滤与搜索返回修复；按 User 反馈撤回单条长消息加载占位和摘要滑动尾部，沿用原有展示。
+搜索返回进一步支持取消：随后发送、回到最新、滚动或定位时，停止旧目标挂载与位置恢复，保留新操作的阅读意图。
+1,000 条混合历史的普通输入组件基准 p95 为 32–48ms，实际挂载 5 条；真实中文功能通过，原生输入 p95 56ms 的投递／显示路径仍需后续定位。
+范围、同负载数据、功能回归与未验收项见[实施记录](long-thread-input-performance.md)。
+
+## 飞书与 Lark 长连接恢复（2026-11-13）
+
+修复 SDK 握手超时的未捕获异步 error 与关闭后连接残留；Host 首连独立调度，稳定 HTTP channel 与
+WebSocket 生命周期分离，恢复后通过窄的本地身份观测完成同一发布意图。发布、连接、登录状态分别呈现。
+范围、测试归属与验收边界见[实施记录](feishu-ws-recovery.md)。无 Migration 或模型输入语义变化。
 
 ## 通用提示与分叉反馈（2026-11-12）
 
@@ -1678,3 +1694,22 @@ Pi 默认不设升级例外，使用隔离真实安装与模型核验原地升�
 逐模型事务合并与现有 Renderer 请求代次。保留 MiniMax thinkingEffort 与正式执行边界。
 合同见 [Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)，
 取舍见 [V1.72-D76](decisions.md#v1-72-d76)，验证见[实施记录](implementation-plan.md#minimax-参数按需读取2026-11-10)。
+
+## Rovai 长期记忆实例开关（2026-11-11）
+
+User 已在范围和文案审阅后授权独立 worktree 实施，当前为[已确认 R4](model-context-change-memory-capability.md)。
+默认开启一个 Core 实例开关；关闭暂停 Agent 和用户管理业务并保留所有数据及已有提交回执。
+仅在新输入原有生成路径省略 Memory 入口和技能，旧 Session/Bootstrap/冻结输入不主动处理。
+R2 沿用 Task 的固定精简方式，从 cli-operations 移除 Memory 专用教学，记忆工作流归条件投递的
+memory-stewardship；通用 CLI 协调始终提供。
+R3 隔离 Memory 设置异常，清理跨重新启用边界的既有提示，删除无业务消费者的快照字段，
+收窄 Hermes 能力查询和审核列表刷新，不增加会话治理或后台状态。
+User sequence 17 的界面跟进已将关闭态调整为 MCP 首次空状态的布局，并在记忆页增加与通用设置同步的总开关。
+R4 收口 Provider 的同序号观察顺序与读取失败状态，分开恢复内容刷新与旧提示过滤，
+在成功活动证据之前统一最终读取结果；页内/页外审核读取互斥，Web 使用既有失效通道的内容标记，
+管理批量读取不再逐条查询开关。保持三字段快照、现有锁和旧会话边界，不增加存储或后台层。
+原有管理功能与 R2 模型输入语义保持，验证见[界面跟进](model-context-change-memory-capability.md#界面跟进与验证user-sequence-17)。
+当前接口见 [Memory Capability v1](../../contracts/memory-capability-v1.md)。实现及自动化验收完成，
+真实模型通用 Gate 尚未执行；范围、结果与限制见[实施记录](implementation-plan.md#rovai-长期记忆实例开关2026-11-11)。
+全部提示词、工具定义/help、关闭错误和回放的前后变化见
+[逐项设计对照](model-context-change-memory-capability.md#完整提示词与工具对照)，沿用 Task 方案的审阅编号。

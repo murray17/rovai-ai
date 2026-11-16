@@ -36,5 +36,8 @@ function hasContent(value: unknown): boolean {
 
 export function safeMarkdownHasRenderableContent(source: string): boolean {
   if (!source.trim()) return false
+  // Plain narration needs no Markdown/HTML tree just to prove it is visible.
+  // Keep markup, entities, escapes and all other syntax on the sanitizer path.
+  if (/^[\p{L}\p{N}\s，。！？、：；（）.,!?;:()-]+$/u.test(source)) return true
   return hasContent(safeMarkdownParser.runSync(safeMarkdownParser.parse(source)))
 }

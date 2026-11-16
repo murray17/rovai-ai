@@ -10,7 +10,7 @@ function MessageCode({ code, languageName, theme, renderReady, children }: Markd
     : <pre>{children}</pre>
 }
 
-/** Only assistant body entry points opt in; ordinary Markdown remains lightweight. */
+/** Conversation and execution entry points opt in; general Markdown stays lightweight. */
 export function MessageMarkdown(props: Omit<ComponentProps<typeof SafeMarkdown>, 'mode' | 'CodeBlock'> & { theme: ResolvedTheme }): React.JSX.Element {
   const exporting = useContext(MessageExportContext)
   return <SafeMarkdown {...props} CodeBlock={exporting ? undefined : MessageCode} />

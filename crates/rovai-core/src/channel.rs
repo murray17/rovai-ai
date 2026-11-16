@@ -467,6 +467,27 @@ impl<const LARK: bool> DomainCommand for UpsertChannelMemberBotCommand<LARK> {
     };
 }
 
+/// A connection may fill the Bot identity, but never rebind an App or its Owner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserveChannelBotConnectionCommand<const LARK: bool> {
+    pub account_id: String,
+    pub agent_id: String,
+    pub app_id: String,
+    pub credential_ref: String,
+    pub expected_version: i64,
+    pub bot_open_id: String,
+    pub bot_display_name: String,
+}
+impl<const LARK: bool> sealed::Sealed for ObserveChannelBotConnectionCommand<LARK> {}
+impl<const LARK: bool> DomainCommand for ObserveChannelBotConnectionCommand<LARK> {
+    const TYPE: &'static str = if LARK {
+        "lark_member_bot.observe_connection"
+    } else {
+        "feishu_member_bot.observe_connection"
+    };
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyChannelOwnerCommand<const LARK: bool> {
@@ -1823,6 +1844,8 @@ impl ChannelService {
                        SELECT 1 FROM {owner_app_identity} AS identity
                        WHERE identity.account_id = bot.account_id
                          AND identity.app_id = bot.app_id
+                         AND identity.open_id_digest IS NOT NULL
+                         AND identity.verified_at IS NOT NULL
                    )
             FROM {member_bot} AS bot
             JOIN {account} AS account ON account.id = bot.account_id
@@ -4153,7 +4176,7 @@ impl ChannelService {
                     created_at, updated_at, published_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'published', NULL, 1, ?7, ?7, ?7)
                 ON CONFLICT(agent_id) DO UPDATE SET
-                    bot_open_id = excluded.bot_open_id,
+                    bot_open_id = COALESCE({member_bot}.bot_open_id, excluded.bot_open_id),
                     bot_display_name = excluded.bot_display_name,
                     status = 'published', failure_code = NULL,
                     published_at = excluded.published_at,
@@ -4206,6 +4229,66 @@ impl ChannelService {
                     entity_id: envelope.payload.agent_id.clone(),
                 }),
             ))
+        })
+    }
+
+    pub fn observe_member_bot_connection<const LARK: bool>(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ObserveChannelBotConnectionCommand<LARK>>,
+    ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            LARK == (self.spec.provider == LARK_PROVIDER),
+            "channel command provider does not match service"
+        );
+        let spec = self.spec;
+        let input = &envelope.payload;
+        for (value, field) in [
+            (&input.agent_id, "agentId"),
+            (&input.account_id, "accountId"),
+            (&input.app_id, "appId"),
+            (&input.credential_ref, "credentialRef"),
+            (&input.bot_open_id, "botOpenId"),
+        ] {
+            validate_nonempty(value, field)?;
+        }
+        anyhow::ensure!(input.bot_open_id.len() <= 512, "botOpenId is too long");
+        let name = normalize_display_name(&input.bot_display_name)?;
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, spec.provider) {
+                return Ok(rejected("channel.host_required", "Only the matching Channel Host can observe Bot identity"));
+            }
+            let row = transaction.query_row(
+                &format!("SELECT account_id, app_id, credential_ref, status, bot_open_id, bot_display_name, version FROM {} WHERE agent_id=?1", spec.member_bot),
+                [&input.agent_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,String>(5)?,row.get::<_,i64>(6)?)),
+            ).optional()?;
+            let Some((account, app, credential, status, open_id, old_name, version)) = row else {
+                return Ok(rejected(&spec.code("member_bot.not_found"), "Bot binding is missing"));
+            };
+            if account != input.account_id || app != input.app_id || credential != input.credential_ref || status != "published" {
+                return Ok(rejected(&spec.code("member_bot.binding_immutable"), "Connection does not match an existing published Bot"));
+            }
+            let owner_verified: bool = transaction.query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE account_id=?1 AND app_id=?2 AND open_id_digest IS NOT NULL AND verified_at IS NOT NULL)", spec.owner_app_identity),
+                params![account, app], |row| row.get(0),
+            )?;
+            if !owner_verified {
+                return Ok(rejected(&spec.code("owner_identity.unverified"), "The frozen Owner identity is not verified"));
+            }
+            if open_id.as_ref().is_some_and(|id| id != &input.bot_open_id) {
+                return Ok(rejected(&spec.code("member_bot.identity_conflict"), "A Bot identity cannot change within its frozen App"));
+            }
+            if version != input.expected_version { return Ok(version_conflict(version)); }
+            let changed = open_id.is_none() || old_name != name;
+            if changed {
+                transaction.execute(
+                    &format!("UPDATE {} SET bot_open_id=?2, bot_display_name=?3, version=version+1, updated_at=?4 WHERE agent_id=?1 AND version=?5", spec.member_bot),
+                    params![input.agent_id, input.bot_open_id, name, Utc::now().to_rfc3339(), version],
+                )?;
+            }
+            Ok(CommandHandlerResult::applied(spec.code("member_bot.connection_observed"),
+                json!({"agentId":input.agent_id,"version":version+i64::from(changed)}),
+                Some(EntityReference{entity_type:spec.code("member_bot"),entity_id:input.agent_id.clone()})))
         })
     }
 
@@ -14286,6 +14369,168 @@ mod tests {
         let host_required = "channel.host_required";
         assert_rejected_without_side_effects(
             database,
+            &wrong("bot-connection"),
+            host_required,
+            |database| {
+                service
+                    .observe_member_bot_connection(
+                        database,
+                        &actor_envelope(
+                            actor,
+                            wrong("bot-connection"),
+                            ObserveChannelBotConnectionCommand::<LARK> {
+                                account_id: "account_1".into(),
+                                agent_id: "agent_1".into(),
+                                app_id: world.app_id.clone(),
+                                credential_ref: world.credential_ref.clone(),
+                                expected_version: 1,
+                                bot_open_id: "ou_bot".into(),
+                                bot_display_name: "Bot".into(),
+                            },
+                        ),
+                    )
+                    .unwrap()
+            },
+        );
+        // This provider owner also exercises observation with the matching Host.
+        // A legacy Owner row without a usable digest is not verified merely
+        // because the row exists; both snapshot and observation must agree.
+        let bot = service
+            .snapshot(database)
+            .unwrap()
+            .member_bots
+            .into_iter()
+            .find(|bot| bot.agent_id == "agent_1")
+            .unwrap();
+        let open_id: String = database
+            .connection()
+            .query_row(
+                &format!(
+                    "SELECT bot_open_id FROM {} WHERE agent_id='agent_1'",
+                    world.spec.member_bot
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let observation = ObserveChannelBotConnectionCommand::<LARK> {
+            account_id: bot.account_id.clone(),
+            agent_id: bot.agent_id.clone(),
+            app_id: bot.app_id.clone(),
+            credential_ref: bot.credential_ref.clone(),
+            expected_version: bot.version,
+            bot_open_id: open_id,
+            bot_display_name: bot.bot_display_name.clone(),
+        };
+        let same = service
+            .observe_member_bot_connection(
+                database,
+                &host_envelope_for(world.spec, "observe-verified", observation.clone()),
+            )
+            .unwrap();
+        assert_eq!(same.result.status, CommandResultStatus::Applied);
+        assert_eq!(same.result.payload["version"], bot.version);
+        let owner: (String, String) = database
+            .connection()
+            .query_row(
+                &format!(
+                    "SELECT open_id_digest, verified_at FROM {} WHERE account_id=?1 AND app_id=?2",
+                    world.spec.owner_app_identity
+                ),
+                params![bot.account_id, bot.app_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        {
+            let field = "open_id_digest";
+            database
+                .connection()
+                .execute(
+                    &format!(
+                        "UPDATE {} SET {field}=NULL WHERE account_id=?1 AND app_id=?2",
+                        world.spec.owner_app_identity
+                    ),
+                    params![bot.account_id, bot.app_id],
+                )
+                .unwrap();
+            assert_eq!(
+                service
+                    .snapshot(database)
+                    .unwrap()
+                    .member_bots
+                    .into_iter()
+                    .find(|bot| bot.agent_id == "agent_1")
+                    .unwrap()
+                    .owner_identity_status,
+                "unverified"
+            );
+            let command_id = format!("{provider}-observe-without-{field}");
+            assert_rejected_without_side_effects(
+                database,
+                &command_id,
+                &world.spec.code("owner_identity.unverified"),
+                |database| {
+                    service
+                        .observe_member_bot_connection(
+                            database,
+                            &host_envelope_for(
+                                world.spec,
+                                &format!("observe-without-{field}"),
+                                observation.clone(),
+                            ),
+                        )
+                        .unwrap()
+                },
+            );
+            database.connection().execute(
+                &format!("UPDATE {} SET open_id_digest=?3, verified_at=?4 WHERE account_id=?1 AND app_id=?2", world.spec.owner_app_identity),
+                params![bot.account_id, bot.app_id, owner.0, owner.1],
+            ).unwrap();
+        }
+        let mut mismatched = observation.clone();
+        mismatched.credential_ref = "wrong-credential".into();
+        let denied = service
+            .observe_member_bot_connection(
+                database,
+                &host_envelope_for(world.spec, "observe-binding-mismatch", mismatched),
+            )
+            .unwrap();
+        assert_eq!(
+            denied.result.code,
+            world.spec.code("member_bot.binding_immutable")
+        );
+        database
+            .connection()
+            .execute(
+                &format!(
+                    "UPDATE {} SET status='disabled' WHERE agent_id='agent_1'",
+                    world.spec.member_bot
+                ),
+                [],
+            )
+            .unwrap();
+        let disabled = service
+            .observe_member_bot_connection(
+                database,
+                &host_envelope_for(world.spec, "observe-disabled", observation),
+            )
+            .unwrap();
+        assert_eq!(
+            disabled.result.code,
+            world.spec.code("member_bot.binding_immutable")
+        );
+        database
+            .connection()
+            .execute(
+                &format!(
+                    "UPDATE {} SET status='published' WHERE agent_id='agent_1'",
+                    world.spec.member_bot
+                ),
+                [],
+            )
+            .unwrap();
+        assert_rejected_without_side_effects(
+            database,
             &wrong("commit"),
             host_required,
             |database| {
@@ -20602,6 +20847,88 @@ mod tests {
         connect_account(&service, &mut database);
         publish_bot(&service, &mut database, "agent_1", "cli_app_1");
 
+        // The same binding owner also owns the narrow observation contract.
+        // No new DB fixture or parallel Rust test is needed.
+        let observation = ObserveChannelBotConnectionCommand::<false> {
+            account_id: "account_1".into(),
+            agent_id: "agent_1".into(),
+            app_id: "cli_app_1".into(),
+            credential_ref: "feishu/member/agent_1".into(),
+            expected_version: 1,
+            bot_open_id: "ou_bot_agent_1".into(),
+            bot_display_name: "agent_1".into(),
+        };
+        let metadata = |db: &Database| {
+            db.connection().query_row(
+            "SELECT b.published_at, o.verified_at, o.open_id_digest FROM feishu_member_bot b JOIN feishu_owner_app_identity o ON o.app_id=b.app_id WHERE b.agent_id='agent_1'",
+            [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)),
+        ).unwrap()
+        };
+        let frozen = metadata(&database);
+        let same = service
+            .observe_member_bot_connection(
+                &mut database,
+                &host_envelope("observe-same", observation.clone()),
+            )
+            .unwrap();
+        assert_eq!(same.result.status, CommandResultStatus::Applied);
+        assert_eq!(same.result.payload["version"], 1);
+        let mut conflict = observation.clone();
+        conflict.bot_open_id = "ou_different_app".into();
+        let denied = service
+            .observe_member_bot_connection(
+                &mut database,
+                &host_envelope("observe-conflict", conflict),
+            )
+            .unwrap();
+        assert_eq!(denied.result.code, "feishu_member_bot.identity_conflict");
+        let mut renamed = observation.clone();
+        renamed.bot_display_name = "Observed name".into();
+        let updated = service
+            .observe_member_bot_connection(
+                &mut database,
+                &host_envelope("observe-name", renamed.clone()),
+            )
+            .unwrap();
+        assert_eq!(updated.result.payload["version"], 2);
+        let stale = service
+            .observe_member_bot_connection(
+                &mut database,
+                &host_envelope("observe-stale", observation.clone()),
+            )
+            .unwrap();
+        assert_eq!(stale.result.status, CommandResultStatus::Rejected);
+        database
+            .connection()
+            .execute(
+                "UPDATE feishu_member_bot SET bot_open_id=NULL WHERE agent_id='agent_1'",
+                [],
+            )
+            .unwrap();
+        renamed.expected_version = 2;
+        let filled = service
+            .observe_member_bot_connection(&mut database, &host_envelope("observe-fill", renamed))
+            .unwrap();
+        assert_eq!(filled.result.payload["version"], 3);
+        assert_eq!(metadata(&database), frozen);
+        // Preserve the existing retirement/reactivation fixture's version baseline.
+        database
+            .connection()
+            .execute(
+                "UPDATE feishu_member_bot SET version=1 WHERE agent_id='agent_1'",
+                [],
+            )
+            .unwrap();
+
+        let mut wrong_binding = observation.clone();
+        wrong_binding.credential_ref = "another-credential".into();
+        let denied = service
+            .observe_member_bot_connection(
+                &mut database,
+                &host_envelope("observe-wrong-binding", wrong_binding),
+            )
+            .unwrap();
+        assert_eq!(denied.result.code, "feishu_member_bot.binding_immutable");
         let duplicate_intent = service
             .create_member_bot_publication_intent(
                 &mut database,
@@ -20658,6 +20985,16 @@ mod tests {
                 [],
             )
             .unwrap();
+        let disabled_observation = service
+            .observe_member_bot_connection(
+                &mut database,
+                &host_envelope("observe-disabled", observation.clone()),
+            )
+            .unwrap();
+        assert_eq!(
+            disabled_observation.result.code,
+            "feishu_member_bot.binding_immutable"
+        );
         let reopened = service
             .advance_member_bot_publication_intent(
                 &mut database,

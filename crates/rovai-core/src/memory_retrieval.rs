@@ -256,6 +256,7 @@ impl MemoryRetrievalService {
         invocation: &MemoryRetrievalInvocation<MemorySearchInput>,
         attested_run: Option<(&str, i64)>,
     ) -> Result<MemorySearchOutput> {
+        crate::memory_capability::require_enabled(database.connection())?;
         let identity = authenticate(database, invocation, attested_run)?;
         let query = invocation.input.query.trim();
         if query.is_empty() || query.len() > MEMORY_SEARCH_QUERY_MAX_BYTES {
@@ -392,6 +393,7 @@ impl MemoryRetrievalService {
         invocation: &MemoryRetrievalInvocation<MemoryReadInput>,
         attested_run: Option<(&str, i64)>,
     ) -> Result<MemoryReadOutput> {
+        crate::memory_capability::require_enabled(database.connection())?;
         let identity = authenticate(database, invocation, attested_run)?;
         if invocation.input.memory_ids.is_empty()
             || invocation.input.memory_ids.len() > MEMORY_READ_MAX_IDS
@@ -521,6 +523,7 @@ impl MemoryRetrievalService {
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        crate::memory_capability::require_enabled(&transaction)?;
         let identity = authenticate_on_connection(&transaction, invocation, attested_run)?;
         let counterparty = match invocation.input.scope {
             MemoryScopeKind::Relationship => {

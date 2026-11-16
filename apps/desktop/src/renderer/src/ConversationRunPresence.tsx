@@ -15,6 +15,7 @@ import { uiAttribute, useInterfaceLanguage } from './interface-language'
 import { agentRunIsStarting, agentRunHasCurrentActivity, type LiveRuntimeEvent } from './ui-model'
 import { groupExecutionEventsByRunId } from './execution-events'
 import { useExecutionWindow } from './useExecutionWindow'
+import { useRunLiveEvents } from './useRunLiveEvents'
 import { useNavigationPressMenu } from './useNavigationPressMenu'
 import type { AgentRunStopViewState } from './ThreadWorkspace'
 import './conversation-run-presence.css'
@@ -221,18 +222,19 @@ export function RunPresenceOpen({ threadId, run, name, description, windowedEvid
   onOpen(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
 }): React.JSX.Element {
   const language = useInterfaceLanguage()
+  const currentEvents = useRunLiveEvents(threadId, run, events)
   const trigger = useRef<HTMLButtonElement>(null)
   const restoreFocusOnClose = useRef(false)
   const menuId = useId()
   const elapsedId = useId()
   const menu = useNavigationPressMenu(true)
-  const tail = useExecutionWindow(windowedEvidence && run.status === 'running', threadId, run, events, null, true)
+  const tail = useExecutionWindow(windowedEvidence && run.status === 'running', threadId, run, currentEvents, null, true)
   const mergedEvents = useMemo(() => {
     // Reconcile evidence by identity/revision before projecting a line. A late
     // restored page must not replace newer live text or a newly started command.
-    const merged = groupExecutionEventsByRunId([{ id: run.id }], tail.evidence, windowedEvidence ? events?.slice(-48) ?? [] : events ?? [])
+    const merged = groupExecutionEventsByRunId([{ id: run.id }], tail.evidence, windowedEvidence ? currentEvents.slice(-48) : currentEvents)
     return merged.get(run.id) ?? []
-  }, [tail.evidence, events, run.id, windowedEvidence])
+  }, [tail.evidence, currentEvents, run.id, windowedEvidence])
   const preview = useMemo(() => stopping && ['queued', 'running', 'waiting'].includes(run.status)
     ? { kind: 'status' as const, text: uiAttribute('正在停止…') }
     : runPresencePreview(run, mergedEvents, name), [run, mergedEvents, name, language, stopping])

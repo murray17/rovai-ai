@@ -5,7 +5,7 @@ authority: conversation-run-presence-surface
 status: accepted
 version: 59
 source_version: v1.72
-last_updated: 2026-11-02
+last_updated: 2026-11-14
 ---
 
 # Run Process Detail Surface v59
@@ -23,3 +23,9 @@ last_updated: 2026-11-02
 
 取消原因继续原样保存。本次不改变 Core 取消、退出、恢复、清理、调度或模型上下文，也不增加自动续跑。
 验证复用 presence 投影、产物 Renderer 与 `pnpm test:run-presence-ui` 的浏览器 owner。
+
+## 模型记录缺失的呈现
+
+模型入口沿用当前[会话 UI 规范](../ui/components/conversation-workspace.md#thread-队员管理)。
+消息或 Run 没有模型记录时隐藏整个模型摘要入口，包括占位文字、箭头和浮层；本规则覆盖继承自 v54 的“模型未记录”占位行为。
+有效记录的 `modelId` 为 null 时仍显示“智能体默认”，已记录模型和强度继续展示；不回退到队员当前配置。

@@ -203,13 +203,14 @@ impl BuiltinToolProcessConfig {
     }
 
     fn write_context(&self, lease: Option<BuiltinToolLeaseContext>) -> Result<()> {
-        self.write_context_with_tasks(lease, false)
+        self.write_context_with_capabilities(lease, false, false)
     }
 
-    fn write_context_with_tasks(
+    fn write_context_with_capabilities(
         &self,
         lease: Option<BuiltinToolLeaseContext>,
         tasks_enabled: bool,
+        memory_enabled: bool,
     ) -> Result<()> {
         let Some(path) = self.context_path() else {
             return Ok(());
@@ -222,6 +223,7 @@ impl BuiltinToolProcessConfig {
             process_token: self.inner.process_token.clone(),
             lease,
             tasks_enabled,
+            memory_enabled,
         };
         atomic_write_private_json(path, &document)
     }
@@ -365,9 +367,19 @@ impl BuiltinToolLeaseRegistry {
     /// Called under the invocation gate after reading the current instance state.
     /// A failed projection refresh cannot revoke a lease or cancel execution.
     /// A binding refresh targets (process, Run, epoch); None refreshes all active leases.
+    #[cfg(test)]
     pub(crate) async fn refresh_tasks(
         &self,
         enabled_runs: &std::collections::HashSet<String>,
+        target: Option<(&str, &str, i64)>,
+    ) -> bool {
+        self.refresh_capabilities(enabled_runs, true, target).await
+    }
+
+    pub(crate) async fn refresh_capabilities(
+        &self,
+        enabled_runs: &std::collections::HashSet<String>,
+        memory_enabled: bool,
         target: Option<(&str, &str, i64)>,
     ) -> bool {
         let processes = self.processes.lock().await;
@@ -394,11 +406,12 @@ impl BuiltinToolLeaseRegistry {
                 lease_generation: active.lease_generation,
                 lease_token: active.lease_token.clone(),
             };
-            if let Err(error) = process.config.write_context_with_tasks(
+            if let Err(error) = process.config.write_context_with_capabilities(
                 Some(context),
                 enabled_runs.contains(&active.agent_run_id),
+                memory_enabled,
             ) {
-                eprintln!("Task CLI discovery refresh failed: {error:#}");
+                eprintln!("Built-in CLI discovery refresh failed: {error:#}");
                 refreshed = false;
             }
         }
