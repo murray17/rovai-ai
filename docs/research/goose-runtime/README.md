@@ -2,7 +2,7 @@
 document_type: research-record
 authority: non-normative-runtime-evidence
 status: native-research
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Goose 官方 ACP 研究与原生探测
@@ -37,6 +37,21 @@ User sequence 146 的两处修复见 [Runtime Launch v96](../../contracts/runtim
 固定官方 1.59.0 用 `_meta.enabledExtensions: []` 选择零扩展，参数查询不依赖原生配置中的 MCP；
 正式任务和普通检查仍继承原生扩展。原生反例、实际 Core 和界面行为见
 [空扩展探测白名单](probe-extensions-1.59.0-macos-arm64.json)。
+
+## 默认思考强度的原生限制（2026-11-16）
+
+User 要求清空强度后与 DSH 一样恢复原生默认。官方 1.59.0 的隔离实测表明，
+仅删除 Rovai 的同值 setter 跳过不能实现该行为：原生初始为 `medium`，显式设为 `high` 后，
+再次选择相同模型仍返回 `high`；设置 `thinking_effort=default` 则返回 `-32602`。
+显式设置 `medium` 正常成功。验证只创建空扩展探测 Session，随后删除，模型生成数为零。
+证据见[默认恢复反例](default-reset-1.59.0-macos-arm64.json)。复跑沿既有入口增加
+`ROVAI_GOOSE_PROBE_SCOPE=model-default`，不启动 Core，不读取日常配置或真实账号。
+
+原生[选模处理](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server.rs#L2386)
+继承 Session 参数，[继承键](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-provider-types/src/model.rs#L17)
+包含 `thinking_effort`；[设置强度](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/agents/services.rs#L1259)
+的普通 Provider 路径只接受具体档位，没有默认重置值。1.59.2 的相关源码相同，未另行运行其二进制。
+因此不能把“重新选模”或“换回默认文案”记成已经恢复默认；产品行为仍保持当前合同，Goose 继续隐藏。
 
 本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
 [实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。
