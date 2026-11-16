@@ -478,13 +478,13 @@ export function GeneralSettings({
             {tasks.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={tasks.error === 'save' ? '未能保存，请重试。' : '无法读取会话任务设置，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void tasks.retry()}><UiText zh="重试" /></button></div>}
             <div className="general-world-map-setting general-memory-setting" aria-busy={memory.saving}>
               <span className="general-conversation-title">
-                <label htmlFor="general-memory-enabled"><strong><UiText zh="Rovai 长期记忆" /></strong></label>
-                <NewConversationQuickHelp label={uiAttribute('Rovai 长期记忆说明')}>
+                <label htmlFor="general-memory-enabled"><strong><UiText zh="记忆" /></strong></label>
+                <NewConversationQuickHelp label={uiAttribute('记忆说明')}>
                   <UiText zh="允许队员读取并形成 Rovai 的长期记忆。关闭后暂停记忆访问与管理，已保存数据保留。" />
                   <br /><UiText zh="已进入当前对话上下文的内容仍可能保留。" />
                 </NewConversationQuickHelp>
               </span>
-              <input id="general-memory-enabled" type="checkbox" role="switch" aria-label={uiAttribute('Rovai 长期记忆')}
+              <input id="general-memory-enabled" type="checkbox" role="switch" aria-label={uiAttribute('记忆')}
                 checked={memory.enabled} disabled={!memory.ready || memory.error === 'read' || memory.saving}
                 onChange={event => void memory.setEnabled(event.target.checked)} />
             </div>

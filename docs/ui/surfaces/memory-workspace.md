@@ -13,7 +13,7 @@ related_targets:
 ## User goal and first view
 
 Read and manage durable memories with minimal scanning effort. Preserve the shared App rail and typography.
-The header has the title, a “Rovai 长期记忆” switch, “查看、搜索和管理长期记忆。” subtitle, review/history entry, and neutral primary Add action.
+The header has the title, an “启用” switch (accessible name “启用记忆”), “查看、搜索和管理长期记忆。” subtitle, review/history entry, and neutral primary Add action.
 The page switch and General → 会话 control the same Core preference through the shared Provider.
 Three quiet inline counts show active memories, active agent-origin memories, and memories due for review.
 Loading counts use a dash. A compact dismissible change notice remains visible on the Memory page and in the Thread.
@@ -27,8 +27,8 @@ selection, badges, borders or decoration. Scope neutral overrides to Memory cont
 
 The navigation remains available. When Core confirms Memory is disabled, follow the MCP first-connection
 empty-state composition: a narrow 460px content column, generous top spacing, the existing neutral brain glyph,
-“Rovai 长期记忆已关闭” heading, “已保存的记忆会保留，重新开启后可继续使用和管理。” description,
-and the same “Rovai 长期记忆” switch to re-enable directly. Use the existing Memory neutral tokens, without a warning card.
+“记忆已关闭” heading, “已保存的记忆会保留，重新开启后可继续使用和管理。” description,
+and the same “启用” switch to re-enable directly. Use the existing Memory neutral tokens, without a warning card.
 Do not load or render the business list/detail, counts, review dialogs, reminders or automatic notices.
 An unavailable setting shows “无法读取长期记忆设置，请重试。” with Retry; initial loading uses
 “正在读取记忆设置…”. Do not infer a confirmed disable from a failed read. Late business responses cannot

@@ -108,13 +108,13 @@ function MemoryCapabilitySwitch(): React.JSX.Element {
     className="memory-capability-switch"
     type="button"
     role="switch"
-    aria-label={uiAttribute('Rovai 长期记忆')}
+    aria-label={uiAttribute('启用记忆')}
     aria-checked={memory.enabled}
     aria-busy={memory.saving}
     disabled={!memory.ready || memory.error === 'read' || memory.saving}
     onClick={() => void memory.setEnabled(!memory.enabled)}
   >
-    <span><UiText zh="Rovai 长期记忆" /></span>
+    <span><UiText zh="启用" /></span>
     <span className="memory-capability-switch-track" aria-hidden="true" />
   </button>
 }
@@ -766,7 +766,7 @@ export function MemoryLibrary({
     <section className="memory-library memory-workspace memory-workspace-inactive" aria-labelledby="memory-library-title" data-startup-route="memory" data-startup-status={memory.ready || memory.error ? 'ready' : 'loading'}>
       <div className="memory-capability-state">
         <AppDialogGlyph name="brain" />
-        <h2 id="memory-library-title"><UiText zh={memory.ready && !memory.enabled && memory.error !== 'read' ? 'Rovai 长期记忆已关闭' : 'Rovai 长期记忆'} /></h2>
+        <h2 id="memory-library-title"><UiText zh={memory.ready && !memory.enabled && memory.error !== 'read' ? '记忆已关闭' : '记忆'} /></h2>
         {memory.ready && !memory.enabled && memory.error !== 'read' ? <p><UiText zh="已保存的记忆会保留，重新开启后可继续使用和管理。" /></p>
           : !memory.error && <p role="status"><UiText zh="正在读取记忆设置…" /></p>}
         <MemoryCapabilitySwitch />

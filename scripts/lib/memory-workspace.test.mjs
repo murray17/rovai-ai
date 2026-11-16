@@ -406,7 +406,7 @@ test('Memory workspace: production components, mutations, notifications and resp
     await b.capture(join(output,'review-history-reduced-motion.png'))
     await b.key('Escape'); await b.wait('!document.querySelector(".memory-review-dialog")')
     await click('.memory-capability-switch')
-    await b.wait('document.querySelector(".memory-library").textContent.includes("Rovai 长期记忆已关闭")')
+    await b.wait('document.querySelector(".memory-library").textContent.includes("记忆已关闭")')
     assert.equal(await b.evaluate('__memoryFixture.capabilityStats().enabled'), false, 'page switch saves the Core preference')
     assert.equal(await b.evaluate('!!document.querySelector(".memory-catalog,.memory-summary-strip,.memory-header-actions,.memory-review-dialog")'), false)
     const pausedReads = await b.evaluate('__memoryFixture.capabilityStats().memoryBusinessReads')
