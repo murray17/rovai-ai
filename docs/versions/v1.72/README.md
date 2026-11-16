@@ -6,10 +6,40 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 会话文件下载（2026-11-15）
+
+按已确认交互稿在队员普通文件行右侧增加悬浮下载入口，使用主题正文字色；主体预览、右键菜单与原有文件列表几何保持。
+Desktop 通过系统保存窗口保存经 exact-owner 重验的文件副本，Web 复用既有下载授权。
+范围与验证见[本版实施记录](implementation-plan.md#会话文件下载2026-11-15)，规则归
+[Camp Attachment v13](../../contracts/camp-attachment-v13.md) 与[会话附件 UI](../../ui/components/conversation-workspace.md)。
+2026-11-16 的评审修复同步 `main@855a3c2a`，补齐 Linux 覆盖确认、源失效分类、默认文件名边界及虚拟列表请求去重；
+验证归属与命令见[评审修复记录](implementation-plan.md#会话文件下载评审修复2026-11-16)。
+
+## Goose 官方 ACP（2026-11-13）
+
+User sequence 109 的独立 worktree `rovai/goose-acp` 已完成官方 1.59.0 固定源码与真实二进制探测。
+结论、14 轴矩阵和复现脚本见[原生研究](../../research/goose-runtime/README.md)；
+User sequence 117 已确认[接入及模型输入 R1](goose-acp-proposal.md)，
+[独立输入说明](model-context-change-goose-acp.md)先于实现记录确认，继续在同一 worktree 实施。
+候选复用共享 ACP/Fleet；采用原生 keyed System append、独立 Steer 回执和用量通知，
+不复制 Kilo 的 instructions 文件、第二 prompt、SQLite reader 或已退役权限 Hook。
+MCP 原生恢复不删除旧项、write 缺完整前像等差异已明示。
+现已实施独立 identity、Migration 225/schema 175、共享执行与现有表单，macOS arm64 开放 Preview。
+合入时保留主线 Memory 224；225 兼容主线和 Goose 预览分支两种 174 来源，保留已有设置及历史。
+字段边界见[Runtime Launch v97](../../contracts/runtime-launch-and-verification-v97.md)，选择理由见 [D86](decisions.md#v1-72-d86)，
+实际验证与未验证范围见[实施记录](goose-acp-implementation.md)。
+User sequence 123 的精简已收窄重复选项设置、MCP 核对与客户端回放，并清理探测原生会话；
+三模式工具集合和 Skills 管理用户 `.agents/skills` 已补定向验证。
+Linux x64 在 Debian 12 通过真实 Sub2API 与受控 ACP 验收后开放 Preview，见
+[D88](decisions.md#v1-72-d88) 与[目标机证据](../../research/goose-runtime/linux-x64-1.59.0-debian12.json)。
+User sequence 146 将显式 Provider 提前传给新建 Session；目标参数成功不再依赖临时 Session 删除成功，
+清理有界且只诊断，未扩展后台工作或存储。
+目标参数探测另显式选择空扩展；Goose 的模型／effort 控件和摘要准确表达“不覆盖”，不增加恢复默认值动作。
 
 ## 长会话输入性能（2026-11-15）
 
@@ -1698,7 +1728,7 @@ R4 收口 Provider 的同序号观察顺序与读取失败状态，分开恢复�
 
 按 21 种 Adapter/不同方言先核查，再用同一组脱敏数值比较后选择方案 1：保留当前 Run 可归属且不重复的已知消费。
 Core 负责 `displayTotalTokens`，RunCard 有值只显示一个 `xxK`；运行中、失败、取消共用准入，未知与零分开。
-Migration 225/schema 175 保留稀疏数据和旧 Run 的保守数值，不扫描历史补账。
+Migration 226/schema 176 保留稀疏数据和旧 Run 的保守数值，不扫描历史补账。
 当前规范为 [Usage v12](../../contracts/runtime-usage-monitoring-v12.md) 与 [Execution Metrics v8](../../contracts/runtime-execution-metrics-v8.md)，
 矩阵、样本、选型、测试和未确认边界见[核查记录](../../research/runtime-monitoring/runcard-token-total-audit-2026-11-15.md)。
 这是局部可逆的计量/显示投影，选择理由保存在核查记录；不新增 Version Decision，不改变版本生命周期或整个监控页。

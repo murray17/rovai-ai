@@ -3,10 +3,101 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-14
+last_updated: 2026-11-16
 ---
 
 # v1.72 实施与验收
+
+## 会话文件下载合入（2026-11-16）
+
+User sequence 12 已授权创建到 `main` 的 PR 并合并，继续复用 `rovai/agent-file-download` 与原 worktree。
+合入前同步 `origin/main@2a54e98e59485b108b6a45106ff260f1e9a7e512`；四处文档日期／相邻章节冲突保留双方内容，
+当前路由同时指向 Runtime Launch v97 与 Camp Attachment v13，业务代码无冲突。
+按新基线复跑类型检查、默认 Node/Vitest、默认 Rust workspace、桌面构建、真实桥接、下载 UI 和通用文档门禁；
+PR 的 `CI / gate` 另复跑真实 Linux 取消／替换窗口并保留提交关联的报告。
+检查通过后合入并清理该干净 worktree；精确 PR、合入 SHA、验收结果与清理状态以 GitHub 和最终交接为准。
+本地默认回归发现主干产品合同指纹测试仍期待 schema 174，而主干 DB 已为 175；仅将该既有断言同步到当前权威值，
+保留其余字段与不可用证据断言，生产协议不作改动。合入 PR 为 [#1100](https://github.com/murray17/rovai-ai/pull/1100)。
+
+## 会话文件下载评审修复（2026-11-16）
+
+复用 `rovai/agent-file-download` 与原 worktree。合并 `origin/main@855a3c2a7a4a3827ff3308a540e38a7dc8cbac1b`，
+合并提交 `80a1e37ac`；只有本版总览的相邻章节发生内容冲突，保留下载章节与主干最新输入性能章节。
+
+- Linux 保存选项显式请求覆盖确认；真实 GTK 窗口验收分别取消和确认对已编辑文件的覆盖。
+- 二次授权后源删除／父路径变化按 `missing` 呈现，源访问拒绝与类型变化分别归入 `unreadable`／`kind_changed`；目标写入失败保持独立。
+- 默认文件名独立规范化，覆盖 Windows 设备保留名、空名称和超长 Unicode；不改写原附件显示名。
+- 下载中的虚拟行卸载后，按客户端和 exact owner 保留同一请求；重新挂载保持忙碌。生产 `TimelineVirtualList` 的 160 行夹具验证滚出／返回、整表卸载／返回、终态重试和重复点击。
+- `CI / gate` 增加生产下载 UI 与真实 Linux 覆盖窗口验收；报告携带 `GITHUB_SHA`，截图与 JSON 作为 `attachment-download-<sha>` artifact 保存。
+  使用现有 workflow_dispatch 在功能分支触发远端验收，无需创建 PR；结果以该提交关联的 CI run 为准。
+
+复跑命令：`pnpm typecheck`、`VITEST_MAX_WORKERS=2 pnpm test`、`pnpm test:rust:pr`、`pnpm build:desktop`、
+`pnpm test:desktop-bridge`、`pnpm test:attachment-download-ui`、`pnpm docs:test`、`pnpm docs:check`、
+`DOCS_BASE_REF=855a3c2a7a4a3827ff3308a540e38a7dc8cbac1b pnpm docs:check:ci`。
+Linux 原生覆盖使用 `xvfb-run -a dbus-run-session -- pnpm test:attachment-save-linux`；macOS 上该项跳过不计为通过。
+所有 App/浏览器夹具使用独立临时 profile，不启动 Core 或 Runtime，不指向日常 userData。
+
+主干同步后的 macOS 本地记录：类型检查、桌面构建、真实 contextBridge、下载 UI／虚拟列表和文档门禁通过；
+完整 Vitest 为 280 文件、3340 项通过（2 项既有跳过），Node 回归 388 项通过（2 项平台跳过），默认 Rust workspace 回归通过。
+Linux 原生覆盖确认不使用本地跳过记录证明；远端结果保存在提交关联的 `CI / gate` 日志和 artifact 中。
+首次远端执行 `43852076068` 在桌面悬浮断言失败：Linux 无头浏览器启用了无悬浮设备的常显样式。
+CI 改用独立 Xvfb 的有窗口 Chrome，并校验／记录 `hover:hover` 和 `pointer:fine`；触屏场景仍独立启用模拟后验收。
+第二轮 `43852964274` 的全部 Renderer 行为断言通过，退出清理发生 `ENOTEMPTY`；沿用现有浏览器夹具的有限目录清理重试。
+原生窗口驱动未取得辅助功能树，夹具显式启用 Chromium 辅助功能桥接并保留失败窗口截图；不改变生产 App 的辅助功能设置。
+第三轮 `43853998756` 的 Renderer 门禁通过；截图确认原生 GTK 保存窗口可见，但 Electron 的 AT-SPI 树没有包含该窗口。
+原生驱动改用独占 Xvfb display 上的 X11 真实键盘，校验保存窗口的子模态确认出现、响应前目标字节不变和最终取消／替换结果。
+移除无效的辅助功能桥接设置与依赖，保留截图和窗口属性作为可核查证据。
+X11 驱动遵守 Chromium 保存窗口的 500ms 输入保护期，使用 GTK 的保存助记键；文件名输入框的 Enter 不作为保存按钮替代。
+真实执行 `43856634484` 随后复现 Electron 43.1.1／Chromium 150 的 GTK 3 保存接受响应绕过覆盖提示，虽已显式传入该选项。
+Main 对 Linux 已有目标增加原生替换确认，默认与关闭均取消；确认后才重新授权与复制。其他 Linux 后端可能多一次确认，
+当前优先保证既有目标覆盖的明确授权；macOS／Windows 保存流程保持。原生验收同时覆盖生产确认选项与实际窗口操作。
+Main 兜底后重新执行以上完整本地回归通过；保存 owner 为 20 项，确认取消不写入、确认期间源消失不覆盖目标、新目标不额外提示。
+源码核对：[Electron 43 Linux 设置传递](https://github.com/electron/electron/blob/v43.1.1/shell/browser/ui/file_dialog_linux.cc)、
+[Chromium 150 GTK 接受响应](https://github.com/chromium/chromium/blob/150.0.7871.114/ui/gtk/select_file_dialog_linux_gtk.cc)。
+
+API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/dialog/)、
+[Windows 文件命名](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。
+
+## 会话文件下载（2026-11-15）
+
+- Work item：队员输出文件行右侧悬浮下载；Owner：爱丽丝。
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-agent-file-download`；Branch：`rovai/agent-file-download`；
+  Base：`origin/main@70aab893810b03e8f45b7281efa7bceb3452ef5c`；Governance：none，同一变更同步当前合同与 UI。
+- Status：ready；本地实施与验证完成，分支交付，未请求创建 PR。
+- 文件行使用 32px 独立动作与主题 `--ink`，悬浮／键盘时显示，触屏命中区 44px；下载不触发预览，既有右键操作保持。
+- Desktop 新增原生保存桥接，系统窗口确认后重验 owner，以字节流暂存并替换选定目标；取消不写入，失败保留目标和原文件。
+  Web 复用既有 exact-owner 下载链路。没有 Rust/Core、数据库或模型输入改动。
+- 验证归属：`attachment-save.test.ts` 的 5 项回归覆盖真实二进制文件、当前源重检、取消、失效、符号链接、目标写入失败、临时文件归属与原文件保护；
+  `pnpm test:desktop-bridge` 覆盖真实隔离 contextBridge；`pnpm test:attachment-download-ui` 挂载生产卡片验证鼠标、键盘、取消／重试、迟到结果、主题和触屏。
+- 验证通过：`pnpm typecheck`、`pnpm build:desktop`、`pnpm test:desktop-bridge`、`pnpm test:attachment-download-ui`、
+  `VITEST_MAX_WORKERS=2 pnpm test`、`pnpm test:rust:pr`、`pnpm docs:test`、`pnpm docs:check` 与以以上 base SHA 运行的 `pnpm docs:check:ci`。
+  默认高并发完整测试首轮出现既有文件监听超时，限制并发后的完整回归通过；未修改或禁用该测试。
+- 自查后让保存沿用已有 Source Ref 符号链接解析，实际持有最终普通文件句柄；最后定向回归验证保存失败不会清理未取得归属的临时名称。
+  隔离 Chrome/ContextBridge 验收未启动 Core 或 Runtime，已查看明暗主题截图；未将这些结果等同 Windows 真机保存窗口或日常安装版验收。
+
+## Goose 官方 ACP（2026-11-13）
+
+- Work item：User sequence 109，基于 Kilo 经验调研接入 Goose；Owner：爱丽丝。
+- Worktree：`../rovai-ai-goose-acp`；Branch：`rovai/goose-acp`；Status：active。
+  Base：研究起点 `origin/main@c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`；Governance：User sequence 117 已确认[模型输入 R1](model-context-change-goose-acp.md)，先记录确认再实施。
+- 已完成：[原生研究和 14 轴矩阵](../../research/goose-runtime/README.md)、[R1 完整前后说明](goose-acp-proposal.md)、
+  [可复现脚本](../../../scripts/probe-goose-runtime.mjs)及[白名单结果](../../research/goose-runtime/native-probe-1.59.0-macos-arm64.json)。
+- 原生官方 1.59.0 / macOS arm64 / 隔离 loopback Provider：new/warm/exact cold、88,099 字节完整 Bootstrap、
+  两次 Steer 提前回执和 wrong-run、普通与前台子代理取消后同 PID 后继、write/read/edit、stdout/stderr/empty/nonzero/large、
+  allow/reject、Skill 实读及更新删除、自动阈值与 overflow 压缩、MCP 实调／追加／撤销／冷恢复、原生问卷取消通过。
+  55 次合成 Provider 请求含标题、摘要和子调用，不是 55 个正式 Core Run，也不代表真实账号验收。
+- 门禁通过：两份研究脚本 `node --check`；上述官方原生 probe；`pnpm docs:test` 10/10、`pnpm docs:check`，
+  以及固定基线 `DOCS_BASE_REF=c7295e2b0b4667a5434c855cd2dd456bcf637e4c pnpm docs:check:ci`。
+- 明确缺口：完整 write 前像不可得；原生子代理不继承父 B；压缩未见逐消息用量，需共享累计基线；
+  MCP load 的空列表不删旧工具，需官方 list/remove。没有为此增加执行框架或私有监控。
+- 实施：已记录 seq117 的 R1 确认；产品 identity、共享接线与现有表单已加入。实际 Core、用量与生命周期结果见[实施记录](goose-acp-implementation.md)。
+  原生证据不能替代 Core；现已补齐 CLI lease、public send、输出预算与不同 cwd，HTTP MCP 和其他平台仍未验证。
+- 九范围：Version lifecycle 保持 v1.72；Documentation routing 增加研究/提案入口；
+  Decisions、Contracts、Architecture、Runtime compatibility、UI 与 Runtime Activity 同步当前 Goose 语义；Root README 无需复制具体产品矩阵。
+  当前版本已有 model_context_change=true；Goose 的独立说明记录真实 User 确认，不增加 gate 例外。
+
+User sequence 123 后续精简及验收归[同一实施记录](goose-acp-implementation.md#用户复核后的精简2026-11-14)；
+当前原生复跑 58 次受控请求，新增模式工具集合和客户端回放边界，不从原生探测推导完整产品资格。
 
 ## 长会话输入性能（2026-11-14）
 

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { RuntimeModelSearch } from './RuntimeModelSearch'
 import { RuntimeParameterSelect } from './RuntimeParameterSelect'
-import { runtimeEffortOption } from './runtime-model-presentation'
+import { runtimeDefaultEffortLabel, runtimeDefaultModelLabel, runtimeEffortOption } from './runtime-model-presentation'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -207,6 +207,8 @@ function runtimeParametersFor(
       return <CodexRuntimeParameters {...props} />
     case 'pi':
       return <PiRuntimeParameters {...props} />
+    case 'goose-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('goose-cli', props)}<PermissionSelect {...props} fieldKey="mode" label={uiAttribute("执行模式")} /></div>
     case 'kilo-cli':
       return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}</div>
     case 'opencode-cli':
@@ -419,6 +421,7 @@ function modelFieldsFor(
   props: RuntimeParameterProps
 ): React.JSX.Element {
   switch (adapterKind) {
+    case 'goose-cli':
     case 'minimax-code-cli':
     case 'command-code-cli':
     case 'claude-code-cli':
@@ -465,7 +468,7 @@ function ModelFields({
   const identity = `${installationIdentity}:${projection.current.scope}`
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
   const isDsh = adapterKind === 'deepseek-harness'
-  const supportsTargetOptions = isDsh || adapterKind === 'minimax-code-cli'
+  const supportsTargetOptions = isDsh || adapterKind === 'minimax-code-cli' || adapterKind === 'goose-cli'
   const isPi = adapterKind === 'pi'
   const target = supportsTargetOptions && explicit
     ? { modelId: explicit.modelId, ...(isDsh ? { dshSource: explicit.dshSource } : {}) } : undefined
@@ -539,6 +542,16 @@ function ModelFields({
         if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
         const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
         if (cached.refreshStatus === 'not_required' && targetModelOptionsResolved(adapterKind, model, current.target.dshSource)) return cached
+        // Goose parameter reads do not fetch the directory. Load a missing or
+        // expired directory once before subscribing to its target observation.
+        if (adapterKind === 'goose-cli' && !['fresh', 'stale'].includes(cached.cache.status)) {
+          const catalog = await read()
+          if (!ownsRequest()) return catalog
+          if (catalog.runtimeKind !== adapterKind || ['failed', 'deferred'].includes(catalog.refreshStatus)) {
+            throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
+          }
+          publishCatalog(catalog)
+        }
         return read(current.target)
       })
       const owner = { key: current.key, generation: request, promise }
@@ -605,6 +618,7 @@ function ModelFields({
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : supportsTargetOptions ? !optionsKnown || option || optionValue : option || storedOptionValue
   const refresh = onOpenModelCatalog ? () => ensureCatalog(true) : undefined
+  const defaultModelLabel = adapterKind === 'goose-cli' ? runtimeDefaultModelLabel(adapterKind) : uiAttribute('默认')
 
   return <>
     <div className="field-label runtime-model-field">
@@ -612,7 +626,11 @@ function ModelFields({
       <RuntimeModelSearch key={identity} open={open}
         onOpenChange={next => { setOpen(next); if (next) ensureCatalog(false, true) }}
         models={models} value={explicit?.modelId ?? 'runtime_default'}
-        label={explicit ? selectedModel?.displayName ?? explicit.modelId : uiAttribute('默认')}
+        label={explicit ? selectedModel?.displayName ?? explicit.modelId : defaultModelLabel}
+        defaultChoice={adapterKind === 'goose-cli' ? {
+          label: defaultModelLabel,
+          description: uiAttribute('新会话使用原生初始值；已有会话保留当前值。')
+        } : undefined}
         disabled={disabled} loading={loading}
         onRefresh={refresh} onSelect={selectModel} />
     </div>
@@ -620,7 +638,7 @@ function ModelFields({
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
       onOpen={() => ensureCatalog(false, true)} loading={supportsTargetOptions && loading}
-      defaultChoice={{ value: '', label: uiAttribute('跟随模型默认值') }}
+      defaultChoice={{ value: '', label: runtimeDefaultEffortLabel(adapterKind) }}
       choices={[
         ...(missing ? [{ value: optionValue, label: optionValue }] : []),
         ...optionChoices.map(choice => ({ ...choice, disabled: supportsTargetOptions && !optionsKnown }))
@@ -695,7 +713,7 @@ export function explicitSelection(
 }
 
 export function targetModelOptionsResolved(kind: AdapterKind, model: ModelDescriptor | null, source?: 'native' | 'web'): boolean {
-  return kind === 'minimax-code-cli' ? model?.runtimeMetadata?.modelOptionsResolved === true
+  return (kind === 'minimax-code-cli' || kind === 'goose-cli') ? model?.runtimeMetadata?.modelOptionsResolved === true
     : kind === 'deepseek-harness' && dshModelOptionsResolved(model, source)
 }
 

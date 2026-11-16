@@ -7,7 +7,8 @@ last_updated: 2026-11-16
 # RunCard Token 总量核查
 
 核查基线 `70aab893810b03e8f45b7281efa7bceb3452ef5c`。范围来自
-[`AdapterKind::ALL`](../../../crates/rovai-core/src/agent_profile.rs)：21 种 Adapter；模式差异另列。
+[`AdapterKind::ALL`](../../../crates/rovai-core/src/agent_profile.rs)：初始 21 种 Adapter；模式差异另列。
+合入 `main@ab42ad8ec` 后增加 Goose，共 22 种，新增来源的核查与受控对照见文末主线集成记录。
 此次先读源码、协议和已入库脱敏数值，比较后才选择产品规则；没有先改 Renderer 门槛。
 不修改监控页面、模型输入或原生 Runtime；不扫描历史 Run 补账。
 
@@ -37,6 +38,7 @@ I=含缓存输入，U=普通输入，R/W=互斥缓存读/写，O=含 reasoning �
 | OpenCode V1 | 根 Session SQLite 已完成 assistant 元数据；逐调用 Delta | U+R+W；原生 output 与 reasoning 互斥，先合成 O | 缺 reasoning 仍保留普通 output；已完成失败调用的正数不因 error 标记丢弃；占位零排除；异步可漏头尾 | 物理 rowid baseline +精确 Session/cwd +message ID；不读取 part；子 Session 排除；V1 terminal 最后调用不另计。[增量 reader](../../versions/v1.72/native-sqlite-usage-incremental.md)。S/R/T |
 | OpenCode V2 | prompt response 当前根 Prompt 的聚合 Delta | 原生 full total；U/R/W，普通 output 与 thought 互斥 | 保留 total 与已知输入桶/输出；缺 reasoning 不反推 Input，输入桶未齐则 I 总量未知；缺终态可能无数字 | V2 禁用 V1 reader；Prompt ID 去重；不包含原生委派 Session；原有 partial quality 不应阻挡已知数值。[源码](../../../crates/rovai-core/src/monitoring.rs)。S/T；本轮无新真实逐调用样本 |
 | Kilo ACP | 共用 V1 SQLite 根调用 reader | U+R+W；普通 output + reasoning=O | reader 同上，稀疏字段、异步漏报边界同上；失败调用有可信正计数仍接纳，占位零不计 | 使用 Kilo 有效 DB 路径，禁止 ACP Token 双来源；[既有实施 R/T](../../versions/v1.72/kilo-acp-implementation.md)。真实完整逐调用数值样本本轮未新增 |
+| Goose 官方 ACP | `usage_update.accumulatedInputTokens/OutputTokens` Session 累计；Prompt 前注入原生基线 | I 含缓存，O；`message_usage` 仅补缓存子集，费用与 Context 分源 | 保留缺失与显式零；逐次累计差、下降重建基线；无安全基线不认领历史值 | Session/Prompt 路由，原生 `messageId` 去重缓存补充；缓存来源只更新内部指标，不与 I 再加。来源 [Goose parser](../../../crates/rovai-core/src/goose.rs)、[已有原生证据](../../versions/v1.72/goose-acp-implementation.md)。本次新增核对为 S/T，未重新调用真实模型 |
 | Copilot ACP | 订阅根 `assistant.usage` 逐调用 Delta | I 含 R/W；O 含 reasoning | timestamp 调用身份；忽略 dataOmitted、子 Agent；终态 Session 累计不计 | [真实六调用 R](all-runtime-app-verification-2026-10-03.md)，[parser](../../../crates/rovai-core/src/monitoring.rs)。原 transport 数值见证保留，parser 6 使用稳定调用 checkpoint；同 timestamp 补齐只修正既有贡献。S/R/T |
 | Cline ACP Plugin | `afterModel` 私有数字文件，根 native Run/message，逐调用 Delta | I 已含 R/W；reasoning 属 O | 未报告继续 null；live 与 terminal 读同有界序号文件 | 精确 Prompt lease、Run、Session、sequence；恢复不导入历史；[真实/受控 R/T](command-cline-verification-2026-10-04.md)、[故障 R/T](command-cline-fault-recovery-2026-10-05.md)。S/R/T |
 | Command Code 当前 ACP Mod | prompt result `_meta.usage` 当前 Prompt Delta | I 含缓存，O；无 reasoning 不猜 | 终态才有消费；失败响应无 Usage 时保留缺失 | 同 result `usage` 是 Session 累计，禁止混入；[当前原生简化 R/T](../../versions/v1.72/command-code-native-simplification.md)。S/R/T；逐调用对照来自旧版记录，不当作 1.88 新实测 |
@@ -145,7 +147,7 @@ Native total、含缓存 Input、缓存桶与 Output/reasoning 各自遵守覆�
 Pi/Copilot 使用原生调用时刻（Pi 另含 Provider/模型）作为窄身份；缺少独立 ID 时，若上游复用同一时刻，
 仍可能保守合并，不能凭 usage 数值变化制造一个新调用。此边界未取得全部上游模式的真实碰撞样本。
 Kimi 恢复 baseline 也冻结没有 usage 的旧根 step；本轮空数值帧不阻挡后续同调用数字。
-统计表保持可选，Migration 225 不因缺少可选用量投影阻塞 Core，也不重建原生历史。
+统计表保持可选，Migration 226 不因缺少可选用量投影阻塞 Core，也不重建原生历史。
 
 复用现有 Rust owners，新增/删除/永久禁用 `#[test]` 均为 0。
 Migration、原子回滚、可选统计、历史回执准入由既有数据库 owner 承接；schema 当前值使用仓库常量，
@@ -157,7 +159,7 @@ Migration、原子回滚、可选统计、历史回执准入由既有数据库 o
 | `cargo test --workspace` | 484 passed、0 failed，1 个既有 ignored；Core 438、CLI 31、Host 4、Web 11 |
 | `cargo test -p rovai-core --features extended-tests --lib monitoring::tests::` | 13 passed；包括分区/事务失败恢复、total 覆盖子集、同调用补齐和两方案外部数值对照 |
 | `cargo test -p rovai-core --features extended-tests --lib native_usage::tests::` | 3 passed；真实旧数值、根/子会话、历史、空帧迟到、SQLite 增量与失败正消费 |
-| `cargo test -p rovai-core --features extended-tests --lib async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt` | 1 passed；225/旧 194 回滚、旧值/null/zero、缺可选统计的升级 |
+| `cargo test -p rovai-core --features extended-tests --lib async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt` | 1 passed；226/旧 194 回滚、旧值/null/zero、缺可选统计的升级 |
 | `cargo test -p rovai-core --features extended-tests --lib database_contract_preflight_admits_current_and_rejects_future_store` | 1 passed；历史回执与可选统计不导致旧迁移重跑，当前收据缺失仍拒绝 |
 | `cargo test -p rovai-core --features extended-tests --lib current_migration_state_admission_matrix` | 1 passed；包括 schema 174 与当前通用指针 |
 | `pnpm exec vitest run apps/desktop/src/renderer/src/execution-metrics-reader.test.ts` | 9 passed；直接消费投影、所有状态、零/未知、旧 epoch、可见性和读取失败保留 |
@@ -187,9 +189,10 @@ OpenCode V2 缺 reasoning 的普通 Output 也被错误用于反推完整 Input�
 | 累计 I 包含缓存：100K/20K/10K 基线 → 仅 R=40K → I=120K/R=40K/O=10K | 显示新增仅 20K，不是 40K；同一 owner 也验证累计 Output/reasoning 与 full total/分项交错。已有父基线时不改计子项，等父计数推进 |
 | 同调用矛盾补充字段与另一 Run 的有效 O=7K 同批 | 矛盾补充局部跳过，旧 175K/checkpoint 保留；另一 Run 的 7K 正常提交。真实 SQL 失败仍按既有原子回滚/重试路径处理 |
 
-上述均为 S/T 证据，不是新一轮真实模型观测。正式 parser 中仅 Claude 发出消费 `Cumulative`，
+上述均为 S/T 证据，不是新一轮真实模型观测。初始基线中仅 Claude 发出消费 `Cumulative`，
 其已验证根 message 进入零基线的单调用快照分支；其余 Gauge 是 Context。
-当前未发现正式 Runtime 进入通用 Session/Run 消费累计分支，因此父子交错是算法反例与防御回归，不能记为已发生的线上重复计量。
+该基线未发现正式 Runtime 进入通用 Session/Run 消费累计分支；合主线后 Goose 新增该正式入口，见文末核对。
+原父子交错反例仍不能记为已发生的线上故障。
 
 定向验证：`cargo test -p rovai-core --features extended-tests --lib monitoring::tests::` 13 passed，
 `cargo test -p rovai-core --features extended-tests --lib native_usage::tests::` 3 passed。
@@ -227,3 +230,17 @@ Run finished 后的普通采样由既有 `accepts_native_poll` 前后栅栏停�
 收口验证：完整 `cargo test --workspace` 484 passed、0 failed、1 个既有 ignored；monitoring 13 passed、
 native reader 3 passed（含以上查询计数与首次采集回归）；格式、diff 和源码隔离副本的通用文档治理通过。
 复用既有 owners，未新增、删除或禁用 Rust 测试函数；没有启动真实 Runtime 或完整 App。
+
+## 主线集成核对（2026-11-16）
+
+保留已合入主线的 Goose Migration 225/schema 175，RunCard 投影顺延为 Migration 226/schema 176；
+Memory 224 与 Goose 预览来源的准入、数据保留和回滚继续由原 owners 验证，没有另开迁移旁路。
+
+Goose 由 Host 在发送 Prompt 前回送已有原生 Session 计数，新 Session 使用原生零基线；
+Core 只计当前 Run 差值。受控生产 parser→buffer→checkpoint 样本：
+Session 基线 I=100K/O=10K，当前 I=150K/O=15K，另有本消息缓存读 40K，
+两方案对这一完整区间均为 55K，不能再加缓存成 95K。
+同一缓存消息补齐到 Read=45K/Write=1K 后，仅修正内部缓存指标，不改变显示合计或增加请求次数。
+I 单边再推进 10K 时方案 1 更新到 65K，随后 O 增加 1K 更新到 66K；
+下一 Run 在同 Session 重新建立基线后只计自身新增 6K，不带入前一 Run 的消费。
+以上均为新增 S/T 集成证据，不加入原 37 组历史真实样本的分母，也不宣称重新实跑全部 22 种 Runtime。

@@ -1,0 +1,307 @@
+---
+document_type: research-record
+authority: non-normative-runtime-evidence
+status: native-research
+last_updated: 2026-11-15
+---
+
+# Goose 官方 ACP 研究与原生探测
+
+结论：可以沿共享 ACP/Fleet 接入，推荐入口是官方 `goose acp`。
+Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收回执和逐消息／累计用量通知，
+这三处可以比 Kilo 更薄。MCP 恢复的追加语义、write 缺少完整前像、压缩用量范围是必须正面处理的差异。
+
+2026-11-14 在相同官方版本复跑 58 次受控 Provider 请求，补充三模式工具集合和客户端回放缩减验证；
+该受控探针没有真实账号调用。后续用户授权的[真实 Sub2API 验收](sub2api-real-1.59.0-macos-arm64.json)
+已验证普通回复、write/edit 和 Core CLI 发送；平台资格没有提升，当前事实以更新的白名单和实施记录为准。
+后续[目录与参数精简证据](catalog-options-1.59.0-macos-arm64.json)验证无 Session 的完整目录、
+目标参数独立发布、MiniMax/Goose 的共享 UI 行为与真实 Sub2API/gpt-6 high 执行。
+User sequence 138 取消逐轮原生默认刷新后，[会话选择精简证据](native-selection-1.59.0-macos-arm64.json)
+另行验证官方 Core 的 Warm／精确冷恢复保留 Session 模型和 effort；不改变上述历史验收结果。
+User sequence 142 进一步取消正式执行中的 MCP 主动撤回，当轮边界见
+[Runtime Launch v94](../../contracts/runtime-launch-and-verification-v94.md)。下方 remove 探针保留为官方能力研究，
+不再作为 Rovai 任务准备的必需步骤。
+对应[原生 MCP 保留验收](mcp-native-retention-1.59.0-macos-arm64.json)分别记录受控接口拒绝与官方 Core 执行。
+User sequence 144 随后恢复尽力撤回，当时边界为 [Runtime Launch v95](../../contracts/runtime-launch-and-verification-v95.md)：
+整批短预算，失败只诊断，连接可用仍继续。正常撤回、原生迟到删除和重新分配、旧扩展冷恢复分开验收。
+原生无响应 stdio 握手的[局部补丁](upstream/README.md)独立验证，不在 Rovai 增加加载管理层。
+对应[尽力撤回白名单](mcp-best-effort-1.59.0-macos-arm64.json)包含正常官方 Core、迟到删除／重分配和原生补丁三组结果。
+
+User sequence 146 的两处修复见 [Runtime Launch v96](../../contracts/runtime-launch-and-verification-v96.md)：
+新建 Session 提前传入显式 Provider，已成功的参数查询不因临时 Session 删除失败作废。
+[可用性验收白名单](session-availability-1.59.0-macos-arm64.json)区分官方原生对照、Core 实际查询和删除故障。
+无默认 Provider 的创建确实失败；另测的未知 Provider／缺凭据默认可能返回未就绪 Session，不能统一描述为创建失败。
+极端删除拒绝保留了 1 个原生探测 Session，查询仍成功；原生无响应 MCP 初始化限制保持。
+
+目标参数探测的当前边界见 [Runtime Launch v97](../../contracts/runtime-launch-and-verification-v97.md)。
+固定官方 1.59.0 用 `_meta.enabledExtensions: []` 选择零扩展，参数查询不依赖原生配置中的 MCP；
+正式任务和普通检查仍继承原生扩展。原生反例、实际 Core 和界面行为见
+[空扩展探测白名单](probe-extensions-1.59.0-macos-arm64.json)。
+
+本页记录实施前的研究与真实官方二进制受控探测。正式接线已完成，当前结果与缺口见[本版实施](../../versions/v1.72/goose-acp-implementation.md)。
+[实施及模型输入提案 R1](../../versions/v1.72/goose-acp-proposal.md)已由 User sequence 117 确认，正式实现与验收继续在原 worktree 进行。
+以下矩阵保留研究阶段的原生与 Rovai 状态；`Verified` 指原生能力，不代表真实账号已登录或目标平台已取得产品资格。
+
+<a id="windows-x64-qualification"></a>
+## Windows x64 目标机验收
+
+2026-11-15 在 Windows 10 Pro 22H2 x64（build 19045，NTFS）运行官方完整 CLI 1.59.0。
+验证使用 `711e66a8f` 构建的 Core、[官方 MSVC 发布包](https://github.com/aaif-goose/goose/releases/tag/v1.59.0)
+和独立的 Core 数据、Skill 文件、MCP、Goose 原生目录及工作区。使用既有 Windows Debug 资格开关采集证据，
+正式准入由 [Windows x64 证据](../../../qualification/runtime-platform/windows-x64-goose-v1.json)绑定。
+
+- 真实 Goose 自定义 Provider 使用 Sub2API 的 `v1/responses` 和 `gpt-6`，3 个 Run 全部成功。
+  首轮通过原生 write/edit 验证含中文、空格的路径，通过内置 `rovai` CLI 恰好发布一次。
+  热续接复用 Host、PID 和原生 Session，实际调用被分配的 stdio MCP。取消分配并计划关停 Core 后，
+  新 Host 精确加载原 Session，原生持久化扩展列表已撤回该项。两次计划关停都写入回执并回收观察到的 Goose 进程。
+- 官方 Core 加受控 Provider 的普通组为 19 成功／1 用例取消，迟到组为 21 成功／1 用例取消。
+  覆盖原生 Bootstrap、项目 Skill、审批、Steer、取消后同 PID 续接、旧命名管道租约拒绝及观察到的 Host/MCP 进程回收。
+  普通撤回后已撤项消失，当前仍分配和用户原生 MCP 均可见。迟到组的 relay 把删除交给官方 Goose，
+  用原生会话数据库写锁延迟提交。Core 在本地预算到期后继续，随后重分配先于原生删除完成，
+  同一 Session 的后继任务成功调用重新分配的工具。
+- 原生 MCP 进程直接退出时，`session/load` 约 211 ms 返回并报告扩展失败，后续 prompt 成功。
+  MCP 完全不回应握手时，配置 1 秒扩展超时，官方 Windows 二进制仍超出 4 秒探针期限。
+  收尾检查时该夹具子进程已退出；[局部原生补丁](upstream/README.md)及原生默认 300 秒的恢复行为未在 Windows 复验。
+
+关闭 Debug 资格开关后，Core 从 PATH 发现同一官方 CLI，返回 `qualified` 和与证据文件匹配的 SHA-256。
+正式路径复跑真实模型 3/3 成功，两次计划关停分别回收当时观测到的 7、3 个 Core 后代进程。
+同一正式准入构建复跑受控普通组 19 成功／1 取消、迟到组 21 成功／1 取消。
+
+Windows 基线的全量 Rust 测试观测到 Codex 证据去重和 Mission Git 私有索引用例失败。
+Goose 的实机验收和准入矩阵测试按独立入口执行。
+
+在独立工作树运行 [Core smoke](../../../scripts/smoke-goose-runtime.mjs) 可复跑两组受控用例。
+Windows 使用原生命令、命名管道和独立用户目录。真实运行可在同样的隔离条件下，将 Sub2API
+配置为 Goose 原生 custom Provider，指定 `base_path = v1/responses` 并由 `api_key_env` 读取凭据。
+
+```powershell
+cargo build --locked -p rovai-core --bins
+$env:ROVAI_GOOSE_BIN = 'D:\path\to\official\goose.exe'
+node scripts/smoke-goose-runtime.mjs
+$env:ROVAI_GOOSE_SOFT_MCP_FAULTS = '1'
+node scripts/smoke-goose-runtime.mjs
+```
+
+准入范围为 Windows x64 的 Core 正式执行链路。打包 Desktop、完整 First-Class Golden Flow 和其他平台各自需要证据。
+
+## 固定基线与复现
+
+| 项目 | 本轮范围 |
+| --- | --- |
+| 上游 | `aaif-goose/goose`；原 `block/goose` 已跳转到该仓库 |
+| 发布 | [v1.59.0](https://github.com/aaif-goose/goose/releases/tag/v1.59.0)，2026-11-10 发布 |
+| 固定源码 | `5d03ef6ed07ba59826328f1aff18d9a754ff8ad2` |
+| 本地平台 | macOS arm64；不据此提升 Intel、Linux 或 Windows 的资格 |
+| 原生程序 | 发布附件 `goose-aarch64-apple-darwin.tar.gz` 中的完整独立 CLI；未全局安装 |
+| 实际入口 | `goose acp`，默认带 developer；没有另启 HTTP 服务 |
+| Rovai 研究分支 | `rovai/goose-acp`，基线 `c7295e2b0b4667a5434c855cd2dd456bcf637e4c` |
+| 环境 | 自动验收通道；独立 HOME、XDG、`GOOSE_PATH_ROOT`、工作目录、Skill 与本地假 Provider |
+| 模型与密钥 | 全部为受控 loopback 响应和 `fixture-key`；未用真实账号、订阅或付费模型 |
+| 证据 | [白名单结果](native-probe-1.59.0-macos-arm64.json)、[可执行探测](../../../scripts/probe-goose-runtime.mjs) |
+
+```bash
+ROVAI_GOOSE_BIN=/absolute/path/to/goose node scripts/probe-goose-runtime.mjs
+```
+
+脚本要求固定的 1.59.0 版本，每次创建新临时根，保留原生帧和合成 Provider 请求供本机检查。
+可用绝对 `ROVAI_GOOSE_PROBE_ROOT` 指定这些新临时根的父目录。
+脚本里的 Node 是探测驱动和明确声明的 MCP 夹具依赖，不是 Goose 产品启动依赖。
+本轮使用 POSIX shell 夹具，不能把在 Windows 拒绝运行此脚本算作 Windows 不支持 Goose。
+清理器关闭 stdin，并在期限后回收本次拥有的进程组；这不能代替正式 Core 的取消、租约和关停证据。
+
+官方另发小型 `goose-acp` 程序，其[入口](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/bin/goose-acp.rs)
+调用同一 ACP server，但没有完整 CLI 的 `configure` 操作。本次只选完整 CLI，避免同时维护两种产品安装身份。
+
+## 14 轴 Parity Matrix
+
+最接近的生产基础是 Kilo/OpenCode 的共享 ACP Host；模型档位按当前 MiniMax/DSH 的目标模型按需路径处理。
+表中接入策略均为提案，不是已批准的产品差异。
+
+| 核心能力轴 | 上游能力及本轮证据 | 最小接入策略 | Runtime evidence / Rovai implementation |
+| --- | --- | --- | --- |
+| Auth / Provider / Model | 原生配置、keyring、Provider inventory；本地 OpenAI 可发现三个合成模型；当前模型有 `thinking_effort` | 保留原生认证；配置可用 Provider 的官方目录；仅查询选中模型的档位 | 目录／setter `Verified`；真实认证 `NotObserved` / `NotImplemented` |
+| Host / Fleet / LRU | 常驻 stdio，多 Run 可用同 PID；普通取消及子代理取消后继均成功 | 一个 Binding 一个 Host，接共享 Fleet/LRU 和兼容判断 | 原生复用 `Verified`；Core 租约 `NotObserved` / `NotImplemented` |
+| Native Session / Continuation | `session/new`、精确 `session/load`；不存在 ID 返回 -32002；冷恢复保留历史 | 保存完整原生 ID 与数据根；不猜 Session，不依赖 recent/list 自动挑选 | `Verified` / `NotImplemented` |
+| Bootstrap / Context | 原生 keyed append System API；首次／warm／cold／88,099 字节完整读取和 Session 隔离 | 每 Run 设置冻结 B，成功后只发送冻结 P；无文件、插件或握手 | `Verified` / `NotImplemented` |
+| Compaction continuity | 阈值自动压缩、一次真实 overflow 错误触发摘要和重试；之后普通生成及冷恢复保留更新后的 B | 由 Goose 压缩，复用现有 compaction 通知和 context gauge | `Verified` / `NotImplemented` |
+| Skills | 项目 Skill 被模型实际读取，同 Host 更新后读取新正文，删除后原生拒绝；用户和插件根见源码 | 原生 Skill 继续由 Goose 加载；Rovai 平台／工具箱索引与路径读取沿共享 B/P | 项目加载 `Verified`；完整 Core 分发 `NotObserved` / `NotImplemented` |
+| External MCP | stdio 模型实调；冷恢复 A→B→空仍有 A+B；原生 list/remove 后冷恢复不再出现 | 现有分配投影加稳定归属名；只移除不再分配的 Rovai 项；不同 cwd 复用 bundled launcher | stdio／撤销 `Verified`；HTTP 与跨 cwd `DocumentationOnly` / `NotImplemented` |
+| Tool / Action / Command Output | write→shell cat→edit；stdout/stderr、exit 7、空输出、9,000 字节；delegate 原生元数据 | 共享 Action/输出预算；映射原生结构；不重复执行文件操作或伪造前像 | `Verified`；标准完整文件 Diff／覆盖前像 `Unsupported` / `NotImplemented` |
+| Narration / Final / Missing-Send | 标准 agent chunks、`end_turn`、`cancelled`；辅助标题生成可单独发生 | 保留 narration/final/公开 CLI 消息分工；合法空终态不造回复；沿用 Missing-Send | 原生流与终态 `Verified`；公开发送 `NotObserved` / `NotImplemented` |
+| Permission / Approval / Workspace | 原生四 mode；approve 的 allow_once 有一次文件效果、reject_once 无效果；不支持表单的客户端收到原生取消降级 | 默认 auto，保留原生 mode；共享审批原选项；不增加权限规则求值器或问卷自动答案 | 审批／问卷取消 `Verified`；强制 readonly `Unsupported` / `NotImplemented` |
+| Built-in `rovai` CLI | developer shell 可以执行本地命令；正式 Run 凭证和公开发送尚无 Goose Core | 复用已有 bundled CLI、环境、Run/epoch/lease 和公共回执 | shell `Verified`；正式 CLI 交付 `NotObserved` / `NotImplemented` |
+| Usage / Cache / Cost | 官方累计和逐消息通知；cache-inclusive 输入，估算费用带 provenance；自动压缩未见逐消息用量 | 共享累计基线及 checkpoint；逐消息补缓存，不双记；缺失缓存保持 partial | 受控数值 `Verified`；所有 Provider 账单 `NotObserved` / `NotImplemented` |
+| Retry / Queue / Cancel / Cleanup | 双 Steer 提前回执，错 Run 拒绝；普通／子代理取消后同进程后继成功 | 共享 Delivery/epoch、期限和 Fleet；accepted/unknown 不自动重投 | 原生 `Verified`；Core 隔离及崩溃 `NotObserved` / `NotImplemented` |
+| Ready / Version / Platform | 真实初始化 ACP v1、agentInfo 1.59.0；官方多平台附件 | 共用发现、轻检查、安装版本及平台准入；不把握手当登录 | macOS arm64 原生 `Verified`；其他平台 `NotObserved` / `NotImplemented` |
+
+## 比 Kilo 更简单的部分
+
+### 原生 System 追加，无需私有 instructions 文件
+
+官方 API：
+
+```json
+{"method":"_goose/unstable/session/system-prompt/set","params":{"sessionId":"native-id","mode":"append","key":"rovai-session-bootstrap","text":"完整冻结 B"}}
+```
+
+响应为 `{}`。同一 key 替换旧值，空正文清除；`set` 模式会替换原生 base，因此提案只使用 `append`。
+其内容保存在原生 Session 中，每次生成由 Goose 组装到 Additional Instructions。
+已验证：首次、同 PID warm、精确 cold、自动／overflow 压缩后普通请求、压缩后再次 cold、第二 Session 隔离。
+测试检查了实际 Provider 请求中的完整 B，而不是只看 setter 返回。
+
+原生辅助标题与摘要请求有自己的 System，不保证包含 B；原生子代理使用专用 System，
+本轮证实它**不继承父 Session 的 B**。接入承诺是父 Session 的普通业务生成；不另造子代理身份或偷偷补一份 B。
+Goose 自己会给用户消息追加时间／cwd 的 turn-context，并清理 Unicode tag；这些是原生行为，Rovai 不另改 B/P。
+来源：[类型](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-sdk-types/src/custom_requests.rs#L192)、
+[Session handler](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/manage_sessions.rs#L48)、
+[Prompt manager](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/agents/prompt_manager.rs)。
+
+### 原生 Steer 有独立接收回执
+
+```json
+{"method":"_goose/unstable/session/steer","params":{"sessionId":"native-id","expectedRunId":"active-run","prompt":[{"type":"text","text":"冻结的补充输入"}]}}
+```
+
+返回 `{"runId":"active-run","messageId":"steer_…"}`，同一 messageId 之后出现在原生消费消息中。
+`activeRunId` 来自 `session_info_update._meta.goose.activeRunId`；结束后可为 null。
+本轮按住父模型响应，先拿到两条不同 messageId，确认原始 prompt 仍未结束，再放行并看到两条补充输入进入模型。
+错误 expectedRunId 在接纳前返回 -32602。局部毫秒耗时只用于记录，不能承诺真实网络／模型响应时间。
+
+因此不用复制 Kilo 的第二个 `session/prompt` 及多 prompt 收口路径，也不用等 `end_turn` 才确认插话。
+原始输入仍按共享接收规则确认；仅得到 activeRunId 不代表初始 P 已被处理。
+来源：[请求／回执](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-sdk-types/src/custom_requests.rs#L220)、
+[接纳处理](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server.rs#L2328)。
+
+### 前台子代理由原生等待
+
+`delegate` 工具先返回“Delegated to subagent …”及 `subagentSessionId`，这不是子代理结束证据。
+1.59.0 的状态机已移除后台子代理，使用 ForegroundSubagentRunner。
+本轮按住子代理模型响应，父 prompt 一直未结束；放行后父模型实际收到子代理的 final-output 报告。
+另一次在子代理被按住时取消，父 prompt 返回 cancelled、子代理 HTTP 请求断开，随后同 PID/Session 正常执行。
+正式 Core 仍需验证自己的旧回调、租约、epoch 和进程管理，不能由这条原生结果替代。
+来源：[原生前台等待](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/agents/state_machine/ops_subagent.rs)。
+
+## 必须保留的薄适配
+
+### 模型目录、档位与原生认证
+
+`_goose/unstable/providers/list` 的 entries 包含 Provider 身份、configured、available、models 等原生信息。
+标准 configOptions 的 provider 下拉包括未配置 Provider，不能全当可执行模型；本轮返回 90 个 Provider 选项。
+inventory 的模型有 reasoning 标志，**没有每个模型的完整 effort 枚举**。
+`providers/supported-models/list` 也只返回模型 ID。
+另核对了 catalog/list、catalog/template 和 canonical-model-info：前两者服务于 Provider 安装模板，
+后者给上下文、价格和 reasoning 标志，也没有完整档位枚举；不能因为名称含 catalog 就当成全部模型参数。
+
+推荐一次读取原生 Provider inventory，界面正常使用已配置且可用的模型；目标模型的 `thinking_effort`
+沿 MiniMax/DSH 现有按需查询获取，不扫描整个目录，也不按名字补 low/high。
+本轮选择合成 `gpt-6.1-sol` 并设 high 后，真实官方程序发送 OpenAI Responses 的
+`reasoning.effort=high`；不是 Rovai 代发请求或改写 Provider 参数。
+来源：[Provider DTO/API](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-sdk-types/src/custom_requests.rs#L1761)、
+[原生 setter](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/dispatch.rs#L153)。
+
+原生 `goose configure`、用户／项目配置、keyring 或原生 secrets 文件继续由 Goose 负责。
+probe 关闭 keyring、重定向 HOME 的隔离做法不能进入产品启动环境。
+configured/available 和 ACP 握手不证明 API Key、OAuth、订阅刷新或 Sub2API 实际可生成。
+标准 ACP authenticate 在此版本直接返回空成功，没有执行 Provider 登录；该 ACK 不能投影成登录成功。
+官方 providers/readiness/check 仅面向嵌套 ACP Provider，也不能拿来当普通 API Provider 的统一验密入口。
+这些均待官方 CLI 配置完成后的独立真实模型验收。
+来源：[官方配置说明](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/documentation/docs/guides/config-files.md)、
+[authenticate handler](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/dispatch.rs#L38)、
+[ACP Provider readiness](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/providers.rs#L532)。
+
+### MCP 不能只换 Host 或传空列表
+
+官方会把 ACP 分配写入 Session extension_data；恢复时新列表按 name 追加／替换，空列表不删旧项。
+已经用 A→B→空的精确 cold load 证实 A+B 同时存在；新 Host 不等于删除旧 MCP。
+原生 `session/extensions/list` 返回 extensionKey，`session/extensions/remove` 删除后再次 cold 仍不再出现。
+
+提案用已有 server_id 生成稳定的 Goose 归属名，放在共享投影现有 runtime_name 中；
+只列出并删除不再分配的 Rovai 归属项，保留用户原生及其他扩展。不是每 Run 换名藏旧工具，
+也不增加配置镜像、dirty 标志、版本队列或 MCP 管理器。
+实际保存行为与 Kilo 一致：只保存，下次 Run 准备时处理，不打断当前冻结的工具集合。
+remove 发生在原生 load 之后、业务 P 之前；load 可能已短暂恢复旧 MCP 的连接，不能承诺撤销项从未启动。
+来源：[恢复追加](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server.rs#L1117)、
+[原生增删接口](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/extensions.rs)。
+
+标准 ACP stdio 配置没有独立 cwd；复用 [bundled Rovai cwd 入口](../../../crates/rovai-core/src/runtime_mcp.rs)
+即可，不解析 python/node 命令里的路径，不假定安装 Node。远程 HTTP MCP 不启动本地进程，不经过这个入口。
+
+### 文件、命令与子代理展示
+
+原生工具启动携带 `_meta.goose.toolCall.toolName/extensionName`，参数保留在 rawInput。
+write 使用 path/content，edit 使用 path/before/after，shell 使用 command。
+write/edit 完成只返回文本与 locations，没有完整 before/after 或标准 ACP Diff；完整覆盖前像在此传输中不可得。
+edit 的确切片段可在原生参数详情中展示，但未知行号不能自行补齐为标准文件补丁。
+只有原生确实给出合法 patch 时才交共享 normalizer；当前默认工具缺少整文件 Diff，显示真实操作结果，
+不读修改后的文件伪造旧内容和整文件增删数。
+
+shell 的完成 rawOutput 有 stdout、stderr、exit_code；exit 7 对应 failed。
+原生 9,000 字节输出未被 7.5 KiB 限制；Rovai 仍必须沿共享持久化输出预算截断，不能另做一份 Goose 预算。
+streaming toolNotification 与完成快照可能重复，继续由共享输出 owner 去重。
+不打开原生 toolCallLabelEnrichment；默认元数据足够映射，不为工具标题另加模型生成。
+delegate 映射已有子代理卡片；只展示原生给出的任务、child Session 和状态，不扫原生历史伪造逐步执行。
+来源：[工具转换](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/tool_calls/conversion.rs)、
+[developer](https://github.com/aaif-goose/goose/tree/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/agents/platform_extensions/developer)。
+
+### 累计用量与逐消息缓存不能混算
+
+开启官方 customNotifications 后可同时收到标准 usage_update 和
+`_goose/unstable/session/update`。后者有：
+
+- usage_update：used、contextLimit、accumulatedInputTokens、accumulatedOutputTokens、可选 accumulatedCost。
+- message_usage：messageId、input/output/total、可选 cacheRead/cacheWrite、cost、costSource、生成耗时。
+
+输入含缓存，缓存是输入的子集；estimated 成本只能标成既有 `runtime_estimate`，不能冒充 Provider 实际账单。
+本轮实际自动压缩有开始／结束通知和摘要 Provider 请求，累计数值也增长，
+但未观察到逐消息 `isCompaction=true` 用量。只加普通 message_usage 会漏摘要。
+
+推荐共享累计源在 dispatch 前建立 Session 基线：new 明确 0，cold 用 load 的累计快照，warm 用该 Host 已观察的末值。
+再由既有 checkpoint 求差；不能拿生成后的第一条累计值作基线。
+逐消息仅补充缓存／来源，不能把它的 input/output/cost 再叠加；压缩缺失的缓存保持 partial。
+历史回放必须经过 LoadingHistory 隔离，不给新 Run 记账；标准与 custom 重复来源只选一个累计计数源。
+不再为 Goose 建 SQLite 历史扫描器，不调用包含整段上下文的 report API 来轮询数值。
+来源：[通知结构](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-sdk-types/src/custom_notifications.rs#L76)、
+[缓存语义](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose-provider-types/src/conversation/token_usage.rs#L96)、
+[现有数值 owner](../../../crates/rovai-core/src/monitoring.rs)。
+
+### 问卷与 native Skills
+
+默认 17 工具没有问卷工具；MCP 仍可请求 form elicitation。
+原生在 ACP client 未广告表单能力时会取消而非代填。本轮真实 MCP 夹具已收到 action=cancel，
+没有生成 choice，后继 prompt 成功；接入不广告尚未实现的问卷 UI。
+普通 allow_once/reject_once 审批独立转交，不把问卷降级变成自动允许。
+来源：[原生问卷取消](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/elicitation.rs)。
+
+原生 Skill 搜索项目 `.agents/skills`、`.goose/skills`、`.claude/skills` 和用户／启用插件目录。
+没有核实到通用的额外 Skill 路径环境变量，不应为了接入虚构一个。
+现行 Rovai 平台 Skill 及工具箱以共享 B/P 中的真实路径索引交付，可由原生 shell 阅读；
+正式接线后必须验证实际读取、更新和移除，不把“原生支持 Skill”当作 Core 分发已验收。
+来源：[发现顺序](https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/skills/mod.rs#L298)。
+
+## 失败记录与未验证范围
+
+探测器迭代中保留的失败不是产品缺陷证明：最初把辅助标题请求当普通请求、把 Responses 误当 Chat、
+把 `load` 误当文件读取、期待 delegate 完成帧直接附带子报告，均已通过固定源码和真实帧修正。
+后续断言分别要求普通请求完整 B、真实 Responses assistant chunk、文件调用零失败、
+子代理被按住时父请求未结束，以及报告真正进入父模型输入；没有删除这些场景来凑通过。
+自动压缩“没有逐消息用量”则是本轮明确保留的观测限制。
+
+仍未验证：真实 OAuth/订阅/BYOK/Sub2API、正式 Core 的新 lease/epoch 与 public send、
+Goose 在无响应／断连／迟到审批时的 Core 清理、不同 cwd helper、远程 MCP、完整 Skills 选择投递、
+Renderer 的 7.5 KiB 和 Diff、Intel/Linux/Windows 资格。不能用本轮原生夹具宣称 First-Class。
+实施验收按 [接入清单](../../development/runtime-integration-checklist.md)的 14 轴和 9 Golden Flows 继续。
+
+## Linux x64 目标机验收（2026-11-15）
+
+Debian 12 x64（glibc 2.36）运行 [Goose 官方 1.59.0 GNU 归档](https://github.com/aaif-goose/goose/releases/tag/v1.59.0)。
+Rovai 来自 Ubuntu 22.04 上构建的原生 Server 包，核对了归档、manifest、bundled CLI 与 Skills。
+原分支在目标机返回 `runtime_platform_not_qualified`，候选构建仅开放 Linux x64 Preview。
+
+独立 Goose 的 `config.yaml`、`custom_providers` 与 `secrets.yaml` 使用其原生配置格式，Sub2API 走本机回环，
+模型为 `gpt-6`。官方 CLI 本身收到真实回复。随后在隔离 Rovai Thread 实测三个 Run：新增 Unicode／空格路径文件，
+Warm 续接只修改第一行，关闭再启 Core 后，用同一个原生 Session 读回初次消息的记忆标记。三个 Run 各有一条内置 CLI
+公开回复，两个文件操作均有共享事件和实际内容核对。完整红绿 Diff 仍受原生前像缺失限制。
+
+同一候选构建用官方 Goose 跑受控 ACP 用例，21 个 Run 成功，1 个按用例取消。该用例覆盖权限审批、取消后复用、
+正常与超时的 MCP 撤回、Steer、自动压缩、用量与原生 Session 精确恢复。真实 Provider 的完整故障矩阵、
+计划关停的进程回收、HTTP MCP、多 Binding 压力和其他发行版仍待验证。[脱敏验收记录](linux-x64-1.59.0-debian12.json)

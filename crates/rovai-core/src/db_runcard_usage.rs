@@ -30,8 +30,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         .transaction_with_behavior(TransactionBehavior::Immediate)?;
     anyhow::ensure!(
         matches!(classify_database_contract(&tx)?,
-        DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 174),
-        "RunCard Usage requires schema 174"
+        DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 175),
+        "RunCard Usage requires schema 175"
     );
     if projection_exists(&tx, "runtime_usage_run_summary")? {
         tx.execute_batch("ALTER TABLE runtime_usage_run_summary ADD COLUMN display_total_tokens INTEGER
@@ -51,8 +51,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             "ALTER TABLE runtime_usage_checkpoint ADD COLUMN native_total_baseline INTEGER;",
         )?;
     }
-    tx.execute_batch("INSERT INTO schema_migration VALUES(225,datetime('now'));
-        UPDATE rovai_data_contract SET projection_schema_version=175,updated_at=datetime('now') WHERE singleton=1;")?;
+    tx.execute_batch("INSERT INTO schema_migration VALUES(226,datetime('now'));
+        UPDATE rovai_data_contract SET projection_schema_version=176,updated_at=datetime('now') WHERE singleton=1;")?;
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
@@ -66,15 +66,19 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
-    if table_columns(c, "runtime_usage_run_summary")
-        .unwrap()
-        .contains(&"display_total_tokens".into())
-    {
-        c.execute_batch("ALTER TABLE runtime_usage_run_summary DROP COLUMN display_total_tokens;
-            ALTER TABLE runtime_usage_checkpoint DROP COLUMN native_total_baseline;
-            DELETE FROM schema_migration WHERE version=225;
-            UPDATE rovai_data_contract SET projection_schema_version=174 WHERE singleton=1 AND projection_schema_version=175;").unwrap();
+    for (table, column) in [
+        ("runtime_usage_run_summary", "display_total_tokens"),
+        ("runtime_usage_checkpoint", "native_total_baseline"),
+    ] {
+        if projection_exists(c, table).unwrap()
+            && table_columns(c, table).unwrap().contains(&column.into())
+        {
+            c.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column};"))
+                .unwrap();
+        }
     }
+    c.execute_batch("DELETE FROM schema_migration WHERE version=226;
+        UPDATE rovai_data_contract SET projection_schema_version=175 WHERE singleton=1 AND projection_schema_version=176;").unwrap();
 }
 
 #[cfg(test)]
@@ -120,7 +124,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .connection()
         .execute_batch(
             "CREATE TEMP TRIGGER reject_runcard_usage BEFORE INSERT ON schema_migration
-        WHEN NEW.version=225 BEGIN SELECT RAISE(ABORT,'runcard rollback'); END;",
+        WHEN NEW.version=226 BEGIN SELECT RAISE(ABORT,'runcard rollback'); END;",
         )
         .unwrap();
     assert!(
@@ -130,10 +134,10 @@ pub(super) fn assert_upgrade(database: &mut Database) {
             .contains("runcard rollback")
     );
     assert!(!schema_matches(database.connection()).unwrap());
-    assert!(!database.schema_migration_applied(225).unwrap());
+    assert!(!database.schema_migration_applied(226).unwrap());
     assert!(
         matches!(classify_database_contract(database.connection()).unwrap(),
-        DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version==174)
+        DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version==175)
     );
     database
         .connection()

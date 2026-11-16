@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "baseline": "7181fb4d7416f295d4ccebb13f3ff44e88d27cdd",
+  "runtime": {"version": "1.59.0", "platform": "darwin-arm64", "distribution": "unmodified Homebrew block-goose-cli", "provider": "synthetic-loopback", "qualificationChanged": false},
+  "nativeField": {
+    "name": "_meta.enabledExtensions",
+    "value": [],
+    "parser": "https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server/new_session.rs#L294",
+    "selection": "https://github.com/aaif-goose/goose/blob/5d03ef6ed07ba59826328f1aff18d9a754ff8ad2/crates/goose/src/acp/server.rs#L608"
+  },
+  "nativeProbe": {
+    "command": "ROVAI_GOOSE_BIN=/absolute/official/goose ROVAI_GOOSE_PROBE_SCOPE=model-options node scripts/probe-goose-runtime.mjs",
+    "configuredNativeMcpTimeoutSeconds": 1,
+    "inheritanceComparisonActuallyStartedMcp": true,
+    "inheritanceComparisonClientTimedOutAfterMs": 4000,
+    "emptySelectionToolCount": 0,
+    "targetEffortResolved": true,
+    "queryElapsedMs": 55,
+    "parameterQueryModelGenerations": 0,
+    "nativeMcpNotStartedByParameterSession": true,
+    "normalSessionRetainedWriteEditShellAndNativeMcp": true,
+    "fixtureMcpProcessesReaped": true
+  },
+  "core": {
+    "command": "ROVAI_GOOSE_BIN=/absolute/official/goose ROVAI_GOOSE_PROBE_MCP_FAULT=1 ROVAI_GOOSE_SESSION_FAULTS=1 ROVAI_GOOSE_SOFT_MCP_FAULTS=1 node scripts/smoke-goose-runtime.mjs",
+    "successfulRuns": 23,
+    "cancellationChecksPassed": true,
+    "providerRequests": 65,
+    "unresponsiveNativeMcpConfiguredDuringTargetQuery": true,
+    "unresponsiveNativeMcpStartedDuringTargetQuery": false,
+    "targetQueryRefreshStatus": "completed",
+    "clearedEffortOverridePreservedNativeHighInSameHost": true,
+    "explicitProviderAndBothDeletionFaultQueriesPassed": true,
+    "lateMcpRemovalAndReassignmentPassed": true,
+    "remainingProbeSessionsAfterControlledDeletionRefusal": 1
+  },
+  "renderer": {
+    "typecheckPassed": true,
+    "relatedUnitTestsPassed": 51,
+    "runtimePickerIntegrationPassed": true,
+    "memberAndOnboardingEntriesCovered": true,
+    "clearingEffortSavedNoOverride": true,
+    "clearingEffortTriggeredNoAdditionalTargetRead": true,
+    "modelSelectionScreenshotsInspected": 2,
+    "existingKeyboardImeThemeAndZoomMatrixPassed": true
+  },
+  "sharedRegression": {"coreLibPassed": 438, "cliPassed": 31, "hostPassed": 4, "webPassed": 11, "ignored": 1, "existingExtendedOwnersPassed": 2},
+  "limits": [
+    "The empty extension selection applies only to target-model parameter probes.",
+    "Business Session initialization with a silent MCP remains an upstream limitation.",
+    "No new real account, OAuth or other-platform acceptance was performed."
+  ]
+}

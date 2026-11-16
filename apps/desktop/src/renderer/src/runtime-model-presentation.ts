@@ -7,6 +7,7 @@ export function runtimeAdapterLabel(kind: string): string {
     pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
     'kilo-cli': 'Kilo',
+    'goose-cli': 'Goose',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',
@@ -35,7 +36,7 @@ export type MemberRuntimeConfigurationPresentation = {
 }
 
 type RuntimeEffortOption = {
-  key: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
+  key: 'thinking_effort' | 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
   label: string
 }
 
@@ -44,11 +45,20 @@ export function runtimeEffortOption(adapterKind: string): RuntimeEffortOption {
     'claude-code-cli': ['effort', '思考强度'],
     'command-code-cli': ['effort', '思考强度'],
     'kilo-cli': ['effort', '推理强度'],
+    'goose-cli': ['thinking_effort', '思考强度'],
     'minimax-code-cli': ['thinkingEffort', '思考强度'],
     pi: ['thinking_level', '思考强度'],
     'codebuddy-cli': ['thought_level', '推理强度']
   } as Record<string, [RuntimeEffortOption['key'], string]>)[adapterKind] ?? ['reasoning_effort', '推理强度']
   return { key, label: uiAttribute(label) }
+}
+
+export function runtimeDefaultModelLabel(adapterKind: string): string {
+  return adapterKind === 'goose-cli' ? uiAttribute('沿用 Goose 会话选择') : uiAttribute('智能体默认')
+}
+
+export function runtimeDefaultEffortLabel(adapterKind: string): string {
+  return adapterKind === 'goose-cli' ? uiAttribute('不覆盖原生思考强度') : uiAttribute('跟随模型默认值')
 }
 
 export function memberRuntimeConfigurationPresentation(
@@ -57,11 +67,12 @@ export function memberRuntimeConfigurationPresentation(
 ): MemberRuntimeConfigurationPresentation {
   const modelSelection = configuration.model
   if (modelSelection.mode === 'runtime_default') {
+    const model = runtimeDefaultModelLabel(configuration.adapterKind)
     return {
-      model: uiAttribute('智能体默认'),
+      model,
       effort: null,
-      strategy: uiAttribute('跟随智能体默认'),
-      summary:uiAttribute("智能体默认")
+      strategy: configuration.adapterKind === 'goose-cli' ? model : uiAttribute('跟随智能体默认'),
+      summary: model
     }
   }
 
@@ -77,7 +88,7 @@ export function memberRuntimeConfigurationPresentation(
         label: effortLabel,
         value: typeof rawEffort === 'string' && rawEffort
           ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [], configuration.adapterKind)
-          : uiAttribute('跟随模型默认值')
+          : runtimeDefaultEffortLabel(configuration.adapterKind)
       }
     : null
 
@@ -110,7 +121,7 @@ export function messageRuntimeModelPresentation(
   const { key: effortKey, label: effortLabel } = runtimeEffortOption(model.adapterKind)
   const choices = descriptor?.options.find(option => option.key === effortKey)?.values ?? []
   return {
-    model: descriptor?.displayName.trim() || model.modelId || uiAttribute('智能体默认'),
+    model: descriptor?.displayName.trim() || model.modelId || runtimeDefaultModelLabel(model.adapterKind),
     effort: model.reasoningEffort ? {
       label: effortLabel,
       value: runtimeEffortValueLabel(model.reasoningEffort, choices, model.adapterKind)

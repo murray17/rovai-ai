@@ -4798,6 +4798,27 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .agent-timeline .attachment-copy small { font-size: 11px; line-height: 1.3; }
 .agent-timeline .agent-artifact-icon { width: 28px; height: 32px; border-radius: 7px; background: transparent; box-shadow: none; }
 .agent-timeline .agent-artifact-icon svg { width: 24px; height: 24px; }
+.agent-timeline:has(.attachment-download-action) .attachment-open { padding-right: 52px; }
+.attachment-download-action { position: absolute; right: 10px; top: 50%; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; color: var(--ink); background: transparent; transform: translateY(-50%); opacity: 0; pointer-events: none; cursor: pointer; transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease; }
+.agent-timeline:hover .attachment-download-action,
+.agent-timeline:focus-within .attachment-download-action,
+.attachment-download-action[data-download-state="preparing"],
+.attachment-download-action[data-download-state="error"] { opacity: 1; pointer-events: auto; }
+.attachment-download-action:hover,
+.attachment-download-action:focus-visible { color: var(--ink); background: var(--surface-muted); }
+.attachment-download-action:active:not(:disabled) { background: var(--surface-subtle); transform: translateY(-50%); }
+.attachment-download-action svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.attachment-download-action:disabled { cursor: wait; }
+.attachment-download-action[data-download-state="error"] { color: var(--danger); background: var(--danger-soft); }
+.attachment-download-spinner { animation: attachment-spin 800ms linear infinite; }
+@media (hover: none), (pointer: coarse) {
+  .attachment-download-action { opacity: 1; pointer-events: auto; width: 44px; height: 44px; right: 4px; }
+  .agent-timeline:has(.attachment-download-action) .attachment-open { padding-right: 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attachment-download-action { transition: none; }
+  .attachment-download-spinner { animation: none; }
+}
 button.attachment-open { cursor: pointer; }
 button.attachment-open.is-preview { cursor: zoom-in; }
 button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, transparent); }

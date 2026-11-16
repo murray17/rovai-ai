@@ -3373,6 +3373,7 @@ mod tests {
             AdapterKind::CodexCli,
             AdapterKind::DeepseekHarness,
             AdapterKind::KiloCli,
+            AdapterKind::GooseCli,
         ] {
             let request = |run: &str, camp: &str, agent: &str| {
                 let mut request = acquire_request(run, camp);

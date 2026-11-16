@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-11-11
+last_updated: 2026-11-16
 ---
 
 # 队员身份与图像
@@ -83,6 +83,12 @@ GIF 保持动画；各 `MemberAvatar` 用同一取景区域显示原动画。旧
 文件系统访问、审批、权限模式等字段继续服从原 Runtime schema、原始选项和默认值；可用性、模型缓存和
 平台冻结状态仍来自 Core。视觉排序不改变初始选择：默认模型不写入显式模型 ID，选择固定模型也不自动填入
 推理强度；选择“跟随模型默认值”删除对应 override。
+
+Goose 复用现有模型、按需思考强度和权限下拉框；原生键为 `thinking_effort`，文案为“思考强度”。
+模型的不覆盖项、触发器与摘要统一使用“沿用 Goose 会话选择”，思考强度空选项使用“不覆盖原生思考强度”。
+模型菜单沿用现有提示位置说明“新会话使用原生初始值；已有会话保留当前值。”，不增加常驻小字或新控件。
+清除覆盖不表示重置原生默认值；执行语义见 [Runtime Launch v97](../../contracts/runtime-launch-and-verification-v97.md)。
+“执行模式”展示 `auto / approve / smart_approve` 原始值，默认来自 Core，不补额外提示或只读权限行。
 
 Kilo 只展示模型与模型参数，不显示权限字段、只读占位或权限帮助入口。
 执行默认与原生裁决由[Runtime Launch](../../contracts/runtime-launch-and-verification-v87.md)拥有，界面不推断统一权限档位。

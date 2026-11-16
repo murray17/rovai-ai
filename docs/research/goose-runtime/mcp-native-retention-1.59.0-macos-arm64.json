@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-15",
+  "runtime": "goose-cli",
+  "officialVersion": "1.59.0",
+  "upstreamCommit": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+  "baseline": "e1d39a6c3553b3d1ef4f4e7a7cd859c684217fed",
+  "platform": "macos-arm64",
+  "contract": "Runtime Launch v94",
+  "productStage": "Preview",
+  "qualificationPromotion": false,
+  "change": {
+    "production": "Delete post-load MCP extension list/remove",
+    "newState": false,
+    "newFiles": false,
+    "backgroundCleanup": false,
+    "stableMcpNames": "unchanged"
+  },
+  "protocolFixture": {
+    "owner": "real_acp_session_model_selection_respects_native_adapter_boundaries",
+    "extensionManagementReply": {
+      "code": -32601,
+      "message": "optional extension management unavailable"
+    },
+    "beforeFix": "exact restore failed before task preparation",
+    "afterFix": "passed; zero list/remove calls",
+    "newWarmAndColdCasesPreserved": true,
+    "fullSystemDelivered": true,
+    "newRustTestFunctions": 0,
+    "removedRustTestFunctions": 0
+  },
+  "officialCore": {
+    "provider": "synthetic-loopback",
+    "runs": {
+      "cancelled": 1,
+      "succeeded": 19
+    },
+    "providerRequests": 56,
+    "mcp": {
+      "differentCwd": true,
+      "argvVerbatim": true,
+      "saveKeepsHost": true,
+      "replacementSameSession": true,
+      "unassignmentTaskSucceeded": true,
+      "nativeExtensionRetained": true,
+      "retainedAfterCoreRestart": true
+    },
+    "exactColdRestore": {
+      "sameSession": true,
+      "newHost": true
+    },
+    "nativeModelSelection": {
+      "warm": true,
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "cold": true
+    },
+    "cancel": {
+      "sameHost": true,
+      "samePid": true,
+      "newRun": true,
+      "newLease": true,
+      "oldLeaseRejected": true,
+      "cleanup": "reusable"
+    },
+    "probeSessions": {
+      "remaining": 0
+    }
+  },
+  "acceptedDifference": "A previously assigned native MCP extension can remain connected and callable after Rovai unassignment, disablement or deletion.",
+  "validation": {
+    "defaultWorkspace": {
+      "status": "passed",
+      "coreLib": 438,
+      "cli": 31,
+      "host": 4,
+      "web": 11,
+      "ignored": 1
+    },
+    "documentation": {
+      "docsTest": "passed",
+      "docsCheck": "passed",
+      "docsCheckCi": "passed"
+    },
+    "scriptSyntax": "passed",
+    "cargoFmt": "passed",
+    "platformEvidenceRevisionOwner": "passed after synchronizing the existing register revision; qualification rows unchanged"
+  },
+  "notRepeated": [
+    "real account/model execution",
+    "packaged App UI",
+    "macOS Intel",
+    "Linux",
+    "Windows"
+  ]
+}

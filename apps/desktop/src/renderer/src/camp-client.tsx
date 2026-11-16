@@ -47,7 +47,7 @@ export type ThreadClient = Pick<RovaiApi,
   /** Optional host shortcut; browsers retain their own tab/window shortcuts. */
   onClosePreviewRequested?: RovaiApi['windowControls']['onCloseTabRequested']
   attachmentLocation?: (locator: import('@contracts').LocalAttachmentOwnerLocator) => Promise<{ path: string; location: 'local' | 'server' } | null>
-  attachments: (RovaiApi['attachments'] & { kind: 'native' }) | {
+  attachments: (Pick<RovaiApi['attachments'], 'open' | 'reveal'> & Partial<Pick<RovaiApi['attachments'], 'save'>> & { kind: 'native' }) | {
     kind: 'download'
     download: RovaiApi['attachments']['open']
   }

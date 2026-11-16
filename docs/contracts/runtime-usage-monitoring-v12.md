@@ -53,6 +53,8 @@ usage fingerprint，可能少计相同数值的独立调用，不能改用通知
 已有累计 total、含缓存 Input 或 Output 父基线时，显示贡献沿用该覆盖范围；父字段暂缺不能改计其子项，
 待父计数推进后再计差值。显式零也只由该覆盖范围内可比较的不变计数证明。
 已验证 Claude 根 message 在本 Run 内从零开始，使用相同的单调用快照修正规则，不能套用 Session 累计首帧语义。
+Goose 沿用启动 Prompt 前的原生 Session 累计基线，只计当前 Run 的 Input/Output 差值；Input 已包含缓存。
+`message_usage` 的缓存字段只补内部缓存指标，不作为独立显示消费再加到累计 Input 上；同消息补齐沿稳定消息身份修正。
 可靠基线后的显式不变计数可以证明已观测区间的零；完全没有可信计数仍为未知。
 
 后台事务继续原子提交 checkpoint、Run summary、hourly；失败恢复有序 batch，不抹旧数值。
@@ -62,7 +64,7 @@ usage fingerprint，可能少计相同数值的独立调用，不能改用通知
 
 ## 持久化与旧 Run
 
-Migration 225 从 schema 174 升到 175，原子增加：
+Migration 226 从 schema 175 升到 176，原子增加：
 
 - `runtime_usage_run_summary.display_total_tokens`：nullable 已知消费显示投影；
 - `runtime_usage_checkpoint.native_total_baseline`：nullable 同单位原生 full total 基线。

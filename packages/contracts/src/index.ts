@@ -31,6 +31,7 @@ export type AdapterKind =
   | 'pi'
   | 'opencode-cli'
   | 'kilo-cli'
+  | 'goose-cli'
   | 'copilot-cli'
   | 'claude-code-cli'
   | 'kiro-cli'
@@ -1648,6 +1649,12 @@ export interface AttachmentOpenResult {
 export interface AttachmentRevealResult {
   revealed: boolean
   error: AttachmentActionError | null
+  availability: LocalAttachmentAvailability
+}
+
+export interface AttachmentSaveResult {
+  saved: boolean
+  error: 'target_unavailable' | 'save_failed' | null
   availability: LocalAttachmentAvailability
 }
 
@@ -4798,6 +4805,7 @@ export interface RovaiApi {
   attachments: {
     open(locator: LocalAttachmentOwnerLocator): Promise<AttachmentOpenResult>
     reveal(locator: LocalAttachmentOwnerLocator): Promise<AttachmentRevealResult>
+    save(locator: LocalAttachmentOwnerLocator): Promise<AttachmentSaveResult>
   }
   filePreview: FilePreviewApi
   clipboard: {

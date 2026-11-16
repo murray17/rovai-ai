@@ -132,6 +132,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::KiloCli
+        | AdapterKind::GooseCli
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
@@ -158,6 +159,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::KiloCli
+        | AdapterKind::GooseCli
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
@@ -944,6 +946,7 @@ fn qualified_admission(
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::KiloCli
+        | AdapterKind::GooseCli
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp

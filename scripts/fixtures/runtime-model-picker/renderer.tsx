@@ -33,11 +33,11 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
     model.options = index === 2 ? [] : [{ key: 'effort', label: 'Effort', valueType: 'enum', scope: 'session', defaultValue: index === 0 ? 'high' : 'medium',
       values: (index === 0 ? ['low', 'high'] : ['medium', 'max']).map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) }]
   }
-  if (kind === 'deepseek-harness' || kind === 'minimax-code-cli') for (const model of installation.snapshot!.models) {
+  if (kind === 'deepseek-harness' || kind === 'minimax-code-cli' || kind === 'goose-cli') for (const model of installation.snapshot!.models) {
     model.runtimeMetadata = kind === 'deepseek-harness'
       ? { dshSource: 'native', ...(model.isDefault ? { dshOptionsResolved: true } : {}) }
       : { modelOptionsResolved: model.isDefault }
-    model.options = model.isDefault ? [{ key: kind === 'deepseek-harness' ? 'reasoning_effort' : 'thinkingEffort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []
+    model.options = model.isDefault ? [{ key: kind === 'deepseek-harness' ? 'reasoning_effort' : kind === 'goose-cli' ? 'thinking_effort' : 'thinkingEffort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []
   }
   if (kind === 'pi') for (const [index, model] of installation.snapshot!.models.entries()) {
     model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: index === 3 ? 'unknown' : 'known' }
@@ -63,7 +63,7 @@ function Fixture(): React.JSX.Element {
   const [observation, setObservation] = useState(0)
   const [projection, setProjection] = useState<RuntimeModelCatalogView | null>(null)
   const installation = fixture(kind, ['empty', 'pending', 'failed-no-cache', 'deferred-empty'].includes(mode), generation,
-    mode.startsWith('failed') || mode.startsWith('deferred') || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
+    mode.startsWith('failed') || mode.startsWith('deferred') || mode === 'expired-pending' || ((mode === 'aging-pending' || kind === 'goose-cli') && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
   if (projection?.runtimeKind === kind) {
@@ -72,7 +72,7 @@ function Fixture(): React.JSX.Element {
   }
   if (state.healthStale) installation.snapshot!.staleAt = state.healthStale
   if (kind === 'pi' && state.piInvalidated) installation.modelCatalog.status = 'invalidated'
-  const supportsTargetOptions = kind === 'deepseek-harness' || kind === 'minimax-code-cli'
+  const supportsTargetOptions = kind === 'deepseek-harness' || kind === 'minimax-code-cli' || kind === 'goose-cli'
   const resolvedKey = kind === 'deepseek-harness' ? 'dshOptionsResolved' : 'modelOptionsResolved'
   const contextKey = kind === 'deepseek-harness' ? 'dshOptionsContext' : 'modelOptionsContext'
   const observedKey = kind === 'deepseek-harness' ? 'dshOptionsObservedAt' : 'modelOptionsObservedAt'
@@ -93,8 +93,11 @@ function Fixture(): React.JSX.Element {
     clearCatalogSuccess: () => setProjection({ ...state.lastCatalog, cache: { status: 'unavailable', observedAt: null, revalidateAfter: null, expiresAt: null } }),
     invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
     setDshReadMode,
-    publishFreshTargetDirectory: () => setProjection({ ...state.dshPublished,
-      cache: { status: 'fresh', ...cacheTimes(new Date(Date.now()).toISOString()) } }),
+    publishFreshTargetDirectory: () => {
+      const cache = { status: 'fresh' as const, ...cacheTimes(new Date(Date.now()).toISOString()) }
+      if (kind === 'goose-cli') state.gooseDirectoryCache = cache
+      setProjection({ ...state.dshPublished, cache })
+    },
     setDshCacheShape: (shape: string | null) => { state.dshCacheShape = shape; state.dshCache = {}; setObservation(value => value + 1) },
     refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setGeneration(value => value + 1) },
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
@@ -117,6 +120,12 @@ function Fixture(): React.JSX.Element {
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
       cache: { status: 'fresh', ...cacheTimes(new Date(clockStartedAt + 2000).toISOString()) }, models: state.piCatalogModels,
       refreshStatus: 'completed', diagnosticCode: null })
+    if (kind === 'goose-cli' && !target?.modelId) {
+      const at = Math.max(Date.now(), Date.parse(installation.modelCatalog.observedAt ?? '') || 0) + 1
+      state.gooseDirectoryCache = { status: 'fresh', ...cacheTimes(new Date(at).toISOString()) }
+      return Promise.resolve({ runtimeKind: kind, cache: state.gooseDirectoryCache, models: nativeDshModels,
+        refreshStatus: 'completed', diagnosticCode: null })
+    }
     if (supportsTargetOptions && target?.forceRefresh && !target.modelId) {
       // A directory result is independent of an earlier target's outcome.
       return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog },
@@ -133,7 +142,7 @@ function Fixture(): React.JSX.Element {
           [resolvedKey]: cached.runtimeMetadata[contextKey] === String(state.dshContext ?? 0) } } : item
       })
       const view = (refreshStatus: RuntimeModelCatalogView['refreshStatus']): RuntimeModelCatalogView => ({
-        runtimeKind: kind, selectedModelId: target.modelId, cache: { ...installation.modelCatalog },
+        runtimeKind: kind, selectedModelId: target.modelId, cache: { ...(kind === 'goose-cli' ? state.gooseDirectoryCache ?? installation.modelCatalog : installation.modelCatalog) },
         models: cachedModels(), refreshStatus, diagnosticCode: null
       })
       const cached = cachedModels().find(item => item.id === target.modelId)!
@@ -160,7 +169,7 @@ function Fixture(): React.JSX.Element {
           if (state.dshDeferredActual || context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
           state.dshCache[target.modelId] = { ...model,
             runtimeMetadata: { ...(kind === 'deepseek-harness' ? { dshSource: 'native' } : {}), [resolvedKey]: true, [contextKey]: String(context), [observedKey]: new Date(Date.now()).toISOString() },
-            options: values.length ? [{ key: kind === 'deepseek-harness' ? 'reasoning_effort' : 'thinkingEffort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
+            options: values.length ? [{ key: kind === 'deepseek-harness' ? 'reasoning_effort' : kind === 'goose-cli' ? 'thinking_effort' : 'thinkingEffort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
               values: values.map((value: string) => ({ value, label: value })) }] : [] }
           state.dshPublished = view('completed')
           if (state.dshNextObservation) state.dshPublished.cache.observedAt = state.dshNextObservation

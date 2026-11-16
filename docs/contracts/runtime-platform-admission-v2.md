@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-11-11
+last_updated: 2026-11-15
 ---
 
 # Runtime Platform Admission v2
@@ -204,3 +204,32 @@ Core 允许发现、检查、安装配置、成员选择和普通执行，并执
 Core 允许常规发现、检查、安装配置、成员选择和执行，并执行现有的机器安装、原生认证、版本、模型和能力检查。
 目标机与用量采样范围见 [Windows x64 验收](../research/kilo-runtime/README.md#windows-x64-目标机验收)与
 [V1.72-D85](../versions/v1.72/decisions.md#v1-72-d85)。
+
+<a id="goose-macos-arm64-preview"></a>
+## Goose macOS arm64 Preview
+
+新增 `goose-cli × macos-arm64 = preview`，reasonCode 为 `runtime_platform.qualification_evidence_missing`，
+evidenceRevision 为 null。macOS x64 为 NotQualified。Linux 和 Windows x64 见下方独立记录。
+macOS arm64 的初始证据来自官方 1.59.0 二进制和独立受控 Provider。
+原生完整 Diff 与父 Bootstrap 不进入原生子代理的差异按 [D86](../versions/v1.72/decisions.md#v1-72-d86) 接受。
+普通原生权限、认证和执行检查继续生效，界面不另加 Preview 提示或平台白名单。
+
+<a id="goose-windows-x64-qualification"></a>
+## Goose Windows x64 qualification
+
+`goose-cli × windows-x64` 为 `qualified / reasonCode=null`，`evidenceRevision` 绑定
+[Windows x64 准入记录](../../qualification/runtime-platform/windows-x64-goose-v1.json) 的 SHA-256。
+Core 按常规路径执行安装发现、认证和模型检查、成员选择与任务执行。
+目标机验收使用官方 Goose 1.59.0，已复现无响应 stdio 扩展阻塞原生 Session 加载的限制。
+证据范围见 [Windows x64 验收](../research/goose-runtime/README.md#windows-x64-qualification)与
+[V1.72-D87](../versions/v1.72/decisions.md#v1-72-d87)。
+
+<a id="goose-linux-x64-preview"></a>
+## Goose Linux x64 Preview
+
+2026-11-15，`goose-cli × linux-x64` 开放 `preview / reasonCode=runtime_platform.qualification_evidence_missing`，
+`evidenceRevision=null`。沿现有 Core 准入开放发现、检查、安装配置、成员选择与执行，仍执行版本、原生认证、模型和能力检查。
+
+Debian 12 x64 上使用官方 Goose 1.59.0，已验证真实 Sub2API 执行、文件新增与修改、公开发送和精确会话恢复。
+目标机和能力覆盖见 [Linux x64 验收](../research/goose-runtime/README.md#linux-x64-目标机验收2026-11-15)
+与 [V1.72-D88](../versions/v1.72/decisions.md#v1-72-d88)。完整平台资格仍需补齐计划关停场景的独立证据。
