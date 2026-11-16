@@ -3439,6 +3439,9 @@ impl AcpHost {
                 if &route.owner != owner {
                     bail!("ACP Session loading route failed Host/Run fencing");
                 }
+                if let AcpSessionPhase::ProtocolViolated { reason } = &route.phase {
+                    bail!("{reason}");
+                }
                 let AcpSessionPhase::LoadingReplay {
                     started_at,
                     last_event_at,
@@ -16116,6 +16119,7 @@ while IFS= read -r ignored; do :; done
                     }
                 }
                 for invalid in ["owner", "epoch", "protocol", "ready"] {
+                    let capacity_reason = "Rovai local ACP protocol read failed: runtime_probe_frame_capacity_exceeded";
                     host.bind_session(
                         &session_id,
                         &runtime.owner,
@@ -16131,18 +16135,27 @@ while IFS= read -r ignored; do :; done
                             "epoch" => route.owner.execution_epoch += 1,
                             "protocol" => {
                                 route.phase = AcpSessionPhase::ProtocolViolated {
-                                    reason: "test violation".into(),
+                                    reason: capacity_reason.into(),
                                 }
                             }
                             _ => route.phase = AcpSessionPhase::Ready,
                         }
                     }
-                    assert!(
-                        runtime
-                            .finish_session_attachment(&session_id, Some("session/resume"))
+                    for method in ["session/resume", "session/load"] {
+                        let error = runtime
+                            .finish_session_attachment(&session_id, Some(method))
                             .await
-                            .is_err()
-                    );
+                            .unwrap_err();
+                        assert_eq!(
+                            error.to_string(),
+                            if invalid == "protocol" {
+                                capacity_reason
+                            } else {
+                                "ACP Session loading route failed Host/Run fencing"
+                            },
+                            "{invalid}: {method}"
+                        );
+                    }
                     if invalid == "protocol" {
                         assert!(matches!(
                             host.routes.read().await[&session_id].phase,
