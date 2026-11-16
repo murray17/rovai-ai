@@ -1252,7 +1252,7 @@ async function verifyExecutionMetricsRenderer(app, capturesRoot, onRestart) {
     ${JSON.stringify(`.run-pulse-chip[data-agent-id="${activeAgentId}"]`)}
   )?.click()`)
   await waitForExpression(restarted.cdp, `document.querySelector(
-    '.execution-process-stage.is-focused .execution-usage-value'
+    '.execution-process-stage.is-focused .execution-usage-trigger'
   )?.textContent?.trim() === '2K'`, 20_000)
   const terminal = await evaluate(restarted.cdp, `(() => {
     const stage = document.querySelector('.execution-process-stage.is-focused')
@@ -1260,23 +1260,29 @@ async function verifyExecutionMetricsRenderer(app, capturesRoot, onRestart) {
     return {
       runId: stage?.dataset.agentRunId ?? null,
       durationInCard: stage?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null,
-      usage: group?.querySelector('.execution-usage-value')?.textContent?.trim() ?? null,
+      usage: group?.querySelector('.execution-usage-trigger')?.textContent?.trim() ?? null,
     }
   })()`)
   assert(terminal.runId === activeRunId && terminal.usage === '2K'
     && terminal.durationInCard === null,
-  `Terminal card did not show the Core token total: ${JSON.stringify(terminal)}`)
+  `Terminal card did not show only the Usage entry: ${JSON.stringify(terminal)}`)
   await evaluate(restarted.cdp, `document.querySelector(
-    '.execution-process-stage.is-focused .execution-duration-trigger'
+    '.execution-process-stage.is-focused .execution-usage-trigger'
   )?.click()`)
-  await waitForExpression(restarted.cdp, `Boolean(document.querySelector('.execution-duration-reading'))`)
-  const duration = await evaluate(restarted.cdp, `document.querySelector('.execution-duration-reading')?.textContent`)
-  assert(/^1分 \d{2}秒$/.test(duration), `Terminal clock did not show duration: ${duration}`)
+  await waitForExpression(restarted.cdp, `document.querySelectorAll('.execution-metric-popover dl > div').length === 5`)
+  const usageRows = await evaluate(restarted.cdp, `[...document.querySelectorAll(
+    '.execution-metric-popover dl > div'
+  )].map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
+  assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
+    ['Input Token', '1.5k'], ['Output Token', '0.5k'],
+    ['Cache Read', '0.3k'], ['Cache Write', '0k']
+  ]) && usageRows[4]?.[0] === '执行耗时' && /^1分 \d{2}秒$/.test(usageRows[4]?.[1]),
+  `Terminal Usage popover did not show four buckets and duration: ${JSON.stringify(usageRows)}`)
   const terminalCapture = join(capturesRoot, 'execution-metrics-terminal.png')
   await capture(restarted.cdp, terminalCapture)
   return {
     app: restarted,
-    verified: { running, terminal, duration },
+    verified: { running, terminal, usageRows },
     captures: { running: runningCapture, terminal: terminalCapture }
   }
 }
@@ -1385,7 +1391,7 @@ async function verifyStreamingExecutionMetricsRenderer(app, capturesRoot) {
   await waitForExpression(app.cdp,
     `document.querySelector(${JSON.stringify(stageSelector)})?.classList.contains('status-succeeded')`, 30_000)
   const terminalBeforeUsage = await evaluate(app.cdp,
-    `({ usage: document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-value')?.textContent?.trim() ?? null,
+    `({ usage: document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-trigger')?.textContent?.trim() ?? null,
       clock: Boolean(document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-duration-trigger')),
       durationInCard: document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-run-metric')?.textContent?.trim() ?? null })`)
   assert(terminalBeforeUsage.usage === null && terminalBeforeUsage.clock
@@ -1409,12 +1415,18 @@ async function verifyStreamingExecutionMetricsRenderer(app, capturesRoot) {
     WHERE agent_run_id = ${sqlLiteral(runId)};
   `)
   await waitForExpression(app.cdp,
-    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-value')?.textContent?.trim() === '2K'`, 16_000)
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-trigger')?.textContent?.trim() === '2K'`, 16_000)
   await evaluate(app.cdp,
-    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-duration-trigger')?.click()`)
-  await waitForExpression(app.cdp, `Boolean(document.querySelector('.execution-duration-reading'))`)
-  const duration = await evaluate(app.cdp, `document.querySelector('.execution-duration-reading')?.textContent`)
-  assert(/分 \d{2}秒$/.test(duration), `Late terminal clock did not show duration: ${duration}`)
+    `document.querySelector(${JSON.stringify(stageSelector)})?.querySelector('.execution-usage-trigger')?.click()`)
+  await waitForExpression(app.cdp, `document.querySelectorAll('.execution-metric-popover dl > div').length === 5`)
+  const usageRows = await evaluate(app.cdp, `[...document.querySelectorAll(
+    '.execution-metric-popover dl > div'
+  )].map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
+  assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
+    ['Input Token', '1.5k'], ['Output Token', '0.5k'],
+    ['Cache Read', '0.3k'], ['Cache Write', '0k']
+  ]) && usageRows[4]?.[0] === '执行耗时' && /分 \d{2}秒$/.test(usageRows[4]?.[1]),
+  `Late terminal Usage did not reach the four buckets and duration: ${JSON.stringify(usageRows)}`)
   const terminalCapture = join(capturesRoot, 'execution-metrics-stream-late-usage.png')
   await capture(app.cdp, terminalCapture)
   const leakedFiles = await filesContainingMarker(dataDir, 'V3_PRIVATE_REASONING_FIXTURE')
@@ -1428,7 +1440,7 @@ async function verifyStreamingExecutionMetricsRenderer(app, capturesRoot) {
   return {
     verified: { streamCampId, runId, setupRunId,
       leakedEvidence: Number(leakedEvidence.trim()), leakedRenderer, leakedFiles, leakedIpc,
-      reopened, switched, duration },
+      reopened, switched, usageRows },
     captures: { steady: steadyCapture, terminal: terminalCapture }
   }
 }
@@ -1620,23 +1632,27 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
       if (history?.getAttribute('aria-expanded') === 'false') history.click()
     })()`)
     await waitForExpression(app.cdp, `Boolean(document.querySelector(
-      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-value`)}
+      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)}
     )?.getClientRects().length)`, 15_000)
     const renderedTotal = await evaluate(app.cdp, `document.querySelector(
-      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-value`)}).textContent`)
+      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)}).textContent`)
     assert(renderedTotal === metricK(usage.displayTotalTokens).replace(/k$/, 'K'), 'Renderer total differs from Core projection')
     await evaluate(app.cdp, `document.querySelector(
-      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-duration-trigger`)}).click()`)
-    await waitForExpression(app.cdp, `Boolean(document.querySelector('.execution-duration-reading'))`)
+      ${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)}).click()`)
+    await waitForExpression(app.cdp, `document.querySelectorAll('.execution-metric-popover dl > div').length === 5`)
     await waitForExpression(app.cdp, `(() => {
       const popover = document.querySelector('.execution-metric-popover')?.getBoundingClientRect()
-      const anchor = document.querySelector(${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-duration-trigger`)})?.getBoundingClientRect()
+      const anchor = document.querySelector(${JSON.stringify(`.execution-process-stage[data-agent-run-id="${runId}"] .execution-usage-trigger`)})?.getBoundingClientRect()
       return popover && anchor && anchor.width > 0 && Math.abs(popover.right - anchor.right) < 300
     })()`)
   }
-  const duration = await evaluate(app.cdp, `document.querySelector('.execution-duration-reading')?.textContent ?? null`)
+  const usageRows = await evaluate(app.cdp, `[...document.querySelectorAll('.execution-metric-popover dl > div')]
+    .map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])`)
   if (process.env.ROVAI_METRICS_VERIFY_USAGE === '1') {
-    assert(/分 \d{2}秒$/.test(duration), 'Clock did not show Run duration')
+    assert(JSON.stringify(usageRows.slice(0, 4)) === JSON.stringify([
+      ['Input Token', metricK(usage.promptInputTotalTokens)], ['Output Token', metricK(usage.outputTokens)],
+      ['Cache Read', metricK(usage.cacheReadTokens)], ['Cache Write', metricK(usage.cacheWriteTokens)]
+    ]), 'Renderer Usage differs from native projection')
     await capture(app.cdp, join(capturesRoot, `native-usage-${captureKey}.png`))
     await app.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   }
@@ -1689,7 +1705,7 @@ async function verifyRealRuntimeExecutionMetrics(app, capturesRoot) {
   const report = { runtimeKind, sampleSource: process.env.ROVAI_METRICS_HELD_FINAL === '1' ? 'controlled-acp' : 'installed-runtime',
     round, distinctLiveValues, commitNotifications, scalarTrace: app.contextTrace, visibilityCheck, historicalCardCheck,
     version: installation.snapshot?.reportedVersion, campId: liveCampId,
-    runId, status, projection, availability, duration, contextLabel, liveContextWitness, samples }
+    runId, status, projection, availability, usageRows, contextLabel, liveContextWitness, samples }
   const reportPath = join(capturesRoot, `native-metrics-${captureKey}.json`)
   await writeFile(reportPath, JSON.stringify(report, null, 2))
   assert(status === 'succeeded'
