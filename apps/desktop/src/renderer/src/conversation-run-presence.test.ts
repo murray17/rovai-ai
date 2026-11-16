@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunView, ThreadMessageView } from '@contracts'
 import { conversationRunPresenceTimeline, formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview } from './conversation-run-presence'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
-import type { LiveRuntimeEvent } from './ui-model'
+import { buildLiveExecutionProgress, type LiveRuntimeEvent } from './ui-model'
 import { changeInterfaceLanguage } from './interface-language'
 import type { GeneralPreferencesApi } from '@contracts'
 
@@ -185,6 +185,27 @@ describe('conversation Run presence', () => {
     expect(runPresencePreview(run('a'),events)).toMatchObject({kind:'command',text:'pnpm typecheck',iconKind:'terminal'})
     expect(runPresencePreview(run('a','alice',{status:'failed'}),events).kind).toBe('error')
     expect(runPresencePreview(run('a','alice',{cancelRequestedAt:'now'}),events)).toEqual({kind:'status',text:'正在停止…'})
+  })
+
+  it('keeps the current line start stable as a long narration grows', () => {
+    const body = '早期进展。'.repeat(2000) + '\n当前正在检查输入。'
+    const events: LiveRuntimeEvent[] = [{ id: 'long-text', agentRunId: 'a', eventType: 'agent.text.delta',
+      payload: { itemId: 'text', delta: body }, createdAt: '2026-10-10T12:00:00Z' }]
+    expect(runPresencePreview(run('a'), events)).toEqual({ kind: 'narration', text: '当前正在检查输入。' })
+    const line = '从这一行的开头显示。' + '进展。'.repeat(5000)
+    const lineEvents = [{ ...events[0], payload: { itemId: 'text', delta: line } }]
+    expect(runPresencePreview(run('a'), lineEvents)).toEqual({ kind: 'narration', text: line })
+    lineEvents.push({ ...events[0], id: 'continued', payload: { itemId: 'text', delta: '继续追加。' } })
+    expect(runPresencePreview(run('a'), lineEvents)).toEqual({ kind: 'narration', text: line + '继续追加。' })
+    expect(buildLiveExecutionProgress(events, 'a').items).toContainEqual(expect.objectContaining({ kind: 'narration', body }))
+  })
+
+  it('does not turn a long hidden HTML comment into a visible activity preview', () => {
+    const body = '<!--' + 'hidden comment '.repeat(500) + '-->'
+    const events: LiveRuntimeEvent[] = [{ id: 'hidden-text', agentRunId: 'a', eventType: 'agent.text.delta',
+      payload: { itemId: 'text', delta: body }, createdAt: '2026-11-15T00:00:00Z' }]
+    expect(runPresencePreview(run('a'), events).kind).toBe('status')
+    expect(runPresencePreview(run('a'), events).text).not.toContain('hidden comment')
   })
 
   it('shows current-epoch activity before a late ACK while keeping old evidence behind the connection fence', () => {
