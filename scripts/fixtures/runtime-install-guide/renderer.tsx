@@ -4,7 +4,7 @@ import type { AdapterKind, HealthStatus, ProductRuntimeAvailability, RuntimePlat
 import { RuntimeInstallationsPanel } from '../../../apps/desktop/src/renderer/src/MemberManagement'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
-const kinds: AdapterKind[] = ['claude-code-cli', 'codex-cli', 'opencode-cli', 'copilot-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'antigravity-app', 'pi']
+const kinds: AdapterKind[] = ['claude-code-cli', 'codex-cli', 'opencode-cli', 'goose-cli', 'copilot-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'antigravity-app', 'pi']
 const calls: string[] = []
 let nextResult = 'missing'
 let platform: HealthStatus['hostPlatform'] = 'macos-arm64'

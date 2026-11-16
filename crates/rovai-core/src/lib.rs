@@ -10,6 +10,7 @@ mod claude_control;
 pub(crate) mod cline;
 mod codex;
 pub mod command_code_acp;
+mod goose;
 mod health;
 pub mod hermes;
 mod kilo;

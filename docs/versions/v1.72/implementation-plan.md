@@ -8,6 +8,15 @@ last_updated: 2026-11-16
 
 # v1.72 实施与验收
 
+## 会话文件下载合入（2026-11-16）
+
+User sequence 12 已授权创建到 `main` 的 PR 并合并，继续复用 `rovai/agent-file-download` 与原 worktree。
+合入前同步 `origin/main@2a54e98e59485b108b6a45106ff260f1e9a7e512`；四处文档日期／相邻章节冲突保留双方内容，
+当前路由同时指向 Runtime Launch v97 与 Camp Attachment v13，业务代码无冲突。
+按新基线复跑类型检查、默认 Node/Vitest、默认 Rust workspace、桌面构建、真实桥接、下载 UI 和通用文档门禁；
+PR 的 `CI / gate` 另复跑真实 Linux 取消／替换窗口并保留提交关联的报告。
+检查通过后合入并清理该干净 worktree；精确 PR、合入 SHA、验收结果与清理状态以 GitHub 和最终交接为准。
+
 ## 会话文件下载评审修复（2026-11-16）
 
 复用 `rovai/agent-file-download` 与原 worktree。合并 `origin/main@855a3c2a7a4a3827ff3308a540e38a7dc8cbac1b`，
@@ -63,6 +72,30 @@ API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/
   默认高并发完整测试首轮出现既有文件监听超时，限制并发后的完整回归通过；未修改或禁用该测试。
 - 自查后让保存沿用已有 Source Ref 符号链接解析，实际持有最终普通文件句柄；最后定向回归验证保存失败不会清理未取得归属的临时名称。
   隔离 Chrome/ContextBridge 验收未启动 Core 或 Runtime，已查看明暗主题截图；未将这些结果等同 Windows 真机保存窗口或日常安装版验收。
+
+## Goose 官方 ACP（2026-11-13）
+
+- Work item：User sequence 109，基于 Kilo 经验调研接入 Goose；Owner：爱丽丝。
+- Worktree：`../rovai-ai-goose-acp`；Branch：`rovai/goose-acp`；Status：active。
+  Base：研究起点 `origin/main@c7295e2b0b4667a5434c855cd2dd456bcf637e4c`，实施前合并 `origin/main@f3719e667e260d7227ad0111a77ecbb485c901e1`；Governance：User sequence 117 已确认[模型输入 R1](model-context-change-goose-acp.md)，先记录确认再实施。
+- 已完成：[原生研究和 14 轴矩阵](../../research/goose-runtime/README.md)、[R1 完整前后说明](goose-acp-proposal.md)、
+  [可复现脚本](../../../scripts/probe-goose-runtime.mjs)及[白名单结果](../../research/goose-runtime/native-probe-1.59.0-macos-arm64.json)。
+- 原生官方 1.59.0 / macOS arm64 / 隔离 loopback Provider：new/warm/exact cold、88,099 字节完整 Bootstrap、
+  两次 Steer 提前回执和 wrong-run、普通与前台子代理取消后同 PID 后继、write/read/edit、stdout/stderr/empty/nonzero/large、
+  allow/reject、Skill 实读及更新删除、自动阈值与 overflow 压缩、MCP 实调／追加／撤销／冷恢复、原生问卷取消通过。
+  55 次合成 Provider 请求含标题、摘要和子调用，不是 55 个正式 Core Run，也不代表真实账号验收。
+- 门禁通过：两份研究脚本 `node --check`；上述官方原生 probe；`pnpm docs:test` 10/10、`pnpm docs:check`，
+  以及固定基线 `DOCS_BASE_REF=c7295e2b0b4667a5434c855cd2dd456bcf637e4c pnpm docs:check:ci`。
+- 明确缺口：完整 write 前像不可得；原生子代理不继承父 B；压缩未见逐消息用量，需共享累计基线；
+  MCP load 的空列表不删旧工具，需官方 list/remove。没有为此增加执行框架或私有监控。
+- 实施：已记录 seq117 的 R1 确认；产品 identity、共享接线与现有表单已加入。实际 Core、用量与生命周期结果见[实施记录](goose-acp-implementation.md)。
+  原生证据不能替代 Core；现已补齐 CLI lease、public send、输出预算与不同 cwd，HTTP MCP 和其他平台仍未验证。
+- 九范围：Version lifecycle 保持 v1.72；Documentation routing 增加研究/提案入口；
+  Decisions、Contracts、Architecture、Runtime compatibility、UI 与 Runtime Activity 同步当前 Goose 语义；Root README 无需复制具体产品矩阵。
+  当前版本已有 model_context_change=true；Goose 的独立说明记录真实 User 确认，不增加 gate 例外。
+
+User sequence 123 后续精简及验收归[同一实施记录](goose-acp-implementation.md#用户复核后的精简2026-11-14)；
+当前原生复跑 58 次受控请求，新增模式工具集合和客户端回放边界，不从原生探测推导完整产品资格。
 
 ## 长会话输入性能（2026-11-14）
 

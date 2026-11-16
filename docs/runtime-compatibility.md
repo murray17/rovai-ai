@@ -1,10 +1,43 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-11
+last_updated: 2026-11-15
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-15 Goose Linux x64 Preview
+
+Debian 12 x64 上使用官方 Goose 1.59.0 和 Sub2API 的 `gpt-6`。Rovai 能发现并配置 Goose，
+真实 Thread 完成文件新增与修改、公开发送、Warm 续接和 Core 重启后的原生 Session 恢复。
+受控用例补验审批、取消后恢复、Steer、MCP 与输出处理。准入范围见
+[Platform Admission](contracts/runtime-platform-admission-v2.md#goose-linux-x64-preview)，
+详细结果见 [Linux x64 验收](research/goose-runtime/README.md#linux-x64-目标机验收2026-11-15)。
+
+## 2026-11-15 Goose 旧 MCP 尽力撤回
+
+按 User sequence 144 恢复精确 load 后的尽力撤回：稳定归属名称减去当前分配，list 与全部 remove 共用短绝对截止点。
+失败／超时只诊断，连接可用即继续；不因可选管理失败退役 Host 或重建 Session，不增加后台重试或存储。
+正常撤回、当前和用户原生项保留、超时后重分配分别验收；本地超时不取消已经发送的原生操作。
+原生 1.59.0 的无响应 stdio MCP 可阻塞 load，是独立的原生初始化等待问题，不由软性撤回冒充解决。
+当前边界见 [Runtime Launch v95](contracts/runtime-launch-and-verification-v95.md)；平台和 Preview 资格不提升。
+
+## 2026-11-15 Goose MCP 沿用原生会话行为
+
+按 User sequence 142，正式执行删除恢复后的 extensions list/remove，不以旧扩展撤回作为任务前置条件。
+每轮仍传入当前适用的 MCP；原生 Session 可保留旧分配，取消分配不再承诺原生工具立即消失。
+既有稳定名称、Host 兼容性替换、精确 Session、cwd 和共享生命周期保持；不新增后台清理或重试。
+当前精确边界见 [Runtime Launch v94](contracts/runtime-launch-and-verification-v94.md)，
+本次不提升既有 Preview 或跨平台资格；下方 2026-11-13 撤回结果是旧产品行为的历史证据。
+
+## 2026-11-13 Goose 官方 ACP Preview
+
+官方完整 CLI 1.59.0 / macOS arm64 经隔离 loopback Provider 验证，沿共享 ACP/Fleet 进入产品目录。
+真实 Core 已验证首次/Warm/精确冷恢复、原生 Bootstrap、按需 effort、审批、文件、Skills、7.5 KiB 输出、
+前台 delegate、自动阈值/overflow 压缩、Steer 接收与 Warm、取消后同 PID 新 lease、MCP 撤回与不同 cwd。
+所有模型均为受控响应；真实账号、HTTP MCP、多 Binding 压力和其他平台未取得资格。
+完整 Diff 原生缺前像，明确 Unsupported；原生子代理不继承父 B。当前范围与失败对照见
+[实施记录](versions/v1.72/goose-acp-implementation.md)，不宣称完整 Golden Flow 或 FirstClass。
 
 ## 2026-11-11 Pi 原地升级与版本生命周期解耦
 

@@ -50,6 +50,7 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'copilot-cli', label: 'GitHub Copilot' },
   { value: 'opencode-cli', label: 'OpenCode' },
   { value: 'kilo-cli', label: 'Kilo' },
+  { value: 'goose-cli', label: 'Goose' },
   { value: 'kiro-cli', label: 'Kiro' },
   { value: 'qoder-cli', label: 'Qoder' },
   { value: 'codebuddy-cli', label: 'CodeBuddy' },

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-14",
+  "runtime": "goose-cli",
+  "officialVersion": "1.59.0",
+  "upstreamCommit": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+  "installation": "Homebrew block-goose-cli",
+  "platform": "macos-arm64",
+  "provider": "custom_sub2api",
+  "model": "gpt-6",
+  "providerType": "real-user-authorized-sub2api",
+  "nativeConfiguration": {
+    "providerDefinition": "custom_providers/custom_sub2api.json",
+    "engine": "openai",
+    "basePath": "v1/responses",
+    "selection": "config.yaml active_provider and providers entry",
+    "credentialStorage": "native secrets.yaml",
+    "providerModelOrCredentialEnvOverrides": false,
+    "preservedExistingSettings": true
+  },
+  "isolation": {
+    "separateHomeDataCacheWorkspace": true,
+    "separateCoreDataSkillsMcp": true,
+    "coreUsesCopiesOfUserNativeConfigFiles": true,
+    "nativeTestSessionDeletionConfirmed": true,
+    "ownedProcessesStopped": true
+  },
+  "nativeChecks": [
+    {
+      "name": "text-reply",
+      "stopReason": "end_turn",
+      "reply": "GOOSE_SUB2API_REAL_OK",
+      "elapsedMs": 3832
+    },
+    {
+      "name": "write-then-edit",
+      "stopReason": "end_turn",
+      "tools": ["write", "edit"],
+      "unicodeAndSpacePath": true,
+      "finalContentVerified": true,
+      "elapsedMs": 7816
+    }
+  ],
+  "coreChecks": {
+    "successfulRuns": 1,
+    "nativeConfiguredDefaultModel": true,
+    "catalogContainsProviderModel": true,
+    "writeAndEditCompleted": true,
+    "sharedFileOperationProjection": true,
+    "officialBundledPublicCliSend": true,
+    "fullDiff": "unsupported-native-preimage-unavailable"
+  },
+  "failureControl": {
+    "initialConfiguration": "Responses URL without explicit base_path was expanded to a Chat Completions path and failed",
+    "correction": "Use the native custom-provider base_path v1/responses; no Rovai adapter change"
+  },
+  "productStage": "Preview",
+  "qualificationPromotion": false,
+  "notVerified": [
+    "OAuth or other real Providers",
+    "real-Provider compaction, steer, cancellation or MCP matrix",
+    "other models or target platforms",
+    "packaged App rendering of this real Run"
+  ]
+}

@@ -1,3 +1,4 @@
+import gooseLogo from './assets/runtime-logos/goose.svg'
 import hermesLogo from './assets/runtime-logos/hermes.png'
 import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import type { AdapterKind, HostPlatformKey, RuntimePlatformAdmission } from '@contracts'
@@ -27,6 +28,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'copilot-cli',
   'opencode-cli',
   'kilo-cli',
+  'goose-cli',
   'kiro-cli',
   'qoder-cli',
   'codebuddy-cli',
@@ -67,6 +69,7 @@ export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'copilot-cli': copilotLogo,
   'opencode-cli': openCodeLogo,
   'kilo-cli': kiloLogo,
+  'goose-cli': gooseLogo,
   'kiro-cli': kiroLogo,
   'qoder-cli': qoderLogo,
   'codebuddy-cli': codeBuddyLogo,
@@ -90,6 +93,7 @@ export function adapterLabel(kind: AdapterKind): string {
     pi: 'PI',
     'opencode-cli': 'OpenCode',
     'kilo-cli': 'Kilo',
+    'goose-cli': 'Goose',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',

@@ -3,10 +3,52 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-11
+last_updated: 2026-11-15
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d88"></a>
+## V1.72-D88：Goose Linux x64 实测后开放 Preview
+
+- 状态：accepted
+- 日期：2026-11-15
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#goose-linux-x64-preview)。
+
+维护者要求使用真实模型验证 Linux 并提交准入记录。Debian 12 x64 上的实际 Sub2API Run
+和受控 ACP 用例覆盖了普通执行、原生文件操作、会话恢复、审批与进程回收。
+Linux x64 按现有 Goose Preview 范围开放。完整平台资格仍需补齐计划关停场景的进程回收证据。当前证据见
+[目标机记录](../../research/goose-runtime/linux-x64-1.59.0-debian12.json)。
+
+<a id="v1-72-d87"></a>
+## V1.72-D87：Goose Windows x64 目标机实测后通过资格
+
+- 状态：accepted
+- 日期：2026-11-15
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#goose-windows-x64-qualification)。
+
+维护者要求验证 Windows 并提交准入记录，授权使用 Sub2API。官方 1.59.0 Windows x64 CLI 在真实 Core 中
+完成原生认证、首次执行、内置 CLI、热续接及关停后的精确恢复。受控 Provider 验证原生审批、取消、
+MCP 正常撤回、迟到删除与进程回收。产品以独立证据摘要开放 Windows x64，资格覆盖该目标机的 Core 执行路径。
+官方 CLI 无响应 stdio 扩展的原生加载限制已在同一目标机复现。
+[Windows x64 验收](../../research/goose-runtime/README.md#windows-x64-qualification)
+
+<a id="v1-72-d86"></a>
+## V1.72-D86：Goose 使用原生 Session 扩展和共享 ACP，macOS arm64 开放 Preview
+
+- 状态：accepted
+- 日期：2026-11-13
+- 当前权威：[Runtime Launch v90](../../contracts/runtime-launch-and-verification-v90.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#goose-官方-acp)与[平台准入](../../contracts/runtime-platform-admission-v2.md#goose-macos-arm64-preview)。
+
+User sequence 117 确认 R1 后实施。Goose 官方已提供 keyed System append、带活动 Run 归属的 Steer 接收回执和用量通知，
+因此采用这些薄映射并复用 ACP/Fleet，不复制 Kilo 的文件、第二 prompt 或数据库 reader。
+原生 load 不删除 MCP 的差异，通过稳定分配名和已有扩展移除 API 收口，不建立第二套连接管理。
+
+完整文件 Diff 的前像缺失、原生子代理不继承父 B、目录 effort 只能按需取得，均作为明确原生边界接受。
+相比伪造 Diff、复制父身份进子代理或扫描所有模型，保留原生事实的实现更小且归属清楚。
+原生 chat 跳过所有工具，无法满足必须经 CLI 公开发送的合同，因此只开放三种可执行原生模式；不为此另建自动发布旁路。
+macOS arm64 先开放 Preview；受控官方二进制证据不冒充真实账号或其他平台资格，不宣称 FirstClass。
+输入依据为[已确认 R1](model-context-change-goose-acp.md)，验证事实独立记录在本版实施记录。
 
 <a id="v1-72-d85"></a>
 ## V1.72-D85：Kilo Windows x64 目标机实测后通过资格

@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-15
+last_updated: 2026-11-16
 ---
 
 # 当前规范与决定理由导航
@@ -64,6 +64,15 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
   [D84](../versions/v1.72/decisions.md#v1-72-d84)。
   Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#kilo-windows-x64-qualification)与
   [D85](../versions/v1.72/decisions.md#v1-72-d85)。
+
+Goose 原生接入的当前边界：[Runtime Launch v97](../contracts/runtime-launch-and-verification-v97.md)、
+[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#goose-官方-acp)、
+[Platform Admission](../contracts/runtime-platform-admission-v2.md#goose-macos-arm64-preview)；
+采用原生扩展与接受 Preview 差异的理由见 [V1.72-D86](../versions/v1.72/decisions.md#v1-72-d86)。
+Linux x64 的 [Preview 范围](../contracts/runtime-platform-admission-v2.md#goose-linux-x64-preview)
+和目标机实测取舍见 [V1.72-D88](../versions/v1.72/decisions.md#v1-72-d88)。
+Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#goose-windows-x64-qualification)与
+[V1.72-D87](../versions/v1.72/decisions.md#v1-72-d87)。
 
 ## Public Thread 消息与多输入 AgentRun
 

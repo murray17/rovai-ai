@@ -10,6 +10,8 @@ mod claim_context;
 mod compact_execution;
 #[path = "db_execution_storage.rs"]
 mod execution_storage;
+#[path = "db_goose.rs"]
+mod goose;
 #[path = "db_hermes.rs"]
 mod hermes;
 #[path = "db_kilo.rs"]
@@ -519,7 +521,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 174;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 175;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1019,6 +1021,7 @@ struct CurrentMigrationState {
     v222: bool,
     v223: bool,
     v224: bool,
+    v225: bool,
 }
 
 impl CurrentMigrationState {
@@ -1040,6 +1043,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v225 {
+            let mut previous = *self;
+            previous.v225 = false;
+            return schema == 175 && previous.admits(contract, 174, classifier);
+        }
         if self.v224 {
             let mut previous = *self;
             previous.v224 = false;
@@ -3874,6 +3882,7 @@ pub(crate) fn classify_database_contract(
                 | 172
                 | 173
                 | 174
+                | 175
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3884,8 +3893,12 @@ pub(crate) fn classify_database_contract(
         )?;
         let valid = completed
             && (marker.projection_schema_version < 174
-                || memory_capability::schema_matches(connection)?)
+                || memory_capability::schema_matches(connection)?
+                || goose::schema_matches(connection)?)
             && (marker.projection_schema_version < 173 || kilo::schema_matches(connection)?)
+            && (marker.projection_schema_version < 175
+                || (memory_capability::schema_matches(connection)?
+                    && goose::schema_matches(connection)?))
             && (marker.projection_schema_version < 170
                 || channel_native::schema_matches(connection)?)
             && (marker.projection_schema_version < 168 || quote_text::schema_matches(connection)?)
@@ -5394,6 +5407,67 @@ const DSH_RUNTIME_TABLES: [&str; 5] = [
 ];
 const DSH_SKILL_TABLES: [&str; 2] = ["skill_group_assignment", "skill_projection_observation"];
 
+fn runtime_catalog_schema_contains(
+    connection: &Connection,
+    runtime: &str,
+    skill: &str,
+) -> rusqlite::Result<bool> {
+    for (tables, token) in [
+        (&DSH_RUNTIME_TABLES[..], runtime),
+        (&DSH_SKILL_TABLES[..], skill),
+    ] {
+        for table in tables {
+            let sql: String = connection.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )?;
+            if !sql.contains(token) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn rewrite_runtime_catalog_closed_sets(
+    transaction: &Transaction<'_>,
+    runtime: (&str, &str),
+    skill: (&str, &str),
+    reverse: bool,
+) -> Result<()> {
+    let triggers = {
+        let mut query = transaction.prepare(
+            "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql IS NOT NULL ORDER BY name"
+        )?;
+        query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (name, _) in &triggers {
+        transaction.execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))?;
+    }
+    for (tables, (old, new)) in [
+        (&DSH_RUNTIME_TABLES[..], runtime),
+        (&DSH_SKILL_TABLES[..], skill),
+    ] {
+        for table in tables {
+            expand_closed_set(
+                transaction,
+                table,
+                if reverse { new } else { old },
+                if reverse { old } else { new },
+            )?;
+        }
+    }
+    for (_, sql) in triggers {
+        transaction.execute_batch(&sql)?;
+    }
+    Ok(())
+}
+
 fn runtime_v184_source_schema_matches(
     connection: &Connection,
     has_v185: bool,
@@ -6216,7 +6290,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=221),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=222),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=224)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=225)
         "#,
         [],
         |row| {
@@ -6376,6 +6451,7 @@ fn load_current_migration_state(
                 v222: row.get(152)?,
                 v223: row.get(153)?,
                 v224: row.get(154)?,
+                v225: row.get(155)?,
             })
         },
     )
@@ -9685,6 +9761,9 @@ impl Database {
             if !self.schema_migration_applied(224)? {
                 migration_step!("migration_224", memory_capability::migrate(self));
             }
+            if !self.schema_migration_applied(225)? {
+                migration_step!("migration_225", goose::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10581,6 +10660,9 @@ impl Database {
         }
         if !self.schema_migration_applied(224)? {
             migration_step!("migration_224", memory_capability::migrate(self));
+        }
+        if !self.schema_migration_applied(225)? {
+            migration_step!("migration_225", goose::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -41998,6 +42080,14 @@ mod tests {
         type Migrate = fn(&mut Database) -> Result<()>;
         for (version, schema, main_continuation, rewrite, schema_matches, migrate) in [
             (
+                225,
+                174,
+                false,
+                goose::rewrite as Rewrite,
+                goose::schema_matches as Matches,
+                goose::migrate as Migrate,
+            ),
+            (
                 223,
                 172,
                 false,
@@ -42055,7 +42145,9 @@ mod tests {
             ),
         ] {
             let (mut database, directory) = crate::test_support::seeded_runtime_database();
-            if version == 223 {
+            if version == 225 {
+                // Current schema already contains both mainline and Goose changes.
+            } else if version == 223 {
                 memory_capability::downgrade_for_test(database.connection());
             } else if version == 216 {
                 hermes::downgrade_rules_for_test(database.connection());
@@ -42087,12 +42179,12 @@ mod tests {
                     .unwrap();
                 Some((id, content))
             } else {
-                if !matches!(version, 205 | 216 | 223) {
+                if !matches!(version, 205 | 216 | 223 | 225) {
                     mission_description::downgrade_for_test(database.connection());
                 }
                 None
             };
-            if !main_continuation && !matches!(version, 205 | 216 | 223) {
+            if !main_continuation && !matches!(version, 205 | 216 | 223 | 225) {
                 run_continuation::downgrade_for_test(database.connection());
             }
             if version == 184 {
@@ -42373,6 +42465,7 @@ mod tests {
             v222: version >= 222,
             v223: version >= 223,
             v224: version >= 224,
+            v225: version >= 225,
         }
     }
 

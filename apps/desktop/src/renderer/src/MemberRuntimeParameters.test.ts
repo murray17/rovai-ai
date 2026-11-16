@@ -332,7 +332,8 @@ describe('member runtime parameters', () => {
   it.each([
     ['codebuddy-cli', 'thought_level', '推理强度'],
     ['kilo-cli', 'effort', '推理强度'],
-    ['minimax-code-cli', 'thinkingEffort', '思考强度']
+    ['minimax-code-cli', 'thinkingEffort', '思考强度'],
+    ['goose-cli', 'thinking_effort', '思考强度']
   ] as const)('renders %s native effort and preserves a saved value when options are unavailable', (kind, key, label) => {
     const installation = runtimeInstallation(kind)
     installation.snapshot!.models[0].options[0].key = key
@@ -642,6 +643,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
       return {}
     case 'opencode-cli':
       return { permission: 'allow' }
+    case 'goose-cli':
+      return { mode: 'auto' }
     case 'copilot-cli':
       return { allow_all: 'on' }
     case 'hermes-cli':
