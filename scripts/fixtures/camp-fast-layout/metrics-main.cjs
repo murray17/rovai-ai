@@ -75,40 +75,78 @@ app.whenReady().then(async () => {
 
     await run('document.querySelector(".execution-drawer-body").scrollTop = 0')
     await run('window.fastTest.metricsTerminal()')
+    await run('window.fastTest.settle()')
+    if (await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded") === "false"')) {
+      await click('.execution-history-toggle')
+    }
     await wait(4_500) // The finite terminal tail has completed.
     const beforeStable = (await requests()).length
     await wait(10_500)
     assert.equal((await requests()).length, beforeStable, 'Stable terminal data still polled')
     assert.ok(await run('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-duration-trigger")'))
     await run('window.fastTest.metricsCommit(1000, 2, false, 55000)')
-    await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "55K"', 'Core projection was gated by partial quality or replaced with raw buckets')
+    await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-value")?.textContent === "55K"', 'Core projection was gated by partial quality or replaced with raw buckets')
     assert.equal(await run('document.querySelector(".execution-context-value")?.textContent'), '32.0%')
     for (const status of ['running', 'waiting', 'failed', 'cancelled', 'succeeded']) {
       await run(`window.fastTest.metricsStatus('${status}')`)
-      await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "55K"', `Missing known usage for ${status}`)
+      await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-value")?.textContent === "55K"', `Missing known usage for ${status}`)
+      if (status === 'running') {
+        const point = await run(`(() => {
+          const rect = document.querySelector('[data-agent-run-id="run-agent-0"] .execution-duration-trigger').getBoundingClientRect()
+          return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) }
+        })()`)
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+        await wait(100)
+        window.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+        window.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
+        await waitFor('!!document.querySelector(".execution-duration-reading")', 'Live clock was covered by Run operations')
+        await click('[data-agent-run-id="run-agent-0"] .execution-duration-trigger')
+      }
     }
-    await click('[data-agent-run-id="run-agent-0"] .execution-usage-trigger')
+    const usageNode = await run(`(() => {
+      const value = document.querySelector('[data-agent-run-id="run-agent-0"] .execution-usage-value')
+      return { tag: value.tagName, interactive: Boolean(value.closest('button, a, [role="button"]')) || value.tabIndex >= 0,
+        clock: Boolean(value.parentElement.querySelector('.execution-duration-trigger')) }
+    })()`)
+    assert.deepEqual(usageNode, { tag: 'SPAN', interactive: false, clock: true }, 'Token total must be read-only beside an independent clock')
+    await click('[data-agent-run-id="run-agent-0"] .execution-usage-value')
+    assert.equal(await run('document.querySelector(".execution-duration-reading")'), null, 'Clicking Token text opened elapsed time')
+    await click('[data-agent-run-id="run-agent-0"] .execution-duration-trigger')
     assert.ok(await run('!!document.querySelector(".execution-duration-reading")'))
-    assert.equal(await run('document.querySelector(".execution-metric-popover")?.textContent.match(/Input|Output|Cache|部分|完整|≥|≈/)'), null)
-    await click('[data-agent-run-id="run-agent-0"] .execution-usage-trigger')
+    assert.equal(await run('document.querySelector(".execution-metric-popover")?.textContent.match(/Input|Output|Cache|部分|完整|≥|≈|55K/)'), null)
+    await click('[data-agent-run-id="run-agent-0"] .execution-duration-trigger')
     await run('window.fastTest.metricsCommit(1000, 2, false, 0)')
-    await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "0K"', 'Explicit zero was hidden')
+    await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-value")?.textContent === "0K"', 'Explicit zero was hidden')
     await run('window.fastTest.metricsCommit(1000, 2, false, null)')
-    await waitFor('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-duration-trigger")', 'Unknown projection fell back to raw Input/Output')
+    await waitFor('!document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-value")', 'Unknown projection fell back to raw Input/Output')
+    assert.ok(await run('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-duration-trigger")'))
     await run('window.fastTest.metricsCommit(1000, 2, false, 55000)')
-    await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "55K"', 'Late projection did not update')
+    await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-value")?.textContent === "55K"', 'Late projection did not update')
     await run('window.fastTest.metricsRemoveContext()')
     await waitFor('document.querySelector(".execution-context-value")?.textContent === "—"', 'Invalid current Session Context was retained')
     assert.equal(await run('document.documentElement.scrollWidth > innerWidth'), false)
+    const themeTokens = new Set()
     for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
-      await run(`document.documentElement.dataset.theme = '${theme}'`)
+      await run(`document.documentElement.dataset.themeId = '${theme}';
+        document.documentElement.dataset.theme = '${['night', 'ember'].includes(theme) ? 'night' : 'day'}';
+        document.documentElement.style.colorScheme = '${['night', 'ember'].includes(theme) ? 'dark' : 'light'}'`)
       await run('window.fastTest.settle()')
+      themeTokens.add(await run(`(() => {
+        const style = getComputedStyle(document.documentElement)
+        return ['--canvas', '--ink', '--conversation-action'].map(name => style.getPropertyValue(name).trim()).join('|')
+      })()`))
+      await click('[data-agent-run-id="run-agent-0"] .execution-usage-value')
+      assert.equal(await run('document.querySelector(".execution-duration-reading")'), null, `${theme}: Token text opened a duration popover`)
+      await click('[data-agent-run-id="run-agent-0"] .execution-duration-trigger')
+      assert.ok(await run('!!document.querySelector(".execution-duration-reading")'), `${theme}: Clock did not open duration`)
       writeFileSync(join(dirname(userData), `metrics-${theme}.png`), (await window.webContents.capturePage()).toPNG())
+      await click('[data-agent-run-id="run-agent-0"] .execution-duration-trigger')
     }
+    assert.equal(themeTokens.size, 5, 'Registered palettes did not all apply their production tokens')
     assert.ok((await requests()).every(request => request.method === 'monitoring.execution'), 'Unexpected metrics polling')
     assert.equal(await run('document.querySelectorAll(".execution-header-metrics > *").length'), 1, 'Header must contain only the Context entry')
     const report = { ok: true, cases: ['visible collapsed history', '500 Run scoped reads', 'scroll and expansion',
-      'hidden panel and page', 'immediate visibility refresh', 'stable terminal', 'late post-tail Usage', 'Core projection independent of raw buckets and quality', 'running/failure/cancelled totals', 'explicit zero and unknown', 'duration-only popover', 'Session replacement/removal'],
+      'hidden panel and page', 'immediate visibility refresh', 'stable terminal', 'late post-tail Usage', 'Core projection independent of raw buckets and quality', 'running/failure/cancelled totals', 'explicit zero and unknown', 'read-only Token text and independent duration button', 'Session replacement/removal'],
       maximumRequestedRuns: Math.max(...(await requests()).filter(request => request.method === 'monitoring.execution').map(request => request.params.agentRunIds.length)) }
     writeFileSync(join(dirname(userData), 'metrics-report.json'), JSON.stringify(report, null, 2))
     console.log(JSON.stringify(report))

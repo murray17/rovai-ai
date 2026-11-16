@@ -157,7 +157,7 @@ describe('execution console layout', () => {
       .toMatch(/grid-column:\s*3;\s*grid-row:\s*1/)
     expect(workspaceSource).toMatch(/<span className="execution-header-metrics">[\s\S]*?<ExecutionContextPopover/)
     expect(workspaceSource).toMatch(/if \(live && total === null\) return <span className="execution-run-metric">\{duration\}<\/span>/)
-    expect(workspaceSource).toContain('<ExecutionDurationPopover run={run} total={total} />')
+    expect(workspaceSource).toContain('<ExecutionDurationPopover run={run} />')
     expect(workspaceSource).not.toContain('ExecutionUsagePopover')
     expect(styleBlock('.execution-duration-popover')).toMatch(/min-width:\s*134px/)
     expect(styles).not.toMatch(/\.execution-process-card:(?:hover|focus-within)[^{]*\.execution-run-operations/)
