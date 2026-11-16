@@ -876,12 +876,6 @@ const SQLITE_USAGE_CURSOR_QUERY: &str = "SELECT rowid,id FROM message ORDER BY r
 const SQLITE_USAGE_CANDIDATES_QUERY: &str = "SELECT id,time_created FROM message NOT INDEXED
     WHERE rowid>?1 AND rowid<=?2 AND session_id=?3 ORDER BY rowid LIMIT ?4";
 const SQLITE_USAGE_QUERIES_PER_POLL: usize = 64;
-const SQLITE_USAGE_SUPPLEMENT_READS: u8 = 2;
-
-struct PendingSqliteUsage {
-    id: String,
-    supplement_reads: u8,
-}
 
 pub(crate) struct OpenCodeUsageReader {
     kind: AdapterKind,
@@ -890,8 +884,8 @@ pub(crate) struct OpenCodeUsageReader {
     session_id: String,
     file_identity: FileIdentity,
     cursor: Option<(i64, String)>,
-    pending: VecDeque<PendingSqliteUsage>,
-    observed: BTreeMap<String, NativeUsageSnapshot>,
+    pending: VecDeque<String>,
+    seen: BTreeSet<String>,
     disabled: bool,
     #[cfg(test)]
     metadata_query_runs: i32,
@@ -940,7 +934,7 @@ impl OpenCodeUsageReader {
             file_identity: FileIdentity::from_metadata(&metadata),
             cursor: None,
             pending: VecDeque::new(),
-            observed: BTreeMap::new(),
+            seen: BTreeSet::new(),
             disabled: false,
             #[cfg(test)]
             metadata_query_runs: 0,
@@ -1038,10 +1032,9 @@ impl OpenCodeUsageReader {
             if !safe_identity(&id) {
                 bail!("native Usage message identity is invalid");
             }
-            self.pending.push_back(PendingSqliteUsage {
-                id,
-                supplement_reads: SQLITE_USAGE_SUPPLEMENT_READS,
-            });
+            if !self.seen.contains(&id) {
+                self.pending.push_back(id);
+            }
             if self.pending.len() > MAX_IDENTITIES {
                 bail!("native Usage pending identities exceed bound");
             }
@@ -1052,9 +1045,9 @@ impl OpenCodeUsageReader {
         }
         // Only metadata scalars leave SQLite. Native parts and message bodies
         // are never selected into Core memory or its public Evidence channel.
-        // Completed full calls leave immediately. Sparse/failed completed calls
-        // get only two supplements. Round-robin also bounds work per poll, while
-        // an actual in-flight call keeps the original wait-for-completion path.
+        // Wait only for the first collectible result. Once any trustworthy
+        // tokens are collected, retire the call even if other fields are absent.
+        // Round-robin bounds the original wait-for-completion path per poll.
         let mut query = database.prepare(
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
@@ -1067,8 +1060,10 @@ impl OpenCodeUsageReader {
         )?;
         let mut result = Vec::new();
         for _ in 0..self.pending.len().min(SQLITE_USAGE_QUERIES_PER_POLL) {
-            let mut candidate = self.pending.pop_front().unwrap();
-            let id = &candidate.id;
+            let id = self.pending.pop_front().unwrap();
+            if self.seen.contains(&id) {
+                continue;
+            }
             let row = query
                 .query_row(rusqlite::params![self.session_id, id], |row| {
                     Ok((
@@ -1091,22 +1086,14 @@ impl OpenCodeUsageReader {
                 })
                 .optional()?;
             let Some((id, mut fields, time, provider, model, cost, role, failed)) = row else {
-                if candidate.supplement_reads > 0 {
-                    candidate.supplement_reads -= 1;
-                    self.pending.push_back(candidate);
-                }
+                self.pending.push_back(id);
                 continue;
             };
             if role != "assistant" {
                 continue;
             }
             if time.is_none() {
-                if !failed {
-                    self.pending.push_back(candidate);
-                } else if candidate.supplement_reads > 0 {
-                    candidate.supplement_reads -= 1;
-                    self.pending.push_back(candidate);
-                }
+                self.pending.push_back(id);
                 continue;
             }
             let counts = [
@@ -1116,12 +1103,9 @@ impl OpenCodeUsageReader {
                 fields.cache_read_input_tokens,
                 fields.cache_write_input_tokens,
             ];
-            let complete = !failed && counts.iter().all(|n| n.is_some_and(|n| n >= 0));
-            if !complete && candidate.supplement_reads > 0 {
-                candidate.supplement_reads -= 1;
-                self.pending.push_back(candidate);
-            }
             if failed && !counts.into_iter().flatten().any(|n| n > 0) {
+                // Preserve the original exclusion of failed placeholder zeros.
+                self.pending.push_back(id);
                 continue;
             }
             fields.output_tokens = match (fields.output_tokens, fields.reasoning_output_tokens) {
@@ -1159,15 +1143,11 @@ impl OpenCodeUsageReader {
                         grain: "model_call".into(),
                     });
             }
-            let snapshot = usage_snapshot(&consumption.usage);
-            if self.observed.get(&id) == Some(&snapshot) {
-                continue;
-            }
-            if !self.observed.contains_key(&id) && self.observed.len() >= MAX_IDENTITIES {
+            if self.seen.len() >= MAX_IDENTITIES {
                 self.disabled = true;
                 break;
             }
-            self.observed.insert(id.clone(), snapshot);
+            self.seen.insert(id.clone());
             result.push(consumption);
             // The installed ACPUsage.contextTokens() defines occupancy as the
             // latest call's input + both cache buckets, excluding output. ACP
@@ -3015,7 +2995,7 @@ mod tests {
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();
         assert!(
-            reader.observed.is_empty(),
+            reader.seen.is_empty(),
             "history is not copied into this Run"
         );
         assert!(
@@ -3089,8 +3069,8 @@ mod tests {
                 .contains("NATIVE_PRIVATE_CANARY")
         );
         assert!(reader.poll().is_empty());
-        // A completed failure with positive sparse usage is revisited by ID,
-        // without allowing the next prompt to claim the same historical row.
+        // A completed failure contributes its positive sparse usage once.
+        // Unsignalled in-place updates do not reopen a collected native call.
         let mut core = crate::db::Database::open(&root.join("core-projection")).unwrap();
         database.execute("INSERT INTO message VALUES('failed-positive-sparse','session-1',5,?1)",
             [json!({"role":"assistant","time":{"completed":5},"error":{"name":"ProviderError"},
@@ -3106,16 +3086,21 @@ mod tests {
                 .unwrap();
         database.execute("UPDATE message SET data=json_remove(json_set(data,'$.tokens.output',5000),'$.error') WHERE id='failed-positive-sparse'", []).unwrap();
         let completed = reader.poll();
-        assert_eq!(completed.len(), 1);
-        assert_eq!(completed[0].source_identity, failed[0].source_identity);
+        assert!(completed.is_empty());
+        assert!(
+            !reader
+                .pending
+                .iter()
+                .any(|id| id == "failed-positive-sparse")
+        );
         assert_eq!(
             project_native_usage(&mut core, AdapterKind::OpencodeCli, &completed),
-            Some(15000)
+            Some(10000)
         );
         assert!(reader.poll().is_empty());
         assert_eq!(
             project_native_usage(&mut core, AdapterKind::OpencodeCli, &[]),
-            Some(15000)
+            Some(10000)
         );
         assert!(
             resumed.poll().is_empty(),
@@ -3185,7 +3170,7 @@ mod tests {
             .unwrap();
         assert!(reader.poll().is_empty());
         assert!(
-            reader.pending.iter().all(|item| item.id != "user-record"),
+            reader.pending.iter().all(|id| id != "user-record"),
             "non-assistant rows leave the candidate budget"
         );
         database.execute("INSERT INTO message VALUES('sparse','session-1',6,?1)",
@@ -3416,44 +3401,42 @@ mod tests {
             .unwrap();
         // Measure actual SQLite statement executions, rather than counting
         // returned observations: duplicate filtering happens after each query.
-        for complete in [true, false] {
+        for (case, data) in [
+            ("complete", history_usage.clone()),
+            ("sparse", json!({"role":"assistant","time":{"completed":1},"tokens":{"input":1}}).to_string()),
+            ("failed-sparse", json!({"role":"assistant","time":{"completed":1},"error":{"name":"ProviderError"},"tokens":{"input":1}}).to_string()),
+        ] {
             let mut measured = OpenCodeUsageReader::baseline(
                 path.clone(),
                 "/workspace".into(),
                 "session-1".into(),
             )
             .unwrap();
-            let data = if complete {
-                history_usage.clone()
-            } else {
-                json!({"role":"assistant","time":{"completed":1},"tokens":{"input":1}}).to_string()
-            };
             database.execute(
                 "WITH RECURSIVE calls(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM calls WHERE n<1000)
                  INSERT INTO message SELECT ?1||n,'session-1',1,?2 FROM calls",
-                rusqlite::params![format!("measured-{complete}-"),data],
+                rusqlite::params![format!("measured-{case}-"),data],
             ).unwrap();
             let mut queries = 0;
-            let mut calls = 0;
+            let mut calls = BTreeSet::new();
             for _ in 0..64 {
                 let observations = measured.poll();
                 assert!(!measured.disabled);
                 assert!(measured.metadata_query_runs <= SQLITE_USAGE_QUERIES_PER_POLL as i32);
                 queries += measured.metadata_query_runs;
-                calls += observations
-                    .iter()
-                    .filter(|item| item.usage.scope == "model_call")
-                    .count();
+                for item in observations.iter().filter(|item| item.usage.scope == "model_call") {
+                    assert!(calls.insert(item.source_identity.clone()), "each call is collected only once");
+                }
                 if measured.pending.is_empty() {
                     break;
                 }
             }
             assert!(measured.pending.is_empty());
             assert_eq!(
-                calls, 1000,
-                "unchanged supplements cannot duplicate consumption"
+                calls.len(), 1000,
+                "all calls with known consumption must be collected"
             );
-            assert_eq!(queries, if complete { 1000 } else { 3000 });
+            assert_eq!(queries, 1000, "sparse fields cannot add follow-up queries");
             for _ in 0..10 {
                 assert!(measured.poll().is_empty());
                 assert_eq!(
@@ -3464,7 +3447,7 @@ mod tests {
             database
                 .execute(
                     "UPDATE message SET data=json_set(data,'$.tokens.output',5) WHERE id=?1",
-                    [format!("measured-{complete}-1")],
+                    [format!("measured-{case}-1")],
                 )
                 .unwrap();
             assert!(
@@ -3473,7 +3456,7 @@ mod tests {
             );
             assert_eq!(measured.metadata_query_runs, 0);
             println!(
-                "SQLite Usage query budget: complete={complete}, calls=1000, metadata_queries={queries}, idle=0"
+                "SQLite Usage first collection: case={case}, calls=1000, metadata_queries={queries}, idle=0"
             );
         }
         let mut unfinished =
@@ -3492,17 +3475,38 @@ mod tests {
         assert!(unfinished.pending.is_empty());
         assert!(unfinished.poll().is_empty());
         assert_eq!(unfinished.metadata_query_runs, 0);
+        let mut unknown =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database
+            .execute(
+                "INSERT INTO message VALUES('completed-no-usage','session-1',1,?1)",
+                [json!({"role":"assistant","time":{"completed":9}}).to_string()],
+            )
+            .unwrap();
+        let empty = unknown.poll();
+        assert_eq!(empty.len(), 1);
+        assert!(
+            empty[0].usage.fields.is_empty(),
+            "missing usage stays unknown rather than becoming zero"
+        );
+        assert!(
+            unknown.pending.is_empty(),
+            "a completed result without usage does not start field chasing"
+        );
+        assert!(unknown.poll().is_empty());
+        assert_eq!(unknown.metadata_query_runs, 0);
         let mut malformed =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();
         for (id, data) in [
-            ("unclassified-budget", json!({})),
+            ("awaiting-metadata", json!({})),
             (
-                "failed-unfinished-budget",
+                "awaiting-failure-completion",
                 json!({"role":"assistant","error":{"name":"ProviderError"}}),
             ),
             (
-                "failed-zero-budget",
+                "awaiting-real-zero",
                 json!({"role":"assistant","time":{"completed":9},"error":{"name":"ProviderError"},"tokens":{"input":0,"output":0}}),
             ),
         ] {
@@ -3513,19 +3517,47 @@ mod tests {
                 )
                 .unwrap();
         }
-        for _ in 0..=SQLITE_USAGE_SUPPLEMENT_READS {
+        for _ in 0..8 {
             assert!(malformed.poll().is_empty());
             assert_eq!(malformed.metadata_query_runs, 3);
         }
+        assert_eq!(
+            malformed.pending.len(),
+            3,
+            "wait for the first collectible result, without a supplement budget"
+        );
+        for id in [
+            "awaiting-metadata",
+            "awaiting-failure-completion",
+            "awaiting-real-zero",
+        ] {
+            database
+                .execute(
+                    "UPDATE message SET data=?2 WHERE id=?1",
+                    rusqlite::params![
+                        id,
+                        json!({"role":"assistant","time":{"completed":9},"tokens":{"input":0}})
+                            .to_string()
+                    ],
+                )
+                .unwrap();
+        }
+        let zeros = malformed.poll();
+        assert_eq!(zeros.len(), 3);
+        assert!(
+            zeros
+                .iter()
+                .all(|item| item.usage.fields.input_tokens == Some(0))
+        );
         assert!(malformed.pending.is_empty());
         assert!(malformed.poll().is_empty());
         assert_eq!(malformed.metadata_query_runs, 0);
-        let mut expired =
+        let mut retired =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();
         database
             .execute(
-                "INSERT INTO message VALUES('expired-supplement','session-1',1,?1)",
+                "INSERT INTO message VALUES('retired-sparse','session-1',1,?1)",
                 [
                     json!({"role":"assistant","time":{"completed":1},"tokens":{"input":10000}})
                         .to_string(),
@@ -3533,20 +3565,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            project_native_usage(&mut core, AdapterKind::OpencodeCli, &expired.poll()),
-            Some(25000)
+            project_native_usage(&mut core, AdapterKind::OpencodeCli, &retired.poll()),
+            Some(20000)
         );
-        for _ in 0..SQLITE_USAGE_SUPPLEMENT_READS {
-            assert!(expired.poll().is_empty());
-        }
-        assert!(expired.pending.is_empty());
-        database.execute("UPDATE message SET data=json_set(data,'$.tokens.output',5000) WHERE id='expired-supplement'", []).unwrap();
-        assert!(expired.poll().is_empty());
-        assert_eq!(expired.metadata_query_runs, 0);
+        assert!(retired.pending.is_empty());
+        database.execute("UPDATE message SET data=json_set(data,'$.tokens.output',5000) WHERE id='retired-sparse'", []).unwrap();
+        assert!(retired.poll().is_empty());
+        assert_eq!(retired.metadata_query_runs, 0);
         assert_eq!(
             project_native_usage(&mut core, AdapterKind::OpencodeCli, &[]),
-            Some(25000),
-            "exhausted supplements preserve known consumption"
+            Some(20000),
+            "retiring a sparse call preserves its known consumption"
         );
         let mut bounded =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
