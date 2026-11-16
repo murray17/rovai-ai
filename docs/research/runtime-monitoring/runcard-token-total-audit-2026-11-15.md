@@ -165,6 +165,9 @@ Migration、原子回滚、可选统计、历史回执准入由既有数据库 o
 | `pnpm test:execution-metrics-ui` | 隔离生产 Renderer passed；有值仅 `55K`、显式 `0K`、未知不回退分项、运行/等待/失败/取消、迟到更新、耗时气泡、500 Run 有界读取与五主题 |
 | `pnpm docs:test`、`pnpm docs:check`、带 `DOCS_BASE_REF` 的 `pnpm docs:check:ci` | 源码隔离副本通过；10 个治理测试。工作区直接检查受到 Git 忽略的既有 `docs/prototypes` 断链干扰，未改写、移动或删除这些原型，也未添加 checker 例外 |
 
+完成后合入主线 `855a3c2a7`（集成提交 `4f5b7574c`）；Rust 源码未变化，沿用上述完整 workspace 结果。
+合并后的 `pnpm typecheck`、4 个相关 Renderer 测试文件（72 passed）及五主题生产 Renderer 验收再次通过。
+
 UI 自动验收使用新建临时 `userData` 与其下的 Skill 目录，不启动 Core 或真实 Runtime；截图和白名单断言来自同次生产组件。
 本轮未重新实跑所有 Runtime 的真实模型/Provider/操作系统组合；历史真实数值、协议判断与受控测试不能彼此替代。
 本次不改变原生 Runtime 资格、Activity、监控页、定价、模型输入或版本生命周期。当前规范是
