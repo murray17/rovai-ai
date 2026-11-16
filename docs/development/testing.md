@@ -232,6 +232,15 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 
 ## Rust 测试准入与退役门槛
 
+RunCard Token 总量扩展现有 `usage_core_semantics_preserve_unknown_zero_and_partial_buckets`、
+`cumulative_checkpoint_dedupes_resets_resume_and_late_terminal_batches`、分区与 parser/native reader owners，
+覆盖外部验收样本、同调用补齐、total 覆盖子集、reset/resume 和失败重试；不新增 Rust 测试函数。
+MiniMax 原 error/aborted 一刀切拒绝的 case 随该准入退出，原 owner 内以正消费保留和全零占位拒绝的对照接替；
+user、未知 stopReason、缺 usage、负数与隐私 canary 仍保留。
+Migration 225 的 DDL/回执回滚和旧值/null/zero 保留复用 `async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt`，
+低层纯函数不能证明 SQLite 原子性；原 194 升级断言保留。Renderer owner 直接消费 Core 投影，隔离 Electron owner
+验证所有状态、零/未知、迟到刷新和五主题。命令与实际边界见[核查记录](../research/runtime-monitoring/runcard-token-total-audit-2026-11-15.md)。
+
 飞书/Lark 连接观测扩展既有 `member_bot_app_binding_is_immutable_across_legacy_disabled_reactivation`
 与 `wrong_provider_hosts_are_rejected_by_every_lark_capable_handler`：原 SQLite binding fixture 覆盖填空、no-op、
 显示名更新、身份冲突、版本 CAS 与 Owner/发布时间不变；原 Provider owner 覆盖交叉 Host 拒绝、双 Provider 的

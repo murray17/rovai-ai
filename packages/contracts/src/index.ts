@@ -696,6 +696,8 @@ export interface RuntimeExecutionMetricsSnapshot {
     cacheWriteTokens: number | null
     finalizedAt: string | null
     lastObservedAt: string | null
+    /** Core-owned sum of attributed, deduplicated known consumption (RunCard scheme 1). */
+    displayTotalTokens: number | null
     /** Coverage of received Input/Output contributions; missing/legacy evidence is not complete. */
     inputOutputComplete?: boolean
   }>

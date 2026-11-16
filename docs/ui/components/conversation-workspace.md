@@ -854,7 +854,7 @@ Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 
 Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含思考正文的
 `thinking | executing` phase 与独立准入的短标题来切换上述反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Thread 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
-运行中 Run 卡片保留原有耗时；终态卡片有用量字段时仅显示 `xxk` 入口，点击的气泡显示 Input Token、Output Token、Cache Read、Cache Write 四项及分隔后的执行耗时。缺失字段显示未知，不加用量合计行、Run 编号或摘要。仅成功且 Input/Output 完整结算时计算入口值 `Input + Output`，Cache 不再叠加。完全没有用量字段的终态卡片使用时钟入口单独查看耗时；迟到用量到达后切换成 token 入口。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Thread Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
+Run 卡片只使用 Core 的 `displayTotalTokens`。有数值时显示一个千进制 `xxK`，至多一位小数，显式零为 `0K`；成功、失败、取消和运行中共用准入，不根据分项、结算或完整性重算。无值时不显示 Token 数字，保留运行耗时或终态时钟入口；迟到有效投影到达后更新。Token 入口的气泡只显示执行耗时，不显示 Input/Output/Cache、完整性标签、“部分”、`≥` 或 `≈`。原生指标与旧 Run 边界见 [Runtime Execution Metrics v8](../../contracts/runtime-execution-metrics-v8.md)。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Thread Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
 上下文圆环填充与百分比共用中性前景色：默认使用 `--muted`，悬浮或气泡展开时使用 `--ink`；
 Run 状态与占用比例不触发圆环状态色。所有已注册配色使用同一规则。
 需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出且没有思考反馈时显示“执行中”。成功后才显示“工作了 {时长}”

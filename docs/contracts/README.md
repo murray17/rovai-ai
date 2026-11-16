@@ -239,7 +239,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v31（历史）](runtime-launch-and-verification-v31.md) | v30 的 Pi wire/安全语义不变；三平台改为明确的可运行 experimental preview，仍不宣称 qualified |
 | [Runtime Launch and Verification v30（历史）](runtime-launch-and-verification-v30.md) | v29 保留；增加 Pi JSONL Host、专属 Ready/exact resume、managed receipt、动态 Skills/MCP、Action/Usage 与三平台未准入边界 |
 | [Runtime Launch and Verification v29（历史）](runtime-launch-and-verification-v29.md) | v28 保留；现有 Check Manager 的 Fast metadata 与单执行原生覆盖 |
-| [Runtime Usage Monitoring v11（当前）](runtime-usage-monitoring-v11.md) | 本轮工具身份限定补采与原生压缩 snapshot 去重，后台预算和部分统计保持 |
+| [Runtime Usage Monitoring v12（当前）](runtime-usage-monitoring-v12.md) | Core 统一投影 RunCard 已知消费总量、同调用补齐去重、原生 full total 和旧 Run 保守边界 |
+| [Runtime Usage Monitoring v11（历史）](runtime-usage-monitoring-v11.md) | 本轮工具身份限定补采与原生压缩 snapshot 去重，后台预算和部分统计保持 |
 | [Runtime Usage Monitoring v10（历史）](runtime-usage-monitoring-v10.md) | 精确消息身份限定的有界后台补采；业务终态不等待统计，journal 仍标部分观测 |
 | [Runtime Usage Monitoring v9（历史）](runtime-usage-monitoring-v9.md) | Run 终态独立于统计刷盘，后台采样与迟到数据去重 |
 | [Runtime Usage Monitoring v8（历史）](runtime-usage-monitoring-v8.md) | 逐调用归一化、批次无关计数与 Input/Output 部分状态 |
@@ -247,7 +248,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v6（历史）](runtime-usage-monitoring-v6.md) | DSH 原生完整调用 total 接通，缓存缺失继续保留未知 |
 | [Runtime Usage Monitoring v5（历史）](runtime-usage-monitoring-v5.md) | 按原生格式准入、去除指标版本门槛；TRAE journal 与 Antigravity step 补采 |
 | [Runtime Usage Monitoring v4（历史）](runtime-usage-monitoring-v4.md) | v3 保留；可选实际档位、observed 优先与未知撤回估价 |
-| [Runtime Execution Metrics v7（当前）](runtime-execution-metrics-v7.md) | 当前 Session 运行中直接更新、有效实际模型窗口复用、ZCode 事件触发读取 |
+| [Runtime Execution Metrics v8（当前）](runtime-execution-metrics-v8.md) | RunCard 只显示一个 Core 总量 xxK，所有状态统一准入、零与未知分开、气泡仅耗时 |
+| [Runtime Execution Metrics v7（历史）](runtime-execution-metrics-v7.md) | 当前 Session 运行中直接更新、有效实际模型窗口复用、ZCode 事件触发读取 |
 | [Runtime Execution Metrics v6（历史）](runtime-execution-metrics-v6.md) | Claude 运行中最新调用占用、窗口未知时独立保存 used |
 | [Runtime Execution Metrics v5（历史）](runtime-execution-metrics-v5.md) | Run 完整性投影与已有部分用量入口守卫 |
 | [Runtime Execution Metrics v4（历史）](runtime-execution-metrics-v4.md) | Antigravity 原生窗口、TRAE 校准占用、Qoder 数量配对及 Kiro 原生窗口 |

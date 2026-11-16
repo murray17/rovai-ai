@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-metering-and-read-boundaries
 status: accepted
-last_updated: 2026-11-11
+last_updated: 2026-11-16
 ---
 
 # Runtime Monitoring 架构
 
-精确字段与方法见 [Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)。长期最小化、
+精确字段与方法见 [Runtime Usage Monitoring v12](../contracts/runtime-usage-monitoring-v12.md)；执行台的原生用量与上下文另见 [Runtime Execution Metrics v8](../contracts/runtime-execution-metrics-v8.md)。长期最小化、
 稀疏语义、clean break 与 Cost grain 由
 [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)拥有。本架构只说明 Usage Transport、内存归一化、
 Projection/Rollup、Read Side 和 Renderer 如何组合。
@@ -31,7 +31,7 @@ Projection/Rollup、Read Side 和 Renderer 如何组合。
 Execution Evidence、Canonical Activity、AgentRun、Approval、Delivery、Recovery、Context 和 Runtime health
 继续由各自 Core domain 拥有。Monitoring 不复制、不删除也不重建这些事实。
 
-执行台增加一条窄读取路径：现有 Run summary 提供每 Run 四项用量，当前原生 Session 上下文单独保存在 `runtime_session_context_latest`。后者由 Session gauge 写入，并由 `Conversation` 的当前 Binding ID、代次和原生 Session ID 在读取时栅栏；指标分支的 Migration 178 从 v1.72/schema 127 建立空表，179 添加 nullable `native_context_ratio` 并升级到 schema 129，保留已安装分支的数据，不回填旧 Run 或旧 Session。合入 Thread 更名后由 180 收口为 schema 130；main 已部署的另一种 schema 128 仅按完整 v32 准入、指标表缺失和精确收据链识别，179 原子补建指标投影，180 保留已具备的 Thread 格式和冻结证据。占用数量与原生比例属于同一最新观测；比例不用于反推 token 数。所有 Runtime 的输出测速已于 2026-10-02 退出；没有字符计数器或临时速度读取路径。原生 Usage buffer、checkpoint、hourly rollup 与 Session Context 继续按既有合同工作。
+执行台增加一条窄读取路径：现有 Run summary 提供每 Run 的 Core 显示总量和内部稀疏分项，当前原生 Session 上下文单独保存在 `runtime_session_context_latest`。后者由 Session gauge 写入，并由 `Conversation` 的当前 Binding ID、代次和原生 Session ID 在读取时栅栏；指标分支的 Migration 178 从 v1.72/schema 127 建立空表，179 添加 nullable `native_context_ratio` 并升级到 schema 129，保留已安装分支的数据，不回填旧 Run 或旧 Session。合入 Thread 更名后由 180 收口为 schema 130；main 已部署的另一种 schema 128 仅按完整 v32 准入、指标表缺失和精确收据链识别，179 原子补建指标投影，180 保留已具备的 Thread 格式和冻结证据。占用数量与原生比例属于同一最新观测；比例不用于反推 token 数。所有 Runtime 的输出测速已于 2026-10-02 退出；没有字符计数器或临时速度读取路径。原生 Usage buffer、checkpoint、hourly rollup 与 Session Context 继续按既有合同工作。
 
 ## Write path
 
@@ -55,14 +55,17 @@ checkpoint，避免重复 Run 和 Coverage。Runtime 事件处理不写 raw/norm
 Execution Evidence。
 
 原始 input/read/write 不跨独立调用合并。请求命中计数在已验证的单调用边界生成，
-summary/hourly 只加已归一的 contribution；缺 Input/Output 的 contribution 会将 summary 标为部分，
-终态不会把部分和升级为完整总量。失败恢复保留旧数值帧在新帧之前，累计首次基线与 reset 不能被
-“只保留最后一帧”覆盖。Delta checkpoint 按调用身份暂存，终态后仍保留，现有过期清理任务在 72 小时后分批删除。
-执行台根据新完整性字段决定是否能显示 Input＋Output，四项已观测值继续可读。
+summary/hourly 只加已归一的 contribution；缺 Input/Output 时仍保留内部部分质量。
+RunCard 统一显示 Core 按方案 1 计算的 `displayTotalTokens`：保留可信、可归属、去重后的已知消费，
+不受 Run 状态、结算或完整性限制。同单位 full total/含缓存 Input/Output 各自覆盖子集，不重复相加。
+同调用后到字段修正已有贡献；失败恢复保留有序数值帧，Session 累计首值/reset 只建立 baseline。
+Delta checkpoint 按调用身份暂存，终态后仍保留，现有过期清理任务在 72 小时后分批删除。
+Migration 225（schema 175）只增加显示投影和原生 total 基线；旧 Run 从已有 summary 作保守投影并固定，
+不补猜已丢失的调用关系或扫描原生历史。字段与兼容边界见 Usage v12。
 
 指标层没有 CLI 版本白名单或私设最低版本。实际字段、来源身份和计量语义决定准入；产品本身的
 Runtime 最低版本和平台门槛保持。OpenCode V1 使用原生逐调用来源；V2 prompt response 只拥有当前
-根会话本轮已报告用量，未覆盖原生子会话／委派，因此沿用部分统计，不能作为完整 Run 总量。
+根会话本轮已报告用量，未覆盖原生子会话／委派，因此沿用内部部分统计；已知根 Prompt 消费仍可贡献 RunCard 的显示量。
 ACP `usage_update.cost` 的 Session 累计不进入 Run summary。Codex 完整 buckets、
 模型／档位／生效时间仍决定静态价格投影，不以 CLI 版本代替字段完整性。
 
@@ -88,12 +91,12 @@ SQLite baseline 只冻结当前物理行游标，不复制 Session 历史身份�
 MiniMax 的终态补采另冻结本轮显示消息 ID 与工具调用 ID，只接纳显式 canonical/turn 映射或精确
 结构化 toolCall 身份。压缩可以替换 active history；终态 reader 验证同一根 Session 后，在既有时间
 预算内读取 active 和原生 catalog 列出的有界 snapshot，保留 baseline 与跨文件身份去重。
-普通 cursor 仍在换代后停止；无本轮身份不重扫。具体预算和拒绝条件由 [Usage v11](../contracts/runtime-usage-monitoring-v11.md)拥有。
+普通 cursor 仍在换代后停止；无本轮身份不重扫。具体预算和拒绝条件由 [Usage v12](../contracts/runtime-usage-monitoring-v12.md)拥有。
 
 这些 reader 只保留有界调用身份、offset、文件身份和必要数值。JSONL 的非 Usage 字段由封闭 DTO 跳过，
 SQLite 不读取 part／正文；原始行只在本次解析缓冲中存在，不进入 Evidence、Blob、日志或 Renderer。
 选定本地 Token 来源后不再混加 ACP Token；Gauge 和 Cost 独立处理。最新版本与字段语义由
-[Usage v11](../contracts/runtime-usage-monitoring-v11.md)及其继承的原生来源合同拥有。
+[Usage v12](../contracts/runtime-usage-monitoring-v12.md)及其继承的原生来源合同拥有。
 
 Antigravity 在当前根 DONE step 进入 buffer 前，只读对应原生 SQLite 的同调用数值，
 交叉核对 stream 与本地身份/计数后替换稀疏观测；Context 读取同一 generator 的原生窗口估计。
@@ -139,7 +142,7 @@ cost 缺少安全的跨 Run baseline，按现有 OpenCode 边界保持 Run 费�
 Codex Run summary 可记录实际 service tier；费用投影先用原生观察、再用冻结/发送时请求档位。未知不套
 Standard 价，实际回退 Standard 不按请求 Fast 计价；失去档位依据时撤回旧目录估价。这个小型 metadata
 写入不新增计费系统，也不替代 Claude 等 Runtime 的原生 reported cost。精确行为由
-[Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md) 拥有。
+[Runtime Usage Monitoring v12](../contracts/runtime-usage-monitoring-v12.md) 拥有。
 
 ```text
 visible Settings page
@@ -177,7 +180,7 @@ epoch、Database contract `v0.99` 与 projection schema `47`。不存在回填�
 ## References
 
 - [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)
-- [Runtime Usage Monitoring v11](../contracts/runtime-usage-monitoring-v11.md)
+- [Runtime Usage Monitoring v12](../contracts/runtime-usage-monitoring-v12.md)
 - [v0.99 implementation plan](../versions/v0.99/implementation-plan.md)
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)

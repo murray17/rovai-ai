@@ -12,11 +12,11 @@ export function executionMetricRunActive(run: ExecutionMetricRun): boolean {
   return ACTIVE_STATUSES.has(run.status)
 }
 
-/** A finalized partial sum is still partial; cache is already included in Input. */
+/** Core owns admission and summation; Run state and raw bucket presence do not gate display. */
 export function executionUsageTotal(run: ExecutionMetricRun, usage: Snapshot['runs'][number] | null): number | null {
-  if (run.status !== 'succeeded' || usage?.finalizedAt == null || usage.inputOutputComplete !== true
-    || usage.promptInputTotalTokens === null || usage.outputTokens === null) return null
-  return usage.promptInputTotalTokens + usage.outputTokens
+  if (!usage || usage.agentRunId !== run.id || usage.executionEpoch !== run.executionEpoch) return null
+  const total = usage.displayTotalTokens
+  return Number.isSafeInteger(total) && total !== null && total >= 0 ? total : null
 }
 
 function sameFields<T extends object>(left: T, right: T, ignored?: keyof T): boolean {

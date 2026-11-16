@@ -1690,3 +1690,13 @@ R4 收口 Provider 的同序号观察顺序与读取失败状态，分开恢复�
 真实模型通用 Gate 尚未执行；范围、结果与限制见[实施记录](implementation-plan.md#rovai-长期记忆实例开关2026-11-11)。
 全部提示词、工具定义/help、关闭错误和回放的前后变化见
 [逐项设计对照](model-context-change-memory-capability.md#完整提示词与工具对照)，沿用 Task 方案的审阅编号。
+
+
+## RunCard Token 显示总量（2026-11-15）
+
+按 21 种 Adapter/不同方言先核查，再用同一组脱敏数值比较后选择方案 1：保留当前 Run 可归属且不重复的已知消费。
+Core 负责 `displayTotalTokens`，RunCard 有值只显示一个 `xxK`；运行中、失败、取消共用准入，未知与零分开。
+Migration 225/schema 175 保留稀疏数据和旧 Run 的保守数值，不扫描历史补账。
+当前规范为 [Usage v12](../../contracts/runtime-usage-monitoring-v12.md) 与 [Execution Metrics v8](../../contracts/runtime-execution-metrics-v8.md)，
+矩阵、样本、选型、测试和未确认边界见[核查记录](../../research/runtime-monitoring/runcard-token-total-audit-2026-11-15.md)。
+这是局部可逆的计量/显示投影，选择理由保存在核查记录；不新增 Version Decision，不改变版本生命周期或整个监控页。

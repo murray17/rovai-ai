@@ -46,6 +46,8 @@ mod pending_draft;
 mod quote_text;
 #[path = "db_run_continuation.rs"]
 mod run_continuation;
+#[path = "db_runcard_usage.rs"]
+mod runcard_usage;
 #[path = "db_shared_environment.rs"]
 mod shared_environment;
 #[path = "db_simplification.rs"]
@@ -519,7 +521,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 174;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 175;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1019,6 +1021,7 @@ struct CurrentMigrationState {
     v222: bool,
     v223: bool,
     v224: bool,
+    v225: bool,
 }
 
 impl CurrentMigrationState {
@@ -1040,6 +1043,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v225 {
+            let mut previous = *self;
+            previous.v225 = false;
+            return schema == 175 && previous.admits(contract, 174, classifier);
+        }
         if self.v224 {
             let mut previous = *self;
             previous.v224 = false;
@@ -3874,6 +3882,7 @@ pub(crate) fn classify_database_contract(
                 | 172
                 | 173
                 | 174
+                | 175
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3883,6 +3892,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 175
+                || runcard_usage::schema_matches(connection)?)
             && (marker.projection_schema_version < 174
                 || memory_capability::schema_matches(connection)?)
             && (marker.projection_schema_version < 173 || kilo::schema_matches(connection)?)
@@ -6216,7 +6227,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=221),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=222),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=224)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=225)
         "#,
         [],
         |row| {
@@ -6376,6 +6388,7 @@ fn load_current_migration_state(
                 v222: row.get(152)?,
                 v223: row.get(153)?,
                 v224: row.get(154)?,
+                v225: row.get(155)?,
             })
         },
     )
@@ -9685,6 +9698,9 @@ impl Database {
             if !self.schema_migration_applied(224)? {
                 migration_step!("migration_224", memory_capability::migrate(self));
             }
+            if !self.schema_migration_applied(225)? {
+                migration_step!("migration_225", runcard_usage::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10581,6 +10597,9 @@ impl Database {
         }
         if !self.schema_migration_applied(224)? {
             migration_step!("migration_224", memory_capability::migrate(self));
+        }
+        if !self.schema_migration_applied(225)? {
+            migration_step!("migration_225", runcard_usage::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -42373,6 +42392,7 @@ mod tests {
             v222: version >= 222,
             v223: version >= 223,
             v224: version >= 224,
+            v225: version >= 225,
         }
     }
 
@@ -42474,6 +42494,7 @@ mod tests {
     #[test]
     fn current_migration_state_admission_matrix() {
         let supported = [
+            ("v1.72/schema 174 before RunCard Usage", "v1.72", 174, 224),
             (
                 "v1.72/schema 168 before subagent classifier",
                 "v1.72",
@@ -42624,7 +42645,7 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                220,
+                CURRENT_PROJECTION_SCHEMA_VERSION + 50,
             ),
             (
                 "v1.72/schema 167 before literal quote text",
@@ -43208,7 +43229,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(220);
+        let current = migration_state_through(CURRENT_PROJECTION_SCHEMA_VERSION + 50);
         assert!(current.admits(
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
@@ -43901,6 +43922,7 @@ mod tests {
     fn async_usage_migration_preserves_checkpoints_and_rolls_back_with_receipt() {
         let directory = std::env::temp_dir().join(format!("rovai-async-usage-{}", Uuid::new_v4()));
         let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        runcard_usage::assert_upgrade(&mut database);
         downgrade_run_bootstrap_for_test(database.connection());
         let old_trigger = crate::monitoring::ASYNC_SETTLEMENT_TRIGGER.replace(
             "    END",
@@ -43942,11 +43964,12 @@ mod tests {
         ).unwrap();
         assert_eq!(baseline, 123);
         drop(database);
-        let reopened = Database::open(&directory).unwrap();
+        let mut reopened = Database::open(&directory).unwrap();
         assert!(connection_has_current_data_contract(reopened.connection()).unwrap());
         assert!(
             !crate::monitoring::async_settlement_schema_matches(reopened.connection()).unwrap()
         );
+        runcard_usage::assert_optional_upgrade(&mut reopened);
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -43967,7 +43990,10 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(220));
+        assert_eq!(
+            state,
+            migration_state_through(CURRENT_PROJECTION_SCHEMA_VERSION + 50)
+        );
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -44029,7 +44055,10 @@ mod tests {
                 }
                 "current_receipt" => {
                     connection
-                        .execute("DELETE FROM schema_migration WHERE version=220", [])
+                        .execute(
+                            "DELETE FROM schema_migration WHERE version=?1",
+                            [CURRENT_PROJECTION_SCHEMA_VERSION + 50],
+                        )
                         .unwrap();
                 }
                 "steer_identity" => {
@@ -44121,10 +44150,14 @@ mod tests {
             .unwrap();
         database
             .connection()
-            .execute_batch(
-                "DELETE FROM schema_migration WHERE version<220;
-             DROP TABLE runtime_usage_run_summary;",
+            .execute(
+                "DELETE FROM schema_migration WHERE version<?1",
+                [CURRENT_PROJECTION_SCHEMA_VERSION + 50],
             )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch("DROP TABLE runtime_usage_run_summary;")
             .unwrap();
         drop(database);
         // Exercise the production opening seam: missing historical receipts

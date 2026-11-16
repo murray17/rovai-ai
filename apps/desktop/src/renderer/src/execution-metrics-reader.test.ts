@@ -6,7 +6,7 @@ const run = (id: string, status: ExecutionMetricRun['status'] = 'succeeded', exe
   ({ id, status, executionEpoch })
 const row = (id: string, value: number | null = 100): RuntimeExecutionMetricsSnapshot['runs'][number] => ({
   agentRunId: id, executionEpoch: 1, promptInputTotalTokens: value, outputTokens: 20,
-  cacheReadTokens: null, cacheWriteTokens: 0, finalizedAt: 'final', lastObservedAt: 'observed', inputOutputComplete: true
+  cacheReadTokens: null, cacheWriteTokens: 0, finalizedAt: 'final', lastObservedAt: 'observed', displayTotalTokens: value, inputOutputComplete: true
 })
 const session: RuntimeExecutionMetricsSnapshot['sessions'][number] = {
   conversationId: 'conversation', agentId: 'agent', sessionGeneration: 1, runtimeKind: 'qoder-cli',
@@ -51,20 +51,22 @@ describe('execution metric structural sharing', () => {
 })
 
 describe('execution usage total qualification', () => {
-  it('keeps the synthetic partial 70 + 15 unknown and exposes only complete succeeded totals', () => {
-    const partial = { ...row('r1', 70), outputTokens: 15, inputOutputComplete: false }
-    expect(executionUsageTotal(run('r1'), partial)).toBeNull()
-    const complete = { ...row('r1', 200), outputTokens: 18, cacheReadTokens: 20 }
-    expect(executionUsageTotal(run('r1'), complete)).toBe(218)
-    expect(executionUsageTotal(run('r1'), { ...complete, inputOutputComplete: undefined })).toBeNull()
-    for (const status of ['running', 'failed', 'cancelled'] as const) {
-      expect(executionUsageTotal(run('r1', status), complete)).toBeNull()
+  it('uses only the Core projection for every status and preserves zero versus unknown', () => {
+    const partial = { ...row('r1', 70), outputTokens: 15, inputOutputComplete: false, displayTotalTokens: 185 }
+    for (const status of ['running', 'waiting', 'succeeded', 'failed', 'cancelled'] as const) {
+      expect(executionUsageTotal(run('r1', status), { ...partial, finalizedAt: null })).toBe(185)
     }
-    expect(executionUsageTotal(run('r1'), { ...complete, finalizedAt: null })).toBeNull()
-    expect(executionUsageTotal(run('r1'), { ...complete, outputTokens: null })).toBeNull()
-    expect(executionUsageTotal(run('r1'), { ...row('r1', 0), outputTokens: 0 })).toBe(0)
-    const initial = { ...snapshot(['r1', 'r2']), runs: [{ ...partial, inputOutputComplete: true }, row('r2')] }
-    const next = { ...initial, runs: [partial, initial.runs[1]] }
+    expect(executionUsageTotal(run('r1'), { ...partial, promptInputTotalTokens: null, outputTokens: null })).toBe(185)
+    expect(executionUsageTotal(run('r1'), { ...partial, displayTotalTokens: null })).toBeNull()
+    expect(executionUsageTotal(run('r1'), { ...partial, displayTotalTokens: undefined } as never)).toBeNull()
+    for (const invalid of [-1, NaN, Infinity, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(executionUsageTotal(run('r1'), { ...partial, displayTotalTokens: invalid })).toBeNull()
+    }
+    expect(executionUsageTotal(run('r1'), { ...partial, displayTotalTokens: 0 })).toBe(0)
+    expect(executionUsageTotal(run('r1', 'succeeded', 2), partial)).toBeNull()
+    expect(executionUsageTotal(run('other'), partial)).toBeNull()
+    const initial = snapshot(['r1', 'r2'])
+    const next = { ...initial, runs: [{ ...initial.runs[0], displayTotalTokens: 55_000 }, initial.runs[1]] }
     const merged = mergeExecutionMetrics(initial, next, ['r1', 'r2'], [run('r1'), run('r2')])
     expect(merged.runs[0]).not.toBe(initial.runs[0])
     expect(merged.runs[1]).toBe(initial.runs[1])

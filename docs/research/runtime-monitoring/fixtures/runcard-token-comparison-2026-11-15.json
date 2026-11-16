@@ -1,0 +1,1201 @@
+{
+  "schemaVersion": 1,
+  "auditBase": "70aab893810b03e8f45b7281efa7bceb3452ef5c",
+  "privacy": "Only numeric counts, aliased scenario identities and existing evidence references; no native text or logs.",
+  "samples": [
+    {
+      "runtime": "codebuddy-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 21313,
+          "output": 417
+        },
+        {
+          "input": 21703,
+          "output": 406,
+          "read": 21120
+        },
+        {
+          "input": 22115,
+          "output": 382,
+          "read": 21504
+        },
+        {
+          "input": 23173,
+          "output": 66,
+          "read": 22016
+        },
+        {
+          "input": 23356,
+          "output": 37,
+          "read": 23040
+        }
+      ],
+      "scheme1": 112968,
+      "scheme2": 112968,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 23790,
+          "output": 352,
+          "read": 23168
+        },
+        {
+          "input": 24182,
+          "output": 147,
+          "read": 23680
+        },
+        {
+          "input": 24447,
+          "output": 26,
+          "read": 24064
+        }
+      ],
+      "scheme1": 72944,
+      "scheme2": 72944,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 20280,
+          "output": 241,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 20545,
+          "output": 250,
+          "read": 20096,
+          "write": 0
+        },
+        {
+          "input": 21463,
+          "output": 49,
+          "read": 20352,
+          "write": 0
+        },
+        {
+          "input": 21577,
+          "output": 20,
+          "read": 21376,
+          "write": 0
+        }
+      ],
+      "scheme1": 84425,
+      "scheme2": 84425,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "kimi-code-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 21984,
+          "output": 329,
+          "read": 21376,
+          "write": 0
+        },
+        {
+          "input": 22337,
+          "output": 153,
+          "read": 21888,
+          "write": 0
+        },
+        {
+          "input": 22556,
+          "output": 20,
+          "read": 22144,
+          "write": 0
+        }
+      ],
+      "scheme1": 67379,
+      "scheme2": 67379,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "opencode-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 7848,
+          "output": 389,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 8204,
+          "output": 379,
+          "read": 7680,
+          "write": 0
+        },
+        {
+          "input": 8572,
+          "output": 374,
+          "read": 8064,
+          "write": 0
+        },
+        {
+          "input": 9591,
+          "output": 62,
+          "read": 8448,
+          "write": 0
+        },
+        {
+          "input": 9707,
+          "output": 44,
+          "read": 9472,
+          "write": 0
+        }
+      ],
+      "scheme1": 45170,
+      "scheme2": 45170,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "opencode-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 10140,
+          "output": 339,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 10493,
+          "output": 137,
+          "read": 9984,
+          "write": 0
+        },
+        {
+          "input": 10683,
+          "output": 49,
+          "read": 10368,
+          "write": 0
+        }
+      ],
+      "scheme1": 31841,
+      "scheme2": 31841,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "claude-code-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 11089,
+          "output": 552,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 11908,
+          "output": 882,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 12307,
+          "output": 593,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 12819,
+          "output": 91,
+          "read": 5888,
+          "write": 0
+        }
+      ],
+      "scheme1": 50241,
+      "scheme2": 50241,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "claude-code-cli",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 13604,
+          "output": 869,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 14211,
+          "output": 290,
+          "read": 5888,
+          "write": 0
+        },
+        {
+          "input": 14507,
+          "output": 49,
+          "read": 12160,
+          "write": 0
+        }
+      ],
+      "scheme1": 43530,
+      "scheme2": 43530,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "pi",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 7824,
+          "output": 297,
+          "read": 0,
+          "write": 0
+        },
+        {
+          "input": 8135,
+          "output": 259,
+          "read": 7680,
+          "write": 0
+        },
+        {
+          "input": 9053,
+          "output": 56,
+          "read": 7936,
+          "write": 0
+        },
+        {
+          "input": 9165,
+          "output": 46,
+          "read": 8960,
+          "write": 0
+        }
+      ],
+      "scheme1": 34835,
+      "scheme2": 34835,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "pi",
+      "mode": "native_root_calls",
+      "evidence": "fixtures/round5-native-usage-context.json",
+      "case": "ordinary-tools-session-continuation-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 9591,
+          "output": 331,
+          "read": 8960,
+          "write": 0
+        },
+        {
+          "input": 9936,
+          "output": 131,
+          "read": 9472,
+          "write": 0
+        },
+        {
+          "input": 10124,
+          "output": 41,
+          "read": 9856,
+          "write": 0
+        }
+      ],
+      "scheme1": 30154,
+      "scheme2": 30154,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "copilot-cli",
+      "mode": "subscribed_native_calls",
+      "evidence": "fixtures/round6-native-context-ratio.json",
+      "case": "session-continuation-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 27234,
+          "output": 1119,
+          "read": 0,
+          "write": 27232
+        },
+        {
+          "input": 28376,
+          "output": 1050,
+          "read": 27232,
+          "write": 1142
+        },
+        {
+          "input": 29449,
+          "output": 1213,
+          "read": 28374,
+          "write": 1073
+        },
+        {
+          "input": 30737,
+          "output": 149,
+          "read": 29447,
+          "write": 1288
+        },
+        {
+          "input": 31950,
+          "output": 468,
+          "read": 30735,
+          "write": 1213
+        },
+        {
+          "input": 32511,
+          "output": 71,
+          "read": 31948,
+          "write": 561
+        }
+      ],
+      "scheme1": 184327,
+      "scheme2": 184327,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "copilot-cli",
+      "mode": "subscribed_native_calls",
+      "evidence": "fixtures/round6-native-context-ratio.json",
+      "case": "session-continuation-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 33246,
+          "output": 619,
+          "read": 32509,
+          "write": 735
+        },
+        {
+          "input": 33888,
+          "output": 539,
+          "read": 33244,
+          "write": 642
+        },
+        {
+          "input": 34523,
+          "output": 53,
+          "read": 33886,
+          "write": 635
+        }
+      ],
+      "scheme1": 102868,
+      "scheme2": 102868,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "qoder-cli",
+      "mode": "custom",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "cold-resume-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 24093,
+          "output": 2534
+        },
+        {
+          "input": 26683,
+          "output": 76,
+          "read": 23936
+        }
+      ],
+      "scheme1": 53386,
+      "scheme2": 53386,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "qoder-cli",
+      "mode": "custom",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "cold-resume-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 27162,
+          "output": 1376,
+          "read": 13696
+        },
+        {
+          "input": 28591,
+          "output": 20,
+          "read": 27008
+        }
+      ],
+      "scheme1": 57149,
+      "scheme2": 57149,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "qoder-cli",
+      "mode": "custom",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "cold-resume-3",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 24107,
+          "output": 501
+        },
+        {
+          "input": 24667,
+          "output": 29,
+          "read": 23936
+        }
+      ],
+      "scheme1": 49304,
+      "scheme2": 49304,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "qoder-cli",
+      "mode": "custom",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "cold-resume-4",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 24093,
+          "output": 499,
+          "read": 13696,
+          "write": 37
+        },
+        {
+          "input": 24635,
+          "output": 111,
+          "read": 23936,
+          "write": 37
+        },
+        {
+          "input": 24804,
+          "output": 25,
+          "read": 24448,
+          "write": 37
+        }
+      ],
+      "scheme1": 74167,
+      "scheme2": 74167,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "grok-build",
+      "mode": "turn_completed",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "cold-resume-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 92387,
+          "output": 1498,
+          "read": 72064,
+          "write": 0
+        }
+      ],
+      "scheme1": 93885,
+      "scheme2": 93885,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "grok-build",
+      "mode": "turn_completed",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "cold-resume-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 58727,
+          "output": 616,
+          "read": 53504,
+          "write": 0
+        }
+      ],
+      "scheme1": 59343,
+      "scheme2": 59343,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "codex-cli",
+      "mode": "validated_run_counter_reference",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "native-boundary-reference-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 160779,
+          "output": 1656,
+          "total": 162435
+        }
+      ],
+      "scheme1": 162435,
+      "scheme2": 162435,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "codex-cli",
+      "mode": "validated_run_counter_reference",
+      "evidence": "fixtures/round7-native-boundaries.json",
+      "case": "native-boundary-reference-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 98596,
+          "output": 650,
+          "total": 99246
+        }
+      ],
+      "scheme1": 99246,
+      "scheme2": 99246,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "codebuddy-cli",
+      "mode": "native",
+      "evidence": "fixtures/round12-kiro-and-field-audit.json",
+      "case": "multi-call-cache-missing",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 24482,
+          "output": 47,
+          "total": 24529
+        },
+        {
+          "input": 24660,
+          "output": 47,
+          "total": 24707
+        },
+        {
+          "input": 24858,
+          "output": 475,
+          "total": 25333
+        },
+        {
+          "input": 25524,
+          "output": 29,
+          "total": 25553
+        }
+      ],
+      "scheme1": 100122,
+      "scheme2": 100122,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "qoder-cli",
+      "mode": "custom",
+      "evidence": "fixtures/round12-kiro-and-field-audit.json",
+      "case": "multi-call-cache-missing",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 30418,
+          "output": 504
+        },
+        {
+          "input": 31130,
+          "output": 60
+        },
+        {
+          "input": 31295,
+          "output": 987
+        },
+        {
+          "input": 32339,
+          "output": 65
+        }
+      ],
+      "scheme1": 126798,
+      "scheme2": 126798,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "mode": "native",
+      "evidence": "fixtures/round12-kiro-and-field-audit.json",
+      "case": "multi-call-cache-missing",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 21184,
+          "output": 269,
+          "total": 21453
+        },
+        {
+          "input": 21568,
+          "output": 38,
+          "total": 21606
+        },
+        {
+          "input": 21751,
+          "output": 561,
+          "total": 22312
+        },
+        {
+          "input": 22393,
+          "output": 174,
+          "total": 22567
+        }
+      ],
+      "scheme1": 87938,
+      "scheme2": 87938,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "qwen-code",
+      "mode": "native",
+      "evidence": "fixtures/round12-kiro-and-field-audit.json",
+      "case": "multi-call-cache-missing",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 18857,
+          "output": 147,
+          "reasoning": 51
+        },
+        {
+          "input": 19054,
+          "output": 91,
+          "reasoning": 0
+        },
+        {
+          "input": 19233,
+          "output": 998,
+          "reasoning": 451
+        },
+        {
+          "input": 19968,
+          "output": 67,
+          "reasoning": 0
+        }
+      ],
+      "scheme1": 78415,
+      "scheme2": 78415,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "zcode-app",
+      "mode": "native",
+      "evidence": "fixtures/round12-kiro-and-field-audit.json",
+      "case": "multi-call-cache-missing",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 18113,
+          "output": 119,
+          "total": 18232
+        },
+        {
+          "input": 18229,
+          "output": 81,
+          "total": 18310
+        },
+        {
+          "input": 18305,
+          "output": 474,
+          "total": 18779
+        },
+        {
+          "input": 18749,
+          "output": 58,
+          "total": 18807
+        }
+      ],
+      "scheme1": 74128,
+      "scheme2": 74128,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "deepseek-harness",
+      "mode": "native",
+      "evidence": "fixtures/round12-kiro-and-field-audit.json",
+      "case": "multi-call-cache-missing",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 14815,
+          "output": 28,
+          "total": 14843
+        },
+        {
+          "input": 15020,
+          "output": 28,
+          "total": 15048
+        },
+        {
+          "input": 15225,
+          "output": 426,
+          "total": 15651
+        },
+        {
+          "input": 15672,
+          "output": 150,
+          "total": 15822
+        },
+        {
+          "input": 15858,
+          "output": 153,
+          "total": 16011
+        },
+        {
+          "input": 16046,
+          "output": 147,
+          "total": 16193
+        }
+      ],
+      "scheme1": 93568,
+      "scheme2": 93568,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "antigravity-app",
+      "mode": "stream_only_unknown_input",
+      "evidence": "fixtures/round8-native-format-compatibility.json",
+      "case": "native-tools-1",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "output": 257,
+          "read": 0
+        },
+        {
+          "output": 159,
+          "read": 0
+        },
+        {
+          "output": 257,
+          "read": 12204
+        },
+        {
+          "output": 25,
+          "read": 12199
+        }
+      ],
+      "scheme1": 25101,
+      "scheme2": null,
+      "knownTokensDiscarded": 25101
+    },
+    {
+      "runtime": "antigravity-app",
+      "mode": "stream_only_unknown_input",
+      "evidence": "fixtures/round8-native-format-compatibility.json",
+      "case": "native-tools-2",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "output": 155,
+          "read": 8130
+        },
+        {
+          "output": 350,
+          "read": 12190
+        },
+        {
+          "output": 30,
+          "read": 0
+        }
+      ],
+      "scheme1": 20855,
+      "scheme2": null,
+      "knownTokensDiscarded": 20855
+    },
+    {
+      "runtime": "antigravity-app",
+      "mode": "validated_native_sqlite",
+      "evidence": "fixtures/round11-native-source-completion.json",
+      "case": "native-tools",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 41111,
+          "output": 72
+        },
+        {
+          "input": 41500,
+          "output": 73
+        },
+        {
+          "input": 41920,
+          "output": 504
+        },
+        {
+          "input": 42565,
+          "output": 449
+        }
+      ],
+      "scheme1": 168194,
+      "scheme2": 168194,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "command-code-cli",
+      "mode": "historical_headless",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "first",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 13319,
+          "output": 9
+        }
+      ],
+      "scheme1": 13328,
+      "scheme2": 13328,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "command-code-cli",
+      "mode": "historical_headless",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "resumed-tools",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 13355,
+          "output": 116
+        },
+        {
+          "input": 13483,
+          "output": 69
+        },
+        {
+          "input": 13589,
+          "output": 95
+        },
+        {
+          "input": 14161,
+          "output": 37
+        },
+        {
+          "input": 14721,
+          "output": 82
+        }
+      ],
+      "scheme1": 69708,
+      "scheme2": 69708,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "cline-cli",
+      "mode": "plugin",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "nativeTurnId-14",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 2279,
+          "output": 11
+        }
+      ],
+      "scheme1": 2290,
+      "scheme2": 2290,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "cline-cli",
+      "mode": "plugin",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "nativeTurnId-17",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 2312,
+          "output": 12
+        }
+      ],
+      "scheme1": 2324,
+      "scheme2": 2324,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "cline-cli",
+      "mode": "plugin",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "nativeTurnId-21",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 2280,
+          "output": 12
+        }
+      ],
+      "scheme1": 2292,
+      "scheme2": 2292,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "cline-cli",
+      "mode": "plugin",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "nativeTurnId-24",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 2346,
+          "output": 12
+        }
+      ],
+      "scheme1": 2358,
+      "scheme2": 2358,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "cline-cli",
+      "mode": "plugin",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "nativeTurnId-27",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 2444,
+          "output": 131
+        },
+        {
+          "input": 2637,
+          "output": 100
+        },
+        {
+          "input": 2824,
+          "output": 54
+        },
+        {
+          "input": 2978,
+          "output": 75
+        },
+        {
+          "input": 3137,
+          "output": 38
+        }
+      ],
+      "scheme1": 14418,
+      "scheme2": 14418,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "cline-cli",
+      "mode": "plugin",
+      "evidence": "command-cline-numeric-evidence-2026-10-04.json",
+      "case": "nativeTurnId-38",
+      "provenance": "existing_real_observation",
+      "calls": [
+        {
+          "input": 3478,
+          "output": 12
+        }
+      ],
+      "scheme1": 3490,
+      "scheme2": 3490,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "inclusive-cache",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 50000,
+          "output": 5000,
+          "read": 40000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": 55000,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "missing-cache-write-exclusive",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "uncached": 10000,
+          "read": 40000,
+          "output": 5000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": null,
+      "knownTokensDiscarded": 55000
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "output-only",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "output": 5000
+        }
+      ],
+      "scheme1": 5000,
+      "scheme2": null,
+      "knownTokensDiscarded": 5000
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "total-only",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "total": 55000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": null,
+      "knownTokensDiscarded": 55000
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "missing-call-between-known",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 25000,
+          "output": 5000
+        },
+        {},
+        {
+          "input": 45000,
+          "output": 5000
+        }
+      ],
+      "scheme1": 80000,
+      "scheme2": 80000,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "separate-one-sided-calls",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 50000
+        },
+        {
+          "output": 5000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": null,
+      "knownTokensDiscarded": 55000
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "failed-after-usage",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 50000,
+          "output": 5000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": 55000,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "cancelled-after-usage",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 50000,
+          "output": 5000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": 55000,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "no-usage",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {}
+      ],
+      "scheme1": null,
+      "scheme2": null,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "explicit-zero",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 0,
+          "output": 0
+        }
+      ],
+      "scheme1": 0,
+      "scheme2": 0,
+      "knownTokensDiscarded": 0
+    },
+    {
+      "runtime": "all",
+      "mode": "acceptance",
+      "evidence": null,
+      "case": "reasoning-is-output-subset",
+      "provenance": "synthetic_boundary",
+      "calls": [
+        {
+          "input": 50000,
+          "output": 5000,
+          "reasoning": 3000
+        }
+      ],
+      "scheme1": 55000,
+      "scheme2": 55000,
+      "knownTokensDiscarded": 0
+    }
+  ]
+}

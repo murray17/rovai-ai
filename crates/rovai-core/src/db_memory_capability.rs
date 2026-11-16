@@ -30,7 +30,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 174
         ),
         "Memory capability failed schema admission"
     );
@@ -40,6 +40,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::runcard_usage::downgrade_for_test(c);
     c.execute_batch("DROP TABLE IF EXISTS memory_preference;
         DELETE FROM schema_migration WHERE version=224;
         UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1 AND projection_schema_version=174;").unwrap();

@@ -550,6 +550,14 @@ impl NativeJsonlUsageReader {
                 }
             };
             for observation in incoming {
+                // Current empty snapshots cannot consume the identity of a
+                // later numeric frame. Historical identities still fence resume.
+                if !baseline
+                    && observation.usage.fields.is_empty()
+                    && observation.usage.cost.is_none()
+                {
+                    continue;
+                }
                 if self.seen.contains(&observation.source_identity) {
                     continue;
                 }
@@ -776,13 +784,16 @@ fn minimax_record(line: &[u8]) -> Option<MinimaxRecord> {
 }
 fn parse_minimax(line: &[u8], session_id: &str) -> Option<NativeUsageObservation> {
     let record = minimax_record(line)?;
-    if !matches!(
-        record.message.stop_reason.as_deref(),
-        Some("stop" | "toolUse" | "length")
-    ) {
-        return None;
-    }
     let raw = record.message.usage?;
+    match record.message.stop_reason.as_deref() {
+        Some("stop" | "toolUse" | "length") => {}
+        Some("error" | "aborted")
+            if [raw.input, raw.output, raw.cache_read, raw.cache_write]
+                .into_iter()
+                .flatten()
+                .any(|n| n > 0) => {}
+        _ => return None,
+    }
     Some(observation(
         session_id,
         format!("minimax-native:{session_id}:{}", record.message_id),
@@ -1005,7 +1016,12 @@ impl OpenCodeUsageReader {
                 AND json_type(data,'$.role')='text'
                 AND (json_extract(data,'$.role')<>'assistant' OR
                     (json_type(data,'$.time.completed')='integer'
-                    AND (json_type(data,'$.error') IS NULL OR json_type(data,'$.error')='null')))",
+                    AND (json_type(data,'$.error') IS NULL OR json_type(data,'$.error')='null'
+                        OR (json_type(data,'$.tokens.input')='integer' AND json_extract(data,'$.tokens.input')>0)
+                        OR (json_type(data,'$.tokens.output')='integer' AND json_extract(data,'$.tokens.output')>0)
+                        OR (json_type(data,'$.tokens.reasoning')='integer' AND json_extract(data,'$.tokens.reasoning')>0)
+                        OR (json_type(data,'$.tokens.cache.read')='integer' AND json_extract(data,'$.tokens.cache.read')>0)
+                        OR (json_type(data,'$.tokens.cache.write')='integer' AND json_extract(data,'$.tokens.cache.write')>0))))",
         )?;
         let mut result = Vec::new();
         for (created, id) in std::mem::take(&mut self.pending) {
@@ -1048,6 +1064,8 @@ impl OpenCodeUsageReader {
                 (Some(output), Some(reasoning)) if output >= 0 && reasoning >= 0 => {
                     output.checked_add(reasoning)
                 }
+                (Some(output), None) if output >= 0 => Some(output),
+                (None, Some(reasoning)) if reasoning >= 0 => None,
                 _ => None,
             };
             let mut consumption = observation(
@@ -1203,6 +1221,7 @@ struct CodeBuddyProvider {
 }
 #[derive(Deserialize)]
 struct OpenAiUsage {
+    total_tokens: Option<i64>,
     prompt_tokens: Option<i64>,
     completion_tokens: Option<i64>,
     prompt_tokens_details: Option<PromptDetails>,
@@ -1289,6 +1308,7 @@ fn parse_codebuddy(
         None,
         RuntimeInputSemantics::CacheInclusiveTotal,
         RuntimeUsageFields {
+            total_tokens: nonnegative(raw.total_tokens),
             input_tokens: nonnegative(raw.prompt_tokens),
             output_tokens: output,
             cache_read_input_tokens: raw
@@ -1378,6 +1398,7 @@ struct TraeResponseMeta {
 }
 #[derive(Deserialize)]
 struct TraeUsage {
+    total_tokens: Option<i64>,
     prompt_tokens: Option<i64>,
     completion_tokens: Option<i64>,
     prompt_token_details: Option<PromptDetails>,
@@ -1399,6 +1420,7 @@ fn parse_trae(record: TraeRecord, session_id: &str) -> Option<NativeUsageObserva
         .timestamp_millis();
     let usage = record.message.message.response_meta?.usage?;
     let fields = RuntimeUsageFields {
+        total_tokens: nonnegative(usage.total_tokens),
         input_tokens: nonnegative(usage.prompt_tokens),
         output_tokens: nonnegative(usage.completion_tokens),
         cache_read_input_tokens: usage
@@ -1406,7 +1428,8 @@ fn parse_trae(record: TraeRecord, session_id: &str) -> Option<NativeUsageObserva
             .and_then(|v| nonnegative(v.cached_tokens)),
         ..Default::default()
     };
-    if fields.input_tokens.is_none()
+    if fields.total_tokens.is_none()
+        && fields.input_tokens.is_none()
         && fields.output_tokens.is_none()
         && fields.cache_read_input_tokens.is_none()
     {
@@ -1474,7 +1497,7 @@ struct KimiEvent {
     turn_id: Option<String>,
     usage: Option<KimiUsage>,
 }
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KimiUsage {
     input_other: Option<i64>,
@@ -1493,7 +1516,7 @@ fn parse_kimi(line: &[u8], session_id: &str) -> Option<NativeUsageObservation> {
         return None;
     }
     let id = event.uuid.filter(|id| safe_identity(id))?;
-    let raw = event.usage?;
+    let raw = event.usage.unwrap_or_default();
     Some(observation(
         session_id,
         format!("kimi-native:{session_id}:{id}"),
@@ -1809,6 +1832,15 @@ mod tests {
     // fields. ACP parser fixtures cannot exercise these persisted envelopes.
     #[test]
     fn native_dialects_select_root_calls_preserve_missing_and_ignore_restated_content() {
+        for reason in ["error", "aborted"] {
+            let positive = json!({"message_id":"partial","turn_id":"turn","message":{"role":"assistant","stopReason":reason,
+                "usage":{"input":100,"output":5,"cacheRead":20}}});
+            let observation = parse_minimax(positive.to_string().as_bytes(), "session").unwrap();
+            assert_eq!(observation.usage.fields.output_tokens, Some(5));
+            let zero = json!({"message_id":"placeholder","message":{"role":"assistant","stopReason":reason,
+                "usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}});
+            assert!(parse_minimax(zero.to_string().as_bytes(), "session").is_none());
+        }
         let frame = minimax("call-1");
         let parsed = parse_minimax(frame.to_string().as_bytes(), "root-1").unwrap();
         assert_eq!(
@@ -1843,9 +1875,8 @@ mod tests {
         );
         for patch in [
             json!({"role":"user"}),
-            json!({"stopReason":"error"}),
-            json!({"stopReason":"aborted"}),
             json!({"usage":null}),
+            json!({"stopReason":"unknown"}),
             json!({"usage":{"input":-1}}),
         ] {
             let mut value = frame.clone();
@@ -1855,6 +1886,25 @@ mod tests {
             let parsed = parse_minimax(value.to_string().as_bytes(), "root-1");
             assert!(parsed.is_none_or(|item| item.usage.fields.input_tokens.is_none()));
         }
+        let mut total_only = trae("total-only");
+        total_only["message"]["message"]["response_meta"]["usage"] = json!({"total_tokens":55000});
+        let total = parse_trae(
+            trae_record(total_only.to_string().as_bytes(), "session-1").unwrap(),
+            "session-1",
+        )
+        .unwrap();
+        assert_eq!(total.usage.fields.total_tokens, Some(55000));
+        assert_eq!(total.usage.fields.input_tokens, None);
+        let mut total_only = codebuddy("total-only");
+        total_only["providerData"]["rawUsage"] = json!({"total_tokens":55000});
+        assert_eq!(
+            parse_codebuddy(total_only.to_string().as_bytes(), "session-1", "/workspace")
+                .unwrap()
+                .usage
+                .fields
+                .total_tokens,
+            Some(55000)
+        );
         let mut frame = trae("call-1");
         let read = |v: &serde_json::Value| {
             trae_record(v.to_string().as_bytes(), "session-1")
@@ -2347,6 +2397,9 @@ mod tests {
                     .unwrap()
                     .remove("usage");
             }
+            if matches!(dialect, Dialect::Kimi) {
+                historical["event"].as_object_mut().unwrap().remove("usage");
+            }
             fs::write(&path, format!("{historical}\n")).unwrap();
             let mut reader = NativeJsonlUsageReader::baseline(
                 dialect,
@@ -2372,6 +2425,27 @@ mod tests {
             assert!(
                 reader.poll().is_empty(),
                 "native repeat cannot claim another model call"
+            );
+            let mut empty = make("late-fields");
+            let usage = match dialect {
+                Dialect::CodeBuddy => &mut empty["providerData"]["rawUsage"],
+                Dialect::Kimi => &mut empty["event"]["usage"],
+                Dialect::Qoder | Dialect::Minimax => &mut empty["message"]["usage"],
+                Dialect::Trae => &mut empty["message"]["message"]["response_meta"]["usage"],
+            };
+            *usage = json!({});
+            writeln!(file, "{empty}").unwrap();
+            file.flush().unwrap();
+            assert!(
+                reader.poll().is_empty(),
+                "unknown is not an observed zero or a consumed identity"
+            );
+            write!(file, "{}", line("late-fields")).unwrap();
+            file.flush().unwrap();
+            assert_eq!(
+                reader.poll().len(),
+                1,
+                "same-call delayed numeric fields remain admissible"
             );
             let mut next_run = NativeJsonlUsageReader::baseline(
                 dialect,
@@ -2934,6 +3008,37 @@ mod tests {
         assert_eq!(sparse[0].usage.fields.input_tokens, None);
         assert_eq!(sparse[0].usage.fields.output_tokens, Some(11));
         assert_eq!(sparse[0].usage.fields.cache_write_input_tokens, None);
+        // Partial reasoning cannot erase a known ordinary-output count. A
+        // failed completed call may still report real consumption.
+        for (id, tokens, error, output) in [
+            (
+                "missing-reasoning",
+                json!({"output":9}),
+                serde_json::Value::Null,
+                Some(9),
+            ),
+            (
+                "reasoning-only",
+                json!({"reasoning":2}),
+                serde_json::Value::Null,
+                None,
+            ),
+            (
+                "failed-with-usage",
+                json!({"input":3,"output":2}),
+                json!({"name":"ProviderError"}),
+                Some(2),
+            ),
+        ] {
+            database.execute("INSERT INTO message VALUES(?1,'session-1',7,?2)",
+                rusqlite::params![id,json!({"role":"assistant","time":{"completed":7},"error":error,"tokens":tokens}).to_string()]).unwrap();
+            let known = reader.poll();
+            assert_eq!(known.len(), 1);
+            assert_eq!(known[0].usage.fields.output_tokens, output);
+            if id == "reasoning-only" {
+                assert_eq!(known[0].usage.fields.reasoning_output_tokens, Some(2));
+            }
+        }
         assert!(!reader.disabled);
         let mut next =
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
