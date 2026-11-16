@@ -29,6 +29,7 @@ pub fn is_agent_tool(adapter: AdapterKind, name: &str) -> bool {
         AdapterKind::QwenCode => matches!(name, "agent" | "task_output" | "task_stop"),
         AdapterKind::OpencodeCli => matches!(name, "task" | "subagent" | "task_output"),
         AdapterKind::KiloCli => name == "task",
+        AdapterKind::GooseCli => name == "delegate",
         AdapterKind::MinimaxCodeCli => matches!(name, "task" | "task_output" | "task_stop"),
         AdapterKind::CommandCodeCli => name == "agent",
         AdapterKind::GrokBuild => name == "spawn_subagent",
@@ -70,6 +71,7 @@ pub fn acp_tool_name(adapter: AdapterKind, update: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .or_else(|| {
             match adapter {
+                AdapterKind::GooseCli => update.pointer("/_meta/goose/toolCall/toolName"),
                 AdapterKind::CodebuddyCli => update.pointer("/_meta/codebuddy.ai~1toolName"),
                 AdapterKind::QoderCli => update.pointer("/_meta/qoder/toolName"),
                 AdapterKind::KiroCli => update.pointer("/_meta/kiro/toolName"),

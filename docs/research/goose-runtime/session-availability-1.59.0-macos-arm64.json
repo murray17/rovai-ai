@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "baseline": "711e66a8f4bc6ccf9e616476ed9405ff89e4f04b",
+  "runtime": {
+    "version": "1.59.0",
+    "platform": "darwin-arm64",
+    "distribution": "Homebrew block-goose-cli, unmodified",
+    "provider": "synthetic-loopback",
+    "qualificationChanged": false
+  },
+  "nativeComparison": {
+    "command": "ROVAI_GOOSE_BIN=/absolute/official/goose ROVAI_GOOSE_PROBE_SCOPE=session-availability node scripts/probe-goose-runtime.mjs",
+    "defaultProviderMissing": true,
+    "creationWithoutExplicitProviderRejected": true,
+    "creationWithExplicitProviderSucceeded": true,
+    "targetEffortOptionsAvailable": true,
+    "promptCompleted": true,
+    "temporarySessionDeleted": true,
+    "providerRequests": 2
+  },
+  "coreAvailability": {
+    "command": "ROVAI_GOOSE_BIN=/absolute/official/goose ROVAI_GOOSE_SESSION_FAULTS=1 node scripts/smoke-goose-runtime.mjs",
+    "defaultProviderMissing": true,
+    "explicitProviderAtSessionCreation": {
+      "targetProbe": true,
+      "businessRun": true
+    },
+    "successfulRuns": 20,
+    "cancellationChecksPassed": true,
+    "providerRequests": 58,
+    "probeCleanup": [
+      {
+        "fault": "session/delete RPC error before native deletion",
+        "refreshStatus": "completed",
+        "effortOptionsRetained": true,
+        "wholeQueryElapsedMs": 244
+      },
+      {
+        "fault": "native session/delete succeeds but response is withheld",
+        "refreshStatus": "completed",
+        "effortOptionsRetained": true,
+        "wholeQueryElapsedMs": 745
+      }
+    ],
+    "remainingNativeProbeSessionsAfterFaults": 1,
+    "cleanupWaitBudgetMs": 500,
+    "cleanupBudgetDoesNotExtendQueryDeadline": true
+  },
+  "existingMcpRegression": {
+    "command": "ROVAI_GOOSE_BIN=/absolute/official/goose ROVAI_GOOSE_SOFT_MCP_FAULTS=1 node scripts/smoke-goose-runtime.mjs",
+    "successfulRuns": 21,
+    "cancellationChecksPassed": true,
+    "providerRequests": 60,
+    "nativeRemovalReceivedBeforeLocalTimeout": true,
+    "reassignedBeforeNativeRemovalCompleted": true,
+    "successorPreservedNativeSession": true,
+    "reassignedToolCallable": true
+  },
+  "combinedRegressionAfterWindowsIntegration": {
+    "integratedRemoteCommit": "9f152ee32",
+    "command": "ROVAI_GOOSE_BIN=/absolute/official/goose ROVAI_GOOSE_SOFT_MCP_FAULTS=1 ROVAI_GOOSE_SESSION_FAULTS=1 node scripts/smoke-goose-runtime.mjs",
+    "successfulRuns": 22,
+    "cancellationChecksPassed": true,
+    "providerRequests": 63,
+    "explicitProviderProbeAndBusinessRunPassed": true,
+    "bothDeletionFaultQueriesCompleted": true,
+    "lateMcpRemovalAndReassignmentPassed": true,
+    "wholeQueryElapsedMs": {"deleteError": 252, "deleteNoResponse": 738},
+    "remainingNativeProbeSessionsAfterFaults": 1
+  },
+  "sharedRegression": {
+    "workspace": {"coreLibPassed": 438, "cliPassed": 31, "hostPassed": 4, "webPassed": 11, "ignored": 1},
+    "extendedOwnersPassed": 2,
+    "linuxIntegrationCommit": "91cd7a25c",
+    "platformAdmissionTestsPassedAfterLinuxIntegration": 5,
+    "existingCompatibilityRegisterRevisionSynchronized": true
+  },
+  "limits": [
+    "Not a real account or OAuth acceptance run.",
+    "Missing default Provider is the verified creation failure; some other invalid defaults can return an unready Session instead.",
+    "Does not establish recovery of an existing Session whose Provider is unavailable.",
+    "Best-effort deletion can leave a native probe Session; no background cleanup is installed.",
+    "Official silent MCP initialization remains a separate upstream limitation; no extension or Core timeout changed."
+  ]
+}

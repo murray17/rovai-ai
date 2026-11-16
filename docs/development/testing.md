@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-11
+last_updated: 2026-11-14
 ---
 
 # 测试与 Smoke Test
@@ -231,6 +231,84 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 环境切换验收遵循 cold-spawn，不把 Warm 的环境快照误判为权限覆盖。结果及失败对照见[简化记录](../versions/v1.72/kilo-simplification.md)。
 
 ## Rust 测试准入与退役门槛
+
+Goose 新接入扩展已有模型目录、数值 parser、权限默认、Skills、MCP 投影、数据库闭集迁移、平台矩阵和 Bootstrap owner，
+不新增 Rust 测试函数。原生协议入口 `scripts/probe-goose-runtime.mjs` 与产品入口 `scripts/smoke-goose-runtime.mjs` 分别保留：
+后者使用新建 Core/data/Skills/MCP/Goose 根、同目录 Core/CLI 和官方 `ROVAI_GOOSE_BIN`，模型为隔离 loopback Provider。
+它不读取其他 Runtime 的认证，不代表真实账号或其他平台资格。失败原始夹具保留，公开结果只导出白名单。
+最小门禁为默认 workspace，及 `--features extended-tests --lib` 的 `grouped_acp_models`、`runtime_parsers`、
+`runtime_catalog_migrations`、`projection_filters_assignment`、`member_permission_defaults` 与 `adapters_declare_their_skill_delivery_groups` owners。
+后续精简扩展已有 `real_acp_session_model_selection_respects_native_adapter_boundaries` 和
+`acp_checks_keep_native_model_catalog_boundaries_without_lifecycle_rehearsals`：前者验证同选择零 setter、
+模型／Provider／effort／mode 真正改变仍应用及每轮完整 System；后者验证探测成功、选项失败时精确删除，
+没有已知会话 ID 不删除，原生删除拒绝不伪报已删除。查询与清理成功的关系由后续 v96 收窄。仍不新增 Rust 测试函数。
+官方原生 probe 验证三模式实际工具集合和客户端回放缩减后模型历史保留；Core smoke 验证探测零残留、
+Skills 管理的用户 `.agents/skills` 读取与原共享生命周期。UI 使用既有 `pnpm test:capability-workspace`。
+
+Goose 目录精简继续扩展以上 health/live-model owners，验证完整目录零 Session/setter、
+inventory/defaults 错误不降级建会话、目标查询零 inventory、同选择跳过、Provider 回显更新和缺失回显失效。
+持久化沿现有 slow owner `target_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`
+扩展 Goose，验证目标只更新选项、不续完整目录时间、不更改默认/名称且不恢复已删除模型。
+该 owner 必须使用 `--features slow-tests,extended-tests --lib target_catalog_updates_accumulate`，
+不能把 extended-only 的零匹配当成通过。迁移 helper 收拢继续运行原 catalog migration owner；不新增 Rust 测试函数。
+`pnpm test:runtime-model-picker` 原 MiniMax 用例扩至 Goose，两个入口共验请求合并、缓存、迟到、
+空档位和失败保留；Goose 完整目录过期时先单独初始化一次。官方原生 probe 在创建任何 Session 前
+验证 inventory/defaults、零原生 Session 行和零生成；Core smoke 验跨 Provider 条目与目录时间保留。
+
+Goose 默认选择精简继续使用同一 live-model owner，验证 Warm 连续 `runtime_default` 零模型 setter、
+保留 Session 的 Provider/model/effort，后续显式选择仍应用。官方 Core smoke 分别验证 Warm 和精确
+冷恢复保留已保存且不同于全局默认的模型／effort。v92 的“清除显式覆盖就重置全局默认”断言随生产
+行为在 [v93](../contracts/runtime-launch-and-verification-v93.md) 退出；原始冷恢复、MCP、取消等场景保留。
+新增、删除及停用的 Rust 测试函数均为零；最低命令为
+`cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`，
+再运行默认 workspace 和原 Goose Core smoke。
+
+Goose MCP 可用性精简按 [v94](../contracts/runtime-launch-and-verification-v94.md) 在同一 live-model owner
+增加精确恢复起始场景，可选 extensions list/remove 接口被夹具拒绝时仍完成 load 和完整 System，
+并断言正式路径没有发出这两个调用。原 Core smoke 将“撤回后工具消失”断言替换为原生扩展保留且任务成功，
+保留配置更新、原 Session、不同 cwd、取消和 Core 重启场景；原生 probe 继续拥有官方 remove 能力研究。
+生产主动撤回与对应产品合同同轮退出，Rust 测试函数新增、删除和停用均为零。
+最低命令仍为上述 live-model owner、默认 workspace 与 Goose Core smoke。
+
+Goose 尽力撤回按 [v95](../contracts/runtime-launch-and-verification-v95.md) 再次扩展同一 owner，
+保留原 unavailable 输入并改验恢复时 1 次可选 list、出错后同 Session 仍能发送普通 prompt。
+新增表输入覆盖空列表、8 项正常／单项拒绝／单项不回包／全部不回包、list 不回包和真实退出；
+核对当前及用户原生项、所有候选获得机会、pending 清空、整批上限及 writer 尚未开始时超时不损坏连接。
+现有 2 秒历史回放隔离不属于撤回预算，测量不得把它误报成逐项等待；不改变该公共时间规则。
+Rust 测试函数仍无新增或删除。
+
+原官方 Core smoke 验正常撤回；`ROVAI_GOOSE_SOFT_MCP_FAULTS=1` 追加一个仅验收用 stdio relay，
+通过夹具数据库未提交写锁，让官方 Goose 已收到的 remove 在本地超时后才实际完成。
+用户重新分配在迟到删除前提交，后继仍经共享 Host 替换、同 native Session 和真实 MCP 调用验证。
+relay、写锁和控制文件均仅存在于独立验收根，不进入生产；不是本地丢弃响应的假删除。
+
+原生 probe 保留正常及迟到删除；`ROVAI_GOOSE_PROBE_SCOPE=mcp-startup` 可单验失联扩展冷恢复，
+配合 `ROVAI_GOOSE_EXPECT_BOUNDED_MCP_LOAD=1` 要求局部修补后的原生 load 和 prompt 均成功。
+官方未修版本的 silent 超时明确记为原生失败，不当成软撤回已经解决。
+
+Goose 新建与参数可用性按 [v96](../contracts/runtime-launch-and-verification-v96.md) 继续扩展同一
+live-model／health owners：创建时携带显式 Provider，默认不可用不妨碍显式选择；未指定时不覆盖原生。
+原删除错误输入改为“查询成功且保留选项、没有伪报删除成功”，原查询失败／无 ID／目录失败断言保留；
+增加不回包的短预算、查询与删除同时失败、目标查询零 inventory 和模型回显验证。
+Rust 测试函数新增、删除及停用均为零，最低命令为这两个 extended owners 和默认 workspace。
+官方原生 probe 的 `session-availability` scope 验无默认时的失败与 `_meta.provider` 对照；
+Core smoke 的 `ROVAI_GOOSE_SESSION_FAULTS=1` 使用既有验收 relay，验证实际新建与目标查询、删除错误／不回包。
+必须检查 `refreshStatus=completed`，不能仅凭已有缓存选项判定成功。原 MCP relay 场景继续保留。
+
+Goose 参数探测按 [v97](../contracts/runtime-launch-and-verification-v97.md) 继续扩展同一 health／live-model owners：
+目标 Session 显式空扩展，普通检查和正式执行不传该字段。Rust 测试函数新增、删除及停用仍为零。
+原生 probe 的 `model-options` scope 先复现用户原生 MCP 失联，再验证空扩展的真实 effort、零工具和零生成；
+Core smoke 的 `ROVAI_GOOSE_PROBE_MCP_FAULT=1` 验参数查询期间不启动失联 MCP，并保留普通业务工具。
+已有 Renderer presentation 和参数单测，以及 Runtime picker 的 member/onboarding 交互覆盖不覆盖文案、
+清空后的保存值和零额外目标查询。最低命令为两个 Rust owners、默认 workspace、`pnpm typecheck`、
+相关 Vitest 及 `pnpm test:runtime-model-picker`，复用原验收入口，不建立另一套夹具系统。
+
+Goose 合主线时将目录迁移顺延为 225/schema 175，保留主线 Memory 224。
+原 `current_schema_contains_required_contract_objects` helper 增加 Goose 预览 224 来源的升级与历史摘要保留；
+`runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 保留原闭集和回滚断言，输入编号随最终迁移更新。
+两者需使用 `--features slow-tests,extended-tests --lib`，确认分别实际执行 1 项；不能把零匹配当成通过。
+Rust 测试函数仍无新增、删除或停用，主线 Memory 的关闭值／缺行／回滚输入继续覆盖。
+
 
 飞书/Lark 连接观测扩展既有 `member_bot_app_binding_is_immutable_across_legacy_disabled_reactivation`
 与 `wrong_provider_hosts_are_rejected_by_every_lark_capable_handler`：原 SQLite binding fixture 覆盖填空、no-op、

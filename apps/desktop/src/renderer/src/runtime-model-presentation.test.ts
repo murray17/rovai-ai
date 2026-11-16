@@ -22,6 +22,7 @@ describe('message model identity', () => {
   it.each([
     ['codebuddy-cli', 'thought_level', '推理强度'],
     ['kilo-cli', 'effort', '推理强度'],
+    ['goose-cli', 'thinking_effort', '思考强度'],
     ['command-code-cli', 'effort', '思考强度'],
     ['minimax-code-cli', 'thinkingEffort', '思考强度']
   ] as const)('uses %s native effort in member summaries and frozen message labels', (adapterKind, effortKey, label) => {
@@ -57,7 +58,7 @@ describe('message model identity', () => {
       .toEqual({ label, value: 'future' })
     expect(memberRuntimeConfigurationPresentation({
       ...configuration, model: { mode: 'explicit', modelId: 'old-model', options: {} }
-    }, native).effort).toEqual({ label, value: '跟随模型默认值' })
+    }, native).effort).toEqual({ label, value: adapterKind === 'goose-cli' ? '不覆盖原生思考强度' : '跟随模型默认值' })
     expect(messageRuntimeModelPresentation({ ...record, adapterKind, reasoningEffort: null }, native)?.effort).toBeNull()
   })
 
@@ -90,6 +91,12 @@ describe('message model identity', () => {
   })
 
   it('keeps an unknown record, Agent defaults and an unspecified effort distinct', () => {
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'goose-cli', modelId: null, reasoningEffort: null }, null))
+      .toEqual({ model: '沿用 Goose 会话选择', effort: null })
+    expect(memberRuntimeConfigurationPresentation({
+      adapterKind: 'goose-cli', model: { mode: 'runtime_default' },
+      permissions: { adapterKind: 'goose-cli', schemaVersion: 1, values: {} }
+    }, null)).toEqual({ model: '沿用 Goose 会话选择', effort: null, strategy: '沿用 Goose 会话选择', summary: '沿用 Goose 会话选择' })
     expect(messageRuntimeModelPresentation(undefined, installation)).toBeNull()
     expect(messageRuntimeModelPresentation(null, installation)).toBeNull()
     expect(messageRuntimeModelPresentation({ ...record, modelId: null, reasoningEffort: null }, installation))

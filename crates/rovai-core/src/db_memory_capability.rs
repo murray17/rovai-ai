@@ -9,6 +9,19 @@ pub(super) fn schema_matches(c: &Connection) -> rusqlite::Result<bool> {
             columns == ["singleton", "enabled", "heads_up_after_global_sequence"]))
 }
 
+pub(super) fn create(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE memory_preference (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+        enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+        heads_up_after_global_sequence INTEGER NOT NULL CHECK(heads_up_after_global_sequence>=0)
+    );
+    INSERT INTO memory_preference
+        SELECT 1,1,COALESCE(MAX(global_sequence),0) FROM event_log;",
+    )?;
+    Ok(())
+}
+
 pub(super) fn migrate(database: &mut Database) -> Result<()> {
     let tx = database
         .connection
@@ -18,19 +31,13 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 173),
         "Memory capability requires schema 173"
     );
-    tx.execute_batch("CREATE TABLE memory_preference (
-        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-        enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
-        heads_up_after_global_sequence INTEGER NOT NULL CHECK(heads_up_after_global_sequence>=0)
-    );
-    INSERT INTO memory_preference
-        SELECT 1,1,COALESCE(MAX(global_sequence),0) FROM event_log;
-    INSERT INTO schema_migration VALUES(224,datetime('now'));
+    create(&tx)?;
+    tx.execute_batch("INSERT INTO schema_migration VALUES(224,datetime('now'));
     UPDATE rovai_data_contract SET projection_schema_version=174,updated_at=datetime('now') WHERE singleton=1;")?;
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 174
         ),
         "Memory capability failed schema admission"
     );
@@ -40,6 +47,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::goose::downgrade_for_test(c);
     c.execute_batch("DROP TABLE IF EXISTS memory_preference;
         DELETE FROM schema_migration WHERE version=224;
         UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1 AND projection_schema_version=174;").unwrap();
@@ -82,6 +90,27 @@ pub(crate) fn assert_upgrade(database: &mut Database) {
             [saved.heads_up_after_global_sequence],
         )
         .unwrap();
+    assert_eq!(
+        evidence,
+        public_history_claim_preserved_evidence_digest(database.connection()).unwrap()
+    );
+    // The unmerged Goose preview also used 224/174, with Goose but no Memory setting.
+    super::goose::downgrade_for_test(database.connection());
+    let tx = database.connection_mut().transaction().unwrap();
+    super::goose::rewrite(&tx, false).unwrap();
+    tx.execute_batch("DROP TABLE memory_preference;").unwrap();
+    tx.commit().unwrap();
+    assert!(
+        matches!(classify_database_contract(database.connection()).unwrap(),
+        DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 174)
+    );
+    database.migrate(false).unwrap();
+    assert!(schema_matches(database.connection()).unwrap());
+    assert!(super::goose::schema_matches(database.connection()).unwrap());
+    assert!(
+        matches!(classify_database_contract(database.connection()).unwrap(),
+        DatabaseContractClassification::Current(ref m) if m.projection_schema_version == 175)
+    );
     assert_eq!(
         evidence,
         public_history_claim_preserved_evidence_digest(database.connection()).unwrap()

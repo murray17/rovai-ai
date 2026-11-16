@@ -289,7 +289,7 @@ struct AcpActivePrompt {
     prompt_activity_observed: bool,
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
     zcode_input_id: Option<String>,
-    codebuddy_request_id: Option<String>,
+    native_prompt_id: Option<String>,
     prompt_progress: AcpPromptProgress,
 }
 
@@ -604,6 +604,7 @@ fn is_en_us_unsigned_integer(value: &str) -> bool {
 fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool {
     is_session_catalog_update(message)
         || is_known_session_lifecycle_extension(adapter_kind, message)
+        || (adapter_kind == AdapterKind::GooseCli && crate::goose::is_metadata(message))
         || (adapter_kind == AdapterKind::GrokBuild && is_grok_turn_usage_frame(message))
         || (adapter_kind == AdapterKind::KiroCli && is_kiro_context_gauge(message))
         || (adapter_kind == AdapterKind::KimiCodeCli && is_kimi_compaction_completed_frame(message))
@@ -2150,6 +2151,10 @@ impl AcpHost {
                 "version": env!("CARGO_PKG_VERSION")
             }
         });
+        if host.adapter_kind == AdapterKind::GooseCli {
+            initialize_params["clientCapabilities"]["_meta"]["goose"]["customNotifications"] =
+                json!(true);
+        }
         if host.adapter_kind == AdapterKind::CopilotCli {
             // Subscribe to per-call Usage and the native public intent label.
             initialize_params["clientCapabilities"]["_meta"] = json!({
@@ -2325,6 +2330,33 @@ impl AcpHost {
                                 continue;
                             }
                         };
+                        if host.adapter_kind == AdapterKind::GooseCli {
+                            crate::goose::project_tool(&mut message);
+                            if message["method"] == "_goose/unstable/session/update"
+                                && message["params"]["update"]["sessionUpdate"] == "usage_update"
+                                && let Some(session) = message["params"]["sessionId"].as_str()
+                            {
+                                let mut results = host.session_results.write().await;
+                                let result = results
+                                    .entry(session.to_owned())
+                                    .or_insert_with(|| json!({}));
+                                result["_meta"]["rovaiGooseUsage"] = crate::goose::usage_snapshot(
+                                    result.pointer("/_meta/rovaiGooseUsage"),
+                                    &message["params"],
+                                );
+                            }
+                            if message["method"] == "session/update"
+                                && message["params"]["update"]["sessionUpdate"]
+                                    == "config_option_update"
+                                && message["params"]["update"]["configOptions"].is_array()
+                                && let Some(session) = message["params"]["sessionId"].as_str()
+                                && let Some(result) =
+                                    host.session_results.write().await.get_mut(session)
+                            {
+                                result["configOptions"] =
+                                    message["params"]["update"]["configOptions"].clone();
+                            }
+                        }
                         if host.adapter_kind == AdapterKind::DeepseekHarness
                             && let Some(root) = host.private_config_root.as_deref()
                             && let Err(error) = crate::dsh::enrich_message(root, &mut message)
@@ -2504,6 +2536,7 @@ impl AcpHost {
                                     AdapterKind::ClineCli
                                         | AdapterKind::CommandCodeCli
                                         | AdapterKind::MinimaxCodeCli
+                                        | AdapterKind::GooseCli
                                 ) {
                                     match host
                                         .enrich_paired_tool_message(
@@ -3600,8 +3633,31 @@ impl AcpHost {
         };
         match &mut route.phase {
             AcpSessionPhase::PromptActive(active_prompt) => {
+                if self.adapter_kind == AdapterKind::GooseCli
+                    && message["method"] == "session/update"
+                    && message["params"]["update"]["sessionUpdate"] == "session_info_update"
+                    && let Some(id) = message
+                        .pointer("/params/update/_meta/goose/activeRunId")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                {
+                    active_prompt.native_prompt_id = Some(id.to_owned());
+                    // Goose publishes its admitted native Run before waiting
+                    // for the first model response. This is its owner receipt,
+                    // unlike catalog/usage updates or a local transport write.
+                    if !active_prompt.acceptance_emitted {
+                        active_prompt.acceptance_emitted = true;
+                        active_prompt.prompt_activity_observed = true;
+                        let _ = self.incoming.send(route.owner.input_accepted(
+                            self.adapter_kind,
+                            &self.host_instance_id,
+                            session_id,
+                            active_prompt,
+                        ));
+                    }
+                }
                 if self.adapter_kind == AdapterKind::CodebuddyCli
-                    && active_prompt.codebuddy_request_id.is_none()
+                    && active_prompt.native_prompt_id.is_none()
                     && crate::runtime::is_root_output(&message["params"])
                     && crate::runtime::is_root_output(&message["params"]["update"])
                     && matches!(
@@ -3616,7 +3672,7 @@ impl AcpHost {
                         )
                     )
                 {
-                    active_prompt.codebuddy_request_id = message
+                    active_prompt.native_prompt_id = message
                         .pointer("/params/update/_meta/codebuddy.ai~1conversationRequestId")
                         .or_else(|| {
                             message.pointer("/params/_meta/codebuddy.ai~1conversationRequestId")
@@ -3658,7 +3714,10 @@ impl AcpHost {
                 // Catalog metadata may report the previous context before a
                 // prompt is accepted. Collect its numbers without treating it
                 // as proof that a rejected input was consumed.
-                if !is_session_catalog_update(message) {
+                if !is_session_catalog_update(message)
+                    && !(self.adapter_kind == AdapterKind::GooseCli
+                        && crate::goose::is_metadata(message))
+                {
                     active_prompt.prompt_activity_observed = true;
                 }
                 // These active-input adapters need the initial native input
@@ -3674,6 +3733,7 @@ impl AcpHost {
                         | AdapterKind::MinimaxCodeCli
                         | AdapterKind::HermesCli
                         | AdapterKind::KiloCli
+                        | AdapterKind::GooseCli
                 ) || (self.adapter_kind == AdapterKind::OpencodeCli
                     && rovai_core::steer::protocol_unavailable(
                         "opencode-cli",
@@ -3869,10 +3929,17 @@ impl AcpHost {
             .await
             .insert(session_id.to_string());
         if let Some(result) = result {
-            self.session_results
-                .write()
-                .await
-                .insert(session_id.to_string(), result.clone());
+            let mut results = self.session_results.write().await;
+            let mut result = result.clone();
+            if self.adapter_kind == AdapterKind::GooseCli
+                && result.pointer("/_meta/rovaiGooseUsage").is_none()
+                && let Some(usage) = results
+                    .get(session_id)
+                    .and_then(|old| old.pointer("/_meta/rovaiGooseUsage"))
+            {
+                result["_meta"]["rovaiGooseUsage"] = usage.clone();
+            }
+            results.insert(session_id.to_string(), result);
         }
     }
 
@@ -4450,10 +4517,23 @@ impl AcpHost {
         &self,
         method: &str,
         params: Value,
-        deadline: Duration,
+        budget: Duration,
+    ) -> Result<Value> {
+        self.rpc_until(method, params, tokio::time::Instant::now() + budget)
+            .await
+    }
+
+    async fn rpc_until(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: tokio::time::Instant,
     ) -> Result<Value> {
         if !self.is_alive() {
             bail!("ACP Host is not alive");
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("ACP request timed out: {method}");
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
@@ -4465,19 +4545,34 @@ impl AcpHost {
                 steer_target: None,
             },
         );
-        if let Err(error) = self
-            .send(json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params}))
-            .await
-        {
-            self.pending.lock().await.remove(&id);
-            return Err(error);
-        }
-        let response = match timeout(deadline, receiver).await {
-            Ok(response) => {
-                response.with_context(|| format!("ACP response channel closed: {method}"))?
+        let mut sent = false;
+        let mut write_started = false;
+        let response = tokio::time::timeout_at(deadline, async {
+            if let Err(error) = self
+                .send_tracking_write(
+                    json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params}),
+                    &mut write_started,
+                )
+                .await
+            {
+                self.alive.store(false, Ordering::Release);
+                return Err(error);
             }
+            sent = true;
+            receiver
+                .await
+                .with_context(|| format!("ACP response channel closed: {method}"))
+        })
+        .await;
+        self.pending.lock().await.remove(&id);
+        let response = match response {
+            Ok(response) => response?,
             Err(_) => {
-                self.pending.lock().await.remove(&id);
+                // An incomplete frame cannot be followed by another request.
+                // A response timeout, in contrast, leaves the transport usable.
+                if write_started && !sent {
+                    self.alive.store(false, Ordering::Release);
+                }
                 bail!("ACP request timed out: {method}");
             }
         };
@@ -4523,7 +4618,7 @@ impl AcpHost {
                 prompt_activity_observed: false,
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
                 zcode_input_id: None,
-                codebuddy_request_id: None,
+                native_prompt_id: None,
                 prompt_progress: AcpPromptProgress::default(),
             });
         }
@@ -4575,7 +4670,12 @@ impl AcpHost {
     }
 
     async fn send(&self, message: Value) -> Result<()> {
+        self.send_tracking_write(message, &mut false).await
+    }
+
+    async fn send_tracking_write(&self, message: Value, write_started: &mut bool) -> Result<()> {
         let mut stdin = self.stdin.lock().await;
+        *write_started = true;
         stdin
             .write_all(serde_json::to_string(&message)?.as_bytes())
             .await?;
@@ -4900,6 +5000,12 @@ impl AcpSessionPermissions {
                     })
                     .context("Command Code Runtime requires valid permission_mode")?,
             ),
+            AdapterKind::GooseCli => Some(
+                values["mode"]
+                    .as_str()
+                    .filter(|mode| matches!(*mode, "auto" | "approve" | "smart_approve"))
+                    .context("Goose requires a native mode")?,
+            ),
             AdapterKind::ClineCli => Some(
                 values["mode"]
                     .as_str()
@@ -4989,6 +5095,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
         adapter_kind,
         AdapterKind::OpencodeCli
             | AdapterKind::KiloCli
+            | AdapterKind::GooseCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -5155,6 +5262,10 @@ impl AcpRuntime {
         session_id: &str,
         bootstrap: &str,
     ) -> Result<()> {
+        if self.host.adapter_kind == AdapterKind::GooseCli {
+            self.host.rpc("_goose/unstable/session/system-prompt/set",json!({"sessionId":session_id,"mode":"append","key":crate::goose::BOOTSTRAP_KEY,"text":bootstrap})).await?;
+            return Ok(());
+        }
         if self.host.adapter_kind == AdapterKind::KiloCli {
             let file = self
                 .host
@@ -5298,7 +5409,10 @@ impl AcpRuntime {
                                 .context("ACP Runtime has no bundled CLI")?
                                 .cli_executable(),
                         );
-                    } else if self.host.adapter_kind == AdapterKind::KiloCli {
+                    } else if matches!(
+                        self.host.adapter_kind,
+                        AdapterKind::KiloCli | AdapterKind::GooseCli
+                    ) {
                         crate::runtime_mcp::adapt_acp_stdio_cwd(
                             &mut server,
                             definition,
@@ -5376,6 +5490,10 @@ impl AcpRuntime {
                         ) {
                             params["additionalDirectories"] = json!(additional_directories);
                         }
+                        if self.host.adapter_kind == AdapterKind::GooseCli {
+                            // Only trim client replay. Goose retains its full native conversation.
+                            params["_meta"]["replayTail"] = json!(1);
+                        }
                         params
                     };
                     match self
@@ -5434,14 +5552,20 @@ impl AcpRuntime {
                 (existing_session_id.to_string(), Some(method))
             }
             AcpSessionContinuation::New => {
-                let params = build_acp_new_session_params(
+                let mut params = build_acp_new_session_params(
                     self.host.adapter_kind,
                     &cwd,
                     &mcp_servers,
                     &additional_directories,
                     new_session_native_rules,
                 );
-                let result = self.host.rpc("session/new", params).await?;
+                if self.host.adapter_kind == AdapterKind::GooseCli && model_source == "explicit" {
+                    params["_meta"]["provider"] = json!(crate::goose::model_route(model)?.0);
+                }
+                let mut result = self.host.rpc("session/new", params).await?;
+                if self.host.adapter_kind == AdapterKind::GooseCli {
+                    result["_meta"]["rovaiGooseUsage"] = json!({"sessionId":result["sessionId"],"update":{"sessionUpdate":"usage_update","accumulatedInputTokens":0,"accumulatedOutputTokens":0,"accumulatedCost":0}});
+                }
                 *self.session_result.write().await = Some(result.clone());
                 let session_id = result
                     .get("sessionId")
@@ -5570,6 +5694,12 @@ impl AcpRuntime {
             {
                 // This custom model was selected by the host's --model argument.
                 // CodeBuddy omits it from set_config_option's built-in choices.
+            } else if self.host.adapter_kind == AdapterKind::GooseCli {
+                let (provider, native_model) = crate::goose::model_route(model)?;
+                self.set_config_option(&session_id, "provider", provider)
+                    .await?;
+                self.set_config_option(&session_id, "model", native_model)
+                    .await?;
             } else if matches!(
                 self.host.adapter_kind,
                 AdapterKind::KiroCli | AdapterKind::GrokBuild
@@ -5620,6 +5750,22 @@ impl AcpRuntime {
                 if let Some(value) = value.as_str() {
                     self.set_config_option(&session_id, key, value).await?;
                 }
+            }
+        }
+        if self.host.adapter_kind == AdapterKind::GooseCli {
+            let mode = self
+                .session_permissions
+                .mode
+                .as_deref()
+                .context("Goose native mode missing")?;
+            self.set_config_option(&session_id, "mode", mode).await?;
+            if restore_method.is_some() {
+                self.withdraw_goose_mcp(
+                    &session_id,
+                    external_mcp_servers,
+                    tokio::time::Instant::now() + crate::goose::MCP_WITHDRAWAL_BUDGET,
+                )
+                .await?;
             }
         }
         if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
@@ -5713,6 +5859,77 @@ impl AcpRuntime {
         Ok(session_id)
     }
 
+    async fn withdraw_goose_mcp(
+        &self,
+        session_id: &str,
+        current: &BTreeMap<String, McpServerDefinition>,
+        deadline: tokio::time::Instant,
+    ) -> Result<()> {
+        let list = self
+            .host
+            .rpc_until(
+                "_goose/unstable/session/extensions/list",
+                json!({"sessionId":session_id}),
+                deadline,
+            )
+            .await;
+        let mut removals = tokio::task::JoinSet::new();
+        match list {
+            Ok(list) => {
+                if let Some(extensions) = list["extensions"].as_array() {
+                    let keys: BTreeSet<_> = extensions
+                        .iter()
+                        .filter_map(|item| item["extensionKey"].as_str())
+                        .filter(|key| {
+                            key.starts_with(crate::goose::ASSIGNED_MCP_PREFIX)
+                                && !current.contains_key(*key)
+                        })
+                        .map(str::to_owned)
+                        .collect();
+                    for key in keys {
+                        let host = self.host.clone();
+                        let session_id = session_id.to_owned();
+                        removals.spawn(async move {
+                            let result = host
+                                .rpc_until(
+                                    "_goose/unstable/session/extensions/remove",
+                                    json!({"sessionId":session_id,"extensionKey":key}),
+                                    deadline,
+                                )
+                                .await;
+                            (key, result)
+                        });
+                    }
+                } else {
+                    self.host.send_host_diagnostic(
+                        "Goose MCP withdrawal skipped: extension list missing".into(),
+                    );
+                }
+            }
+            Err(error) => self
+                .host
+                .send_host_diagnostic(format!("Goose MCP withdrawal list unconfirmed: {error:#}")),
+        }
+        while let Some(result) = removals.join_next().await {
+            match result {
+                Ok((key, Ok(_))) => self
+                    .host
+                    .send_host_diagnostic(format!("Goose MCP extension withdrawn: {key}")),
+                Ok((key, Err(error))) => self.host.send_host_diagnostic(format!(
+                    "Goose MCP withdrawal unconfirmed for {key}: {error:#}"
+                )),
+                Err(error) => self
+                    .host
+                    .send_host_diagnostic(format!("Goose MCP withdrawal unconfirmed: {error}")),
+            }
+        }
+        ensure!(
+            self.host.is_alive(),
+            "ACP Host disconnected during Goose MCP withdrawal"
+        );
+        Ok(())
+    }
+
     async fn finish_session_attachment(
         &self,
         session_id: &str,
@@ -5759,7 +5976,10 @@ impl AcpRuntime {
     }
 
     pub async fn observed_model_id(&self) -> Option<String> {
-        if self.adapter_kind() == AdapterKind::CopilotCli {
+        if matches!(
+            self.adapter_kind(),
+            AdapterKind::CopilotCli | AdapterKind::GooseCli
+        ) {
             // The advertised Session default may not
             // be the root call's model. Its validated assistant.usage owns the
             // first actual model observation in Core.
@@ -5785,6 +6005,18 @@ impl AcpRuntime {
         config_id: &str,
         value: &str,
     ) -> Result<()> {
+        // Goose setters can rebuild Providers and persist unchanged selections.
+        if self.adapter_kind() == AdapterKind::GooseCli
+            && self
+                .session_result
+                .read()
+                .await
+                .as_ref()
+                .and_then(|session| crate::goose::selected_option(session, config_id))
+                == Some(value)
+        {
+            return Ok(());
+        }
         let result = self
             .host
             .rpc(
@@ -5800,14 +6032,17 @@ impl AcpRuntime {
         // Successful native replies need not repeat the catalog or selected value.
         // Consume any returned option state without turning missing metadata into
         // an execution failure.
-        if let Some(options) = result.get("configOptions").filter(|value| value.is_array()) {
+        let options = result.get("configOptions").filter(|value| value.is_array());
+        if options.is_some() || self.adapter_kind() == AdapterKind::GooseCli {
             let mut selected = self
                 .session_result
                 .read()
                 .await
                 .clone()
                 .unwrap_or_else(|| json!({}));
-            selected["configOptions"] = options.clone();
+            // A Goose Provider/model change can reset other options. Without
+            // a new snapshot they are unknown, never grounds for skipping.
+            selected["configOptions"] = options.cloned().unwrap_or(Value::Null);
             *self.session_result.write().await = Some(selected.clone());
             self.host
                 .remember_session(session_id, Some(&selected))
@@ -5838,6 +6073,36 @@ impl AcpRuntime {
             .host
             .prepare_prompt(&session_id, &self.owner, delivery_id)
             .await?;
+        if self.adapter_kind() == AdapterKind::GooseCli
+            && let Some(params) = self
+                .host
+                .session_result(&session_id)
+                .await
+                .and_then(|v| v.pointer("/_meta/rovaiGooseUsage").cloned())
+        {
+            let message = json!({"method":"_goose/unstable/session/update","params":params});
+            if let AcpSessionMessageRoute::Forward {
+                owner,
+                active_prompt,
+                sequence,
+            } = self
+                .host
+                .route_session_message(&session_id, &message, 0)
+                .await
+            {
+                self.host
+                    .incoming
+                    .send(owner.message(
+                        self.adapter_kind(),
+                        &self.host.host_instance_id,
+                        &session_id,
+                        &active_prompt,
+                        sequence,
+                        message,
+                    ))
+                    .context("Goose usage baseline receiver closed")?;
+            }
+        }
         if self.native_usage_selected().await {
             let kind = self.adapter_kind();
             let workspace = self.execution_root.clone();
@@ -6027,11 +6292,15 @@ impl AcpRuntime {
             };
         }
         let kiro = self.adapter_kind() == AdapterKind::KiroCli;
-        let codebuddy_request = routes.get(&session).and_then(|route| match &route.phase {
-            AcpSessionPhase::PromptActive(p) => p.codebuddy_request_id.clone(),
+        let native_request = routes.get(&session).and_then(|route| match &route.phase {
+            AcpSessionPhase::PromptActive(p) => p.native_prompt_id.clone(),
             _ => None,
         });
         let (method, params) = match self.adapter_kind() {
+            AdapterKind::GooseCli => (
+                "_goose/unstable/session/steer",
+                json!({"sessionId":session,"expectedRunId":native_request.as_deref().ok_or(rovai_core::steer::ActiveInputNotAccepted)?,"prompt":[{"type":"text","text":text}]}),
+            ),
             AdapterKind::HermesCli => (
                 "session/prompt",
                 json!({"sessionId":session,"prompt":[{"type":"text","text":format!("/steer {text}")}]}),
@@ -6043,7 +6312,7 @@ impl AcpRuntime {
                 // old versions still answer method-not-found without accepting it.
                 json!({"sessionId":session,"contentBlocks":[{"type":"text","text":text}],
                     "clientUserMessageId":input_id,
-                    "expectedRequestId":codebuddy_request.as_deref().unwrap_or(expected_prompt)}),
+                    "expectedRequestId":native_request.as_deref().unwrap_or(expected_prompt)}),
             ),
             AdapterKind::CodebuddyCli | AdapterKind::KiloCli => (
                 "session/prompt",
@@ -6108,7 +6377,9 @@ impl AcpRuntime {
         );
         // Keep unknown and failed Steer on the existing retirement path. Kilo
         // clears this only after its complete successful aggregate terminal.
-        self.host.retire_after_steer.store(true, Ordering::Release);
+        if self.adapter_kind() != AdapterKind::GooseCli {
+            self.host.retire_after_steer.store(true, Ordering::Release);
+        }
         let written = timeout(
             Duration::from_secs(10),
             self.host
@@ -6118,6 +6389,7 @@ impl AcpRuntime {
         .context("ACP active input write timed out")
         .and_then(|result| result);
         if let Err(error) = written {
+            self.host.retire_after_steer.store(true, Ordering::Release);
             if opencode {
                 self.host.pending.lock().await.remove(&id);
                 self.host.opencode_steering_changed.notify_waiters();
@@ -6165,6 +6437,9 @@ impl AcpRuntime {
             }
         }
         .await;
+        if self.adapter_kind() == AdapterKind::GooseCli && result.is_err() {
+            self.host.retire_after_steer.store(true, Ordering::Release);
+        }
         if opencode {
             // This is a bounded in-flight request, not a receipt tracker. After
             // its original deadline the input stays unknown and is never resent.
@@ -6173,10 +6448,12 @@ impl AcpRuntime {
         }
         let result = match result {
             Err(error)
-                if self.adapter_kind() == AdapterKind::KiloCli
-                    && error.downcast_ref::<AcpRpcError>().is_some_and(|native| {
-                        matches!(native.code, Some(-32600 | -32601 | -32602))
-                    }) =>
+                if matches!(
+                    self.adapter_kind(),
+                    AdapterKind::KiloCli | AdapterKind::GooseCli
+                ) && error.downcast_ref::<AcpRpcError>().is_some_and(|native| {
+                    matches!(native.code, Some(-32600 | -32601 | -32602))
+                }) =>
             {
                 return Err(rovai_core::steer::ActiveInputNotAccepted.into());
             }
@@ -6242,6 +6519,23 @@ impl AcpRuntime {
         {
             bail!("MiniMax Code did not confirm active Turn steering");
         }
+        if self.adapter_kind() == AdapterKind::GooseCli {
+            let receipt = (|| {
+                ensure!(
+                    result["runId"].as_str() == native_request.as_deref(),
+                    "Goose steer returned a different native Run"
+                );
+                result["messageId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .context("Goose steer receipt missing messageId")
+            })();
+            if receipt.is_err() {
+                self.host.retire_after_steer.store(true, Ordering::Release);
+            }
+            return receipt;
+        }
         if self.adapter_kind() == AdapterKind::ZcodeApp {
             if result["inputId"] != input_id || result["accepted"] != true {
                 bail!("ZCode did not confirm steering queue admission");
@@ -6284,7 +6578,7 @@ impl AcpRuntime {
                 }
             } else {
                 if result["steered"] != true
-                    || codebuddy_request
+                    || native_request
                         .as_deref()
                         .is_none_or(|expected| result["ownerRequestId"] != expected)
                 {
@@ -7172,7 +7466,7 @@ impl AcpCliRuntimeAdapter {
         let spawn_compaction_policy = self.compaction_detector_policy;
         if matches!(
             self.kind,
-            AdapterKind::DeepseekHarness | AdapterKind::KiloCli
+            AdapterKind::DeepseekHarness | AdapterKind::KiloCli | AdapterKind::GooseCli
         ) {
             // Retire obsolete Hosts in this Binding before exact resume.
             // DSH also holds a native lock while its previous Host owns the Session.
@@ -7756,6 +8050,9 @@ fn configure_runtime_command(
                 .env("TMPDIR", root)
                 .env("ROVAI_ZCODE_OWNER_REPORT", root.join("owner-cleanup.json"))
                 .env("ROVAI_ZCODE_CLI_CONTEXT_DIR", root.join("cli-contexts"));
+        }
+        AdapterKind::GooseCli => {
+            command.arg("acp");
         }
         AdapterKind::KiloCli => {
             crate::kilo::configure_command(command);
@@ -9046,7 +9343,7 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
         AdapterKind::MinimaxCodeCli => permissions["permission_mode"] == "bypassPermissions",
-        AdapterKind::HermesCli | AdapterKind::KiloCli => false,
+        AdapterKind::HermesCli | AdapterKind::KiloCli | AdapterKind::GooseCli => false,
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
@@ -15254,6 +15551,327 @@ for line in sys.stdin:
                 host.shutdown().await;
                 std::fs::remove_dir_all(root).unwrap();
             }
+        }
+
+        // Cover fresh and restored Goose Sessions in the same model owner.
+        // Optional extension management must not gate restored task execution.
+        for (first_target, restore_first, withdrawal_case) in [
+            ("native/model-a", false, "unavailable"),
+            ("native/model-a", false, "default_unavailable"),
+            ("runtime_default", false, "unavailable"),
+            ("runtime_default", true, "unavailable"),
+            ("runtime_default", true, "empty"),
+            ("runtime_default", true, "normal"),
+            ("runtime_default", true, "partial"),
+            ("runtime_default", true, "list_hang"),
+            ("runtime_default", true, "remove_hang"),
+            ("runtime_default", true, "all_hang"),
+            ("runtime_default", true, "dead"),
+        ] {
+            let root = std::env::temp_dir()
+                .join(format!("rovai-goose-selection-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("goose");
+            let log = root.join("requests");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/usr/bin/python3
+import json, sys
+case = {withdrawal_case:?}
+extensions = ['rovai_assigned_current', 'user_native']
+if case in ('normal', 'partial', 'remove_hang', 'all_hang'):
+    extensions += ['rovai_assigned_old_' + str(i) for i in range(8)]
+options = dict(provider='native', model='model-a', thinking_effort='high', mode='auto')
+for line in sys.stdin:
+    request = json.loads(line)
+    with open({log:?}, 'a') as out: out.write(json.dumps(request) + '\n')
+    method, params = request['method'], request.get('params', {{}})
+    result = {{}}
+    if method == 'initialize': result = {{'protocolVersion':1,'agentCapabilities':{{}}}}
+    elif method == 'session/new' and case == 'default_unavailable' and params.get('_meta', {{}}).get('provider') != 'native':
+        print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32000,'message':'unrelated default Provider requires authentication'}})), flush=True)
+        continue
+    elif method == '_goose/unstable/session/extensions/list':
+        if case == 'dead': sys.exit(0)
+        if case == 'list_hang': continue
+        if case == 'unavailable':
+            print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32601,'message':'optional extension management unavailable'}})), flush=True)
+            continue
+        result = {{'extensions':[{{'extensionKey':k,'status':'failed'}} for k in extensions]}}
+    elif method == '_goose/unstable/session/extensions/remove':
+        key = params['extensionKey']
+        if case == 'all_hang' or (case == 'remove_hang' and key.endswith('_0')): continue
+        if case == 'partial' and key.endswith('_0'):
+            print(json.dumps(dict(jsonrpc='2.0', id=request['id'], error={{'code':-32603,'message':'one native removal refused'}})), flush=True)
+            continue
+        extensions.remove(key)
+    elif method == 'session/set_config_option':
+        options[params['configId']] = params['value']
+        if params['configId'] == 'model': options['thinking_effort'] = 'off'
+    if method in ('session/new', 'session/load', 'session/set_config_option'):
+        result = {{'sessionId':'goose-selection','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
+    if method == 'session/set_config_option' and params.get('value') == 'model-no-echo': result = {{}}
+    if method == 'session/prompt': result = {{'stopReason':'end_turn'}}
+    if method == 'audit/barrier': result = {{'remaining':extensions}}
+    print(json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)), flush=True)
+"#,
+                    log = log.to_string_lossy(),
+                    withdrawal_case = withdrawal_case,
+                ),
+            );
+            let mut frozen = frozen_trae_runtime(&executable);
+            frozen.adapter_kind = AdapterKind::GooseCli;
+            frozen.permissions.adapter_kind = AdapterKind::GooseCli;
+            frozen.permissions.values = json!({"mode":"auto"});
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            for (epoch, target, mode, expected) in [
+                (1, first_target, "auto", vec![]),
+                (2, "native/model-a", "auto", vec![]),
+                (
+                    3,
+                    "native/model-b",
+                    "auto",
+                    vec!["model", "thinking_effort"],
+                ),
+                (4, "native/model-b", "auto", vec![]),
+                (5, "native/model-b", "approve", vec!["mode"]),
+                (6, "native/model-b", "approve", vec![]),
+                (
+                    7,
+                    "second/model-c",
+                    "approve",
+                    vec!["provider", "model", "thinking_effort"],
+                ),
+                (8, "second/model-c", "approve", vec![]),
+                (
+                    9,
+                    "second/model-no-echo",
+                    "approve",
+                    vec!["model", "thinking_effort"],
+                ),
+                (10, "second/model-no-echo", "approve", vec![]),
+                (11, "runtime_default", "approve", vec![]),
+                (12, "runtime_default", "approve", vec![]),
+                (
+                    13,
+                    "native/model-a",
+                    "approve",
+                    vec!["provider", "model", "thinking_effort"],
+                ),
+            ] {
+                if withdrawal_case != "unavailable" && epoch > 1 {
+                    break;
+                }
+                let before = std::fs::read_to_string(&log).unwrap().lines().count();
+                let runtime = AcpRuntime::from_test_host(
+                    AcpRuntimeOwner {
+                        agent_run_id: format!("goose-run-{epoch}"),
+                        execution_epoch: epoch,
+                    },
+                    host.clone(),
+                    "compat".into(),
+                    "mcp".into(),
+                    root.clone(),
+                    Some(exact_attachment_root(&root)),
+                    "runtime_managed".into(),
+                    AcpSessionPermissions {
+                        mode: Some(mode.into()),
+                        ..Default::default()
+                    },
+                    None,
+                );
+                let current_mcp = BTreeMap::from([(
+                    "rovai_assigned_current".to_string(),
+                    serde_json::from_value(json!({"command":"/usr/bin/true","args":[]})).unwrap(),
+                )]);
+                let started = Instant::now();
+                let session = runtime
+                    .start_or_resume_session(
+                        (epoch > 1 || restore_first).then_some("goose-selection"),
+                        AcpSessionCapabilities {
+                            can_resume: false,
+                            can_load_history: true,
+                        },
+                        if target == "runtime_default" {
+                            "runtime_default"
+                        } else {
+                            "explicit"
+                        },
+                        target,
+                        &json!({"thinking_effort":"high"}),
+                        &current_mcp,
+                    )
+                    .await;
+                if withdrawal_case == "dead" {
+                    assert!(
+                        session.is_err(),
+                        "real disconnection cannot look successful"
+                    );
+                    assert!(!host.is_alive());
+                    host.shutdown().await;
+                    break;
+                }
+                let session = session.unwrap();
+                if withdrawal_case == "empty" {
+                    // Waiting for an occupied writer has not damaged the wire.
+                    let writer = host.stdin.lock().await;
+                    runtime
+                        .withdraw_goose_mcp(
+                            &session,
+                            &current_mcp,
+                            tokio::time::Instant::now() + Duration::from_millis(100),
+                        )
+                        .await
+                        .unwrap();
+                    assert!(host.is_alive());
+                    assert!(host.pending.lock().await.is_empty());
+                    drop(writer);
+                }
+                if matches!(withdrawal_case, "list_hang" | "remove_hang" | "all_hang") {
+                    // Exclude the unchanged shared history replay grace.
+                    let elapsed = started
+                        .elapsed()
+                        .saturating_sub(ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE);
+                    assert!(elapsed >= crate::goose::MCP_WITHDRAWAL_BUDGET);
+                    assert!(
+                        elapsed < Duration::from_secs(2),
+                        "one batch budget, not one per extension"
+                    );
+                }
+                assert!(
+                    host.pending.lock().await.is_empty(),
+                    "no optional RPC waiters leaked"
+                );
+                runtime
+                    .bind_managed_bootstrap(&session, "COMPLETE_SYSTEM")
+                    .await
+                    .unwrap();
+                if epoch == 1 {
+                    runtime
+                        .start_prompt("goose-business", "TASK")
+                        .await
+                        .unwrap();
+                    receive_through_prompt_completion(&mut receiver).await;
+                }
+                let native = host.rpc("audit/barrier", json!({})).await.unwrap();
+                let requests: Vec<Value> = std::fs::read_to_string(&log)
+                    .unwrap()
+                    .lines()
+                    .skip(before)
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                let setters: Vec<_> = requests
+                    .iter()
+                    .filter(|r| r["method"] == "session/set_config_option")
+                    .map(|r| r["params"]["configId"].as_str().unwrap())
+                    .collect();
+                assert_eq!(setters, expected, "Goose round {epoch}");
+                if let Some(new_session) = requests.iter().find(|r| r["method"] == "session/new") {
+                    assert!(
+                        new_session["params"]["_meta"]
+                            .get("enabledExtensions")
+                            .is_none()
+                    );
+                    assert_eq!(
+                        new_session["params"]["_meta"]["provider"],
+                        if first_target == "runtime_default" {
+                            Value::Null
+                        } else {
+                            json!("native")
+                        },
+                    );
+                }
+                let loads: Vec<_> = requests
+                    .iter()
+                    .filter(|r| r["method"] == "session/load")
+                    .collect();
+                assert_eq!(loads.len(), usize::from(restore_first && epoch == 1));
+                if let Some(load) = loads.first() {
+                    assert_eq!(load["params"]["sessionId"], "goose-selection");
+                    assert_eq!(load["params"]["_meta"]["replayTail"], 1);
+                }
+                if matches!(epoch, 11 | 12) {
+                    let selected = runtime.session_result.read().await;
+                    let selected = selected.as_ref().unwrap();
+                    assert_eq!(
+                        crate::goose::selected_option(selected, "provider"),
+                        Some("second")
+                    );
+                    assert_eq!(
+                        crate::goose::selected_option(selected, "model"),
+                        Some("model-no-echo")
+                    );
+                    assert_eq!(
+                        crate::goose::selected_option(selected, "thinking_effort"),
+                        Some("high")
+                    );
+                }
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| r["method"] == "_goose/unstable/session/extensions/list")
+                        .count(),
+                    usize::from(restore_first && epoch == 1)
+                );
+                let removed: Vec<_> = requests
+                    .iter()
+                    .filter(|r| r["method"] == "_goose/unstable/session/extensions/remove")
+                    .collect();
+                assert!(removed.iter().all(|r| {
+                    r["params"]["extensionKey"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("rovai_assigned_old_")
+                }));
+                if matches!(
+                    withdrawal_case,
+                    "normal" | "partial" | "remove_hang" | "all_hang"
+                ) {
+                    assert_eq!(removed.len(), 8, "every independent removal gets a chance");
+                    let remaining = native["remaining"].as_array().unwrap();
+                    assert!(remaining.contains(&json!("rovai_assigned_current")));
+                    assert!(remaining.contains(&json!("user_native")));
+                    assert_eq!(
+                        remaining.len(),
+                        match withdrawal_case {
+                            "normal" => 2,
+                            "all_hang" => 10,
+                            _ => 3,
+                        }
+                    );
+                } else {
+                    assert!(removed.is_empty());
+                }
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|r| r["method"] == "_goose/unstable/session/system-prompt/set")
+                        .count(),
+                    1
+                );
+                host.unbind_session(&session, &runtime.owner).await;
+            }
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
         }
     }
 

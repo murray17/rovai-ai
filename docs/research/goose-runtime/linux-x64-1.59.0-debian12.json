@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-15",
+  "runtime": "goose-cli",
+  "platform": "linux-x64",
+  "targetHost": {
+    "os": "Debian GNU/Linux 12",
+    "architecture": "x86_64",
+    "glibc": "2.36"
+  },
+  "admission": "preview",
+  "originalBranchRevision": "711e66a8f4bc6ccf9e616476ed9405ff89e4f04b",
+  "originalLinuxBlocker": "runtime_platform_not_qualified",
+  "testedBuild": {
+    "artifactId": 14167738619,
+    "buildCommit": "0c8ade73d91b41770aa4ebe1247c76ecbc67ec9e",
+    "archiveSha256": "cb4bff0421020a60391beb8a223c7acd8315d654905a45435dab43e5cfb8ae9b",
+    "archiveBytes": 62623489,
+    "buildWorkflowRun": 43728574987,
+    "filesVerified": 223,
+    "glibcMaximum": "2.35"
+  },
+  "integrationBase": "9f152ee32ad39bddcd4c37ae1ba6b36bccdafec6",
+  "runtimeEvidence": {
+    "officialVersion": "1.59.0",
+    "upstreamRevision": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+    "releaseAsset": "goose-x86_64-unknown-linux-gnu.tar.gz",
+    "releaseArchiveSha256": "a774667de6c20206a60d78d7bece2d9dda8389667e4f5c2fc8aaa758d1e81ef3",
+    "executableSha256": "4ee4e39acff02e725e6959a71b5f4d91da9e8c0bd7b95bc2dce4a753abbecede",
+    "launch": "goose acp",
+    "protocol": "acp-v1",
+    "provider": "Sub2API",
+    "model": "gpt-6",
+    "providerSettings": "Goose native custom provider, config.yaml and secrets.yaml",
+    "apiFormat": "openai-responses",
+    "sub2apiLocalOnly": true,
+    "officialCliReplyVerified": true
+  },
+  "realCore": {
+    "passed": true,
+    "checks": {
+      "nativeDefaultModel": true,
+      "discoveredModel": "custom_sub2api/gpt-6",
+      "installedAdapter": "goose-cli",
+      "warmSameHostAndSession": true,
+      "coldNewHostSameSessionAndHistory": true,
+      "finalFile": {
+        "name": "Goose 验收.txt",
+        "content": "updated line\nkeep line\n"
+      }
+    },
+    "runs": [
+      {
+        "stage": "create",
+        "runId": "30e9615a-cbd9-4005-9d11-428a42559a13",
+        "status": "succeeded",
+        "publicReplies": 1,
+        "approvals": 0,
+        "fileOperations": [
+          "write"
+        ],
+        "workspaceFileVerified": true
+      },
+      {
+        "stage": "edit",
+        "runId": "7adbf32d-1aca-4721-9c4f-32abdef18644",
+        "status": "succeeded",
+        "publicReplies": 1,
+        "approvals": 0,
+        "fileOperations": [
+          "write"
+        ],
+        "workspaceFileVerified": true
+      },
+      {
+        "stage": "cold-resume",
+        "runId": "a9cb8245-60be-41da-b0ec-960aac5dd978",
+        "status": "succeeded",
+        "publicReplies": 1,
+        "approvals": 0,
+        "fileOperations": [],
+        "workspaceFileVerified": false
+      }
+    ]
+  },
+  "controlledCore": {
+    "passed": true,
+    "checks": [
+      "noImplicitNode",
+      "skillsManagement",
+      "probeSessions",
+      "catalog",
+      "nativeDefaultFirstAndWarm",
+      "bootstrap",
+      "commandOutput",
+      "warm",
+      "skills",
+      "outputBudget",
+      "subagent",
+      "compaction",
+      "effort",
+      "runtimeDefaultPreservesNativeSelection",
+      "approval",
+      "steer",
+      "cancel",
+      "lateRemoval",
+      "mcp",
+      "metrics",
+      "cost",
+      "cold",
+      "files"
+    ],
+    "successfulRunCount": 21,
+    "terminalRunCounts": {
+      "cancelled": 1,
+      "succeeded": 21
+    },
+    "cancelledRunCount": 1,
+    "warm": true,
+    "cold": {
+      "sameSession": true,
+      "newHost": true
+    },
+    "files": {
+      "writeAndEdit": true,
+      "fullDiff": "unsupported-native-metadata"
+    },
+    "cancel": {
+      "sameHost": true,
+      "samePid": true,
+      "newRun": true,
+      "newLease": true,
+      "oldLeaseRejected": true,
+      "cleanup": "reusable"
+    },
+    "remainingProbeSessions": 0,
+    "provider": "isolated scripted replies",
+    "mcpDelayedWithdrawalCovered": true
+  },
+  "fixture": {
+    "separateNativeConfigAndCoreData": true,
+    "separateSkillsMcpAndWorkspace": true,
+    "protectedProductionHome": true,
+    "serialRuns": true,
+    "memoryHardLimitMiB": 950,
+    "cleanupVerified": true,
+    "productionRovaiAndSub2apiSameProcess": true,
+    "releaseHarnessAdaptations": [
+      "Use the packaged Host and Skills with the existing Core IPC fixture",
+      "Use a writable private /tmp for the Built-in CLI socket",
+      "Collect notifications without retaining polling replies",
+      "Read file-operation v2 source metadata"
+    ]
+  },
+  "caveats": [
+    "Formal planned-shutdown process-tree criteria were outside this Linux Preview check.",
+    "Real responses cover the listed Sub2API model. The controlled provider exercises cancellation, approvals, compaction, steer, and MCP.",
+    "The verified Runtime host is Debian 12 x64. The Server OS CI build checks are independent."
+  ]
+}

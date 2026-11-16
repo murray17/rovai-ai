@@ -7,12 +7,13 @@ import { UiText, uiAttribute } from './interface-language'
 const DEFAULT_MODEL = 'runtime_default'
 const normalize = (text: string): string => text.normalize('NFKC').trim().toLocaleLowerCase()
 
-export function RuntimeModelSearch({ open, onOpenChange, models, value, label, disabled, loading, onRefresh, onSelect }: {
+export function RuntimeModelSearch({ open, onOpenChange, models, value, label, defaultChoice, disabled, loading, onRefresh, onSelect }: {
   open: boolean
   onOpenChange(open: boolean): void
   models: ModelDescriptor[]
   value: string
   label: string
+  defaultChoice?: { label: string; description: string }
   disabled: boolean
   loading: boolean
   onRefresh?(): void
@@ -166,9 +167,9 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
         <div className="runtime-picker-default">
           <button type="button" tabIndex={-1} role="option" aria-selected={value === DEFAULT_MODEL}
             id={`${id}-option-${resultIds.length}`} className="runtime-model-picker-item"
-            data-highlighted={active === DEFAULT_MODEL ? '' : undefined} title={uiAttribute("跟随智能体默认")}
+            data-highlighted={active === DEFAULT_MODEL ? '' : undefined} title={defaultChoice?.description ?? uiAttribute("跟随智能体默认")}
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(DEFAULT_MODEL)} onClick={() => choose(DEFAULT_MODEL)}>
-            <span className="runtime-model-picker-copy"><strong><UiText zh={"默认"} /></strong></span>
+            <span className="runtime-model-picker-copy"><strong>{defaultChoice?.label ?? uiAttribute('默认')}</strong></span>
             <span className="runtime-model-picker-check">{value === DEFAULT_MODEL && <RuntimePickerCheck />}</span>
           </button>
         </div>

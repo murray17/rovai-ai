@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "windows-x64-goose-v1",
+  "capturedAt": "2026-11-15T15:22:29.007Z",
+  "platform": "windows-x64",
+  "qualifiedRuntimeKinds": [
+    "goose-cli"
+  ],
+  "baseRevision": "711e66a8f4bc6ccf9e616476ed9405ff89e4f04b",
+  "qualificationBasis": {
+    "type": "target-host-runtime-acceptance",
+    "report": "docs/research/goose-runtime/README.md#windows-x64-qualification",
+    "mode": "isolated Debug Core with the existing per-adapter Windows qualification override for evidence collection"
+  },
+  "targetHost": {
+    "os": "Windows 10 Pro 22H2",
+    "version": "10.0.19045",
+    "architecture": "x64",
+    "filesystem": "NTFS"
+  },
+  "runtimeEvidence": {
+    "version": "1.59.0",
+    "upstreamRevision": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+    "protocol": "acp-v1",
+    "launch": "goose acp",
+    "releaseAsset": "goose-x86_64-pc-windows-msvc.zip",
+    "archiveSha256": "8b9ef7be66f469bdafd018de943a095ed83c32775dd623bebb0ab730da22d0d0",
+    "executableSha256": "5a424ab992d75aaefdc54ccf27719f62c3995e6d9b283d1cca016ec4d4b055ef",
+    "discoverySource": "env",
+    "authentication": "Goose native custom Provider with an environment-backed BYOK credential",
+    "provider": "Sub2API",
+    "apiFormat": "openai-responses",
+    "model": "gpt-6"
+  },
+  "testedBinarySha256": {
+    "rovai-core.exe": "a9d20344ce0fe9abd31f817e2940265af57326b3c1ecaa84feb1ed76fa17806f",
+    "rovai.exe": "978ff7076a54b67276e9bfd4fc15203bb49d5107ddb662cf9070b23ab090a8b9"
+  },
+  "realModel": {
+    "reportSha256": "818879dfd162c98e3caa755a6aa7715d548ead6cc96f8486ff3a8e318f2d2ee0",
+    "nativeDefaultInCatalog": true,
+    "runs": [
+      {
+        "name": "first",
+        "status": "succeeded",
+        "elapsedMs": 36654,
+        "publicMessages": 1,
+        "tools": [
+          "write",
+          "edit",
+          "shell"
+        ],
+        "unicodeAndSpacePath": true,
+        "bundledPublicCli": true
+      },
+      {
+        "name": "warm-mcp",
+        "status": "succeeded",
+        "elapsedMs": 23698,
+        "publicMessages": 1,
+        "sameHostAndPid": true,
+        "sameSession": true,
+        "assignedStdioMcpCalls": 1
+      },
+      {
+        "name": "cold",
+        "status": "succeeded",
+        "elapsedMs": 20674,
+        "publicMessages": 1,
+        "newHost": true,
+        "exactSession": true,
+        "withdrawalPersistedInNativeSession": true
+      }
+    ],
+    "plannedShutdowns": {
+      "completed": 2,
+      "controlledCyclesPersisted": 2,
+      "observedGooseProcessesReaped": 2
+    },
+    "observedUsage": [
+      {
+        "inputTokens": 32826,
+        "outputTokens": 115,
+        "cacheReadTokens": 16128
+      },
+      {
+        "inputTokens": 26422,
+        "outputTokens": 89,
+        "cacheReadTokens": 24960
+      },
+      {
+        "inputTokens": 18511,
+        "outputTokens": 93,
+        "cacheReadTokens": 9088
+      }
+    ]
+  },
+  "controlledProvider": {
+    "transport": "loopback scripted responses; official Windows Goose and production Core dispatch",
+    "normal": {
+      "reportSha256": "8026eb29ed9b13dac93d32bd22501a4b6270ac343d5a2a89673524ecd67c71bd",
+      "succeeded": 19,
+      "cancelled": 1,
+      "providerRequests": 55,
+      "observedHostAndMcpProcessesReaped": 10
+    },
+    "lateRemoval": {
+      "reportSha256": "3f0949b41457e3f03e71fa088e5ddf369bacdcea495e98862d85bcd8571950df",
+      "succeeded": 21,
+      "cancelled": 1,
+      "providerRequests": 60,
+      "observedHostAndMcpProcessesReaped": 14,
+      "withdrawalBudgetMs": 500,
+      "forwardedToOfficialGoose": true,
+      "localDeadlineReported": true,
+      "reassignmentPrecededOriginalNativeRemove": true,
+      "nativeRemoveResultAfterForwardMs": 1618,
+      "nativeRemoveSucceeded": true,
+      "reassignedToolInvokedInSameSession": true
+    },
+    "checks": {
+      "nativeDefaultWarmAndExactColdResume": true,
+      "nativeKeyedBootstrap": true,
+      "isolatedUserAndProjectSkillReads": true,
+      "nativeThresholdAndOverflowCompaction": true,
+      "nativeSteerReceiptBeforeTurnEnd": true,
+      "applyNativeApproval": true,
+      "cancelReusesHostAndRejectsStaleNamedPipeLease": true,
+      "unicodeAndSpaceFilePath": true,
+      "persistentToolOutputLimitBytes": 7680,
+      "withdrawsOnlyUnassignedRovaiMcp": true,
+      "retainsCurrentAndUserNativeMcp": true,
+      "nativeStdioMcpCwdAndArgvPreserved": true,
+      "nativeNumericUsageAndContextGauge": true
+    }
+  },
+  "upstreamStdioLoad": {
+    "directlyExitingMcp": {
+      "nativeLoadMs": 211,
+      "loadCompleted": true,
+      "followingPromptCompleted": true
+    },
+    "unresponsiveMcp": {
+      "configuredExtensionTimeoutSeconds": 1,
+      "clientDeadlineMs": 4000,
+      "observedElapsedMs": 4003,
+      "loadCompleted": false,
+      "childExitedAfterFixtureHostShutdown": true
+    }
+  },
+  "limitations": [
+    "The upstream silent stdio handshake blocks session/load in the official build. This target-host run did not use the local upstream patch or verify recovery under the native 300-second default.",
+    "Full file diffs require preimages unavailable from the observed native write/edit metadata.",
+    "Real-model evidence covers the recorded Sub2API provider and model. Approval, cancellation, steer, compaction and the delayed deletion use controlled provider responses.",
+    "Qualification applies to the Windows x64 Core product path. This run does not establish packaged Desktop, other platforms or full First-Class Golden Flow coverage."
+  ]
+}

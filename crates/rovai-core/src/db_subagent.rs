@@ -116,6 +116,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     database.migrate_project_directory_references().unwrap();
     super::kilo::migrate(database).unwrap();
     super::memory_capability::migrate(database).unwrap();
+    super::goose::migrate(database).unwrap();
     assert_eq!(snapshot(database.connection()), before);
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),

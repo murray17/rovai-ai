@@ -11,6 +11,27 @@ last_updated: 2026-11-15
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Goose 官方 ACP（2026-11-13）
+
+User sequence 109 的独立 worktree `rovai/goose-acp` 已完成官方 1.59.0 固定源码与真实二进制探测。
+结论、14 轴矩阵和复现脚本见[原生研究](../../research/goose-runtime/README.md)；
+User sequence 117 已确认[接入及模型输入 R1](goose-acp-proposal.md)，
+[独立输入说明](model-context-change-goose-acp.md)先于实现记录确认，继续在同一 worktree 实施。
+候选复用共享 ACP/Fleet；采用原生 keyed System append、独立 Steer 回执和用量通知，
+不复制 Kilo 的 instructions 文件、第二 prompt、SQLite reader 或已退役权限 Hook。
+MCP 原生恢复不删除旧项、write 缺完整前像等差异已明示。
+现已实施独立 identity、Migration 225/schema 175、共享执行与现有表单，macOS arm64 开放 Preview。
+合入时保留主线 Memory 224；225 兼容主线和 Goose 预览分支两种 174 来源，保留已有设置及历史。
+字段边界见[Runtime Launch v97](../../contracts/runtime-launch-and-verification-v97.md)，选择理由见 [D86](decisions.md#v1-72-d86)，
+实际验证与未验证范围见[实施记录](goose-acp-implementation.md)。
+User sequence 123 的精简已收窄重复选项设置、MCP 核对与客户端回放，并清理探测原生会话；
+三模式工具集合和 Skills 管理用户 `.agents/skills` 已补定向验证。
+Linux x64 在 Debian 12 通过真实 Sub2API 与受控 ACP 验收后开放 Preview，见
+[D88](decisions.md#v1-72-d88) 与[目标机证据](../../research/goose-runtime/linux-x64-1.59.0-debian12.json)。
+User sequence 146 将显式 Provider 提前传给新建 Session；目标参数成功不再依赖临时 Session 删除成功，
+清理有界且只诊断，未扩展后台工作或存储。
+目标参数探测另显式选择空扩展；Goose 的模型／effort 控件和摘要准确表达“不覆盖”，不增加恢复默认值动作。
+
 ## 长会话输入性能（2026-11-15）
 
 按 User 确认方案分批实施：固定可复跑基线、隔离执行更新、控制公共历史挂载，最后依据复测决定大内容优化。
