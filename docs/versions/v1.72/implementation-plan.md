@@ -27,7 +27,7 @@ Linux 原生覆盖使用 `xvfb-run -a dbus-run-session -- pnpm test:attachment-s
 所有 App/浏览器夹具使用独立临时 profile，不启动 Core 或 Runtime，不指向日常 userData。
 
 主干同步后的 macOS 本地记录：类型检查、桌面构建、真实 contextBridge、下载 UI／虚拟列表和文档门禁通过；
-完整 Vitest 为 280 文件、3338 项通过（2 项既有跳过），Node 回归 388 项通过（2 项平台跳过），默认 Rust workspace 回归通过。
+完整 Vitest 为 280 文件、3340 项通过（2 项既有跳过），Node 回归 388 项通过（2 项平台跳过），默认 Rust workspace 回归通过。
 Linux 原生覆盖确认不使用本地跳过记录证明；远端结果保存在提交关联的 `CI / gate` 日志和 artifact 中。
 首次远端执行 `43852076068` 在桌面悬浮断言失败：Linux 无头浏览器启用了无悬浮设备的常显样式。
 CI 改用独立 Xvfb 的有窗口 Chrome，并校验／记录 `hover:hover` 和 `pointer:fine`；触屏场景仍独立启用模拟后验收。
@@ -37,6 +37,12 @@ CI 改用独立 Xvfb 的有窗口 Chrome，并校验／记录 `hover:hover` 和 
 原生驱动改用独占 Xvfb display 上的 X11 真实键盘，校验保存窗口的子模态确认出现、响应前目标字节不变和最终取消／替换结果。
 移除无效的辅助功能桥接设置与依赖，保留截图和窗口属性作为可核查证据。
 X11 驱动遵守 Chromium 保存窗口的 500ms 输入保护期，使用 GTK 的保存助记键；文件名输入框的 Enter 不作为保存按钮替代。
+真实执行 `43856634484` 随后复现 Electron 43.1.1／Chromium 150 的 GTK 3 保存接受响应绕过覆盖提示，虽已显式传入该选项。
+Main 对 Linux 已有目标增加原生替换确认，默认与关闭均取消；确认后才重新授权与复制。其他 Linux 后端可能多一次确认，
+当前优先保证既有目标覆盖的明确授权；macOS／Windows 保存流程保持。原生验收同时覆盖生产确认选项与实际窗口操作。
+Main 兜底后重新执行以上完整本地回归通过；保存 owner 为 20 项，确认取消不写入、确认期间源消失不覆盖目标、新目标不额外提示。
+源码核对：[Electron 43 Linux 设置传递](https://github.com/electron/electron/blob/v43.1.1/shell/browser/ui/file_dialog_linux.cc)、
+[Chromium 150 GTK 接受响应](https://github.com/chromium/chromium/blob/150.0.7871.114/ui/gtk/select_file_dialog_linux_gtk.cc)。
 
 API 依据：[Electron 保存窗口](https://www.electronjs.org/docs/latest/api/dialog/)、
 [Windows 文件命名](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。

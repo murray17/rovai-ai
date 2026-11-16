@@ -1177,7 +1177,8 @@ Agent 图片继续共用 `ImageGallery` / `ImageTile` / Lightbox：单张按原�
 取消静默恢复，成功只作无障碍通知；不增加常驻说明或成功 Toast。用户文件卡、Composer、目录及图片缩略图不增加此按钮。
 下载请求不归虚拟行挂载周期所有；下载期间滚动卸载并返回同一附件时，仍显示忙碌并禁止重复触发。
 同一请求结束后再次点击可以重新下载，换客户端／owner 时不投递旧结果。
-Desktop 经系统保存窗口保存副本，Web 沿用浏览器下载。`previewKind`
+Desktop 经系统保存窗口保存副本；Linux 的已有目标另需 Main 原生替换确认，默认与关闭均为取消。
+Web 沿用浏览器下载。`previewKind`
 不是图片的 image MIME/扩展名对象进入 Agent 文件区的 Image 家族。
 
 新生成的长粘贴文件在第一行显示原文开头（空白折叠、纯文本、单行省略），第二行显示“粘贴内容 / Pasted text”。

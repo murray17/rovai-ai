@@ -20,7 +20,9 @@ last_updated: 2026-11-16
 Windows 设备保留名及其带扩展名形式加 `_` 前缀，包括 COM/LPT 的上标 ¹/²/³ 形式。
 名称最多 240 个 UTF-8 字节且不超过 240 个 UTF-16 code units，不切断 Unicode 码点；32 字节以内的普通扩展名保留。
 这些清理只影响系统保存窗口的默认目标名，不改写消息中的原显示名。目标位置只能来自系统保存窗口。
-Linux 显式设置 `properties: ['showOverwriteConfirmation']`，让已有文件的替换由系统窗口请求确认。
+Linux 显式设置 `properties: ['showOverwriteConfirmation']`；当前 Electron 43 的 GTK 3 后端仍可绕过其内部确认，
+因此 Main 对已有目标另行展示原生替换确认，默认与关闭均为取消。确认后才重新解析 owner 并复制。
+已自带确认的 Linux 后端可能多一次确认；以保证既有目标覆盖获得明确授权为当前取舍。
 取消窗口不写入文件，不作为失败。
 
 系统窗口确认后再次按同一 owner 解析当前源，归属失效、源缺失或变为目录时不保存。

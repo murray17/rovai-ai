@@ -9,7 +9,7 @@ app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 app.commandLine.appendSwitch('gtk-version', '3')
 app.commandLine.appendSwitch('xdg-portal-required-version', '999')
-const { attachmentSaveDialogOptions, saveDesktopAttachment } = require(bundle)
+const { attachmentReplaceDialogOptions, attachmentSaveDialogOptions, saveDesktopAttachment } = require(bundle)
 const source = join(root, 'source.txt')
 const destination = join(root, 'edited.txt')
 const original = 'User-edited destination: must survive cancellation.\n'
@@ -40,6 +40,12 @@ app.whenReady().then(async () => {
       assert.equal(selected.filePath, destination)
       await writeFile(source, copied)
       return selected.filePath
+    }, async name => {
+      const options = attachmentReplaceDialogOptions(name)
+      await status({ scenario, phase: 'overwrite-open' })
+      const selected = await dialog.showMessageBox(window, options)
+      console.log(JSON.stringify({ scenario, replacementResponse: selected.response }))
+      return selected.response === 1
     })
     if (scenario === 'cancel') {
       assert.deepEqual(result, { saved: false, error: null, availability: 'available' })
@@ -52,7 +58,7 @@ app.whenReady().then(async () => {
   }
   assert.equal(resolveCalls, 3)
   const report = { commit: process.env.GITHUB_SHA ?? null, platform: process.platform, electron: process.versions.electron,
-    backend: 'GTK 3; forced portal fallback', cases, resolveCalls }
+    backend: 'GTK 3; Main Linux replacement confirmation', cases, resolveCalls }
   await writeFile(join(root, 'native-report.json'), JSON.stringify(report, null, 2))
   await status({ phase: 'done' })
   console.log(JSON.stringify(report))

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAttachmentTarget } from './attachment-desktop'
-import { attachmentSaveDialogOptions, normalizeAttachmentSaveName, saveDesktopAttachment } from './attachment-save'
+import { attachmentReplaceDialogOptions, attachmentSaveDialogOptions, normalizeAttachmentSaveName, saveDesktopAttachment } from './attachment-save'
 
 vi.mock('node:crypto', () => ({ randomUUID: () => 'fixture-copy' }))
 
@@ -26,6 +26,39 @@ describe('native attachment saving', () => {
     expect(attachmentSaveDialogOptions('/downloads', 'report.txt', 'linux').properties).toContain('showOverwriteConfirmation')
     expect(attachmentSaveDialogOptions('/downloads', 'report.txt', 'darwin').properties).toBeUndefined()
     expect(attachmentSaveDialogOptions('/downloads', 'report.txt', 'win32').properties).toBeUndefined()
+  })
+
+  it('leaves an edited destination untouched when Linux Main replacement is declined', async () => {
+    const f = await fixture()
+    await writeFile(f.destination, 'user edits')
+    const resolve = vi.fn(async () => ({ target: f.target, availability: 'available' as const }))
+    const confirm = vi.fn(async () => false)
+    expect(await saveDesktopAttachment(resolve, async () => f.destination, confirm)).toEqual({ saved: false, error: null, availability: 'available' })
+    expect(confirm).toHaveBeenCalledWith('saved.bin')
+    expect(resolve).toHaveBeenCalledTimes(1)
+    expect(await readFile(f.destination, 'utf8')).toBe('user edits')
+    const options = attachmentReplaceDialogOptions('saved.bin')
+    expect(options.defaultId).toBe(options.cancelId)
+    expect(options.buttons?.[options.defaultId!]).toBe('取消')
+  })
+
+  it('reauthorizes only after replacement confirmation and does not ask for a new destination', async () => {
+    const f = await fixture()
+    const resolve = vi.fn(async () => ({ target: f.target, availability: 'available' as const }))
+    const confirm = vi.fn(async () => {
+      await rm(f.source)
+      return true
+    })
+    await writeFile(f.destination, 'user edits')
+    expect(await saveDesktopAttachment(resolve, async () => f.destination, confirm)).toEqual({ saved: false, error: 'target_unavailable', availability: 'missing' })
+    expect(resolve).toHaveBeenCalledTimes(2)
+    expect(await readFile(f.destination, 'utf8')).toBe('user edits')
+    await writeFile(f.source, f.bytes)
+    await rm(f.destination)
+    confirm.mockClear()
+    expect(await saveDesktopAttachment(resolve, async () => f.destination, confirm)).toMatchObject({ saved: true })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(await readFile(f.destination)).toEqual(f.bytes)
   })
 
   it.each(['CON.txt', 'nul.json', 'PRN', 'AUX.tar.gz', 'COM1.log', 'LPT9', 'COM¹.txt', 'LPT².csv', 'CONIN$'])

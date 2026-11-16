@@ -64,20 +64,19 @@ for scenario in ['cancel', 'confirm']:
     time.sleep(.6)
     key(save_window, 'alt+s')
     confirmation = wait_for(lambda: next((window for window in windows()
-        if window['parent'] == save_window['id'] and '_NET_WM_STATE_MODAL' in window['properties']
-        and '_NET_WM_WINDOW_TYPE_DIALOG' in window['properties']), None),
-        'Existing file was accepted without a visible child overwrite dialog')
-    assert state() == {'scenario': scenario, 'phase': 'dialog-open'}, 'Save returned before overwrite confirmation'
+        if window['parent'] == save_window['parent'] and '替换文件' in window['properties']
+        and '_NET_WM_STATE_MODAL' in window['properties'] and '_NET_WM_WINDOW_TYPE_DIALOG' in window['properties']), None),
+        'Existing file was accepted without a visible Main replacement dialog')
+    assert state() == {'scenario': scenario, 'phase': 'overwrite-open'}, 'Copy advanced before replacement confirmation'
     assert (root / 'edited.txt').read_text() == original, 'Destination changed before confirmation'
     command('scrot', str(root / ('overwrite-' + scenario + '.png')))
     observations.append({'scenario': scenario, 'confirmation': confirmation, 'destination': 'edited.txt',
         'destinationPreservedBeforeConfirmation': True})
-    # GTK's question dialog uses Cancel for Escape and Replace as default Return.
+    print(json.dumps({'scenario': scenario, 'replacementWindow': confirmation}), flush=True)
+    # The production Main prompt defaults to Cancel. Tab moves to Replace.
+    if scenario == 'confirm':
+        key(confirmation, 'Tab')
     key(confirmation, 'Escape' if scenario == 'cancel' else 'Return')
-    if scenario == 'cancel':
-        wait_for(lambda: all(window['id'] != confirmation['id'] for window in windows()), 'Overwrite dialog did not close')
-        if state() == {'scenario': scenario, 'phase': 'dialog-open'}:
-            key(wait_for(chooser, 'Native chooser did not return after declining overwrite'), 'Escape')
 
 wait_for(lambda: state().get('phase') == 'done', 'Native save assertions did not finish')
 (root / 'native-dialog-report.json').write_text(json.dumps({'driver': 'X11 native keyboard; private display',

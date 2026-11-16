@@ -124,7 +124,7 @@ App，以受控本机 API 和时钟验证首帧画布、就绪交接与 authorit
 修改队员文件行下载时运行 `pnpm test:attachment-download-ui`：隔离 Chrome 挂载生产附件卡片，验证下载与预览分离、
 键盘、取消与重试、客户端／附件换代、生产虚拟列表的卸载／返回、五套主题和触屏；原生保存另由 `attachment-save.test.ts` 与 `pnpm test:desktop-bridge` 验证。
 Linux 覆盖确认运行 `xvfb-run -a dbus-run-session -- pnpm test:attachment-save-linux`：使用独立 Electron userData、GTK 3
-和 X11 真实键盘操作保存／覆盖窗口，校验原生父子模态窗口与取消保留已有编辑、确认后替换。
+和 X11 真实键盘操作保存／Main 替换窗口，校验原生父子模态窗口与取消保留已有编辑、确认后替换。
 依赖 `openbox`、`scrot`、`xdotool`、`x11-utils` 与 `python3`；非 Linux 本地显式跳过，不能作为 Linux 验收。
 窗口操作失败保存截图与原生窗口属性诊断；仅操作该测试独占的 Xvfb display。
 上述下载 UI 与 Linux 原生窗口验收进入 `CI / gate`，报告和截图随提交关联的 Actions artifact 保存。

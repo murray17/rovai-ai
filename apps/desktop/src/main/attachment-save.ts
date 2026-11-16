@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { constants, createWriteStream } from 'node:fs'
 import { lstat, open, realpath, rename, stat, unlink } from 'node:fs/promises'
-import { dirname, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import type { SaveDialogOptions } from 'electron'
+import type { MessageBoxOptions, SaveDialogOptions } from 'electron'
 import type { AttachmentSaveResult, LocalAttachmentAvailability } from '@contracts'
 import type { DesktopAttachmentTarget } from './attachment-desktop'
 
@@ -32,6 +32,11 @@ export function attachmentSaveDialogOptions(directory: string, name: string, pla
   return options
 }
 
+export function attachmentReplaceDialogOptions(name: string): MessageBoxOptions {
+  return { type: 'warning', title: '替换文件', buttons: ['取消', '替换'], defaultId: 0, cancelId: 0, noLink: true,
+    message: `替换“${name}”？`, detail: '此位置已存在同名文件，替换后将覆盖其内容。' }
+}
+
 class AttachmentSourceUnavailable extends Error {
   constructor(readonly availability: LocalAttachmentAvailability) { super('Attachment source unavailable') }
 }
@@ -48,7 +53,8 @@ async function inspectSource<T>(operation: () => Promise<T>): Promise<T> {
 /** Only Main supplies the owner-authorized source and the native dialog's destination. */
 export async function saveDesktopAttachment(
   resolve: () => Promise<{ target: DesktopAttachmentTarget | null; availability: LocalAttachmentAvailability }>,
-  chooseDestination: (name: string) => Promise<string | null>
+  chooseDestination: (name: string) => Promise<string | null>,
+  confirmReplacement?: (name: string) => Promise<boolean>
 ): Promise<AttachmentSaveResult> {
   let availability: LocalAttachmentAvailability = 'unknown'
   try {
@@ -60,7 +66,16 @@ export async function saveDesktopAttachment(
     const name = normalizeAttachmentSaveName(initial.target.displayName)
     const destination = await chooseDestination(name)
     if (!destination) return { saved: false, error: null, availability }
-    // A native dialog can remain open while a message or its source disappears.
+    // Electron 43's GTK 3 accept response bypasses GTK's stock overwrite gate.
+    // Linux Main therefore owns an explicit confirmation for existing targets.
+    if (confirmReplacement) {
+      const exists = await lstat(destination).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      if (exists && !await confirmReplacement(basename(destination))) return { saved: false, error: null, availability }
+    }
+    // Native dialogs can remain open while a message or its source disappears.
     const current = await resolve()
     availability = current.availability
     if (!current.target || current.target.kind !== 'file') {

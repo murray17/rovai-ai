@@ -121,7 +121,7 @@ import {
   type DesktopAttachmentTarget
 } from './attachment-desktop'
 import { createPastedTextAttachment, LocalComposerAttachmentRegistry } from './local-composer-attachments'
-import { attachmentSaveDialogOptions, saveDesktopAttachment } from './attachment-save'
+import { attachmentReplaceDialogOptions, attachmentSaveDialogOptions, saveDesktopAttachment } from './attachment-save'
 import {
   prepareWindowsBootstrapRoot,
   prepareWindowsDataRoot,
@@ -2478,7 +2478,11 @@ ipcMain.handle('rovai:attachment-save', async (_event, value: unknown) => {
       ? await dialog.showSaveDialog(mainWindow, options)
       : await dialog.showSaveDialog(options)
     return result.canceled ? null : result.filePath ?? null
-  })
+  }, process.platform === 'linux' ? async name => {
+    const options = attachmentReplaceDialogOptions(name)
+    const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options)
+    return result.response === 1
+  } : undefined)
 })
 
 ipcMain.handle(
