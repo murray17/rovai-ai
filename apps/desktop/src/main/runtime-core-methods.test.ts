@@ -4,7 +4,7 @@ import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 
 const mainSource = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
 
-describe('Runtime Renderer Core method allowlist', () => {
+describe('Desktop Renderer Core method allowlist', () => {
   it('exposes discovery, recovery wake, input reconciliation, explicit checking, and cancellation', () => {
     expect(RUNTIME_RENDERER_CORE_METHODS).toEqual([
       'runtime.status.get',
@@ -42,12 +42,16 @@ describe('Runtime Renderer Core method allowlist', () => {
     )
   })
 
-  it('allows the Single Chat pending-input mutation implemented by Core', () => {
+  it.each([
+    'singleChat.pendingInputs.edit',
+    'preferences.memory.get',
+    'preferences.memory.set'
+  ])('allows the desktop Renderer to call %s', (method) => {
     const allowlistStart = mainSource.indexOf('const allowedMethods = new Set<CoreMethod>([')
     const allowlistEnd = mainSource.indexOf('\n])', allowlistStart)
     expect(allowlistStart).toBeGreaterThan(-1)
     expect(allowlistEnd).toBeGreaterThan(allowlistStart)
     expect(mainSource.slice(allowlistStart, allowlistEnd))
-      .toContain("'singleChat.pendingInputs.edit'")
+      .toContain(`'${method}'`)
   })
 })
