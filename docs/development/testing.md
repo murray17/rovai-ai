@@ -2005,10 +2005,22 @@ Runtime 的同用途合并与目录／完整检查隔离；DSH 原生计数和�
 
 ## 原生会话恢复 owner（2026-10-12）
 
+共享 ACP 长历史恢复扩展既有 `history_restore_replay_is_quarantined_and_only_current_prompt_accepts_input`：
+逐条输出 4,097 帧、累计超过 64 MiB 的合法历史，核对原 Session ID、历史文本／工具／审批／用量隔离及当前输入仅一次。
+`BoundedLineReader` 的分帧、容量边界与配置矩阵仍由 `runtime_probe_process` 原 owner 拥有，不重复建立读取器测试。
+累计事件／字节拒绝随生产路径退出，原 `history_restore_budget_rejects_events_bytes_and_elapsed_time_independently`
+退役；新增 Rust 测试函数为零，减少一项扩展层测试。计时边界由下述既有 Core/CLI owner 的真实等待承接，
+原非法 JSON、错误 Session ID、resume 优先及 load 回退的协议用例保留。
+
 扩展既有跨版本 owner `smoke-member-environment-upgrade.mjs`，覆盖生产 Core 的 exact-ID 恢复、当前启动
 环境、旧安装/上下文摘要和坏 Bootstrap，不只检查数据库留存。复用同一隔离 harness 增加模拟 ACP 的
 一次新建成功/失败、误导错误文本、模型请求错误、取消、超时和输入后进程退出，并断言真实 prompt 次数和成功提示。
 Codex 另以真实 `config/read` / `account/read` 请求注入 MCP / 认证错误，要求零新建、零业务输入并保留原 ID。
+同一 ACP 夹具补充单帧容量不足的原因穿过恢复 RPC 到达 Run 失败详情、旧 ID 保留及下一次恢复成功；
+35 秒恢复能完成、120 秒最终超时和等待恢复响应时停止仍及时清理。它使用隔离 Core 环境中的 4 KiB 容量，
+不改默认容量，也不在共享 Rust 测试进程改环境。既有一次新建失败保留旧 ID、accepted／unknown 不重发用例继续执行。
+定向命令为 `cargo test -p rovai-core --features extended-tests --lib history_restore_` 与
+`node scripts/smoke-member-environment-upgrade.mjs --adapter-regressions`；Core/CLI 夹具不调用真实模型。
 最小命令：`node scripts/smoke-member-environment-upgrade.mjs /absolute/schema142/rovai-core`。
 旧二进制可从 `7973c7ffd1b0a360dea02c936458fb69f591c11e` 构建，旁边需配套 `rovai`；候选为当前 debug binaries。
 

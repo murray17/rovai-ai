@@ -468,8 +468,9 @@ last-known-good。此增量不修改其他 Runtime 的执行路径或 Availabili
 每次真实 Session 返回；新队员默认使用已验证的 `bypass_permissions`，用户仍可改回 `default`。Session 恢复采用
 有界 continuation：兼容 IdleWarm 命中时直接复用同一 Host 已持有的 Session；冷 Host 优先使用声明的
 `session/resume`。本机 `0.120.52` 的 exact-ID Provider Resume 协议 Probe 不合格，因此当前下一层为
-`session/load` HistoryRestore；所有 load replay 在当前 prompt 前进入独立 quarantine，失败才建立
-`session/new`。禁止 `--resume AUTO`、私有 Session 文件解析和最近 Session 扫描。
+`session/load` HistoryRestore；所有 load replay 在当前 prompt 前进入独立 quarantine。仅在原生明确
+拒绝恢复目标或恢复能力不可用，且本次输入尚未开始投递时，沿既有一次 `session/new` 兜底。
+禁止 `--resume AUTO`、私有 Session 文件解析和最近 Session 扫描。
 
 TRAE 与其他 Runtime 一样只做静态入口发现。用户主动诊断可以运行保守的 ACP 初始化检查，结果只供排障。
 配置使用静态声明的 `permission_mode=default|bypass_permissions`，默认值保持现状；任务启动时真实 Session
@@ -479,8 +480,13 @@ TRAE 与其他 Runtime 一样只做静态入口发现。用户主动诊断可以
 冷 Host HistoryRestore 只在 executable fingerprint、installation/protocol、Host config、canonical workspace、
 workspace access/isolation、模型和权限均兼容时尝试。Host initialize 后先把精确 Session route 标为
 `LoadingReplay`，再调用 `session/load`；匹配成功 response 是进入 `Ready` 和发送当前 prompt 的唯一 barrier。
-恢复期 assistant/tool/permission/usage/server request 均静默隔离，受 4096 event、8 MiB 和 30 秒上限约束；
-异常持久记录 continuity lost、停止失败 Host、轮换 Binding 后才以新 Session 继续。
+恢复期 assistant/tool/permission/usage/server request 均静默隔离，逐帧消费后释放，不保存完整历史副本。
+共享 ACP 恢复不限制累计字节或事件数；stdout 复用 `BoundedLineReader`，默认单帧读取容量为 64 MiB，
+沿用 `ROVAI_RUNTIME_PROBE_MAX_FRAME_BYTES` 配置，包括更大的有效值。每帧独立计量，多帧累计或一次
+底层读取含多帧均不构成超限。单帧超过容量时停止读取并把 Rovai 本地容量原因返回恢复调用方，不截断 JSON。
+既有恢复请求期限为 120 秒；这是宽松初始值，不是性能保证。计时、恢复后的兼容等待、静默判断及取消清理保持原路径。
+认证、网络、超时、本地读取容量等失败只清理失败 Host，保留旧原生 Session ID 供后续重试；一次新建兜底
+成功后才替换持久化的 Session ID 并记录上下文未延续，失败仍保留旧目标。accepted／unknown 输入不自动重发。
 
 External MCP 沿用现有 `AdditivePerRun`：当前 AgentRun 的冻结 Definition 通过
 `session/new` 参数追加；warm reuse 只允许完整 Runtime compatibility digest 相等，因此冻结 MCP Projection

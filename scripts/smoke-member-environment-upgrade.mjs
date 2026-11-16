@@ -183,8 +183,8 @@ try {
   await rm(fixture, { recursive: true, force: true })
 }
 
-async function waitFor(probe, describe) {
-  const deadline = Date.now() + 45000
+async function waitFor(probe, describe, timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (await probe()) return
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -341,7 +341,10 @@ for line in sys.stdin:
         if (stage.startswith('load-unsupported') and method == 'session/load') or (stage.startswith('resume-') and method == 'session/resume') or (stage == 'resume-and-load-unsupported' and method == 'session/load'):
             error, error_code = 'unavailable', -32601
         if stage in ('restore-error','mcp-error') and method == 'session/load': error = stage + ': incompatible method not found'
-        if stage in ('cancel','timeout') and method == 'session/load': time.sleep(90)
+        if stage == 'capacity' and method == 'session/load':
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':sid,'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'history' * 1024}}}}), flush=True)
+        if stage == 'slow-restore' and method == 'session/load': time.sleep(35)
+        if stage in ('cancel','timeout') and method == 'session/load': time.sleep(180)
     elif method in ('session/set_model','session/set_config_option'):
         result = {}
         if stage == 'model-error': error = 'model: incompatible method not found'
@@ -367,7 +370,8 @@ for line in sys.stdin:
   const start = stage => connectCore(binary, [...coreDataDirectoryArguments(data, { homeDirectory: home }),
     '--skill-library-root', join(data, 'skills'), '--mcp-config-path', join(data, 'mcp.json')], directory,
     { HOME: home, PATH: '/usr/bin:/bin', SHELL: '/bin/sh', TMPDIR: directory, ROVAI_TRAE_CN_BIN: executable,
-      ROVAI_CODEX_BIN: '/nonexistent/codex', ROVAI_CLAUDE_CODE_BIN: '/nonexistent/claude', RESUME_CASE: stage })
+      ROVAI_CODEX_BIN: '/nonexistent/codex', ROVAI_CLAUDE_CODE_BIN: '/nonexistent/claude', RESUME_CASE: stage,
+      ...(stage === 'capacity' ? { ROVAI_RUNTIME_PROBE_MAX_FRAME_BYTES: '4096' } : {}) })
   let core, campId, total = 0
   const send = async body => {
     const result = await core.request('thread.messages.send', { commandId: crypto.randomUUID(), threadId: campId,
@@ -375,11 +379,11 @@ for line in sys.stdin:
       execution: { taskId: null, purpose: 'Verify bounded native fallback', completionRole: 'required' } })
     assert.equal(result.commandResult.status, 'accepted'); total++
   }
-  const settle = async expected => {
+  const settle = async (expected, timeoutMs) => {
     await waitFor(() => {
       const row = query("SELECT COUNT(*) AS total, SUM(status IN ('succeeded','failed','cancelled')) AS settled FROM agent_run WHERE camp_id=?", campId)
       return row.total === total && row.settled === total
-    }, () => JSON.stringify(query('SELECT status,last_error_code FROM agent_run WHERE camp_id=? ORDER BY rowid DESC LIMIT 1', campId)))
+    }, () => JSON.stringify(query('SELECT status,last_error_code FROM agent_run WHERE camp_id=? ORDER BY rowid DESC LIMIT 1', campId)), timeoutMs)
     const run = query('SELECT * FROM agent_run WHERE camp_id=? ORDER BY rowid DESC LIMIT 1', campId)
     assert.equal(run.status, expected, JSON.stringify({ stage: total, code: run.last_error_code }))
     return run
@@ -399,20 +403,31 @@ for line in sys.stdin:
     campId = created.payload.threadId
     await send('SEED_INPUT'); await settle('succeeded'); await core.stop()
     const replacements = ['unsupported-new-fails','unsupported','load-unsupported-new-fails','load-unsupported','resume-and-load-unsupported']
-    const successful = ['unsupported','load-unsupported','resume-and-load-unsupported','resume-unsupported-load-success']
-    for (const stage of [...replacements, 'resume-unsupported-load-success','initialize-method-missing','model-method-missing','initialize-error','restore-error','model-error','mcp-error','cancel','timeout','input-unknown']) {
+    const successful = ['unsupported','load-unsupported','resume-and-load-unsupported','resume-unsupported-load-success','slow-restore']
+    for (const stage of [...replacements, 'resume-unsupported-load-success','initialize-method-missing','model-method-missing','initialize-error','restore-error','model-error','mcp-error','capacity','slow-restore','cancel','timeout','input-unknown']) {
       const before = query('SELECT native_session_id FROM conversation WHERE camp_id=?', campId).native_session_id
       assert.ok(before)
       core = start(stage); await core.request('health.check')
       await send(`INPUT_${stage}`)
+      let cancelStarted
       if (stage === 'cancel') {
         await waitFor(async () => (await records()).some(r => r.stage === stage && r.method === 'session/load'), () => 'await load before cancellation')
         const run = query('SELECT id,version FROM agent_run WHERE camp_id=? ORDER BY rowid DESC LIMIT 1', campId)
+        cancelStarted = Date.now()
         const cancelled = await core.request('agentRuns.cancel', { commandId: crypto.randomUUID(), command: { campId, agentRunId: run.id, expectedVersion: run.version } })
         assert.equal(cancelled.status, 'applied', JSON.stringify(cancelled))
       }
-      const run = await settle(successful.includes(stage) ? 'succeeded' : stage === 'cancel' ? 'cancelled' : 'failed')
+      const run = await settle(successful.includes(stage) ? 'succeeded' : stage === 'cancel' ? 'cancelled' : 'failed', stage === 'timeout' ? 135000 : undefined)
+      if (stage === 'cancel') {
+        await waitFor(() => query('SELECT cancel_acknowledged_at FROM agent_run WHERE id=?', run.id).cancel_acknowledged_at,
+          () => 'Stop must confirm cleanup of the pending restore', 10000)
+        assert.ok(Date.now() - cancelStarted < 10000, 'Stop must clean up the pending restore without waiting for the 120-second deadline')
+      }
       await core.stop()
+      if (stage === 'capacity') {
+        assert.match(run.last_error_details_ref, /Rovai local ACP protocol read failed.*runtime_probe_frame_capacity_exceeded/)
+        assert.match(run.last_error_details_ref, /ROVAI_RUNTIME_PROBE_MAX_FRAME_BYTES/)
+      }
       const actual = (await records()).filter(r => r.stage === stage)
       const launches = actual.filter(r => r.method === 'process/start')
       assertFreshProcessContexts(launches, directory)
