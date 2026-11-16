@@ -36,7 +36,7 @@ test('Linux native Electron asks before replacing an edited attachment download'
     const bundle = join(fixture, 'attachment-save.cjs')
     await esbuild.build({ entryPoints: [join(root, 'apps/desktop/src/main/attachment-save.ts')], outfile: bundle,
       bundle: true, platform: 'node', format: 'cjs' })
-    const env = { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ACCESSIBILITY_ENABLED: '1', GNOME_ACCESSIBILITY: '1', NO_AT_BRIDGE: '0', GTK_MODULES: 'atk-bridge', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+    const env = { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete env.ELECTRON_RUN_AS_NODE
     console.log(`Linux automatic acceptance userData: ${userData}; unused Skill Library: ${join(userData, 'managed-skill-library')}; no Core/Runtime`)
     start('openbox', ['--sm-disable'], env)

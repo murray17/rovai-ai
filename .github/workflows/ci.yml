@@ -145,7 +145,7 @@ jobs:
         if: steps.changes.outputs.node == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb dbus-x11 openbox scrot at-spi2-core gir1.2-atspi-2.0 python3-gi
+          sudo apt-get install -y xvfb dbus-x11 openbox scrot xdotool x11-utils
 
       - name: Run attachment download UI acceptance
         if: steps.changes.outputs.node == 'true'

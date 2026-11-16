@@ -1,15 +1,10 @@
-"""Operate actual GTK dialogs on the test's private Xvfb/DBus display."""
+"""Drive actual GTK windows with keys on the test's private Xvfb/DBus display."""
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
-import gi
-
-gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi
-
-Atspi.init()
 
 root = Path(sys.argv[1])
 original = 'User-edited destination: must survive cancellation.\n'
@@ -17,19 +12,21 @@ deadline = time.monotonic() + 65
 observations = []
 
 
-def nodes(parent=None, depth=0):
-    if parent is None:
-        parent = Atspi.get_desktop(0)
-    if parent is None or depth > 18:
-        return
-    yield parent
-    try:
-        children = [parent.get_child_at_index(i) for i in range(min(parent.get_child_count(), 400))]
-    except Exception:
-        return
-    for child in children:
-        if child is not None:
-            yield from nodes(child, depth + 1)
+def command(*args):
+    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=5).stdout
+
+
+def windows():
+    clients = re.findall(r'0x[0-9a-f]+', command('xprop', '-root', '_NET_CLIENT_LIST'))
+    result = []
+    for window in clients:
+        try:
+            properties = command('xprop', '-id', window, '_NET_WM_NAME', 'WM_TRANSIENT_FOR', '_NET_WM_STATE', '_NET_WM_WINDOW_TYPE')
+            parent = re.search(r'WM_TRANSIENT_FOR.*?(0x[0-9a-f]+)', properties)
+            result.append({'id': window, 'parent': parent.group(1) if parent else None, 'properties': properties})
+        except subprocess.CalledProcessError:
+            pass  # The chooser may close between enumeration and inspection.
+    return result
 
 
 def state():
@@ -39,66 +36,46 @@ def state():
         return {}
 
 
-def button(name, parent=None):
-    for node in nodes(parent):
-        try:
-            if (node.get_role() == Atspi.Role.PUSH_BUTTON
-                    and node.get_name().replace('_', '').casefold() == name.casefold()
-                    and node.get_state_set().contains(Atspi.StateType.SHOWING)):
-                return node
-        except Exception:
-            pass
-
-
 def wait_for(check, message):
     while time.monotonic() < deadline:
         found = check()
         if found:
             return found
         time.sleep(.1)
-    tree = []
-    for node in nodes():
-        try:
-            tree.append([node.get_role_name(), node.get_name()])
-        except Exception:
-            pass
     subprocess.run(['scrot', str(root / 'native-failure.png')], timeout=5, check=False)
-    raise AssertionError(message + '\n' + json.dumps({'state': state(), 'tree': tree}, ensure_ascii=False))
+    raise AssertionError(message + '\n' + json.dumps({'state': state(), 'windows': windows()}, ensure_ascii=False))
 
 
-def click(node):
-    assert node.get_action_iface().do_action(0), 'Native button action failed'
+def key(window, name):
+    command('xdotool', 'windowactivate', '--sync', window['id'])
+    command('xdotool', 'key', '--clearmodifiers', name)
 
 
-def overwrite():
-    replace = button('Replace')
-    if replace is None:
-        return None
-    parent = replace.get_parent()
-    while parent is not None:
-        if parent.get_role() in (Atspi.Role.DIALOG, Atspi.Role.ALERT):
-            return parent
-        parent = parent.get_parent()
+def chooser():
+    return next((window for window in windows() if 'Attachment save overwrite acceptance' in window['properties']), None)
 
 
 for scenario in ['cancel', 'confirm']:
     wait_for(lambda: state().get('scenario') == scenario and state().get('phase') == 'dialog-open', 'Save operation did not start')
-    click(wait_for(lambda: button('Save'), 'Native Save button missing'))
-    confirmation = wait_for(overwrite, 'Existing file was accepted without a visible overwrite confirmation')
-    labels = ' '.join(node.get_name() or '' for node in nodes(confirmation))
-    assert 'edited.txt' in labels and ('already exists' in labels or 'replace' in labels.lower()), labels
+    save_window = wait_for(chooser, 'Native chooser window missing')
+    key(save_window, 'Return')  # Activate the chooser's default Save action.
+    confirmation = wait_for(lambda: next((window for window in windows()
+        if window['parent'] == save_window['id'] and '_NET_WM_STATE_MODAL' in window['properties']
+        and '_NET_WM_WINDOW_TYPE_DIALOG' in window['properties']), None),
+        'Existing file was accepted without a visible child overwrite dialog')
     assert state() == {'scenario': scenario, 'phase': 'dialog-open'}, 'Save returned before overwrite confirmation'
     assert (root / 'edited.txt').read_text() == original, 'Destination changed before confirmation'
-    subprocess.run(['scrot', str(root / ('overwrite-' + scenario + '.png'))], check=True)
-    observations.append({'scenario': scenario, 'confirmation': labels, 'destinationPreservedBeforeConfirmation': True})
-    click(wait_for(lambda: button('Cancel' if scenario == 'cancel' else 'Replace', confirmation), 'Confirmation action missing'))
+    command('scrot', str(root / ('overwrite-' + scenario + '.png')))
+    observations.append({'scenario': scenario, 'confirmation': confirmation, 'destination': 'edited.txt',
+        'destinationPreservedBeforeConfirmation': True})
+    # GTK's question dialog uses Cancel for Escape and Replace as default Return.
+    key(confirmation, 'Escape' if scenario == 'cancel' else 'Return')
     if scenario == 'cancel':
-        wait_for(lambda: overwrite() is None, 'Overwrite confirmation did not close')
-        # GTK returns to its chooser after declining overwrite. Cancel that
-        # chooser too, if the backend has not already canceled the operation.
+        wait_for(lambda: all(window['id'] != confirmation['id'] for window in windows()), 'Overwrite dialog did not close')
         if state() == {'scenario': scenario, 'phase': 'dialog-open'}:
-            click(wait_for(lambda: button('Cancel'), 'Native chooser Cancel button missing'))
+            key(wait_for(chooser, 'Native chooser did not return after declining overwrite'), 'Escape')
 
 wait_for(lambda: state().get('phase') == 'done', 'Native save assertions did not finish')
-(root / 'native-dialog-report.json').write_text(json.dumps({'overwriteDialogs': observations}, indent=2))
+(root / 'native-dialog-report.json').write_text(json.dumps({'driver': 'X11 native keyboard; private display',
+    'overwriteDialogs': observations}, indent=2))
 print(json.dumps({'nativeOverwriteConfirmations': len(observations)}))
