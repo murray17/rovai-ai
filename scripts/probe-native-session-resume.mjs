@@ -114,7 +114,7 @@ process.env.ROVAI_CLINE_BIN = '/nonexistent/rovai-resume-audit'
 process.env.ROVAI_COMMAND_CODE_BIN = '/nonexistent/rovai-resume-audit'
 const wrapper = join(fixture, 'runtime-wire-proxy')
 await writeFile(wrapper, `#!/usr/bin/python3
-import json, os, signal, subprocess, sys, threading
+import json, os, signal, subprocess, sys, threading, traceback
 target = ${JSON.stringify(executable)}
 log_path, stage_path = ${JSON.stringify(wirePath)}, ${JSON.stringify(stagePath)}
 lock = threading.Lock()
@@ -176,9 +176,23 @@ def feed():
         child.stdin.close()
     except (BrokenPipeError,ValueError): pass
 threading.Thread(target=feed,daemon=True).start()
-for line in child.stdout:
-    observe(line,'out'); sys.stdout.buffer.write(line); sys.stdout.buffer.flush()
-sys.exit(child.wait())
+status = 1
+try:
+    for line in child.stdout:
+        observe(line, 'out')
+        sys.stdout.buffer.write(line)
+        sys.stdout.buffer.flush()
+    status = child.wait()
+except BaseException:
+    traceback.print_exc()
+finally:
+    if child.returncode is None:
+        child.kill()
+        child.wait()
+    # Core may keep stdin open, leaving feed blocked in a buffered read.
+    # Avoid interpreter finalization and let any in-flight wire log write finish.
+    with lock:
+        os._exit(status)
 `, { mode: 0o700 })
 process.env[spec[1]] = wrapper
 if (kind === 'zcode-app') {
