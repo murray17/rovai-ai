@@ -7946,13 +7946,18 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'hermes-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi', 'kilo-cli', 'goose-cli'])
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'hermes-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi', 'kilo-cli'])
     for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
       const admissions: HealthStatus['runtimePlatformAdmission'] = [{
         runtimeKind: 'hermes-cli', platform, status: 'enabled',
         reasonCode: null, evidenceRevision: null
       }]
       expect(visibleProductRuntimes(platform, admissions)).toContain('hermes-cli')
+      const gooseAdmission: HealthStatus['runtimePlatformAdmission'] = [{
+        runtimeKind: 'goose-cli', platform, status: 'qualified',
+        reasonCode: null, evidenceRevision: 'existing-qualification'
+      }]
+      expect(visibleProductRuntimes(platform, gooseAdmission)).not.toContain('goose-cli')
     }
     expect(visibleProductRuntimes(null, [])).not.toContain('hermes-cli')
     expect(markup).toContain('member-runtime-picker')
@@ -8131,9 +8136,10 @@ describe('task event projections', () => {
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
       git: { installed: true, version: 'git version 2.0' },
       hostPlatform,
-      runtimeCatalog: [],
+      runtimeCatalog: [{ runtimeKind: 'goose-cli', displayName: 'Goose', commandName: 'goose' }],
       runtimePlatformAdmission: runtimeAdmissionRows(hostPlatform, 'qualified'),
       runtimeAvailability: [
+        productAvailability('goose-cli', 'ready'),
         productAvailability('codex-cli', 'ready'),
         productAvailability('opencode-cli', 'found_uninspected'),
         productAvailability('copilot-cli', 'checking'),
@@ -8180,6 +8186,7 @@ describe('task event projections', () => {
     expect(markup).toContain('Hermes Agent')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
+    expect(markup).not.toContain('Goose')
     expect(markup).toContain('Command Code')
     expect(markup).not.toContain('待支持')
     expect(markup).not.toContain('尚未开放')
