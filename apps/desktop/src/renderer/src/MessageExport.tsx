@@ -23,9 +23,12 @@ import './message-export.css'
 export function ExportGlyph(): React.JSX.Element {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5" /></svg>
 }
+export function MessageSelectGlyph(): React.JSX.Element {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 5h8M13 12h8M13 19h8m-18-2 2 2 4-4M3 7l2 2 4-4" /></svg>
+}
 export function MessageSelectButton({ onSelect }: { onSelect(): void }): React.JSX.Element {
-  return <button className="message-select-button" type="button" title={uiAttribute('选择多条消息')} aria-label={uiAttribute('选择多条消息')} onClick={onSelect}>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 5h8M13 12h8M13 19h8m-18-2 2 2 4-4M3 7l2 2 4-4" /></svg>
+  return <button className="message-select-button" type="button" title={uiAttribute('多选消息')} aria-label={uiAttribute('多选消息')} onClick={onSelect}>
+    <MessageSelectGlyph />
   </button>
 }
 export function useMessageExport(threadId: string, messages: readonly ThreadMessageView[]) {
