@@ -96,7 +96,7 @@ describe('explicit Runtime check targeting', () => {
     expect(request).toHaveBeenCalledWith('runtime.modelCatalog.open', {
       runtimeKind: 'copilot-cli'
     })
-    for (const runtimeKind of ['codex-cli', 'deepseek-harness', 'minimax-code-cli'] as const) {
+    for (const runtimeKind of ['codex-cli', 'deepseek-harness', 'minimax-code-cli', 'goose-cli'] as const) {
       await openRuntimeModelCatalog(runtimeKind, request, true, { forceRefresh: true })
       expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
         runtimeKind, waitForRefresh: true, forceRefresh: true
@@ -109,12 +109,19 @@ describe('explicit Runtime check targeting', () => {
       runtimeKind: 'deepseek-harness', waitForRefresh: true,
       modelId: 'fixture-target', dshSource: 'web', cacheOnly: true, forceRefresh: true
     })
-    await openRuntimeModelCatalog('minimax-code-cli', request, true, {
-      modelId: 'm:provider:model:v:fast', dshSource: 'web', cacheOnly: true
-    })
-    expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
-      runtimeKind: 'minimax-code-cli', waitForRefresh: true, modelId: 'm:provider:model:v:fast', cacheOnly: true
-    })
+    for (const [runtimeKind, modelId] of [
+      ['minimax-code-cli', 'm:provider:model:v:fast'],
+      ['goose-cli', 'custom_sub2api/gpt-6']
+    ] as const) {
+      await openRuntimeModelCatalog(runtimeKind, request, true, { modelId, dshSource: 'web', cacheOnly: true })
+      expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
+        runtimeKind, waitForRefresh: true, modelId, cacheOnly: true
+      })
+      await openRuntimeModelCatalog(runtimeKind, request, true, { modelId })
+      expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
+        runtimeKind, waitForRefresh: true, modelId
+      })
+    }
   })
 
   it('waits for the backend-owned check and preserves its failure outcome without a separate rescan', async () => {

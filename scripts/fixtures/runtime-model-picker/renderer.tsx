@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AdapterInstallation, AdapterKind, RuntimeModelCatalogTarget, RuntimeModelCatalogView } from '@contracts'
+import type { AdapterInstallation, AdapterKind, RovaiApi, RuntimeModelCatalogTarget, RuntimeModelCatalogView } from '@contracts'
 import { MemberRuntimeParameters, MemberModelParameters, draftFromDefaults, type MemberRuntimeDraft } from '../../../apps/desktop/src/renderer/src/MemberRuntimeParameters'
 import { onboardingRuntimeSelectionFor } from '../../../apps/desktop/src/renderer/src/OnboardingFlow'
 import { MemberRuntimePicker } from '../../../apps/desktop/src/renderer/src/MemberRuntimePicker'
+import { openRuntimeModelCatalog } from '../../../apps/desktop/src/renderer/src/runtime-check'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 
@@ -113,7 +114,7 @@ function Fixture(): React.JSX.Element {
     },
     settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 100))))
   }) })
-  const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
+  const catalogResponse = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
     state.catalogRequests ??= []
     state.catalogRequests.push({ kind, ...target })
@@ -222,6 +223,12 @@ function Fixture(): React.JSX.Element {
     }
     return Promise.resolve(result)
   }
+  // Exercise the shared request boundary used by the real member/onboarding pages.
+  const request: RovaiApi['request'] = async <T,>(method: string, params?: unknown): Promise<T> => {
+    if (method !== 'runtime.modelCatalog.open') throw new Error(`Unexpected request: ${method}`)
+    return await catalogResponse(params as RuntimeModelCatalogTarget) as T
+  }
+  const catalog = (target?: RuntimeModelCatalogTarget) => openRuntimeModelCatalog(kind, request, true, target)
   return <main style={{ height: '100%', overflow: 'auto', padding: 24 }}>
     <section style={{ width: 'min(740px, 100%)', margin: '0 auto' }}>
       <h1>运行配置</h1>
