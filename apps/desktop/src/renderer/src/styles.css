@@ -2454,8 +2454,6 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 .execution-run-operations button:disabled { cursor: wait; opacity: .65; }
 .execution-process-stage.status-running .execution-run-trailing { position: relative; width: 77px; }
 .execution-process-stage.status-running .execution-run-operations { position: absolute; right: 9px; opacity: 0; pointer-events: none; }
-.execution-process-stage.status-running .execution-run-trailing:has(.execution-usage-trigger) { width: auto; }
-.execution-process-stage.status-running .execution-run-trailing:has(.execution-usage-trigger) .execution-run-operations { position: static; }
 .execution-process-stage.status-running .execution-run-card-header:is(:hover, :has(:focus-visible)) .execution-run-metric { opacity: 0; }
 .execution-process-stage.status-running .execution-run-card-header:is(:hover, :has(:focus-visible)) .execution-run-operations { opacity: 1; pointer-events: auto; }
 @media (hover: none), (pointer: coarse) {
