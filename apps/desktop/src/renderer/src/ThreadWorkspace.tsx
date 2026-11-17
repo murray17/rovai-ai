@@ -4,7 +4,7 @@ import { InlineProjectFileReference } from './InlineProjectFileReference'
 import { projectFileLink } from './project-file-reference'
 import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
 import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
-import { ExportGlyph, MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
+import { MessageExportDialog, MessageSelectButton, MessageSelectGlyph, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
 import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
@@ -10395,7 +10395,7 @@ export function MessageActions({
         <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" title={uiAttribute('更多消息操作')} aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu" align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()} loop>
           <DropdownMenu.Item className="sidebar-action-menu-item" disabled={forkBusy} onSelect={onFork}><ForkIcon /><span>{uiAttribute('从此处分叉')}</span></DropdownMenu.Item>
-          {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><ExportGlyph /><span>{uiAttribute('导出')}</span></DropdownMenu.Item>}
+          {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><MessageSelectGlyph /><span>{uiAttribute('多选')}</span></DropdownMenu.Item>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root> : onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}
