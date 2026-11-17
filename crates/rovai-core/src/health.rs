@@ -2948,9 +2948,7 @@ pub fn configure_acp_command(
 ) -> Result<()> {
     match kind {
         AdapterKind::KiloCli => crate::kilo::configure_command(command),
-        AdapterKind::GooseCli => {
-            command.arg("acp");
-        }
+        AdapterKind::GooseCli => crate::goose::configure_command(command),
         AdapterKind::OpencodeCli => {
             crate::opencode_compat::Generation::require(version)?.configure_command(command);
         }

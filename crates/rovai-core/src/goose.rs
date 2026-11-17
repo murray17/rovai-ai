@@ -10,6 +10,12 @@ pub(crate) const BOOTSTRAP_KEY: &str = "rovai-session-bootstrap";
 pub(crate) const ASSIGNED_MCP_PREFIX: &str = "rovai_assigned_";
 pub(crate) const MCP_WITHDRAWAL_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
+pub(crate) fn configure_command(command: &mut tokio::process::Command) {
+    command
+        .arg("acp")
+        .env("GOOSE_DISABLE_SESSION_NAMING", "true");
+}
+
 pub(crate) fn usage_snapshot(previous: Option<&Value>, incoming: &Value) -> Value {
     let mut snapshot = incoming.clone();
     // Sparse native updates do not reset a known cumulative cost. This cache

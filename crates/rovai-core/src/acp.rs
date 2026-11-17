@@ -8028,9 +8028,7 @@ fn configure_runtime_command(
                 .env("ROVAI_ZCODE_OWNER_REPORT", root.join("owner-cleanup.json"))
                 .env("ROVAI_ZCODE_CLI_CONTEXT_DIR", root.join("cli-contexts"));
         }
-        AdapterKind::GooseCli => {
-            command.arg("acp");
-        }
+        AdapterKind::GooseCli => crate::goose::configure_command(command),
         AdapterKind::KiloCli => {
             crate::kilo::configure_command(command);
             crate::kilo::configure_execution(

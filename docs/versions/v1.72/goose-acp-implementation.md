@@ -423,3 +423,14 @@ macOS arm64 / 官方 Homebrew Goose 1.59.2 / 真实 Sub2API `gpt-6`：隔离打�
 
 本轮不提升资格或恢复 Goose 可见入口。其他平台／Provider、完整故障矩阵和覆盖式 write 的旧内容
 没有在本轮重新验收；当前隔离实例已有的侧栏未列出会话问题仍单列，搜索可打开。
+
+## 关闭原生自动会话命名（User sequence 193）
+
+正式执行和健康／目录探测复用 Goose 的同一启动函数，在子进程环境设置
+`GOOSE_DISABLE_SESSION_NAMING=true`，省去原生会话自动标题的辅助模型调用。
+不修改用户配置或全局环境，不增加存储、文件或后台任务；业务模型／effort 和现有隐藏状态保持。
+
+官方 Goose 1.59.2 在隔离原生根与 loopback Provider 中连续完成两条任务，
+总计两次 Provider 请求、零标题请求，精确删除探测 Session。
+[白名单结果](../../research/goose-runtime/session-naming-1.59.2-macos-arm64.json)只证明原生开关效果；
+本轮未重打包或重启当前 App，不作为新增的真实账号、完整 Core 或平台资格证据。

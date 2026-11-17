@@ -72,6 +72,7 @@ Goose 暂缓向用户展示，统一从共享 Renderer 可见目录中隐藏：�
 ## Goose 官方 ACP
 
 Goose 以完整官方 `goose acp` 加入独立产品身份，复用共享 ACP、Binding、Fleet、审批、活动和用量缓冲。
+正式执行和探测共用启动配置，在子进程环境设置 `GOOSE_DISABLE_SESSION_NAMING=true`，省去原生自动标题的辅助模型调用；不修改用户配置或全局环境。
 一个 Binding 一个 Host；精确 `session/load` 隔离历史，普通完成和确认取消可 Warm，不建私有池或生命周期。
 完整冻结 Bootstrap 通过原生 keyed System append 每轮替换，普通 prompt 仅投递 Dynamic Context。
 原生子代理和摘要拥有自己的 System，不额外复制父身份。原生 edit 的成功 before/after 进入共享精确替换片段；
