@@ -1,0 +1,526 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "rovaiBaseline": "26667fefaeae1345d8738637f7c37b1a86a923f8",
+  "officialGoose": "1.59.2",
+  "upstreamCommit": "9da692fde8ac69ec385b5e7d68b92cc7101a509a",
+  "platform": "macos-arm64",
+  "provider": "synthetic-loopback",
+  "paidModelRequests": 0,
+  "mcpStartup": {
+    "official": [
+      {
+        "mode": "exit",
+        "ms": 71.55812500000002,
+        "loadCompleted": true,
+        "promptCompleted": true,
+        "extensionResults": [
+          {
+            "name": "scheduler",
+            "success": true
+          },
+          {
+            "name": "tom",
+            "success": true
+          },
+          {
+            "name": "Extension Manager",
+            "success": true
+          },
+          {
+            "name": "summon",
+            "success": true
+          },
+          {
+            "name": "developer",
+            "success": true
+          },
+          {
+            "name": "analyze",
+            "success": true
+          },
+          {
+            "name": "skills",
+            "success": true
+          },
+          {
+            "name": "apps",
+            "success": true
+          },
+          {
+            "name": "rovai_parity_switch",
+            "success": false,
+            "error": "process quit before initialization: stderr = "
+          }
+        ]
+      },
+      {
+        "mode": "silent",
+        "ms": 4002.790125,
+        "configuredExtensionTimeoutSec": 1,
+        "loadCompleted": false,
+        "promptCompleted": false,
+        "knownNativeIssue": "silent MCP initialization outlives configured timeout"
+      }
+    ],
+    "candidateOneSecond": [
+      {
+        "mode": "exit",
+        "ms": 267.3852920000004,
+        "loadCompleted": true,
+        "promptCompleted": true,
+        "extensionResults": [
+          {
+            "name": "Extension Manager",
+            "success": true
+          },
+          {
+            "name": "developer",
+            "success": true
+          },
+          {
+            "name": "tom",
+            "success": true
+          },
+          {
+            "name": "summon",
+            "success": true
+          },
+          {
+            "name": "skills",
+            "success": true
+          },
+          {
+            "name": "rovai_parity_switch",
+            "success": false,
+            "error": "process quit before initialization: stderr = "
+          }
+        ]
+      },
+      {
+        "mode": "silent",
+        "ms": 1231.3702919999996,
+        "loadCompleted": true,
+        "promptCompleted": true,
+        "unresponsiveChildReaped": true,
+        "extensionResults": [
+          {
+            "name": "Extension Manager",
+            "success": true
+          },
+          {
+            "name": "developer",
+            "success": true
+          },
+          {
+            "name": "tom",
+            "success": true
+          },
+          {
+            "name": "summon",
+            "success": true
+          },
+          {
+            "name": "skills",
+            "success": true
+          },
+          {
+            "name": "rovai_parity_switch",
+            "success": false,
+            "error": "error during extension setup: MCP initialization timed out"
+          }
+        ]
+      }
+    ],
+    "candidateExtraCases": [
+      {
+        "case": "init_error",
+        "configuredToolTimeoutSeconds": 1,
+        "loadMs": 263.35133299999995,
+        "loadCompleted": true,
+        "extensionSucceeded": false,
+        "failedMcpReaped": true,
+        "error": "process quit before initialization: stderr = ",
+        "businessPromptCompleted": true
+      },
+      {
+        "case": "slow_valid",
+        "configuredToolTimeoutSeconds": 300,
+        "loadMs": 2035.5797499999999,
+        "loadCompleted": true,
+        "extensionSucceeded": true,
+        "slowToolMs": 2213.300584,
+        "slowToolCompleted": true,
+        "businessPromptCompleted": true
+      },
+      {
+        "case": "default_silent",
+        "configuredToolTimeoutSeconds": 300,
+        "loadMs": 30231.598875,
+        "loadCompleted": true,
+        "extensionSucceeded": false,
+        "failedMcpReaped": true,
+        "error": "error during extension setup: MCP initialization timed out",
+        "businessPromptCompleted": true
+      }
+    ],
+    "candidateLongTool": [
+      {
+        "case": "slow_valid",
+        "configuredToolTimeoutSeconds": 300,
+        "loadMs": 2016.9012079999998,
+        "loadCompleted": true,
+        "extensionSucceeded": true,
+        "slowToolMs": 35004.623541,
+        "slowToolCompleted": true,
+        "businessPromptCompleted": true
+      }
+    ],
+    "coreCandidate": {
+      "successfulRuns": 3,
+      "configuredExtensionTimeoutSeconds": 1,
+      "coldRunMs": 3896.083375,
+      "failedMcpAbsent": true,
+      "failedMcpReaped": true,
+      "sameNativeSession": true,
+      "coldHostChanged": true,
+      "warmSuccessorReusedHost": true,
+      "nativeCandidateOnly": true
+    },
+    "candidatePatch": "upstream/stdio-initialization-timeout-1.59.2.patch",
+    "candidateBuildFeatures": [
+      "rustls-tls",
+      "bundled-mcp"
+    ],
+    "candidateInitializationCapSeconds": 30,
+    "toolTimeoutChanged": false,
+    "installedCliChanged": false
+  },
+  "coldProvider": {
+    "requiredOldCredentialNativeDefaultB": {
+      "freshProviderBWorks": true,
+      "oldProvider": "custom_review_a",
+      "newProvider": "custom_review_b",
+      "cases": [
+        {
+          "case": "missing",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": false,
+            "code": -32603,
+            "message": "Internal error",
+            "data": "Failed to get provider while loading ACP session: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+            "ms": 33.202916000000016
+          }
+        },
+        {
+          "case": "meta_missing",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": false,
+            "code": -32603,
+            "message": "Internal error",
+            "data": "Failed to get provider while loading ACP session: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+            "ms": 28.118083000000013
+          }
+        },
+        {
+          "case": "direct_missing",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "set_provider_before_load",
+          "first": {
+            "ok": false,
+            "code": -32603,
+            "message": "Internal error",
+            "data": "Failed to get provider: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+            "ms": 28.280958
+          }
+        },
+        {
+          "case": "expired_remote",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 32.73316599999998
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 2.2570420000000126
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        },
+        {
+          "case": "valid",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 31.59062499999999
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 3.796875
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        }
+      ],
+      "syntheticExpiredAuthHttpRequests": 1,
+      "allSessionsDeleted": true
+    },
+    "requiredOldCredentialNativeDefaultA": {
+      "freshProviderBWorks": true,
+      "nativeDefault": "custom_review_a",
+      "oldProvider": "custom_review_a",
+      "newProvider": "custom_review_b",
+      "cases": [
+        {
+          "case": "missing",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": false,
+            "code": -32603,
+            "message": "Internal error",
+            "data": "Failed to get provider while loading ACP session: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+            "ms": 30.519041000000016
+          }
+        },
+        {
+          "case": "meta_missing",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": false,
+            "code": -32603,
+            "message": "Internal error",
+            "data": "Failed to get provider while loading ACP session: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+            "ms": 28.194916999999975
+          }
+        },
+        {
+          "case": "direct_missing",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "set_provider_before_load",
+          "first": {
+            "ok": false,
+            "code": -32603,
+            "message": "Internal error",
+            "data": "Failed to get provider: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+            "ms": 28.71195799999998
+          }
+        },
+        {
+          "case": "expired_remote",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 34.84224999999998
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 1.9166250000000105
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        },
+        {
+          "case": "valid",
+          "sameNativeSession": true,
+          "seedProviderConfirmed": "custom_review_a",
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 32.103875000000016
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 2.350750000000005
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        }
+      ],
+      "syntheticExpiredAuthHttpRequests": 1,
+      "allSessionsDeleted": true
+    },
+    "optionalCredentialOpenAiControl": {
+      "freshProviderBWorks": true,
+      "oldProvider": "openai",
+      "newProvider": "custom_review_b",
+      "cases": [
+        {
+          "case": "missing",
+          "sameNativeSession": true,
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 32.15395900000004
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 2.1895419999999604
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        },
+        {
+          "case": "meta_missing",
+          "sameNativeSession": true,
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 38.19283299999995
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 2.0185409999999706
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        },
+        {
+          "case": "direct_missing",
+          "sameNativeSession": true,
+          "firstOperation": "set_provider_before_load",
+          "first": {
+            "ok": true,
+            "ms": 32.296875
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 32.296875
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        },
+        {
+          "case": "expired_remote",
+          "sameNativeSession": true,
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 36.3245
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 1.7510409999999865
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        },
+        {
+          "case": "valid",
+          "sameNativeSession": true,
+          "firstOperation": "session/load",
+          "first": {
+            "ok": true,
+            "ms": 31.950040999999942
+          },
+          "selectB": {
+            "ok": true,
+            "ms": 1.7304169999999885
+          },
+          "modelSet": true,
+          "prompt": {
+            "ok": true,
+            "stopReason": "end_turn"
+          },
+          "selectedProvider": "custom_review_b",
+          "historyRetained": true
+        }
+      ],
+      "syntheticExpiredAuthHttpRequests": 2,
+      "allSessionsDeleted": true
+    },
+    "coreOfficial": {
+      "firstRun": "succeeded",
+      "oldProvider": "custom_review_a",
+      "selectedProvider": "custom_secondary",
+      "missingOldCredential": {
+        "status": "failed",
+        "failure": {
+          "code": "runtime_launch_failed",
+          "detail": "ACP error -32603: Internal error: Failed to get provider while loading ACP session: missing required key REVIEW_A_KEY: Configuration value not found: REVIEW_A_KEY",
+          "origin": "unknown",
+          "phase": "execution",
+          "retryable": true,
+          "runtimeKind": "goose-cli",
+          "summary": "Goose 未能完成运行"
+        },
+        "modelRequests": 0,
+        "nativePromptStarted": false,
+        "nativeSession": null
+      },
+      "recovered": {
+        "status": "succeeded",
+        "sameNativeSession": true,
+        "historyRetained": true,
+        "newHost": true
+      }
+    },
+    "productionFixImplemented": false
+  },
+  "qualificationPromotion": false,
+  "notVerified": [
+    "Other platforms",
+    "Real OAuth Provider initialization failures",
+    "HTTP MCP initialization",
+    "Full feature official build of native candidate",
+    "Packaged App with the candidate"
+  ]
+}

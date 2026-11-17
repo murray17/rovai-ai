@@ -175,6 +175,10 @@ fn admit_candidate(
                 && semantic_kind == "zcode_edit_patch"
         }
         AdapterKind::HermesCli => false,
+        AdapterKind::GooseCli if semantic_kind == "exact_mutation" => {
+            protocol_family == "acp-v1"
+                && source_event_kind == "session/update.tool_call_update.completed"
+        }
         AdapterKind::CommandCodeCli if semantic_kind == "reported_mutation" => {
             protocol_family == "acp-v1"
                 && source_event_kind == "session/update.tool_call_update.completed.edit_file"

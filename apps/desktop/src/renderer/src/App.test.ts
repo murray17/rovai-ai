@@ -7946,7 +7946,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'hermes-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi', 'kilo-cli'])
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'hermes-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi', 'kilo-cli', 'goose-cli'])
     for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
       const admissions: HealthStatus['runtimePlatformAdmission'] = [{
         runtimeKind: 'hermes-cli', platform, status: 'enabled',
@@ -7957,7 +7957,7 @@ describe('task event projections', () => {
         runtimeKind: 'goose-cli', platform, status: 'qualified',
         reasonCode: null, evidenceRevision: 'existing-qualification'
       }]
-      expect(visibleProductRuntimes(platform, gooseAdmission)).not.toContain('goose-cli')
+      expect(visibleProductRuntimes(platform, gooseAdmission)).toContain('goose-cli')
     }
     expect(visibleProductRuntimes(null, [])).not.toContain('hermes-cli')
     expect(markup).toContain('member-runtime-picker')
@@ -8186,7 +8186,7 @@ describe('task event projections', () => {
     expect(markup).toContain('Hermes Agent')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
-    expect(markup).not.toContain('Goose')
+    expect(markup).toContain('Goose')
     expect(markup).toContain('Command Code')
     expect(markup).not.toContain('待支持')
     expect(markup).not.toContain('尚未开放')
@@ -8217,7 +8217,8 @@ describe('task event projections', () => {
     expect(markup).toContain('<strong>Kiro</strong></div>')
     expect(markup).toContain('<strong>Antigravity</strong></div>')
     expect(markup).toContain('<small title="codex-cli 1.0.0">codex-cli 1.0.0</small>')
-    expect(markup.match(/<small\b/g)).toHaveLength(4)
+    expect(markup).toContain('goose-cli 1.0.0')
+    expect(markup.match(/<small\b/g)).toHaveLength(5)
     expect(markup).not.toContain('<small></small>')
     expect(markup).not.toContain('来源 inherited_path')
     expect(markup).not.toContain('Version Probe')

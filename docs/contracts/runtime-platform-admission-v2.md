@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-11-15
+last_updated: 2026-11-17
 ---
 
 # Runtime Platform Admission v2
@@ -209,7 +209,9 @@ Core 允许常规发现、检查、安装配置、成员选择和执行，并执
 ## Goose macOS arm64 Preview
 
 新增 `goose-cli × macos-arm64 = preview`，reasonCode 为 `runtime_platform.qualification_evidence_missing`，
-evidenceRevision 为 null。macOS x64 为 NotQualified。Linux 和 Windows x64 见下方独立记录。
+evidenceRevision 为 null。2026-11-17 按维护者三端开放要求，macOS x64 同样开放 Preview，
+reasonCode 为 `runtime_platform.qualification_evidence_missing`，evidenceRevision 为 null；
+本次不声称新增 Intel 真机验收。Linux 和 Windows x64 见下方独立记录。
 macOS arm64 的初始证据来自官方 1.59.0 二进制和独立受控 Provider。
 原生完整 Diff 与父 Bootstrap 不进入原生子代理的差异按 [D86](../versions/v1.72/decisions.md#v1-72-d86) 接受。
 普通原生权限、认证和执行检查继续生效，界面不另加 Preview 提示或平台白名单。

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "baseline": "3cdf2d69a",
+  "officialRuntimeVersion": "1.59.2",
+  "platform": "macos-arm64",
+  "provider": "synthetic-loopback",
+  "scope": "Native flag effect; not a packaged App or full Core smoke",
+  "nativeEnvironment": {
+    "GOOSE_DISABLE_SESSION_NAMING": "true"
+  },
+  "result": {
+    "disabled": true,
+    "businessPrompts": 2,
+    "businessCompletions": 2,
+    "providerRequests": 2,
+    "sessionTitleRequests": 0,
+    "sessionDeleted": true
+  },
+  "paidModelRequests": 0,
+  "qualificationPromotion": false
+}

@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 status: preview
-last_updated: 2026-11-15
+last_updated: 2026-11-17
 ---
 
 # Goose 官方 ACP 接入
@@ -398,3 +398,80 @@ Goose 现有模型控件与摘要使用“沿用 Goose 会话选择”，effort 
 现有 catalog migration owner 继续验证闭集、行保留和 receipt 回滚；原 schema owner 增加预览来源升级与历史摘要保留。
 主线 Memory 的关闭值、缺行和回滚测试保留，未新增 Rust 测试函数。原 224/schema 174 的记录是当时预览事实，
 本节解释最终主线编号，不回写原生验收证据。
+
+
+## 真实会话文件 Diff 开发包（2026-11-17）
+
+User sequence 189。代码提交 `cd11f2acb`，分支 `rovai/goose-file-diff`，worktree
+`../rovai-ai-goose-file-diff`；基线 `6e16366d8`，状态 ready，Governance none（没有模型输入变更）。
+
+Goose 继续使用已有 ACP Session/Prompt/ToolCall 配对缓存，成功 edit 的 before/after 进入共享
+exact mutation；write 仅同路径显式 Created 回执进入完整新增。修正了 Goose 原先借用 Cline
+工具 profile 的分发，未增加状态表、文件前像读取、备份、原生数据库 reader 或 Renderer 专用分支。
+Canonical Activity 的分类和 identity 未改变，本次只补既有文件 Diff 内容准入。
+
+macOS arm64 / 官方 Homebrew Goose 1.59.2 / 真实 Sub2API `gpt-6`：隔离打包 App 保留原来
+两轮真实记录，以同一精确 native Session 续接，新建 57 行 HTML 的卡片显示 `+57 / −0`，
+后继 Run 使用同 Host、四次原生 edit 显示 `+4 / −4`。App 中实际展开四组红绿精确替换片段，
+打开当前 HTML 后真实点击计数按钮两次得到 2，原有 CSS/JS 保持。页面视口与窗口尺寸相同。
+结果见[白名单验收记录](../../research/goose-runtime/file-diff-1.59.2-macos-arm64.json)。
+
+扩展已有 `paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt` 和
+`acp_tool_events_expose_only_the_public_command_and_payload_digests`，保留原例，未增加或删除 Rust
+测试函数。定向 owners、共享 Diff 17 项、默认 workspace 484 passed / 1 既有 ignored、
+文档测试和通用文档门禁、Desktop 构建及 ad-hoc 签名检查通过。
+
+本轮不提升资格或恢复 Goose 可见入口。其他平台／Provider、完整故障矩阵和覆盖式 write 的旧内容
+没有在本轮重新验收；当前隔离实例已有的侧栏未列出会话问题仍单列，搜索可打开。
+
+## 关闭原生自动会话命名（User sequence 193）
+
+正式执行和健康／目录探测复用 Goose 的同一启动函数，在子进程环境设置
+`GOOSE_DISABLE_SESSION_NAMING=true`，省去原生会话自动标题的辅助模型调用。
+不修改用户配置或全局环境，不增加存储、文件或后台任务；业务模型／effort 和现有隐藏状态保持。
+
+官方 Goose 1.59.2 在隔离原生根与 loopback Provider 中连续完成两条任务，
+总计两次 Provider 请求、零标题请求，精确删除探测 Session。
+[白名单结果](../../research/goose-runtime/session-naming-1.59.2-macos-arm64.json)只证明原生开关效果；
+本轮未重打包或重启当前 App，不作为新增的真实账号、完整 Core 或平台资格证据。
+
+## 可用性深入验证（User sequence 197）
+
+基线 `26667fefa`。官方 1.59.2 与独立原生候选、生产 Core 均使用新建隔离目录和受控 Provider，
+零付费模型请求。结果见[研究与范围](../../research/goose-runtime/README.md#availability-1-59-2)
+和[白名单证据](../../research/goose-runtime/availability-1.59.2-macos-arm64.json)。
+
+stdio 初始化候选只修改原生一个文件，握手和错误 stderr 收尾使用同一上限，不修改正常工具 timeout。
+配置 1 秒时约 1.23 秒返回失败隔离，默认配置约 30.23 秒；合法慢初始化和 35 秒工具执行通过。
+候选驱动生产 Core 完成三轮，原 Session 保留，坏 MCP 消失且退出，后继 Run Warm 复用。
+
+旧 Provider 缺必需凭据阻断切换已在官方 Core 复现；失败发生在模型派发前，未另建 Session。
+补回旧凭据后，以同 Session 执行新 Provider 成功且保留历史。普通服务端 401 和可选凭据对照没有阻断。
+提前传 load metadata 或提前调用 setter 均不能解决缺必需凭据，正式修复仍需原生恢复入口支持。
+当前正式 CLI、App、Rovai 执行代码、默认强度行为和平台资格保持；未把本地候选标成已部署修复。
+
+## 显式模型刷新与三端开放（User sequence 207）
+
+复用 `rovai/goose-file-diff`，在保留文件 Diff、关闭自动命名及可用性研究提交后，合入
+`origin/main@24efa0737a6f52839f2fba7412998d49b4a0604c`。
+
+- 显式刷新完整模型列表将既有 `forceRefresh` 传给官方 inventory/refresh，
+  原生回执后仍沿同一探测期限等待任务结束，再读取完整库存和默认值。
+  已在刷新的项一起等待；静态／不支持刷新项沿原生库存读取。单个 Provider 失败不丢弃其他成功结果，
+  全部刷新失败、接口错误或超时不覆盖旧可用目录。
+- 普通打开目录、健康检查和目标模型思考强度查询不增加全量原生刷新，不创建目录 Session。
+- 从共享可见目录解除 Goose 隐藏，覆盖各平台 Desktop/Web 的设置、成员、引导、Skills 和筛选。
+  macOS Intel 按维护者要求开放 Preview；macOS arm64、Linux 的 Preview 和 Windows qualified 证据保持。
+- 第 2、5 项保留已确认的官方原生限制；不交付本地修改的 Goose，不更改默认强度行为。
+
+官方 Homebrew Goose 1.59.2 与产品 Core 在独立 Core/data/Skills/MCP/Goose 根完成验收：
+显式刷新拿到 Provider 新增模型，普通打开不重新取库存，等待约 250 ms 的受控响应后才提交新目录；
+实测整次刷新约 3.50 秒，包含其他原生 Provider 的处理，不能将受控延迟描述为整次耗时。
+全部刷新失败沿现有错误回执，旧模型与 observedAt 保持；目录阶段零模型生成、零残留探测 Session。
+业务主链观察到 20 个成功 Run，Warm、精确冷恢复、文件 Diff、Steer、取消复用和 MCP 撤回断言均通过。
+完整白名单见[本轮产品验收](../../research/goose-runtime/catalog-refresh-1.59.2-macos-arm64.json)。
+
+`pnpm test`、`pnpm typecheck`、默认 Rust workspace、原 health extended owner、
+`pnpm test:capability-workspace` 与 `pnpm test:runtime-model-picker` 通过。
+Rust owner 扩展原函数覆盖部分成功、全部失败、已有任务及总期限，不新增测试函数。
+本轮未补做 Windows/Linux/Intel 资格，也未将受控 Provider 当成真实账号验证；App 合并安装回执由交付记录独立确认。

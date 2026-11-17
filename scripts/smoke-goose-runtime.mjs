@@ -49,10 +49,16 @@ const largeOutputCommand = windows
  ? "powershell.exe -NoProfile -NonInteractive -Command \"[Console]::Write('GOOSE_LONG_START'+('0'*9000)+'GOOSE_LONG_DISCARDED')\""
  : "printf 'GOOSE_LONG_START'; printf '%09000d' 0; printf 'GOOSE_LONG_DISCARDED'"
 let gate,approvalDecision='allow_once',compactInjected=false,overflowInjected=false,newLease,mcpTargetName
+let catalogModel='gpt-6.1-rovai-refresh-a',catalogGets=0,catalogFailure=false,catalogDelayMs=0
 function hold(marker){let enter,release;const entered=new Promise(r=>enter=r),wait=new Promise(r=>release=r);return gate={marker,enter,entered,release,wait,held:false}}
 const provider=createServer(async(req,res)=>{
  try{
-  if(req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({object:'list',data:['gpt-4o-mini','gpt-5','gpt-6.1-sol'].map(id=>({id,object:'model',owned_by:'fixture'}))}));return}
+  if(req.method==='GET'){
+   catalogGets++
+   if(catalogDelayMs)await new Promise(r=>setTimeout(r,catalogDelayMs))
+   res.writeHead(catalogFailure?503:200,{'content-type':'application/json'})
+   res.end(JSON.stringify(catalogFailure?{error:{message:'Synthetic inventory unavailable'}}:{object:'list',data:['gpt-4o-mini','gpt-5','gpt-6.1-sol',catalogModel].map(id=>({id,object:'model',owned_by:'fixture'}))}));return
+  }
   let raw='';for await(const part of req)raw+=part
   const body=JSON.parse(raw);calls.push(body)
   const messages=body.messages??body.input??[]
@@ -216,6 +222,30 @@ try{
  assert(catalog.models.some(m=>m.id==='custom_secondary/gpt-5'))
  assert.equal(catalog.models.find(m=>m.id==='openai/gpt-6.1-sol').runtimeMetadata.modelOptionsResolved,false,'Directory inventory must not claim target effort was observed')
  assert.equal(calls.length,offset,'Model discovery must not generate a response')
+ const catalogA=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',forceRefresh:true,waitForRefresh:true})
+ assert.equal(catalogA.refreshStatus,'completed',JSON.stringify(catalogA))
+ assert(catalogA.models.some(m=>m.id==='openai/'+catalogModel),'Explicit refresh must fetch Provider models')
+ const getsAfterA=catalogGets
+ catalogModel='gpt-6.1-rovai-refresh-b'
+ const cached=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',waitForRefresh:true})
+ assert.equal(catalogGets,getsAfterA,'Normal open must retain the existing cache policy')
+ assert(!cached.models.some(m=>m.id==='openai/'+catalogModel))
+ catalogDelayMs=250
+ const refreshStarted=performance.now()
+ const catalogB=await core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',forceRefresh:true,waitForRefresh:true})
+ const refreshMs=performance.now()-refreshStarted
+ assert.equal(catalogB.refreshStatus,'completed',JSON.stringify(catalogB))
+ assert(catalogB.models.some(m=>m.id==='openai/'+catalogModel),'Refresh ACK must not finish before new inventory arrives')
+ assert(refreshMs>=250)
+ assert(catalogGets>getsAfterA)
+ catalogDelayMs=0;catalogFailure=true
+ await assert.rejects(()=>core.request('runtime.modelCatalog.open',{runtimeKind:'goose-cli',forceRefresh:true,waitForRefresh:true}),/runtime_check_failed/)
+ const retained=(await core.request('runtime.installations.list')).find(i=>i.adapterKind==='goose-cli')
+ catalogFailure=false
+ assert(retained.snapshot.models.some(m=>m.id==='openai/'+catalogModel),'Refresh failure must retain the usable catalog')
+ assert.equal(retained.modelCatalog.observedAt,catalogB.cache.observedAt,'A failed refresh must not renew directory freshness')
+ assert.equal(calls.length,offset,'Inventory refresh must not generate model responses')
+ result.checks.explicitCatalogRefresh={ordinaryOpenUsesCache:true,nativeRefreshObserved:true,waitedForCompletion:true,refreshMs,failedRefreshRetainsModels:true,failedRefreshKeepsObservedAt:true,modelGenerations:0}
  const nativeProbeRows=()=>{
   const db=new DatabaseSync(join(root,'goose-root','data','sessions','sessions.db'),{readOnly:true})
   try{return db.prepare("SELECT count(*) AS n FROM sessions WHERE instr(replace(working_dir,char(92),'/'),'/rovai-acp-probe-')>0").get().n}finally{db.close()}
@@ -250,6 +280,10 @@ try{
  result.checks.warm={host:a.started.hostInstanceId,pid:firstOwner.pid,session:a.started.nativeThreadId}
  const files=await settle(await send('CORE_GOOSE_FILES'))
  assert.equal(await readFile(join(project,'测试 空格.txt'),'utf8'),'第一行（编辑）\n保留行\n')
+ const fileActions=events.filter(e=>e.method==='runtime.action'&&e.params?.agentRunId===files.run.id&&e.params?.payload?.status==='completed'&&['write','edit'].includes(e.params?.payload?.toolName))
+ assert.deepEqual(fileActions.map(e=>e.params.payload.toolName),['write','edit'])
+ assert(fileActions.every(e=>e.params.payload.runtimeDiff?.status==='available'),'Successful native file tools must reach the shared Diff projection')
+ result.checks.fileDiff={writeAndEdit:true,sharedProjection:true}
  const skillRoot=join(project,'.goose','skills','rovai-goose-core-smoke');await mkdir(skillRoot,{recursive:true})
  await writeFile(join(skillRoot,'SKILL.md'),'---\nname: rovai-goose-core-smoke\ndescription: Isolated Core acceptance skill.\n---\nGOOSE_CORE_SKILL_BODY\n')
  const skill=await settle(await send('CORE_GOOSE_SKILL'))

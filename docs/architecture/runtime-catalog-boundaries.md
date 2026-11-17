@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-15
+last_updated: 2026-11-17
 ---
 
 # Runtime Catalog Boundaries
@@ -57,9 +57,10 @@ Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也�
 selector 同样不展示 Cursor 与 Cline。Hermes 在 macOS arm64/x64、Windows x64 与 Linux x64 均普通开放；
 Command Code 在 macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。成员选项继续经过 Runtime Platform Admission，Renderer 不另建平台白名单。
 
-Goose 暂缓向用户展示，统一从共享 Renderer 可见目录中隐藏：各平台 Desktop 与 Web 的智能体设置页、
-成员 Runtime 选择器、首次引导、Skills 智能体选择器和用量筛选均不提供 Goose 入口。
-保留 closed identity、底层接入、既有配置与历史记录，不改写已有平台资格证据；隐藏入口不改变模型与参数的原生执行语义。
+Goose 通过共享 Renderer 可见目录向 macOS、Windows 与 Linux 开放：Desktop 与 Web 的智能体设置页、
+成员 Runtime 选择器、首次引导、Skills 智能体选择器和用量筛选均沿既有入口展示。
+macOS arm64/x64 与 Linux x64 使用 Preview 准入，Windows x64 保留既有 qualified 证据；
+入口开放不改变模型、参数、原生会话恢复及已接受的能力边界。
 
 `enabled`、`qualified` 与 `preview` 可以进入 Product Runtime Availability；`enabled` 不宣称完整资格，
 `preview` 在内部保留缺失资格证据，用户界面不显示资格记录未齐备的提示。
@@ -72,11 +73,18 @@ Goose 暂缓向用户展示，统一从共享 Renderer 可见目录中隐藏：�
 ## Goose 官方 ACP
 
 Goose 以完整官方 `goose acp` 加入独立产品身份，复用共享 ACP、Binding、Fleet、审批、活动和用量缓冲。
+正式执行和探测共用启动配置，在子进程环境设置 `GOOSE_DISABLE_SESSION_NAMING=true`，省去原生自动标题的辅助模型调用；不修改用户配置或全局环境。
 一个 Binding 一个 Host；精确 `session/load` 隔离历史，普通完成和确认取消可 Warm，不建私有池或生命周期。
 完整冻结 Bootstrap 通过原生 keyed System append 每轮替换，普通 prompt 仅投递 Dynamic Context。
-原生子代理和摘要拥有自己的 System，不额外复制父身份；原生 write/edit 无完整前像，不伪造 Diff。
+原生子代理和摘要拥有自己的 System，不额外复制父身份。原生 edit 的成功 before/after 进入共享精确替换片段；
+write 仅凭同路径显式 Created 回执生成新增 Diff，覆盖时没有旧前像则保持路径操作。
 
-完整目录在 initialize 后直接读官方 Provider inventory/defaults，不创建原生 Session；`thinking_effort` 沿共享目标模型按需查询，不重复读取 inventory。
+完整目录在 initialize 后直接读官方 Provider inventory/defaults，不创建原生 Session。
+用户显式刷新完整目录时，既有 `forceRefresh` 继续传到原生 inventory/refresh，
+在原探测总期限内等待 started／already-refreshing 项结束，再读取完整库存；回执不等于刷新完成。
+单个 Provider 失败不丢弃其余成功结果；全部刷新失败或超时保留既有可用目录，
+不新增缓存、后台刷新器或重试。普通读取与目标参数查询不触发原生全量刷新；
+`thinking_effort` 沿共享目标模型按需查询，不重复读取 inventory。
 相同原生选项复用已有会话快照，省略重复 setter；未显式指定模型时不设置 Provider/model/effort，
 新 Session 使用原生初始选择，Warm/冷恢复保留原生 Session 当前选择，不逐轮刷新全局默认。
 显式 Provider 在新建正式／目标参数 Session 的 `_meta.provider` 中提前传入，模型及 effort 沿现有 setter 设置。

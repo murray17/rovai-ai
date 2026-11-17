@@ -2,10 +2,32 @@
 document_type: research-record
 authority: non-normative-runtime-evidence
 status: native-research
-last_updated: 2026-11-16
+last_updated: 2026-11-17
 ---
 
 # Goose 官方 ACP 研究与原生探测
+
+<a id="availability-1-59-2"></a>
+## 1.59.2 可用性深入验证（2026-11-17）
+
+User sequence 197 的验证固定 Rovai `26667fefa`、官方 Goose 1.59.2，
+使用独立 Core/data/Skills/MCP/原生目录和 loopback Provider，不使用真实凭据。
+[白名单证据](availability-1.59.2-macos-arm64.json)分开记录官方结果、局部候选和生产 Core 路径。
+
+- 原生 stdio 握手未使用扩展期限，失败后的 stderr EOF 等待也无截止点。
+  [局部候选](upstream/README.md#stdio-startup-1-59-2)将两者收拢到同一初始化期限；
+  1 秒配置和默认配置的失联隔离、合法慢启动、35 秒工具调用及三个 Core Run 均有证据。
+  候选不修改工具执行时长，也未替换官方安装；HTTP MCP 和其他平台未在本轮验证。
+- 已复现旧 Provider 缺必需凭据阻断冷恢复：本次新建的会话先用 A 成功，关闭 Core、移除 A 的假凭据，
+  明确选择仍可用的 B，生产 Core 的后继 Run 在模型派发前失败，模型请求为零。
+  补回 A 的凭据后，B 使用同一个原生 Session 成功，历史保留，未自动换新会话。
+- 范围比“旧认证失效都会阻断”更窄：旧 key 仅收到服务端 401 时，load、切 B 和继续生成成功；
+  原生 OpenAI 的可选凭据对照也成功。必需凭据缺失时，即使全局默认已是 B，
+  给 load 加 `_meta.provider=B` 或先发标准 Provider setter，仍返回旧 A 的缺键错误。
+  当前正式 load 不支持用该字段越过旧 Provider 初始化，不能仅在 Rovai 加一个字段就记为修复。
+
+恢复问题是普通新会话后续切换场景，不涉及旧版本迁移。本轮未增加兼容层、配置副本或恢复重试。
+对有缺陷的旧 Provider，应由原生恢复入口在初始化前接受本轮显式选择；这条修复尚未实现。
 
 结论：可以沿共享 ACP/Fleet 接入，推荐入口是官方 `goose acp`。
 Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收回执和逐消息／累计用量通知，
@@ -248,9 +270,10 @@ remove 发生在原生 load 之后、业务 P 之前；load 可能已短暂恢�
 原生工具启动携带 `_meta.goose.toolCall.toolName/extensionName`，参数保留在 rawInput。
 write 使用 path/content，edit 使用 path/before/after，shell 使用 command。
 write/edit 完成只返回文本与 locations，没有完整 before/after 或标准 ACP Diff；完整覆盖前像在此传输中不可得。
-edit 的确切片段可在原生参数详情中展示，但未知行号不能自行补齐为标准文件补丁。
-只有原生确实给出合法 patch 时才交共享 normalizer；当前默认工具缺少整文件 Diff，显示真实操作结果，
-不读修改后的文件伪造旧内容和整文件增删数。
+官方 1.59.2 的 `edit` 在成功终态后可将原始 before/after 作为共享精确替换片段展示和统计，
+不补造全局行号或完整文件。`write` 的同路径显式 Created 回执能够确认新增，再用原始 content
+生成完整新增 Diff；Wrote 覆盖仍无旧前像，只显示操作。两者沿共享配对和 normalizer，
+不读修改后的文件或原生数据库来补造历史。实现与验收归当前版本的 Goose 实施记录。
 
 shell 的完成 rawOutput 有 stdout、stderr、exit_code；exit 7 对应 failed。
 原生 9,000 字节输出未被 7.5 KiB 限制；Rovai 仍必须沿共享持久化输出预算截断，不能另做一份 Goose 预算。
