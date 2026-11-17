@@ -74,11 +74,13 @@ app.whenReady().then(async () => {
     await waitFor(`window.fastTest.metricsRequests().filter(r => r.method === "monitoring.execution").length > ${beforeExpand}`, 'Cached Run expansion did not refresh on demand')
 
     await run('document.querySelector(".execution-drawer-body").scrollTop = 0')
+    const beforeTerminal = (await requests()).length
     await run('window.fastTest.metricsTerminal()')
     await run('window.fastTest.settle()')
     if (await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded") === "false"')) {
       await click('.execution-history-toggle')
     }
+    await waitFor(`window.fastTest.metricsRequests().slice(${beforeTerminal}).some(request => request.params.agentRunIds.includes('run-agent-0') && request.params.agentRunIds.includes('metric-history-0'))`, 'Terminal history visibility did not refresh before measuring stable reads')
     await wait(4_500) // The finite terminal tail has completed.
     const beforeStable = (await requests()).length
     await wait(10_500)
@@ -87,22 +89,20 @@ app.whenReady().then(async () => {
     await run('window.fastTest.metricsCommit(1000, 2, false, 55000)')
     await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "55K"', 'Core projection was gated by partial quality or replaced with raw buckets')
     assert.equal(await run('document.querySelector(".execution-context-value")?.textContent'), '32.0%')
-    for (const status of ['running', 'waiting', 'failed', 'cancelled', 'succeeded']) {
+    for (const status of ['running', 'waiting']) {
       await run(`window.fastTest.metricsStatus('${status}')`)
-      await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "55K"', `Missing known usage for ${status}`)
-      assert.equal(await run('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-duration-trigger")'), false, `${status}: Known usage must replace the clock`)
-      if (status === 'running') {
-        const point = await run(`(() => {
-          const rect = document.querySelector('[data-agent-run-id="run-agent-0"] .execution-usage-trigger').getBoundingClientRect()
-          return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) }
-        })()`)
-        window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
-        await wait(100)
-        window.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
-        window.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point })
-        await waitFor('document.querySelectorAll(".execution-metric-popover dl > div").length === 5', 'Live usage details were covered by Run operations')
-        await click('[data-agent-run-id="run-agent-0"] .execution-usage-trigger')
+      await waitFor('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-run-metric") && !document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")', `${status}: Known usage replaced elapsed time`)
+      assert.match(await run('document.querySelector("[data-agent-run-id=run-agent-0] .execution-run-metric")?.textContent'), /^\d+(?:时 \d+分|分 \d{2}秒)$/)
+      assert.equal(await run('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-duration-trigger")'), false, `${status}: Live elapsed time became a clock button`)
+    }
+    for (const status of ['failed', 'cancelled', 'succeeded']) {
+      await run(`window.fastTest.metricsStatus('${status}')`)
+      await run('window.fastTest.settle()')
+      if (await run('document.querySelector(".execution-history-toggle")?.getAttribute("aria-expanded") === "false"')) {
+        await click('.execution-history-toggle')
       }
+      await waitFor('document.querySelector("[data-agent-run-id=run-agent-0] .execution-usage-trigger")?.textContent === "55K"', `Missing known terminal usage for ${status}`)
+      assert.equal(await run('!!document.querySelector("[data-agent-run-id=run-agent-0] .execution-duration-trigger")'), false, `${status}: Known usage must replace the clock`)
     }
     await wait(4_500) // Let the status-change terminal tail settle before measuring a detail click.
     const usageNode = await run(`(() => {
@@ -152,7 +152,7 @@ app.whenReady().then(async () => {
     assert.ok((await requests()).every(request => request.method === 'monitoring.execution'), 'Unexpected metrics polling')
     assert.equal(await run('document.querySelectorAll(".execution-header-metrics > *").length'), 1, 'Header must contain only the Context entry')
     const report = { ok: true, cases: ['visible collapsed history', '500 Run scoped reads', 'scroll and expansion',
-      'hidden panel and page', 'immediate visibility refresh', 'stable terminal', 'late post-tail Usage', 'Core projection independent of raw buckets and quality', 'running/failure/cancelled totals', 'explicit zero and unknown', 'usage/clock priority and original details without extra reads', 'Session replacement/removal'],
+      'hidden panel and page', 'immediate visibility refresh', 'stable terminal', 'late post-tail Usage', 'Core projection independent of raw buckets and quality', 'live elapsed time despite known usage', 'terminal failure/cancelled/success totals', 'explicit zero and unknown', 'usage/clock priority and original details without extra reads', 'Session replacement/removal'],
       maximumRequestedRuns: Math.max(...(await requests()).filter(request => request.method === 'monitoring.execution').map(request => request.params.agentRunIds.length)) }
     writeFileSync(join(dirname(userData), 'metrics-report.json'), JSON.stringify(report, null, 2))
     console.log(JSON.stringify(report))

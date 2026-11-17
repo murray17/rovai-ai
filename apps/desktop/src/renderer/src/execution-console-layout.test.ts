@@ -156,7 +156,7 @@ describe('execution console layout', () => {
     expect(styleBlock('.execution-drawer-inspector .execution-drawer-header:not(.is-overview) .execution-header-metrics'))
       .toMatch(/grid-column:\s*3;\s*grid-row:\s*1/)
     expect(workspaceSource).toMatch(/<span className="execution-header-metrics">[\s\S]*?<ExecutionContextPopover/)
-    expect(workspaceSource).toMatch(/if \(live && total === null\) return <span className="execution-run-metric">\{duration\}<\/span>/)
+    expect(workspaceSource).toMatch(/if \(live\) return <span className="execution-run-metric">\{duration\}<\/span>/)
     expect(workspaceSource).toContain('<ExecutionDurationPopover run={run} />')
     expect(workspaceSource).toContain('<ExecutionUsagePopover run={run} usage={usage} total={total} />')
     expect(styleBlock('.execution-duration-popover')).toMatch(/min-width:\s*134px/)

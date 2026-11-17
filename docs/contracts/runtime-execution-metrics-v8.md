@@ -4,7 +4,7 @@ contract: runtime-execution-metrics
 version: 8
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-16
+last_updated: 2026-11-17
 ---
 
 # Runtime Execution Metrics v8
@@ -26,8 +26,8 @@ Core 统一使用方案 1：对当前 logical Run 内可信、可归属、已去
 输出已含 reasoning 时不得再加 reasoning。只有 reasoning 时可以贡献已证明的输出子集。
 缺字段/缺调用不清空其他贡献；没有合格计数为 null，可信显式零为 0。
 
-成功、失败、取消、等待、运行中和正在停止共用上述准入。`finalizedAt` 与 `inputOutputComplete`
-继续作为内部事实返回，不决定是否显示。Context/Session 占用、无法归当前 Run 的累计值、价格或文字估算
+成功、失败、取消、等待、运行中和正在停止共用上述投影计算与数值准入。`finalizedAt` 与 `inputOutputComplete`
+继续作为内部事实返回，不决定数值是否合格；RunCard 的呈现时机仍遵守下述状态优先级。Context/Session 占用、无法归当前 Run 的累计值、价格或文字估算
 不得进入该投影；不同 Runtime 不能改用方案 2 的门槛来补数字。
 
 总量在写入时按同调用 checkpoint 计算，前端不得把 Run 分项相加或据质量猜测。
@@ -36,10 +36,11 @@ Core 统一使用方案 1：对当前 logical Run 内可信、可归属、已去
 
 ## RunCard
 
-- 卡片摘要有数值时只显示一个可点击的 `xxK`，千进制，保留至多一位小数；显式零显示 `0K`。
-- 无数值时不显示 Token 数字；保留既有运行耗时或终态时钟入口。
+- 保留原有状态优先级：启动/停止时显示对应状态，运行中只显示 live 耗时，即使已有合格用量也不显示 Token 入口。
+- Run 进入终态后，有数值时只显示一个可点击的 `xxK`，千进制，保留至多一位小数；显式零显示 `0K`。
+- 终态无数值时不显示 Token 数字，使用原有时钟入口。
 - 卡片摘要不显示“部分”、完整性/覆盖标签、`≥`、`≈`，不回退 Input、Output、Cache Read/Write 分项。
-- 有数值时用量入口替代时钟；点击保留原有 Input Token、Output Token、Cache Read、Cache Write 和执行耗时明细。明细读取已有投影，缺失显示 `—`，不重算总量，不新增采集或详情查询。
+- 终态有数值时用量入口替代时钟；点击保留原有 Input Token、Output Token、Cache Read、Cache Write 和执行耗时明细。明细读取已有投影，缺失显示 `—`，不重算总量，不新增采集或详情查询。
 - 迟到投影沿现有 `monitoring.changed`/有界读取更新；可见性、single-flight、旧 epoch 排除和失败保留规则不变。
 
 ## 证据

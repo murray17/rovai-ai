@@ -7584,14 +7584,13 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
     }, 1_000)
     return () => window.clearInterval(timer)
   }, [live, run.id, run.executionEpoch, run.startedAt, run.createdAt])
-  const total = executionUsageTotal(run, usage)
-  if ((cancelling || starting) && total === null) return <span className="execution-run-status" role="status">
+  if (cancelling || starting) return <span className="execution-run-status" role="status">
     {uiAttribute(cancelling ? '正在停止…' : '启动中…')}
   </span>
-  if (live && total === null) return <span className="execution-run-metric">{duration}</span>
+  if (live) return <span className="execution-run-metric">{duration}</span>
+  const total = executionUsageTotal(run, usage)
   return <span className="execution-run-metric-group">
-    {(cancelling || starting) ? <span className="execution-run-status" role="status">{uiAttribute(cancelling ? '正在停止…' : '启动中…')}</span>
-      : run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
+    {run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
     {total !== null ? <ExecutionUsagePopover run={run} usage={usage} total={total} />
       : <ExecutionDurationPopover run={run} />}
   </span>
