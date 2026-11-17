@@ -434,3 +434,18 @@ macOS arm64 / 官方 Homebrew Goose 1.59.2 / 真实 Sub2API `gpt-6`：隔离打�
 总计两次 Provider 请求、零标题请求，精确删除探测 Session。
 [白名单结果](../../research/goose-runtime/session-naming-1.59.2-macos-arm64.json)只证明原生开关效果；
 本轮未重打包或重启当前 App，不作为新增的真实账号、完整 Core 或平台资格证据。
+
+## 可用性深入验证（User sequence 197）
+
+基线 `26667fefa`。官方 1.59.2 与独立原生候选、生产 Core 均使用新建隔离目录和受控 Provider，
+零付费模型请求。结果见[研究与范围](../../research/goose-runtime/README.md#availability-1-59-2)
+和[白名单证据](../../research/goose-runtime/availability-1.59.2-macos-arm64.json)。
+
+stdio 初始化候选只修改原生一个文件，握手和错误 stderr 收尾使用同一上限，不修改正常工具 timeout。
+配置 1 秒时约 1.23 秒返回失败隔离，默认配置约 30.23 秒；合法慢初始化和 35 秒工具执行通过。
+候选驱动生产 Core 完成三轮，原 Session 保留，坏 MCP 消失且退出，后继 Run Warm 复用。
+
+旧 Provider 缺必需凭据阻断切换已在官方 Core 复现；失败发生在模型派发前，未另建 Session。
+补回旧凭据后，以同 Session 执行新 Provider 成功且保留历史。普通服务端 401 和可选凭据对照没有阻断。
+提前传 load metadata 或提前调用 setter 均不能解决缺必需凭据，正式修复仍需原生恢复入口支持。
+当前正式 CLI、App、Rovai 执行代码、默认强度行为和平台资格保持；未把本地候选标成已部署修复。

@@ -7,6 +7,28 @@ last_updated: 2026-11-17
 
 # Goose 官方 ACP 研究与原生探测
 
+<a id="availability-1-59-2"></a>
+## 1.59.2 可用性深入验证（2026-11-17）
+
+User sequence 197 的验证固定 Rovai `26667fefa`、官方 Goose 1.59.2，
+使用独立 Core/data/Skills/MCP/原生目录和 loopback Provider，不使用真实凭据。
+[白名单证据](availability-1.59.2-macos-arm64.json)分开记录官方结果、局部候选和生产 Core 路径。
+
+- 原生 stdio 握手未使用扩展期限，失败后的 stderr EOF 等待也无截止点。
+  [局部候选](upstream/README.md#stdio-startup-1-59-2)将两者收拢到同一初始化期限；
+  1 秒配置和默认配置的失联隔离、合法慢启动、35 秒工具调用及三个 Core Run 均有证据。
+  候选不修改工具执行时长，也未替换官方安装；HTTP MCP 和其他平台未在本轮验证。
+- 已复现旧 Provider 缺必需凭据阻断冷恢复：本次新建的会话先用 A 成功，关闭 Core、移除 A 的假凭据，
+  明确选择仍可用的 B，生产 Core 的后继 Run 在模型派发前失败，模型请求为零。
+  补回 A 的凭据后，B 使用同一个原生 Session 成功，历史保留，未自动换新会话。
+- 范围比“旧认证失效都会阻断”更窄：旧 key 仅收到服务端 401 时，load、切 B 和继续生成成功；
+  原生 OpenAI 的可选凭据对照也成功。必需凭据缺失时，即使全局默认已是 B，
+  给 load 加 `_meta.provider=B` 或先发标准 Provider setter，仍返回旧 A 的缺键错误。
+  当前正式 load 不支持用该字段越过旧 Provider 初始化，不能仅在 Rovai 加一个字段就记为修复。
+
+恢复问题是普通新会话后续切换场景，不涉及旧版本迁移。本轮未增加兼容层、配置副本或恢复重试。
+对有缺陷的旧 Provider，应由原生恢复入口在初始化前接受本轮显式选择；这条修复尚未实现。
+
 结论：可以沿共享 ACP/Fleet 接入，推荐入口是官方 `goose acp`。
 Goose 已有按 Session 追加 System 指令、带原生 Run ID 的 Steer 接收回执和逐消息／累计用量通知，
 这三处可以比 Kilo 更薄。MCP 恢复的追加语义、write 缺少完整前像、压缩用量范围是必须正面处理的差异。
