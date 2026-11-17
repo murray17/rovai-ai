@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v5
-last_updated: 2026-11-13
+last_updated: 2026-11-17
 ---
 
 # Runtime Activity Mapping Registry

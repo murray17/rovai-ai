@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 status: preview
-last_updated: 2026-11-15
+last_updated: 2026-11-17
 ---
 
 # Goose 官方 ACP 接入
@@ -398,3 +398,28 @@ Goose 现有模型控件与摘要使用“沿用 Goose 会话选择”，effort 
 现有 catalog migration owner 继续验证闭集、行保留和 receipt 回滚；原 schema owner 增加预览来源升级与历史摘要保留。
 主线 Memory 的关闭值、缺行和回滚测试保留，未新增 Rust 测试函数。原 224/schema 174 的记录是当时预览事实，
 本节解释最终主线编号，不回写原生验收证据。
+
+
+## 真实会话文件 Diff 开发包（2026-11-17）
+
+User sequence 189。代码提交 `cd11f2acb`，分支 `rovai/goose-file-diff`，worktree
+`../rovai-ai-goose-file-diff`；基线 `6e16366d8`，状态 ready，Governance none（没有模型输入变更）。
+
+Goose 继续使用已有 ACP Session/Prompt/ToolCall 配对缓存，成功 edit 的 before/after 进入共享
+exact mutation；write 仅同路径显式 Created 回执进入完整新增。修正了 Goose 原先借用 Cline
+工具 profile 的分发，未增加状态表、文件前像读取、备份、原生数据库 reader 或 Renderer 专用分支。
+Canonical Activity 的分类和 identity 未改变，本次只补既有文件 Diff 内容准入。
+
+macOS arm64 / 官方 Homebrew Goose 1.59.2 / 真实 Sub2API `gpt-6`：隔离打包 App 保留原来
+两轮真实记录，以同一精确 native Session 续接，新建 57 行 HTML 的卡片显示 `+57 / −0`，
+后继 Run 使用同 Host、四次原生 edit 显示 `+4 / −4`。App 中实际展开四组红绿精确替换片段，
+打开当前 HTML 后真实点击计数按钮两次得到 2，原有 CSS/JS 保持。页面视口与窗口尺寸相同。
+结果见[白名单验收记录](../../research/goose-runtime/file-diff-1.59.2-macos-arm64.json)。
+
+扩展已有 `paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt` 和
+`acp_tool_events_expose_only_the_public_command_and_payload_digests`，保留原例，未增加或删除 Rust
+测试函数。定向 owners、共享 Diff 17 项、默认 workspace 484 passed / 1 既有 ignored、
+文档测试和通用文档门禁、Desktop 构建及 ad-hoc 签名检查通过。
+
+本轮不提升资格或恢复 Goose 可见入口。其他平台／Provider、完整故障矩阵和覆盖式 write 的旧内容
+没有在本轮重新验收；当前隔离实例已有的侧栏未列出会话问题仍单列，搜索可打开。

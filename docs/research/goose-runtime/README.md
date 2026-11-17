@@ -2,7 +2,7 @@
 document_type: research-record
 authority: non-normative-runtime-evidence
 status: native-research
-last_updated: 2026-11-16
+last_updated: 2026-11-17
 ---
 
 # Goose 官方 ACP 研究与原生探测

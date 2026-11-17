@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-17",
+  "platform": "macos-arm64",
+  "sourceCodeCommit": "cd11f2acb",
+  "appVersion": "0.5.13",
+  "channel": "isolated-packaged-app",
+  "officialRuntimeVersion": "1.59.2",
+  "providerType": "real-user-authorized-sub2api",
+  "model": "custom_sub2api/gpt-6",
+  "existingRealConversationResumed": true,
+  "historicalRunsRetained": 2,
+  "successfulNewRuns": [
+    {
+      "id": "fc3beb90-bba1-465e-88a8-ed18749c60ee",
+      "status": "succeeded",
+      "seconds": 34.734
+    },
+    {
+      "id": "ec218a30-2b55-42e8-8d6e-2b83d485f94f",
+      "status": "succeeded",
+      "seconds": 47.34
+    }
+  ],
+  "nativeSessionId": "20261117_1",
+  "sameHost": true,
+  "fileChanges": [
+    {
+      "file": "goose-diff.html",
+      "presentation": "full_net_diff",
+      "additions": 57,
+      "deletions": 0,
+      "operations": 1
+    },
+    {
+      "file": "goose-diff.html",
+      "presentation": "exact_mutations",
+      "additions": 4,
+      "deletions": 4,
+      "operations": 4
+    }
+  ],
+  "renderer": {
+    "sharedFileCards": true,
+    "redGreenExactFragments": true,
+    "htmlCounterRealClicks": 2,
+    "htmlCounterFinalValue": 2,
+    "viewportFillsWindow": true,
+    "mainRendererExceptions": 0
+  },
+  "validation": {
+    "sharedPairingOwner": "passed",
+    "eventNormalizerOwner": "passed",
+    "sharedDiffTests": 17,
+    "defaultWorkspace": {
+      "passed": 484,
+      "failed": 0,
+      "existingIgnored": 1
+    },
+    "documentationTests": 10,
+    "documentationGates": "passed",
+    "desktopBuild": "passed",
+    "appSignature": "verified-ad-hoc"
+  },
+  "productGooseHidden": true,
+  "qualificationPromotion": false,
+  "notVerified": [
+    "Other platforms or Providers",
+    "New fault, cancellation, steer or compaction matrices",
+    "Full previous content for overwrite write",
+    "Full official Goose controlled smoke after this change"
+  ]
+}
