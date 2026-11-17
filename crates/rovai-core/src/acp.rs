@@ -1614,10 +1614,10 @@ fn enrich_paired_tool_message(
         .to_string();
     let key = (session_id.to_string(), prompt_id.to_string(), call_id);
     let terminal = matches!(update["status"].as_str(), Some("completed" | "failed"));
-    let enrich = if adapter_kind == AdapterKind::CommandCodeCli {
-        crate::command_code_acp::enrich_tool_update
-    } else {
-        crate::cline::enrich_tool_update
+    let enrich = match adapter_kind {
+        AdapterKind::CommandCodeCli => crate::command_code_acp::enrich_tool_update,
+        AdapterKind::GooseCli => crate::goose::enrich_tool_update,
+        _ => crate::cline::enrich_tool_update,
     };
     // Cline requests permission before execution. It emits a populated pending
     // tool_call_update, then failed on denial, without ever emitting tool_call.
@@ -19350,7 +19350,137 @@ while IFS= read -r ignored; do :; done
             assert_eq!(actual_result["params"]["update"]["status"], "failed");
         }
         assert!(tools.is_empty());
-        for kind in [AdapterKind::ClineCli, AdapterKind::CommandCodeCli] {
+        // Goose shares this exact Session/Prompt pairing; successful edit
+        // fragments and explicit creation receipts use the existing cache.
+        for (name, input, status, output, semantic) in [
+            (
+                "edit",
+                json!({"path":"src/a.txt","before":"old\n","after":"new\n"}),
+                "completed",
+                "Edited src/a.txt (1 lines -> 1 lines)",
+                Some("exact_mutation"),
+            ),
+            (
+                "edit",
+                json!({"path":"src/a.txt","before":"old","after":"new"}),
+                "failed",
+                "Failed to write",
+                None,
+            ),
+            (
+                "edit",
+                json!({"path":"src/a.txt","before":"same","after":"same"}),
+                "completed",
+                "Edited",
+                None,
+            ),
+            (
+                "edit",
+                json!({"path":"src/a.txt","after":"new"}),
+                "completed",
+                "Edited",
+                None,
+            ),
+            (
+                "write",
+                json!({"path":"src/a.txt","content":"one\ntwo\n"}),
+                "completed",
+                "Created src/a.txt (2 lines)",
+                Some("complete_before_after"),
+            ),
+            (
+                "write",
+                json!({"path":"src/a.txt","content":"one\ntwo\n"}),
+                "completed",
+                "Wrote src/a.txt (2 lines)",
+                None,
+            ),
+            (
+                "write",
+                json!({"path":"src/a.txt","content":"one\ntwo\n"}),
+                "completed",
+                "Created src/other.txt (2 lines)",
+                None,
+            ),
+            (
+                "write",
+                json!({"path":"src/a.txt","content":"one\ntwo\n"}),
+                "completed",
+                "Created src/a.txt (3 lines)",
+                None,
+            ),
+            (
+                "write",
+                json!({"path":"src/a.txt","content":"one\ntwo\n"}),
+                "failed",
+                "Created src/a.txt (2 lines)",
+                None,
+            ),
+            (
+                "custom__edit",
+                json!({"path":"src/a.txt","before":"old","after":"new"}),
+                "completed",
+                "Edited",
+                None,
+            ),
+        ] {
+            let mut initial = json!({"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call","toolCallId":"goose-file","kind":"edit","status":"pending",
+                "rawInput":input,"_meta":{"goose":{"toolCall":{"toolName":name}},"rovaiGooseDiff":{"untrusted":true}}
+            }}});
+            enrich_paired_tool_message(
+                AdapterKind::GooseCli,
+                &mut tools,
+                "goose-session",
+                "goose-prompt",
+                &mut initial,
+            )
+            .unwrap();
+            assert!(
+                initial
+                    .pointer("/params/update/_meta/rovaiGooseDiff")
+                    .is_none()
+            );
+            let mut terminal = json!({"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"goose-file","status":status,
+                "content":[{"type":"content","content":{"type":"text","text":output}}]
+            }}});
+            let mut wrong_prompt = terminal.clone();
+            if status == "completed" {
+                assert!(
+                    enrich_paired_tool_message(
+                        AdapterKind::GooseCli,
+                        &mut tools,
+                        "goose-session",
+                        "other-prompt",
+                        &mut wrong_prompt
+                    )
+                    .is_err()
+                );
+            }
+            enrich_paired_tool_message(
+                AdapterKind::GooseCli,
+                &mut tools,
+                "goose-session",
+                "goose-prompt",
+                &mut terminal,
+            )
+            .unwrap();
+            assert_eq!(
+                terminal
+                    .pointer("/params/update/_meta/rovaiGooseDiff/semanticKind")
+                    .and_then(Value::as_str),
+                semantic,
+                "{name}: {status}: {output}"
+            );
+            assert_eq!(terminal["params"]["update"]["rawInput"], input);
+        }
+        assert!(tools.is_empty());
+        for kind in [
+            AdapterKind::ClineCli,
+            AdapterKind::CommandCodeCli,
+            AdapterKind::GooseCli,
+        ] {
             let mut unknown_success = json!({"method":"session/update","params":{"update":{
                 "sessionUpdate":"tool_call_update","toolCallId":"reused-id","status":"completed"
             }}});

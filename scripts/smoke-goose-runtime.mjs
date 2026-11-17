@@ -250,6 +250,10 @@ try{
  result.checks.warm={host:a.started.hostInstanceId,pid:firstOwner.pid,session:a.started.nativeThreadId}
  const files=await settle(await send('CORE_GOOSE_FILES'))
  assert.equal(await readFile(join(project,'测试 空格.txt'),'utf8'),'第一行（编辑）\n保留行\n')
+ const fileActions=events.filter(e=>e.method==='runtime.action'&&e.params?.agentRunId===files.run.id&&e.params?.payload?.status==='completed'&&['write','edit'].includes(e.params?.payload?.toolName))
+ assert.deepEqual(fileActions.map(e=>e.params.payload.toolName),['write','edit'])
+ assert(fileActions.every(e=>e.params.payload.runtimeDiff?.status==='available'),'Successful native file tools must reach the shared Diff projection')
+ result.checks.fileDiff={writeAndEdit:true,sharedProjection:true}
  const skillRoot=join(project,'.goose','skills','rovai-goose-core-smoke');await mkdir(skillRoot,{recursive:true})
  await writeFile(join(skillRoot,'SKILL.md'),'---\nname: rovai-goose-core-smoke\ndescription: Isolated Core acceptance skill.\n---\nGOOSE_CORE_SKILL_BODY\n')
  const skill=await settle(await send('CORE_GOOSE_SKILL'))

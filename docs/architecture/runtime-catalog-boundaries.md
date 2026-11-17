@@ -74,7 +74,8 @@ Goose 暂缓向用户展示，统一从共享 Renderer 可见目录中隐藏：�
 Goose 以完整官方 `goose acp` 加入独立产品身份，复用共享 ACP、Binding、Fleet、审批、活动和用量缓冲。
 一个 Binding 一个 Host；精确 `session/load` 隔离历史，普通完成和确认取消可 Warm，不建私有池或生命周期。
 完整冻结 Bootstrap 通过原生 keyed System append 每轮替换，普通 prompt 仅投递 Dynamic Context。
-原生子代理和摘要拥有自己的 System，不额外复制父身份；原生 write/edit 无完整前像，不伪造 Diff。
+原生子代理和摘要拥有自己的 System，不额外复制父身份。原生 edit 的成功 before/after 进入共享精确替换片段；
+write 仅凭同路径显式 Created 回执生成新增 Diff，覆盖时没有旧前像则保持路径操作。
 
 完整目录在 initialize 后直接读官方 Provider inventory/defaults，不创建原生 Session；`thinking_effort` 沿共享目标模型按需查询，不重复读取 inventory。
 相同原生选项复用已有会话快照，省略重复 setter；未显式指定模型时不设置 Provider/model/effort，

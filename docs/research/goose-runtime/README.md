@@ -248,9 +248,10 @@ remove 发生在原生 load 之后、业务 P 之前；load 可能已短暂恢�
 原生工具启动携带 `_meta.goose.toolCall.toolName/extensionName`，参数保留在 rawInput。
 write 使用 path/content，edit 使用 path/before/after，shell 使用 command。
 write/edit 完成只返回文本与 locations，没有完整 before/after 或标准 ACP Diff；完整覆盖前像在此传输中不可得。
-edit 的确切片段可在原生参数详情中展示，但未知行号不能自行补齐为标准文件补丁。
-只有原生确实给出合法 patch 时才交共享 normalizer；当前默认工具缺少整文件 Diff，显示真实操作结果，
-不读修改后的文件伪造旧内容和整文件增删数。
+官方 1.59.2 的 `edit` 在成功终态后可将原始 before/after 作为共享精确替换片段展示和统计，
+不补造全局行号或完整文件。`write` 的同路径显式 Created 回执能够确认新增，再用原始 content
+生成完整新增 Diff；Wrote 覆盖仍无旧前像，只显示操作。两者沿共享配对和 normalizer，
+不读修改后的文件或原生数据库来补造历史。实现与验收归当前版本的 Goose 实施记录。
 
 shell 的完成 rawOutput 有 stdout、stderr、exit_code；exit 7 对应 failed。
 原生 9,000 字节输出未被 7.5 KiB 限制；Rovai 仍必须沿共享持久化输出预算截断，不能另做一份 Goose 预算。

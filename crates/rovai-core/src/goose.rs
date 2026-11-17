@@ -56,6 +56,74 @@ pub(crate) fn project_tool(message: &mut Value) {
     update["kind"] = json!(kind);
 }
 
+/// Reuse the shared Session/Prompt/ToolCall pairing. Native edit replaces one
+/// exact match; its before/after are fragments, never complete file states.
+pub(crate) fn enrich_tool_update(update: &mut Value, initial: Option<&Value>) {
+    if let Some(meta) = update.get_mut("_meta").and_then(Value::as_object_mut) {
+        meta.remove("rovaiGooseDiff");
+    }
+    let Some(initial) = initial else {
+        return;
+    };
+    for field in ["title", "kind", "rawInput", "locations"] {
+        if update[field].is_null() && !initial[field].is_null() {
+            update[field] = initial[field].clone();
+        }
+    }
+    if update["status"] != "completed" {
+        return;
+    }
+    let input = &initial["rawInput"];
+    let Some(path) = input["path"].as_str().filter(|path| !path.is_empty()) else {
+        return;
+    };
+    let diff = match initial
+        .pointer("/_meta/goose/toolCall/toolName")
+        .and_then(Value::as_str)
+    {
+        Some("edit") => {
+            let Some((before, after)) = input["before"].as_str().zip(input["after"].as_str())
+            else {
+                return;
+            };
+            if before == after {
+                return;
+            }
+            json!({"semanticKind":"exact_mutation", "entries":[{
+                "semantics":"exact_mutation", "path":path, "oldText":before, "newText":after
+            }]})
+        }
+        Some("write") => {
+            let Some(content) = input["content"]
+                .as_str()
+                .filter(|content| !content.is_empty())
+            else {
+                return;
+            };
+            // This official receipt is emitted only when the file did not
+            // exist. A successful overwrite supplies no previous file body.
+            let receipt = format!("Created {path} ({} lines)", content.lines().count());
+            if !update["content"].as_array().is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    block["type"] == "content"
+                        && block["content"]["type"] == "text"
+                        && block["content"]["text"].as_str() == Some(receipt.as_str())
+                })
+            }) {
+                return;
+            }
+            json!({"semanticKind":"complete_before_after", "entries":[{
+                "path":path, "changeKind":"add", "oldText":null, "newText":content
+            }]})
+        }
+        _ => return,
+    };
+    if !update["_meta"].is_object() {
+        update["_meta"] = json!({});
+    }
+    update["_meta"]["rovaiGooseDiff"] = diff;
+}
+
 pub(crate) fn usage(method: &str, params: &Value) -> Vec<crate::monitoring::ParsedRuntimeUsage> {
     use crate::monitoring::{
         ParsedRuntimeUsage, RuntimeInputSemantics, RuntimeUsageCounterMode, RuntimeUsageFields,

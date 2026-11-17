@@ -25205,6 +25205,14 @@ fn normalize_acp_event_with_completion(
                         "path":entries[0]["path"],"changeKind":entries[0]["changeKind"]});
                 }
             }
+            if adapter_kind == AdapterKind::GooseCli
+                && public_status == "completed"
+                && let Some(diff) = update.pointer("/_meta/rovaiGooseDiff")
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":"session/update.tool_call_update.completed",
+                    "semanticKind":diff["semanticKind"], "entries":diff["entries"]});
+            }
             if adapter_kind == AdapterKind::CommandCodeCli
                 && public_status == "completed"
                 && let Some(entries) = update.pointer("/_meta/rovaiCommandMutation/entries")
@@ -40586,6 +40594,50 @@ for line in sys.stdin:
                     (2, 0)
                 );
             }
+        }
+
+        for (name, input, receipt, expected_kind, counts) in [
+            (
+                "edit",
+                json!({"path":"src/a.txt","before":"old\n","after":"new\n","private":"GOOSE_PRIVATE"}),
+                "Edited src/a.txt (1 lines -> 1 lines)",
+                "exact_mutation",
+                (1, 1),
+            ),
+            (
+                "write",
+                json!({"path":"src/a.txt","content":"one\ntwo\n","private":"GOOSE_PRIVATE"}),
+                "Created src/a.txt (2 lines)",
+                "complete_before_after",
+                (2, 0),
+            ),
+        ] {
+            let initial = json!({"rawInput":input,"kind":"edit","_meta":{"goose":{"toolCall":{"toolName":name}}}});
+            let mut update = json!({"sessionUpdate":"tool_call_update","toolCallId":"goose-file","status":"completed",
+                "content":[{"type":"content","content":{"type":"text","text":receipt}}]});
+            crate::goose::enrich_tool_update(&mut update, Some(&initial));
+            let params = json!({"update":update});
+            let completion = acp::completed_action(AdapterKind::GooseCli, &params).unwrap();
+            let (_, payload) = normalize_acp_event_with_completion(
+                AdapterKind::GooseCli,
+                "session/update",
+                &params,
+                completion.as_ref(),
+            );
+            assert_eq!(payload["runtimeDiff"]["semanticKind"], expected_kind);
+            let admitted = crate::runtime_diff::admit_runtime_diff(
+                &payload,
+                std::path::Path::new("/repo"),
+                Some("goose-cli"),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(admitted.entries[0].path, "src/a.txt");
+            assert_eq!(
+                (admitted.entries[0].additions, admitted.entries[0].deletions),
+                counts
+            );
+            assert!(!payload.to_string().contains("GOOSE_PRIVATE"));
         }
 
         let query = "password=公开测试词 token=也照常展示";
