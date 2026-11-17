@@ -259,6 +259,25 @@ try{
   await checkOfflineMcpLoads()
  }else if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='model-options'){
   await checkModelOptionsWithoutExtensions()
+ }else if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='model-default'){
+  const host=await open({GOOSE_THINKING_EFFORT:'medium'})
+  const session=await host.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[],_meta:{provider:'openai',enabledExtensions:[]}})
+  const select=()=>host.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'model',value:'gpt-6.1-sol'})
+  const effort=result=>result.configOptions.find(option=>option.id==='thinking_effort')?.currentValue
+  const initial=effort(await select())
+  const explicit=effort(await host.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'thinking_effort',value:'high'}))
+  const reselected=effort(await select())
+  assert.equal(initial,'medium');assert.equal(explicit,'high');assert.equal(reselected,'high')
+  let resetErrorCode
+  await assert.rejects(host.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'thinking_effort',value:'default'}),error=>{
+   resetErrorCode=error.rpcError?.code
+   return resetErrorCode===-32602
+  })
+  const explicitMedium=effort(await host.rpc('session/set_config_option',{sessionId:session.sessionId,configId:'thinking_effort',value:'medium'}))
+  assert.equal(explicitMedium,'medium')
+  assert.equal(requests.length,0,'Model configuration research must not generate model responses')
+  checks.modelDefault={initial,explicit,reselected,resetErrorCode,explicitMedium,modelGenerations:requests.length}
+  await host.rpc('session/delete',{sessionId:session.sessionId})
  }else if(process.env.ROVAI_GOOSE_PROBE_SCOPE==='session-availability'){
   const host=await open({GOOSE_PROVIDER:undefined})
   await assert.rejects(host.rpc('session/new',{cwd:join(fixture,'workspace'),mcpServers:[]}),error=>!!error.rpcError)

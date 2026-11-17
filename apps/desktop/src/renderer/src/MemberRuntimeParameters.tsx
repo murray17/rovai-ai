@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { RuntimeModelSearch } from './RuntimeModelSearch'
 import { RuntimeParameterSelect } from './RuntimeParameterSelect'
-import { runtimeDefaultEffortLabel, runtimeDefaultModelLabel, runtimeEffortOption } from './runtime-model-presentation'
+import { runtimeEffortOption } from './runtime-model-presentation'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -618,7 +618,6 @@ function ModelFields({
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : supportsTargetOptions ? !optionsKnown || option || optionValue : option || storedOptionValue
   const refresh = onOpenModelCatalog ? () => ensureCatalog(true) : undefined
-  const defaultModelLabel = adapterKind === 'goose-cli' ? runtimeDefaultModelLabel(adapterKind) : uiAttribute('默认')
 
   return <>
     <div className="field-label runtime-model-field">
@@ -626,11 +625,7 @@ function ModelFields({
       <RuntimeModelSearch key={identity} open={open}
         onOpenChange={next => { setOpen(next); if (next) ensureCatalog(false, true) }}
         models={models} value={explicit?.modelId ?? 'runtime_default'}
-        label={explicit ? selectedModel?.displayName ?? explicit.modelId : defaultModelLabel}
-        defaultChoice={adapterKind === 'goose-cli' ? {
-          label: defaultModelLabel,
-          description: uiAttribute('新会话使用原生初始值；已有会话保留当前值。')
-        } : undefined}
+        label={explicit ? selectedModel?.displayName ?? explicit.modelId : uiAttribute('默认')}
         disabled={disabled} loading={loading}
         onRefresh={refresh} onSelect={selectModel} />
     </div>
@@ -638,7 +633,7 @@ function ModelFields({
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
       onOpen={() => ensureCatalog(false, true)} loading={supportsTargetOptions && loading}
-      defaultChoice={{ value: '', label: runtimeDefaultEffortLabel(adapterKind) }}
+      defaultChoice={{ value: '', label: uiAttribute('跟随模型默认值') }}
       choices={[
         ...(missing ? [{ value: optionValue, label: optionValue }] : []),
         ...optionChoices.map(choice => ({ ...choice, disabled: supportsTargetOptions && !optionsKnown }))

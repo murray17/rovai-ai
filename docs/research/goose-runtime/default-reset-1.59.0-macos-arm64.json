@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-16",
+  "runtime": "goose-cli",
+  "officialVersion": "1.59.0",
+  "upstreamCommit": "5d03ef6ed07ba59826328f1aff18d9a754ff8ad2",
+  "baseline": "81161b345fe3f3b5ede0a68e15b29ed2c071e7d9",
+  "platform": "macos-arm64",
+  "provider": "synthetic-loopback",
+  "scope": "model-default",
+  "qualificationPromotion": false,
+  "nativeEvidence": {
+    "configuredInitialEffort": "medium",
+    "explicitEffort": "high",
+    "sameModelReselectionEffort": "high",
+    "defaultValueErrorCode": -32602,
+    "explicitMediumEffort": "medium",
+    "modelGenerations": 0,
+    "nativeSessionDeleted": true
+  },
+  "sourceReview": {
+    "latestRelease": "1.59.2",
+    "relatedImplementationChangedSince1590": false,
+    "latestBinaryExecuted": false,
+    "nativeSelectionInheritsThinkingEffort": true,
+    "ordinaryProviderAcceptsDefaultSentinel": false
+  },
+  "executionChanges": false,
+  "conclusion": "Removing same-value setter skipping does not restore the native model's default thinking effort."
+}

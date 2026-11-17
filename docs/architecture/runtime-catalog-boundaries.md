@@ -59,7 +59,7 @@ Command Code 在 macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。�
 
 Goose 暂缓向用户展示，统一从共享 Renderer 可见目录中隐藏：各平台 Desktop 与 Web 的智能体设置页、
 成员 Runtime 选择器、首次引导、Skills 智能体选择器和用量筛选均不提供 Goose 入口。
-保留 closed identity、底层接入、既有配置与历史记录，不改写已有平台资格证据；模型和思考强度的行为与文案保持不变。
+保留 closed identity、底层接入、既有配置与历史记录，不改写已有平台资格证据；隐藏入口不改变模型与参数的原生执行语义。
 
 `enabled`、`qualified` 与 `preview` 可以进入 Product Runtime Availability；`enabled` 不宣称完整资格，
 `preview` 在内部保留缺失资格证据，用户界面不显示资格记录未齐备的提示。
