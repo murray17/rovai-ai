@@ -4,7 +4,7 @@ import { InlineProjectFileReference } from './InlineProjectFileReference'
 import { projectFileLink } from './project-file-reference'
 import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
 import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
-import { ExportGlyph, MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
+import { MessageExportDialog, MessageSelectButton, MessageSelectGlyph, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
 import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
@@ -7584,14 +7584,13 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
     }, 1_000)
     return () => window.clearInterval(timer)
   }, [live, run.id, run.executionEpoch, run.startedAt, run.createdAt])
-  const total = executionUsageTotal(run, usage)
-  if ((cancelling || starting) && total === null) return <span className="execution-run-status" role="status">
+  if (cancelling || starting) return <span className="execution-run-status" role="status">
     {uiAttribute(cancelling ? '正在停止…' : '启动中…')}
   </span>
-  if (live && total === null) return <span className="execution-run-metric">{duration}</span>
+  if (live) return <span className="execution-run-metric">{duration}</span>
+  const total = executionUsageTotal(run, usage)
   return <span className="execution-run-metric-group">
-    {(cancelling || starting) ? <span className="execution-run-status" role="status">{uiAttribute(cancelling ? '正在停止…' : '启动中…')}</span>
-      : run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
+    {run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
     {total !== null ? <ExecutionUsagePopover run={run} usage={usage} total={total} />
       : <ExecutionDurationPopover run={run} />}
   </span>
@@ -10396,7 +10395,7 @@ export function MessageActions({
         <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" title={uiAttribute('更多消息操作')} aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu" align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()} loop>
           <DropdownMenu.Item className="sidebar-action-menu-item" disabled={forkBusy} onSelect={onFork}><ForkIcon /><span>{uiAttribute('从此处分叉')}</span></DropdownMenu.Item>
-          {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><ExportGlyph /><span>{uiAttribute('导出')}</span></DropdownMenu.Item>}
+          {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><MessageSelectGlyph /><span>{uiAttribute('多选')}</span></DropdownMenu.Item>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root> : onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}

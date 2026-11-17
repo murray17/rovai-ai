@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-16
+last_updated: 2026-11-17
 ---
 
 # Thread 会话工作区
@@ -53,7 +53,7 @@ Composer 内的光标／选区变化不触发历史几何测量；归属判断�
 ## Thread 分叉
 
 已发布队员公屏消息保留复制、回复，并常驻三点入口；离队作者及副本中的历史消息同样可用。
-气泡提供“从此处分叉 / 导出”（“Fork chat from here / Export”）。用户消息只保留既有导出入口；
+气泡提供“从此处分叉 / 多选”（“Fork chat from here / Select messages”）。用户消息只保留既有多选入口；
 撤回、删除、流式内容、执行卡片、单聊和 Mission 不提供分叉。
 复用现有菜单与主题；消息菜单按最长项目撑开（`width:max-content; min-width:0`），不改变其他菜单的宽度。
 图文垂直居中，图标 16px、间距 8px、文字行高 20px；键盘和触屏使用同一入口。
@@ -74,7 +74,7 @@ Composer 内的光标／选区变化不触发历史几何测量；归属判断�
 
 ## 消息导出
 
-用户消息操作栏的双勾列表图标“选择多条消息”，或队员消息三点菜单的“导出”，进入既有多选状态；会话顶栏不提供导出入口。仅选择当前已加载的已发布公开消息，
+用户消息操作栏的双勾列表图标“多选消息”，或队员消息三点菜单中同款图标的“多选”，进入既有多选状态并预选当前消息；会话顶栏不提供导出入口。仅选择当前已加载的已发布公开消息，
 按消息序号输出；撤回、乐观 Pending、系统记录与 Mission 起始记录不参与。支持单选、Shift 范围选择、
 全选已加载、清空、取消与 Escape。接收新消息不自动扩大选择，不额外补载全部历史。
 切换 Thread 清除选择和预览，返回原 Thread 不恢复旧状态。
@@ -861,7 +861,7 @@ Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 
 Runtime 的 private thought/reasoning 文本不进入 Renderer state、搜索、缓存或 disclosure；仅消费不含思考正文的
 `thinking | executing` phase 与独立准入的短标题来切换上述反馈，并把 phase edge 作为匿名公开正文的分段边界。
 Thread 执行卡片的普通等待提示与正文共用字号、行高和文字起点，加载图标放在提示文字后；底部、桌面浮层和手机端切入首行正文时不改变卡片位置或单行高度。
-Run 卡片摘要的 Token 总量只使用 Core 的 `displayTotalTokens`。有数值时显示一个可点击的千进制 `xxK`，至多一位小数，显式零为 `0K`；成功、失败、取消和运行中共用准入，不根据分项、结算或完整性重算。无值时不显示 Token 数字，保留运行耗时或终态时钟入口；迟到有效投影到达后更新。有数值时用量入口替代时钟，点击保留原有 Input Token、Output Token、Cache Read、Cache Write 和执行耗时明细；缺失字段显示 `—`。卡片摘要不回退分项，不增加完整性标签、“部分”、`≥` 或 `≈`；明细复用已有投影，不重算总量或发起额外查询。原生指标与旧 Run 边界见 [Runtime Execution Metrics v8](../../contracts/runtime-execution-metrics-v8.md)。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Thread Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
+Run 卡片保留原有状态优先级：启动/停止时显示对应状态，运行中只显示 live 耗时，已有用量也不显示 Token 入口。终态卡片摘要的 Token 总量只使用 Core 的 `displayTotalTokens`，有数值时显示一个可点击的千进制 `xxK`，至多一位小数，显式零为 `0K`；成功、失败、取消共用数值准入，不根据分项、结算或完整性重算。终态无值时不显示 Token 数字，使用原有时钟入口；迟到有效投影到达后更新。有数值时用量入口替代时钟，点击保留原有 Input Token、Output Token、Cache Read、Cache Write 和执行耗时明细；缺失字段显示 `—`。卡片摘要不回退分项，不增加完整性标签、“部分”、`≥` 或 `≈`；明细复用已有投影，不重算总量或发起额外查询。原生指标与旧 Run 边界见 [Runtime Execution Metrics v8](../../contracts/runtime-execution-metrics-v8.md)。执行台标题右侧的弱化圆环默认并排显示一位小数百分比，与气泡保持一致（未知为 `—`），读取当前队员 Thread Conversation 的原生 Session 上下文；切换同一会话的 Run 卡片不改变圆环归属。气泡只显示 `used / window` 和比例，单有窗口不显示 `0%`；只有可信原生比例时显示该比例，数量仍为 `— / —`，不反推 used 或窗口。来源、栅栏和字段语义见 [Runtime Execution Metrics v5](../../contracts/runtime-execution-metrics-v5.md)。
 上下文圆环填充与百分比共用中性前景色：默认使用 `--muted`，悬浮或气泡展开时使用 `--ink`；
 Run 状态与占用比例不触发圆环状态色。所有已注册配色使用同一规则。
 需要审批、网络恢复、重试或停止时继续显示明确状态。非终态过程不显示耗时总结，非聚焦执行摘要在已有输出且没有思考反馈时显示“执行中”。成功后才显示“工作了 {时长}”
