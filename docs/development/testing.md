@@ -263,6 +263,9 @@ Skills 管理的用户 `.agents/skills` 读取与原共享生命周期。UI 使�
 
 Goose 目录精简继续扩展以上 health/live-model owners，验证完整目录零 Session/setter、
 inventory/defaults 错误不降级建会话、目标查询零 inventory、同选择跳过、Provider 回显更新和缺失回显失效。
+显式目录刷新继续扩展同一 health owner，覆盖原生刷新回执后仍在执行、already-refreshing、
+静态 Provider、部分成功／全部失败、刷新接口错误及原探测期限耗尽；普通读取和目标参数不触发原生刷新。
+共享平台矩阵和 Renderer 现有入口 owners 覆盖 Goose 四个平台键开放，Windows 原资格证据保持；不新增 Rust 测试函数。
 持久化沿现有 slow owner `target_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`
 扩展 Goose，验证目标只更新选项、不续完整目录时间、不更改默认/名称且不恢复已删除模型。
 该 owner 必须使用 `--features slow-tests,extended-tests --lib target_catalog_updates_accumulate`，

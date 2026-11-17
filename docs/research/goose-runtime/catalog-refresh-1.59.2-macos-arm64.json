@@ -1,0 +1,105 @@
+{
+  "date": "2026-11-17",
+  "userSequence": 207,
+  "platform": "macos-arm64",
+  "officialGoose": "1.59.2",
+  "baseMain": "24efa0737a6f52839f2fba7412998d49b4a0604c",
+  "provider": "synthetic-loopback",
+  "paidModelRequests": 0,
+  "nativeCliModified": false,
+  "catalogRefresh": {
+    "ordinaryOpenUsesCache": true,
+    "nativeRefreshObserved": true,
+    "waitedForCompletion": true,
+    "refreshMs": 3502.795,
+    "failedRefreshRetainsModels": true,
+    "failedRefreshKeepsObservedAt": true,
+    "modelGenerations": 0
+  },
+  "nativeProbeSessionsRemaining": 0,
+  "business": {
+    "successfulRunsObserved": 20,
+    "warm": true,
+    "steer": {
+      "nativeReceiptBeforeCompletion": true,
+      "sameRun": true,
+      "warmSuccessor": true
+    },
+    "cancel": {
+      "sameHost": true,
+      "samePid": true,
+      "newRun": true,
+      "newLease": true,
+      "oldLeaseRejected": true,
+      "cleanup": "reusable"
+    },
+    "mcp": {
+      "differentCwd": true,
+      "argvVerbatim": true,
+      "saveKeepsHost": true,
+      "replacementSameSession": true,
+      "unassignmentTaskSucceeded": true,
+      "withdrawnToolAbsent": true,
+      "currentAssignedRetained": true,
+      "userNativeRetained": true,
+      "withdrawalPersistsAfterCoreRestart": true
+    },
+    "files": {
+      "writeAndEdit": true,
+      "sharedProjection": true
+    },
+    "defaultSelection": {
+      "warm": true,
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "cold": true
+    }
+  },
+  "regression": {
+    "rustWorkspacePassed": 484,
+    "rustWorkspaceFailed": 0,
+    "rustWorkspaceIgnored": 1,
+    "healthOwner": {
+      "passed": 1,
+      "covers": [
+        "ordinary read",
+        "refresh completion",
+        "already refreshing",
+        "partial provider failure",
+        "all provider failures",
+        "static provider",
+        "RPC failure",
+        "existing deadline",
+        "target does not refresh inventory"
+      ]
+    },
+    "vitestPassed": 3344,
+    "vitestSkipped": 2,
+    "nodeRegressionPassed": 388,
+    "nodeRegressionSkipped": 2,
+    "typecheck": true,
+    "capabilityWorkspaceElectron": true,
+    "runtimeModelPickerElectron": true,
+    "docsGates": true
+  },
+  "visibility": {
+    "sharedProductDirectory": true,
+    "platformKeys": [
+      "macos-arm64",
+      "macos-x64",
+      "windows-x64",
+      "linux-x64"
+    ],
+    "macosX64Admission": "preview",
+    "windowsQualificationUnchanged": true
+  },
+  "unchangedLimitations": [
+    "Goose silent MCP initialization can block Session restore",
+    "Old Provider missing required credentials can block cold restore"
+  ],
+  "notVerified": [
+    "New Windows/Linux/macOS Intel runtime qualification",
+    "Packaged App at the time of this source-level record",
+    "Real-account LLM on this revision"
+  ]
+}

@@ -378,21 +378,12 @@ mod tests {
                     let admission = registry.platform_admission(runtime_kind, platform);
                     let expected = match platform {
                         HostPlatformKey::WindowsX64 => RuntimePlatformAdmissionStatus::Qualified,
-                        HostPlatformKey::MacosArm64 | HostPlatformKey::LinuxX64 => {
-                            RuntimePlatformAdmissionStatus::Preview
-                        }
-                        HostPlatformKey::MacosX64 => RuntimePlatformAdmissionStatus::NotQualified,
+                        HostPlatformKey::MacosArm64
+                        | HostPlatformKey::MacosX64
+                        | HostPlatformKey::LinuxX64 => RuntimePlatformAdmissionStatus::Preview,
                     };
                     assert_eq!(admission.status(), expected);
-                    assert_eq!(
-                        admission.allows_runtime_use(),
-                        matches!(
-                            platform,
-                            HostPlatformKey::MacosArm64
-                                | HostPlatformKey::LinuxX64
-                                | HostPlatformKey::WindowsX64
-                        )
-                    );
+                    assert!(admission.allows_runtime_use());
                     assert_eq!(
                         admission.is_qualified(),
                         platform == HostPlatformKey::WindowsX64

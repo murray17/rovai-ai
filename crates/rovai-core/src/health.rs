@@ -444,13 +444,14 @@ pub async fn refresh_model_catalog(
     path: &Path,
     kind: AdapterKind,
 ) -> Result<RefreshedModelCatalog> {
-    refresh_model_catalog_for_selection(path, kind, None).await
+    refresh_model_catalog_for_selection(path, kind, None, false).await
 }
 
 pub async fn refresh_model_catalog_for_selection(
     path: &Path,
     kind: AdapterKind,
     target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
+    force_refresh: bool,
 ) -> Result<RefreshedModelCatalog> {
     let purpose = RuntimeLaunchPurpose::AvailabilityCheck;
     if !runtime_launch_allowed(kind, purpose) {
@@ -512,6 +513,7 @@ pub async fn refresh_model_catalog_for_selection(
                 purpose,
                 true,
                 target,
+                force_refresh,
                 None,
             )
             .await?;
@@ -2030,6 +2032,7 @@ async fn acp_probe_at(
         purpose,
         catalog_requested && kind.acp_selected_model_effort_key().is_some(),
         None,
+        false,
         reported_version.as_deref(),
     )
     .await;
@@ -2137,6 +2140,7 @@ async fn run_acp_probe(
         purpose,
         false,
         None,
+        false,
         version.as_deref(),
     )
     .await
@@ -2150,6 +2154,7 @@ async fn run_acp_probe_with_scope(
     purpose: RuntimeLaunchPurpose,
     catalog_only: bool,
     target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
+    force_refresh: bool,
     reported_version: Option<&str>,
 ) -> Result<(Value, Option<Value>)> {
     if !runtime_launch_allowed(kind, purpose) {
@@ -2272,10 +2277,9 @@ async fn run_acp_probe_with_scope(
                 bail!("Runtime did not negotiate ACP v1");
             }
             if kind == AdapterKind::GooseCli && catalog_only && !include_session {
-                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":2,"method":"_goose/unstable/providers/list","params":{"providerIds":[]}})).await?;
-                let inventory = read_rpc_result(lines, 2).await?;
-                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":3,"method":"_goose/unstable/defaults/read","params":{}})).await?;
-                let defaults = read_rpc_result(lines, 3).await?;
+                let inventory = goose_provider_inventory(stdin, lines, force_refresh).await?;
+                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":5,"method":"_goose/unstable/defaults/read","params":{}})).await?;
+                let defaults = read_rpc_result(lines, 5).await?;
                 return Ok((
                     initialize,
                     Some(json!({"_meta":{
@@ -3399,6 +3403,56 @@ async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Va
         }
         Err(error) => Err(error),
     }
+}
+
+async fn goose_provider_inventory(
+    stdin: &mut ManagedChildStdin,
+    lines: &mut BoundedLineReader<ManagedChildStdout>,
+    force_refresh: bool,
+) -> Result<Value> {
+    if force_refresh {
+        write_json_line(stdin, &json!({"jsonrpc":"2.0","id":2,"method":"_goose/unstable/providers/inventory/refresh","params":{"providerIds":[]}})).await?;
+        let refresh = read_rpc_result(lines, 2).await?;
+        // The native reply acknowledges jobs, not their completion. Observe only
+        // those jobs within the enclosing probe's existing absolute deadline.
+        let providers: Vec<&str> = refresh["started"]
+            .as_array()
+            .context("Goose inventory refresh acknowledgement missing")?
+            .iter()
+            .filter_map(Value::as_str)
+            .chain(
+                refresh["skipped"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|entry| entry["reason"] == "already_refreshing")
+                    .filter_map(|entry| entry["providerId"].as_str()),
+            )
+            .collect();
+        if !providers.is_empty() {
+            loop {
+                write_json_line(stdin, &json!({"jsonrpc":"2.0","id":3,"method":"_goose/unstable/providers/list","params":{"providerIds":providers}})).await?;
+                let inventory = read_rpc_result(lines, 3).await?;
+                let entries = inventory["entries"]
+                    .as_array()
+                    .context("Goose provider inventory missing")?;
+                if entries.iter().any(|entry| entry["refreshing"] == true) {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                if entries.iter().all(|entry| {
+                    entry["lastRefreshError"]
+                        .as_str()
+                        .is_some_and(|error| !error.is_empty())
+                }) {
+                    bail!("Goose provider inventory refresh failed");
+                }
+                break;
+            }
+        }
+    }
+    write_json_line(stdin, &json!({"jsonrpc":"2.0","id":4,"method":"_goose/unstable/providers/list","params":{"providerIds":[]}})).await?;
+    read_rpc_result(lines, 4).await
 }
 
 async fn write_json_line(stdin: &mut ManagedChildStdin, value: &Value) -> Result<()> {
@@ -5076,6 +5130,14 @@ while IFS= read -r ignored; do :; done
                 vec!["provider"],
             ),
             ("catalog", false, None, true, vec![]),
+            ("refresh", false, None, true, vec![]),
+            ("refresh_already", false, None, true, vec![]),
+            ("refresh_partial", false, None, true, vec![]),
+            ("refresh_static", false, None, true, vec![]),
+            ("refresh_rpc_error", false, None, false, vec![]),
+            ("refresh_provider_error", false, None, false, vec![]),
+            ("refresh_hang", false, None, false, vec![]),
+            ("refresh_target", true, Some("native/model-a"), true, vec![]),
             ("inventory_error", false, None, false, vec![]),
             ("defaults_error", false, None, false, vec![]),
             ("target_same", true, Some("native/model-a"), true, vec![]),
@@ -5127,6 +5189,7 @@ while IFS= read -r ignored; do :; done
 import json, sys
 case = {case:?}
 options = dict(provider='native', model='model-a', thinking_effort='high')
+polls = 0
 for line in sys.stdin:
     request = json.loads(line)
     with open({log:?}, 'a') as out: out.write(json.dumps(request) + '\n')
@@ -5146,10 +5209,25 @@ for line in sys.stdin:
     if method in ('session/new', 'session/set_config_option'):
         result = {{'sessionId':'goose-probe-only','configOptions':[{{'id':k,'currentValue':v}} for k,v in options.items()]}}
     if method == 'session/set_config_option' and (case == 'target_no_echo' or (case == 'provider_no_echo' and params['configId'] == 'provider')): result = {{}}
-    if method == '_goose/unstable/providers/list': result = {{'entries':[{{'providerId':'native','configured':True,'available':True,'models':[{{'id':'model-a'}}]}}]}}
+    if method == '_goose/unstable/providers/inventory/refresh':
+        result = {{'started':['native'],'skipped':[]}}
+        if case == 'refresh_already': result = {{'started':[],'skipped':[{{'providerId':'native','reason':'already_refreshing'}}]}}
+        if case == 'refresh_partial': result['started'].append('unavailable')
+        if case == 'refresh_static': result = {{'started':[],'skipped':[{{'providerId':'native','reason':'does_not_support_refresh'}}]}}
+    if method == '_goose/unstable/providers/list':
+        entry = {{'providerId':'native','configured':True,'available':True,'models':[{{'id':'model-a'}}]}}
+        if params.get('providerIds'):
+            polls += 1
+            entry['refreshing'] = case == 'refresh_hang' or (case in ('refresh','refresh_already','refresh_partial') and polls == 1)
+            if case == 'refresh_provider_error': entry['lastRefreshError'] = 'fixture refresh failed'
+        elif case in ('refresh','refresh_already','refresh_partial'):
+            assert polls >= 2, 'refresh acknowledgement is not completion'
+            entry['models'].append({{'id':'model-b'}})
+        result = {{'entries':[entry]}}
+        if case == 'refresh_partial' and params.get('providerIds'): result['entries'].append({{'providerId':'unavailable','refreshing':False,'lastRefreshError':'fixture unavailable'}})
     if method == '_goose/unstable/defaults/read': result = {{'providerId':'native','modelId':'model-a'}}
     response = {{'jsonrpc':'2.0','id':request['id'],'result':result}}
-    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('target_and_delete_error','session/set_config_option'), ('target_and_delete_error','session/delete'), ('delete_error','session/delete'), ('inventory_error','_goose/unstable/providers/list'), ('defaults_error','_goose/unstable/defaults/read')]:
+    if (case, method) in [('session_error','session/new'), ('target_error','session/set_config_option'), ('target_and_delete_error','session/set_config_option'), ('target_and_delete_error','session/delete'), ('delete_error','session/delete'), ('inventory_error','_goose/unstable/providers/list'), ('defaults_error','_goose/unstable/defaults/read'), ('refresh_rpc_error','_goose/unstable/providers/inventory/refresh')]:
         response = {{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32602,'message':case + ':' + method}}}}
     print(json.dumps(response), flush=True)
 "#, log=log.to_string_lossy())).unwrap();
@@ -5162,6 +5240,7 @@ for line in sys.stdin:
                 RuntimeLaunchPurpose::HealthProbe,
                 true,
                 target.map(|model| (model, None)),
+                case.starts_with("refresh"),
                 Some("1.59.0"),
             )
             .await;
@@ -5172,6 +5251,10 @@ for line in sys.stdin:
                     started.elapsed() < Duration::from_secs(3),
                     "cleanup must not consume the full probe window"
                 );
+            }
+            if case == "refresh_hang" {
+                assert!(started.elapsed() >= Duration::from_secs(30));
+                assert!(started.elapsed() < Duration::from_secs(34));
             }
             let requests: Vec<Value> = std::fs::read_to_string(&log)
                 .unwrap()
@@ -5205,6 +5288,11 @@ for line in sys.stdin:
                         .iter()
                         .any(|r| r["method"] == "_goose/unstable/providers/list")
                 );
+                assert!(
+                    !requests
+                        .iter()
+                        .any(|r| { r["method"] == "_goose/unstable/providers/inventory/refresh" })
+                );
             } else if let Some(request) = requests.iter().find(|r| r["method"] == "session/new") {
                 assert!(
                     request["params"]["_meta"]
@@ -5228,16 +5316,23 @@ for line in sys.stdin:
             if !include_session {
                 assert!(!requests.iter().any(|r| r["method"] == "session/new"));
                 if succeeds {
+                    let mut expected = vec!["initialize"];
+                    if case.starts_with("refresh") {
+                        expected.push("_goose/unstable/providers/inventory/refresh");
+                        if case != "refresh_static" {
+                            expected.extend(["_goose/unstable/providers/list"; 2]);
+                        }
+                    }
+                    expected.extend([
+                        "_goose/unstable/providers/list",
+                        "_goose/unstable/defaults/read",
+                    ]);
                     assert_eq!(
                         requests
                             .iter()
                             .map(|r| r["method"].as_str().unwrap())
                             .collect::<Vec<_>>(),
-                        [
-                            "initialize",
-                            "_goose/unstable/providers/list",
-                            "_goose/unstable/defaults/read"
-                        ]
+                        expected
                     );
                     let (_, catalog) = result.as_ref().unwrap();
                     let models = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
@@ -5246,6 +5341,9 @@ for line in sys.stdin:
                     )
                     .unwrap();
                     assert!(models[0].is_default);
+                    if matches!(case, "refresh" | "refresh_already" | "refresh_partial") {
+                        assert!(models.iter().any(|model| model.id == "native/model-b"));
+                    }
                     assert!(models[0].options.is_empty());
                     assert_eq!(
                         models[0].runtime_metadata.as_ref().unwrap()["modelOptionsResolved"],

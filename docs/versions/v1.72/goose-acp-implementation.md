@@ -449,3 +449,29 @@ stdio 初始化候选只修改原生一个文件，握手和错误 stderr 收尾
 补回旧凭据后，以同 Session 执行新 Provider 成功且保留历史。普通服务端 401 和可选凭据对照没有阻断。
 提前传 load metadata 或提前调用 setter 均不能解决缺必需凭据，正式修复仍需原生恢复入口支持。
 当前正式 CLI、App、Rovai 执行代码、默认强度行为和平台资格保持；未把本地候选标成已部署修复。
+
+## 显式模型刷新与三端开放（User sequence 207）
+
+复用 `rovai/goose-file-diff`，在保留文件 Diff、关闭自动命名及可用性研究提交后，合入
+`origin/main@24efa0737a6f52839f2fba7412998d49b4a0604c`。
+
+- 显式刷新完整模型列表将既有 `forceRefresh` 传给官方 inventory/refresh，
+  原生回执后仍沿同一探测期限等待任务结束，再读取完整库存和默认值。
+  已在刷新的项一起等待；静态／不支持刷新项沿原生库存读取。单个 Provider 失败不丢弃其他成功结果，
+  全部刷新失败、接口错误或超时不覆盖旧可用目录。
+- 普通打开目录、健康检查和目标模型思考强度查询不增加全量原生刷新，不创建目录 Session。
+- 从共享可见目录解除 Goose 隐藏，覆盖各平台 Desktop/Web 的设置、成员、引导、Skills 和筛选。
+  macOS Intel 按维护者要求开放 Preview；macOS arm64、Linux 的 Preview 和 Windows qualified 证据保持。
+- 第 2、5 项保留已确认的官方原生限制；不交付本地修改的 Goose，不更改默认强度行为。
+
+官方 Homebrew Goose 1.59.2 与产品 Core 在独立 Core/data/Skills/MCP/Goose 根完成验收：
+显式刷新拿到 Provider 新增模型，普通打开不重新取库存，等待约 250 ms 的受控响应后才提交新目录；
+实测整次刷新约 3.50 秒，包含其他原生 Provider 的处理，不能将受控延迟描述为整次耗时。
+全部刷新失败沿现有错误回执，旧模型与 observedAt 保持；目录阶段零模型生成、零残留探测 Session。
+业务主链观察到 20 个成功 Run，Warm、精确冷恢复、文件 Diff、Steer、取消复用和 MCP 撤回断言均通过。
+完整白名单见[本轮产品验收](../../research/goose-runtime/catalog-refresh-1.59.2-macos-arm64.json)。
+
+`pnpm test`、`pnpm typecheck`、默认 Rust workspace、原 health extended owner、
+`pnpm test:capability-workspace` 与 `pnpm test:runtime-model-picker` 通过。
+Rust owner 扩展原函数覆盖部分成功、全部失败、已有任务及总期限，不新增测试函数。
+本轮未补做 Windows/Linux/Intel 资格，也未将受控 Provider 当成真实账号验证；App 合并安装回执由交付记录独立确认。

@@ -5393,14 +5393,21 @@ impl Core {
             kind.as_str()
         );
         let catalog = with_runtime_configuration(kind, &search, async {
-            health::refresh_model_catalog_for_selection(&path, kind, target)
-                .await
-                .map_err(|error| {
-                    let failure = health::model_catalog_failure(kind, &error, &path);
-                    anyhow::Error::new(RuntimeFailureError::new(failure.clone()))
-                        .context(failure.detail.unwrap_or_default())
-                        .context(failure.summary)
-                })
+            health::refresh_model_catalog_for_selection(
+                &path,
+                kind,
+                target,
+                check_context
+                    .as_ref()
+                    .is_some_and(|context| context.force_refresh),
+            )
+            .await
+            .map_err(|error| {
+                let failure = health::model_catalog_failure(kind, &error, &path);
+                anyhow::Error::new(RuntimeFailureError::new(failure.clone()))
+                    .context(failure.detail.unwrap_or_default())
+                    .context(failure.summary)
+            })
         })
         .await;
         let Some(_update) = self.runtime_check_update_guard(&search).await else {
