@@ -902,11 +902,15 @@ mod tests {
                     "sequence": 9,
                     "snippet": "private full search result"
                 }],
-                "truncated": false,
-                "searchIncomplete": false
+                "truncated": false
             }),
         );
         assert_eq!(projected["canonicalInput"]["query"], "handoff decision");
+        assert!(
+            projected["canonicalResult"]
+                .get("searchIncomplete")
+                .is_none()
+        );
         assert_eq!(
             projected["canonicalResult"]["results"][0]["messageId"],
             "message-1"
@@ -1356,13 +1360,14 @@ mod tests {
                     }
                 })).collect::<Vec<_>>(),
                 "truncated": false,
-                "searchIncomplete": false,
+                "searchIncomplete": true,
                 "body": "TOP_LEVEL_RAW_BODY_MUST_NOT_PERSIST",
                 "snippet": "TOP_LEVEL_RAW_SNIPPET_MUST_NOT_PERSIST",
                 "token": "TOP_LEVEL_RAW_TOKEN_MUST_NOT_PERSIST",
                 "authorization": "TOP_LEVEL_RAW_AUTHORIZATION_MUST_NOT_PERSIST"
             }),
         );
+        assert_eq!(projected["canonicalResult"]["searchIncomplete"], true);
         let encoded = serde_json::to_string(&projected).unwrap();
         for forbidden in [
             "RAW_BODY_MUST_NOT_PERSIST",

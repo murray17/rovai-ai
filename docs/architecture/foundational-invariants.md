@@ -220,7 +220,7 @@ last_updated: 2026-11-12
 
 - ThreadMessage 是唯一公共消息事实；ConversationMessage 只服务目标成员的私有连续性。公共 A2A、用户消息和允许的 Runtime 自动输出都必须先越过同一 publication fence，之后才可进入 History、Context、通知或 Delivery。
 - History 的稳定职责分为 Thread discovery、单一显式 Thread 内 search/read、跨 Thread public search 和按 exact ID/sequence 分页读取；工具只返回结构化、有界、可继续的结果，不恢复旧 Summary 或让 relevance search 取代权威顺序读取。中文/短查询、转义、派生索引与 tombstone 使用确定性合同，索引可重建且不成为第二真源。
-- `rovai thread read` 提供 timeline、exact item（`messageId`）和回复链（`replyChain`）。timeline 与回复链可用互斥的 `before/after` 分页，默认 limit 为 20、最大 100；`after: 0` 从最早可见消息开始。请求不公开 `mode/direction/around/cursor`，显式 Thread ID 只改变单一 target。精确字段由 [History v17](../contracts/camp-history-v17.md) 拥有。
+- `rovai thread read` 提供 timeline、exact item（`messageId`）和回复链（`replyChain`）。timeline 与回复链可用互斥的 `before/after` 分页，默认 limit 为 20、最大 100；`after: 0` 从最早可见消息开始。请求不公开 `mode/direction/around/cursor`，显式 Thread ID 只改变单一 target。精确字段由 [History v18](../contracts/camp-history-v18.md) 拥有。
 - 每个受认证队员都可访问所有存续 Thread 的公共历史；ThreadMember 只拥有参与、寻址与执行语义，不是公共历史 ACL。显式 `thread.read`、`thread.search` 和 `history.search` 可读取各自发布边界内仍 recallable 或本队员 Delivery 仍 waiting 的消息，但不改变 claim 或撤回资格。已撤回正文不能由 ID、搜索命中、旧 Manifest 或引用闭包恢复；`thread.read` 仅在边界内投影英文状态项。`thread.read` 使用目标 Thread 的实时边界，ContextManifest catalog 只保存 discovery 时序证据。
 - 已保存 Quote 的文本独立于来源消息生命周期。Agent-facing 投影只校验承载消息的权限与可见性，并输出 `kind/text`；不重读、重验或过滤来源。旧冻结输入保持原字节，见 [Message Quotes v2](../contracts/message-quotes-v2.md)。
 - `thread.message.send` 只有 `automatic | public_only` 两种持久寻址意图。只有显式 built-in routing operation 且意图允许 Agent addressing 时才创建 Delivery；Runtime 自动 final、普通用户消息和纯 public publication 不能靠正文意外唤醒 Agent。
@@ -380,7 +380,7 @@ last_updated: 2026-11-12
 - 新公开 batch AgentRun 不自动生成 `SHARED_CONVERSATION`、历史摘要或遗漏 locator。`RUN_INPUT` 仍完整有序。`RUN_FACTS.historyHint` 依据本 Agent 在此 Thread 上一次有效 accepted ACK 对应执行前公屏尾 `P` 以及本轮 claim 冻结的额外可见消息布尔结果选四种完整句子；存在只表示额外可见消息，不增加工作责任、不要求读取。提示是历史参考点，不代表阅读或完成，也不是 `thread.read --before` 游标。Charter 保留不推断遗漏、仅需当前工作时读取的纪律；`RUN_INPUT` 和已有上下文足够就直接推进，仅在缺少当前工作所需 Thread context 时 `rovai thread read`。
 - claim 同一事务用 `P`、本轮公屏尾 `T`、最终领取进入 `RUN_INPUT.messages` 的全部 ID `I` 与当前 Agent `A` 检查额外可见消息：`P > 0` 查 `(P, T]`、`P = 0` 查 `<= T`，首轮也查实际历史。可见性沿用当前 Thread `thread.read` 时间线的同 Thread／非 tombstone 规则，撤回占位符计入；仅排除 `I` 和 `author_type = agent, author_id = A`。发给其他 Agent 的可见消息及未领取队尾仍计入；不能用 waiting Delivery 候选代替历史可见集合。只做无正文、无数量、无分页上限的 `EXISTS`，失败回滚整个 claim，不创建无判断结果的 Run。Run 内部冻结 `P` 与布尔值，不复制历史；后续消息、撤回或水位变化均不重算原提示。
 - `(ThreadId, AgentId)` 接受水位只由匹配 Run/binding/generation 的整批 Runtime accepted ACK 推进，并跨 Native Session 保留；prepared、rejected、unknown、claim、read/search、发布、执行结束、stale ACK 或后续 Stop 都不能新增或回退有效边界。同一 Run 复用冻结 Manifest／payload 和原输入。
-- `RUN_INPUT` 的承载消息继续受 claim 与撤回边界约束；其中已保存的 quotes 不再按来源重新过滤。显式 read/search 按 [Camp History v17](../contracts/camp-history-v17.md) 使用主动查询可见性：已发布、未撤回的原文可读；撤回项只进入 `thread.read` 的时间线和按 ID 结果，以 `Message withdrawn` 状态占一个分页位置，不进入搜索或冻结输入。
+- `RUN_INPUT` 的承载消息继续受 claim 与撤回边界约束；其中已保存的 quotes 不再按来源重新过滤。显式 read/search 按 [Camp History v18](../contracts/camp-history-v18.md) 使用主动查询可见性：已发布、未撤回的原文可读；撤回项只进入 `thread.read` 的时间线和按 ID 结果，以 `Message withdrawn` 状态占一个分页位置，不进入搜索或冻结输入。
 - `thread.read` 使用调用时最新授权和可见状态，不受 ContextManifest 的历史上下界限制；timeline/reply_chain 默认 20、显式 1–100，可用排他的 `before` 倒翻或 `after` 正向翻页，结果按时间正序并提供真实续读位置。它不 claim Delivery、不关闭撤回、不推进 accepted 水位，也不把读到的消息变成当前 Run 输入。
 - Agent 与 User 的 body/snippet/search offset 使用分开、版本化投影。外部渠道引用必须经 ThreadMessage Structured Content 进入标准投影，不能用 prompt override 绕过可见性或 evidence。
 

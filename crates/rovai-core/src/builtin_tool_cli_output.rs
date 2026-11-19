@@ -438,9 +438,10 @@ fn validate_projected_document(operation: &str, success: bool, value: &Value) ->
             "thread.read" if legacy_addressing || legacy_authors => {
                 crate::team_tool_catalog::legacy_camp_read_success_schema(legacy_addressing)
             }
-            "thread.search" | "history.search" if legacy_authors => {
-                crate::team_tool_catalog::legacy_camp_search_success_schema(
+            "thread.search" | "history.search" if value.get("searchIncomplete").is_some() => {
+                crate::team_tool_catalog::frozen_camp_search_success_schema(
                     operation == "history.search",
+                    legacy_authors,
                 )
             }
             _ => agent_output_schema(operation)?,
@@ -978,12 +979,41 @@ mod tests {
 
     #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
-        // v14 changes legacy avatar contents, not v13's JSON shape. Reuse the
-        // same golden; source/framing semantics belong to member_avatar tests.
-        let golden: Value = serde_json::from_str(include_str!(
+        let mut golden: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/builtin-tool-agent-output-v13.json"
         ))
         .unwrap();
+        // v16 retires one top-level field in these two operations. Exercise
+        // the frozen v13–15 shape before applying that delta to the live golden.
+        for operation in ["thread.search", "history.search"] {
+            let live_schema = agent_output_schema(operation).unwrap();
+            let historical = &golden[operation]["agentOutput"];
+            for results in [&historical["results"], &json!([])] {
+                for incomplete in [false, true] {
+                    let frozen = json!({"results": results, "truncated": false, "searchIncomplete": incomplete});
+                    assert!(validate_schema(&frozen, &live_schema).is_err());
+                    let envelope = BuiltinToolInvocationEnvelope::success(
+                        operation,
+                        "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                        frozen.clone(),
+                    )
+                    .unwrap();
+                    assert_eq!(project_envelope(envelope).unwrap(), frozen);
+                }
+            }
+            let mut invalid = historical.clone();
+            invalid["searchIncomplete"] = json!("false");
+            assert!(validate_projected_document(operation, true, &invalid).is_err());
+            for shape in ["canonicalResult", "agentOutput"] {
+                assert_eq!(
+                    golden[operation][shape]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("searchIncomplete"),
+                    Some(json!(false))
+                );
+            }
+        }
         // Old results are projected to current names without content receipts.
         let legacy: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/builtin-tool-agent-output-v5.json"

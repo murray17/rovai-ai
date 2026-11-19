@@ -1209,7 +1209,6 @@ fn ranked_search_response(
         json!({
             "results": results,
             "truncated": search.truncated,
-            "searchIncomplete": false,
         }),
         "results",
     )
@@ -2167,7 +2166,7 @@ mod slow_tests {
                 assert_eq!(result["results"][0]["snippet"], "旧消息：任务调度器");
                 assert_eq!(result["results"][0]["threadTitle"], "Frozen name");
                 assert_eq!(result["truncated"], false);
-                assert_eq!(result["searchIncomplete"], false);
+                assert!(result.get("searchIncomplete").is_none());
             }
         }
         let local_only = run_search(
@@ -2192,7 +2191,7 @@ mod slow_tests {
             format!("message-{}", end + 4)
         );
         assert_eq!(result["truncated"], true);
-        assert_eq!(result["searchIncomplete"], false);
+        assert!(result.get("searchIncomplete").is_none());
 
         let day = parse_date_range(
             Some("2026-08-01T08:00:00+08:00"),
@@ -2206,8 +2205,26 @@ mod slow_tests {
         assert_eq!(
             run_search("common", fence, day),
             json!({
-                "results": [], "truncated": false, "searchIncomplete": false
+                "results": [], "truncated": false
             })
+        );
+        transaction
+            .execute(
+                "UPDATE camp_message SET structured_content_json='invalid' WHERE sequence=?1",
+                [end + 4],
+            )
+            .unwrap();
+        let mut search = MessageSearch::new("common", 1).unwrap();
+        assert!(
+            scan_thread_messages(
+                &transaction,
+                "example",
+                fence,
+                Some("Frozen name"),
+                ParsedDateRange::default(),
+                &mut search,
+            )
+            .is_err()
         );
     }
 

@@ -13,7 +13,7 @@ last_updated: 2026-11-19
 
 ## 公开消息正文搜索（2026-11-19）
 
-当前公屏与历史公屏统一支持连续原文搜索。输入文案、扫描边界、迁移与实测见[消息搜索上下文对照](model-context-change-message-search.md)。
+当前公屏与历史公屏统一支持连续原文搜索。扫描完成后成功结果只含 `results` 和 `truncated`。输入文案、迁移与验证见[消息搜索上下文对照 R3](model-context-change-message-search.md)、[History v18](../../contracts/camp-history-v18.md) 和 [Transport v46](../../contracts/builtin-tool-transport-v46.md)。
 
 ## 公共消息编辑与删除（2026-11-19）
 

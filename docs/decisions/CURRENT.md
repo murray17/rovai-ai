@@ -26,13 +26,13 @@ Team 创建模板与启动指引：[Team Templates v1](../contracts/team-templat
 队员单文件头像当前规范：[Member Avatar v4](../contracts/member-avatar-v4.md)、[队员身份 UI](../ui/components/member-identity.md)；取舍见 [V1.72-D42](../versions/v1.72/decisions.md#v1-72-d42)。
 
 成员路由与职责扩容当前规范：[Collaboration State v4](../contracts/collaboration-state-v4.md)、
-[Built-in Transport v45](../contracts/builtin-tool-transport-v45.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
+[Built-in Transport v46](../contracts/builtin-tool-transport-v46.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
 分层与保持 resume 的取舍见 [V1.72-D40](../versions/v1.72/decisions.md#v1-72-d40)。
 
 
-内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v45](../contracts/builtin-tool-transport-v45.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
+内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v46](../contracts/builtin-tool-transport-v46.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
 
-Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v45](../contracts/builtin-tool-transport-v45.md)和
+Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v46](../contracts/builtin-tool-transport-v46.md)和
 [Built-in 运输不变量](../architecture/foundational-invariants.md#skills-builtin-transport)；单入口与精简教学的取舍见
 [V1.72-D33](../versions/v1.72/decisions.md#v1-72-d33)。
 
@@ -80,13 +80,13 @@ Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admissi
   [Missing-Send v4](../contracts/missing-send-recovery-publication-v4.md)。局部问卷取消保留诊断，随后有效成功不被覆盖；
   空 final 不产生消息或新模型调用，运行与队列照常完成。
 
-- Thread read 正向增量分页：[History v17](../contracts/camp-history-v17.md)；已确认输入与提示词前后对照见 [实施方案](../versions/v1.72/model-context-change-thread-read-after.md)。
+- Thread read 正向增量分页：[History v18](../contracts/camp-history-v18.md)；已确认输入与提示词前后对照见 [实施方案](../versions/v1.72/model-context-change-thread-read-after.md)。
 
 - 对话与使命引用：[Thread Reference v2](../contracts/thread-reference-v3.md)、[Composer 架构](../architecture/camp-composer-draft.md)；理由见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。
 
 - Claude 受管执行回执与启动期待插话：[Delivery v19](../contracts/message-delivery-v19.md)；取舍见 [V1.72-D49](../versions/v1.72/decisions.md#v1-72-d49)。
-- 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v17](../contracts/camp-history-v17.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
-- 模型 Mention 统一：[Message Mentions v1](../contracts/message-mentions-v1.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)、[Camp History v17](../contracts/camp-history-v17.md)；仅合并两处元数据、按 Run 冻结的取舍见 [V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)。
+- 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v18](../contracts/camp-history-v18.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
+- 模型 Mention 统一：[Message Mentions v1](../contracts/message-mentions-v1.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)、[Camp History v18](../contracts/camp-history-v18.md)；仅合并两处元数据、按 Run 冻结的取舍见 [V1.72-D19](../versions/v1.72/decisions.md#v1-72-d19)。
 
 - 当前主链：[Public Thread Message/Delivery 架构](../architecture/public-a2a-message-delivery.md)、
   [Message Delivery v15](../contracts/message-delivery-v15.md)、[Camp Message Send v23](../contracts/camp-message-send-v23.md)；
@@ -391,7 +391,7 @@ v62 移除原生会话重建提示和展示查询，保留恢复及审计行为�
 
 - 执行记录保存与删除回收：[Execution Record Storage v3](../contracts/execution-record-storage-v3.md)；理由见 [V1.72-D43](../versions/v1.72/decisions.md#v1-72-d43)。
 
-- 实时目录与独立正文边界：[Camp History v17](../contracts/camp-history-v17.md)；理由见 [V1.72-D44](../versions/v1.72/decisions.md#v1-72-d44)。
+- 实时目录与独立正文边界：[Camp History v18](../contracts/camp-history-v18.md)；理由见 [V1.72-D44](../versions/v1.72/decisions.md#v1-72-d44)。
 
 - 新操作与活动统一保存的理由见 [V1.72-D45](../versions/v1.72/decisions.md#v1-72-d45)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
 - 新操作预览预算与结果摘要分离的理由见 [V1.72-D46](../versions/v1.72/decisions.md#v1-72-d46)，当前权威为 [Execution Record Storage v3](../contracts/execution-record-storage-v3.md)。
