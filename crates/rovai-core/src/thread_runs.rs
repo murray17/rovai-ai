@@ -301,11 +301,15 @@ fn frozen_inputs(
     if run_ids.is_empty() {
         return Ok(HashMap::new());
     }
+    // The published body reproduces what a full snapshot would have captured.
+    // Pre-227 inputs with no snapshot retain their live Agent-text fallback.
     let mut statement = transaction.prepare(
         "SELECT input.agent_run_id, COUNT(*),
                 (SELECT first.message_id FROM agent_run_input first
                  WHERE first.agent_run_id = input.agent_run_id ORDER BY first.ordinal LIMIT 1),
-                (SELECT json_extract(first.input_snapshot_json,'$.body') FROM agent_run_input first
+                (SELECT CASE WHEN first.uses_published_body AND m.content_revision=first.message_content_revision
+                             THEN m.body ELSE json_extract(first.input_snapshot_json,'$.body') END
+                 FROM agent_run_input first JOIN camp_message m ON m.id=first.message_id
                  WHERE first.agent_run_id = input.agent_run_id ORDER BY first.ordinal LIMIT 1)
          FROM agent_run_input input
          WHERE input.agent_run_id IN (SELECT value FROM json_each(?1))
@@ -630,7 +634,8 @@ mod read_tests {
             CREATE INDEX agent_run_camp_delete_idx ON agent_run(camp_id, id) WHERE camp_id IS NOT NULL;
             CREATE INDEX agent_run_a2a_turn_idx ON agent_run(camp_turn_id, invocation_kind, created_at);
             CREATE TABLE context_manifest(id TEXT, agent_run_id TEXT, global_public_message_boundary INTEGER, history_fence_version INTEGER);
-            CREATE TABLE agent_run_input(agent_run_id TEXT, ordinal INTEGER, message_id TEXT, input_snapshot_json TEXT);
+            CREATE TABLE agent_run_input(agent_run_id TEXT, ordinal INTEGER, message_id TEXT, input_snapshot_json TEXT,
+                message_content_revision INTEGER NOT NULL DEFAULT 1, uses_published_body INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE camp_message_delivery(camp_id TEXT, recipient_agent_id TEXT, status TEXT,
                 queue_sequence INTEGER, created_at TEXT, message_id TEXT, id TEXT PRIMARY KEY);
             CREATE TABLE camp_run_continuation(delivery_id TEXT PRIMARY KEY, source_agent_run_id TEXT);
@@ -640,7 +645,7 @@ mod read_tests {
             CREATE TABLE camp_message(id TEXT, camp_id TEXT, sequence INTEGER, author_type TEXT DEFAULT 'user',
                 author_id TEXT DEFAULT 'local_user', reply_to_camp_message_id TEXT, body TEXT DEFAULT 'STALE BODY',
                 created_at TEXT DEFAULT '2026-10-03T12:00:00Z', tombstoned_at TEXT,
-                recall_state TEXT DEFAULT 'closed', structured_content_json TEXT);
+                recall_state TEXT DEFAULT 'closed', structured_content_json TEXT, content_revision INTEGER NOT NULL DEFAULT 1);
             INSERT INTO conversation VALUES ('public', 'agent_1', 'camp'), ('private', 'agent_1', 'single_chat');
             INSERT INTO context_manifest VALUES ('manifest', 'caller', 0, 1);
             ALTER TABLE context_manifest ADD COLUMN source_delivery_id TEXT;
@@ -759,6 +764,18 @@ mod read_tests {
             "UPDATE agent_run_input SET input_snapshot_json=?1 WHERE agent_run_id='actual-queued' AND ordinal=0",
             [json!({"body":"first at claim"}).to_string()],
         ).unwrap();
+        connection
+            .execute(
+                "UPDATE agent_run_input SET uses_published_body=1 WHERE agent_run_id='failed'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE camp_message SET body='published name at claim' WHERE id='anchor'",
+                [],
+            )
+            .unwrap();
         let all = read(&mut connection, ThreadRunsInput::default()).unwrap();
         assert_eq!(all["items"].as_array().unwrap().len(), 5);
         assert!(all["items"].as_array().unwrap().iter().all(|item| {
@@ -827,6 +844,22 @@ mod read_tests {
         .unwrap();
         assert_eq!(failed["items"].as_array().unwrap().len(), 1);
         assert_eq!(failed["items"][0]["agentRunId"], "failed");
+        assert_eq!(
+            failed["items"][0]["messagePreview"]["text"],
+            "published name at claim"
+        );
+        assert!(
+            all["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(
+                    |item| item["agentRunId"].as_str().is_some_and(|id| id != "failed")
+                        && item["messagePreview"]["messageId"] == "anchor"
+                        && item["messagePreview"]["text"] == "anchor"
+                ),
+            "unmigrated inputs keep their Agent-rendered body"
+        );
         let page = read(
             &mut connection,
             ThreadRunsInput {
