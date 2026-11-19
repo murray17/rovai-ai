@@ -208,7 +208,7 @@ Core 在鉴权并记录调用开始后，用独立只读连接固定 SQLite 快�
 同一 Core 的正文扫描依次在阻塞工作线程执行，消息写入可以与扫描并行。
 搜索在该快照内按 Thread 序列分批。当前公屏按会话消息序号判断可见性，跨会话搜索按首次全局公开发布事件检查冻结边界。
 Core 对权威结构化正文投影后的文字匹配和排名，内存只保留当前消息与有界的最佳结果。
-Migration 228 随搜索替换移除消息 FTS 与三个写入触发器。引用和提及继续沿用上下文索引的维护路径。
+Migration 229 在主线消息投递索引迁移 228 之后移除消息 FTS 与三个写入触发器。引用和提及继续沿用上下文索引的维护路径。
 
 `thread.read` exact help 展示 timeline、exact item `--message-id MESSAGE_ID` 和回复链 `--reply-chain MESSAGE_ID`。
 timeline 与回复链使用互斥的 `--before/--after`，`--after 0` 从最早可见消息开始；limit 默认 20、最大 100。

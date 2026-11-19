@@ -1151,8 +1151,8 @@ fn insert_batch_run(
                 agent_run_id, ordinal, delivery_id, message_id,
                 message_sequence, message_content_digest,
                 context_manifest_version, default_recipient_display_name,
-                message_content_revision, input_snapshot_json
-            ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, content_revision, ?9
+                message_content_revision, uses_published_body
+            ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, content_revision, 1
               FROM camp_message WHERE id=?4
             "#,
             params![
@@ -1164,10 +1164,6 @@ fn insert_batch_run(
                 delivery.content_digest,
                 PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION,
                 delivery.default_recipient_display_name,
-                crate::collaboration::message_mutation::input_snapshot(
-                    transaction,
-                    &delivery.message_id
-                )?,
             ],
         )?;
         let terminal_status = if error_code.is_some() {
@@ -2351,6 +2347,14 @@ mod tests {
             })
             .unwrap();
         assert_eq!(status, "queued");
+        let snapshots: i64 = fixture.database.connection().query_row(
+            "SELECT count(input_snapshot_json) FROM agent_run_input WHERE agent_run_id IN (?1,?2)",
+            params![source, active], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            snapshots, 0,
+            "claim, unchanged saves and rolled-back edits leave no content copies"
+        );
         fixture
             .database
             .connection()
@@ -2374,6 +2378,21 @@ mod tests {
         let after_edit = crate::read_model::ReadModelService
             .camp_snapshot(&mut fixture.database, &thread)
             .unwrap();
+        for run in after_edit
+            .agent_runs
+            .iter()
+            .filter(|run| run.id == source || run.id == active)
+        {
+            assert!(
+                run.input_previews[&a]
+                    .summary
+                    .as_deref()
+                    .unwrap()
+                    .ends_with("input A")
+            );
+            assert!(!run.input_previews.contains_key(&b));
+            assert!(!run.input_previews.contains_key(&c));
+        }
         assert!(
             !after_edit
                 .agent_runs
@@ -2492,9 +2511,6 @@ mod tests {
         let a = ordinary.send_user_input("agent_1", "ordinary A", None);
         let b = ordinary.send_user_input("agent_1", "ordinary B", None);
         let c = ordinary.send_user_input("agent_1", "ordinary C", None);
-        let old = claim_waiting_delivery_batches(&mut ordinary.database, 1)
-            .unwrap()
-            .remove(0);
         let file = ordinary._directory.join("edit-attachment.txt");
         std::fs::write(&file, "attachment only").unwrap();
         let attachment = crate::local_attachment_source::observe_source_attachment(
@@ -2504,6 +2520,16 @@ mod tests {
         )
         .unwrap();
         let attachment_id = attachment.id.clone();
+        let mut attach_b = edit(&b, 1, "agent_1", "ordinary B");
+        attach_b.camp_id = thread.clone();
+        attach_b.source_attachments = vec![attachment.clone()];
+        let attach_b = ordinary.user_command(attach_b);
+        service
+            .edit_camp_message(&mut ordinary.database, &attach_b, None)
+            .unwrap();
+        let old = claim_waiting_delivery_batches(&mut ordinary.database, 1)
+            .unwrap()
+            .remove(0);
         let mut command = edit(&a, 1, "agent_1", "ordinary A");
         command.camp_id = thread.clone();
         command.source_attachments = vec![attachment];
@@ -2551,9 +2577,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             active_inputs,
-            vec![(a.clone(), 3), (b.clone(), 1), (c.clone(), 1)]
+            vec![(a.clone(), 3), (b.clone(), 2), (c.clone(), 1)]
         );
-        for id in [a, b, c] {
+        for id in [a, b.clone(), c] {
             let deletion = ordinary.user_command(DeleteThreadMessageCommand {
                 camp_id: thread.clone(),
                 message_id: id,
@@ -2562,6 +2588,17 @@ mod tests {
                 .delete_camp_message(&mut ordinary.database, &deletion)
                 .unwrap();
         }
+        let frozen_file: String = ordinary
+            .database
+            .connection()
+            .query_row(
+                "SELECT json_extract(input_snapshot_json,'$.sourceAttachments[0].displayName')
+             FROM agent_run_input WHERE agent_run_id=?1 AND message_id=?2",
+                params![old, b],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(frozen_file, "edit-attachment.txt");
         assert!(
             claim_waiting_delivery_batches(&mut ordinary.database, 1)
                 .unwrap()

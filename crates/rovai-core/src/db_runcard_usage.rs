@@ -175,6 +175,23 @@ pub(super) fn assert_optional_upgrade(database: &mut Database) {
     migrate(database).unwrap();
     assert!(!projection_exists(database.connection(), "runtime_usage_run_summary").unwrap());
     super::message_mutations::migrate(database).unwrap();
+    database
+        .connection()
+        .execute_batch(
+            "CREATE TEMP TRIGGER reject_input_storage BEFORE INSERT ON schema_migration
+        WHEN NEW.version=228 BEGIN SELECT RAISE(ABORT,'test migration rollback'); END;",
+        )
+        .unwrap();
+    assert!(super::message_mutations::migrate_input_storage(database).is_err());
+    assert!(!database.schema_migration_applied(228).unwrap());
+    assert!(
+        !super::message_mutations::indexed_inputs_schema_matches(database.connection()).unwrap()
+    );
+    database
+        .connection()
+        .execute_batch("DROP TRIGGER reject_input_storage")
+        .unwrap();
+    super::message_mutations::migrate_input_storage(database).unwrap();
     database.retire_message_fts().unwrap();
     assert!(connection_has_current_data_contract(database.connection()).unwrap());
 }
