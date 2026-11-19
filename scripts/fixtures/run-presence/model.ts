@@ -326,7 +326,7 @@ export const model = {
   showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false, messageCount = 120, largeBody = false) {
     this.setScenario('stream'); halt()
     const messages = [
-      makeMessage('reply-a', 1, '回复详情保持只读，沿用当前会话里的回复锚点。'),
+      { ...makeMessage('reply-a', 1, '回复详情沿用当前会话里的回复锚点。'), canEdit: true },
       makeMessage('reply-b', 2, '我先核对消息的来源，再把详情接到回复块上。', 0),
       makeMessage('reply-c', 3, '详情用头像、作者和正文排列，复制与回到原文悬浮出现。', 1),
       makeMessage('reply-d', 4, '执行中的消息也要能查看过程。'),

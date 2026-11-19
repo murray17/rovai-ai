@@ -6508,6 +6508,7 @@ export function ThreadWorkspace({
         </section>
 
         {replyDetail.messageId && <ReplyDetails state={replyDetail} reader={replyReader} width={replyWidth} full={replyFull}
+          editingReply={editingMessage?.surface === 'reply' && showInlineEditor}
           onWidth={setReplyWidth} onFull={() => setReplyFull(value => !value)} onClose={() => closeReplyDetails()}
           snapshot={snapshot} profiles={agents} eventsByRunId={executionEventsByRunId} windowedEvidence={openCoverage !== null}
           author={message => campMessageAuthorLabel(message, memberById, currentUserName)}

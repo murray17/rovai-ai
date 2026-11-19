@@ -109,6 +109,27 @@ async function runReplyDetails(t, splittersOnly = false) {
       console.log(JSON.stringify({ result: 'passed', scenarios: results.map(r => r.name) }))
       return
     }
+    if (!process.env.ROVAI_REPLY_CASE || process.env.ROVAI_REPLY_CASE === 'edit-pagination') {
+      await open({ loaded: true })
+      await b.evaluate('document.querySelector("[data-reply-message-id=reply-a] .message-more-button").focus()')
+      await b.key('Enter')
+      const editItem = '[...document.querySelectorAll("[role=menuitem]")].find(item => item.textContent.trim() === "编辑")'
+      await b.wait(`Boolean(${editItem})`)
+      await b.evaluate(editItem + '.focus()')
+      await b.key('Enter')
+      const editor = '.reply-detail-panel .inline-message-edit'
+      await b.wait(`!!document.querySelector("${editor} [contenteditable=true]")`)
+      await click(editor + ' [contenteditable=true]')
+      await b.send('Input.insertText', { text: '尚未保存的文字' })
+      assert.equal(await b.evaluate('document.querySelector(".reply-detail-page").disabled'), true)
+      await click('.reply-detail-page')
+      assert.match(await b.evaluate(`document.querySelector("${editor} [contenteditable=true]").textContent`), /尚未保存的文字/)
+      await click(editor + ' .inline-edit-actions .quiet-button')
+      await b.wait('!document.querySelector(".reply-detail-page").disabled')
+      await click('.reply-detail-page')
+      await b.wait('!document.querySelector("[data-reply-message-id=reply-a]") && !!document.querySelector("[data-reply-message-id=long-60]")')
+      results.push({ name: 'edit-pagination' })
+    }
     for (const scenario of [
       { width: 1920, full: false }, { width: 1440, full: true }, { width: 1040, full: false }
     ].filter(() => !process.env.ROVAI_REPLY_CASE)) {
