@@ -3,7 +3,7 @@ document_type: protocol-contract
 contract: channel-message-bridge-v1
 status: accepted
 target_version: v1.60
-last_updated: 2026-11-05
+last_updated: 2026-11-19
 ---
 
 # Channel Message Bridge v1
@@ -15,6 +15,10 @@ answer and terminal-update contract are owned by [Native Interactions v1](native
 A Channel is an asynchronous bridge, not a synchronous request/response wrapper around an AgentRun.
 Inbound receipt completes when one external-principal `CampMessage` and its target Delivery are committed.
 It does not wait for execution or an outbound reply. Later inbound messages enter the same Agent FIFO.
+
+For an archived bound Thread, the Host acknowledges the transport and silently discards incoming text,
+resources and DM `/new`. Core checks the binding before recording the sender, observation or command
+receipt. New messages resume on the same binding after manual unarchive. [Thread Archive v1](thread-archive-v1.md)
 
 A Camp has at most one Channel binding. Every Agent message published through ordinary `rovai send` in a
 bound Camp atomically creates one idempotent ChannelDelivery for that message. The outbound payload is the

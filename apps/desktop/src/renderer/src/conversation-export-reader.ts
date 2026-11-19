@@ -69,7 +69,7 @@ export class ConversationExportReader {
       const projection = await this.client.request<ThreadOpenProjection>('threads.open', { traceId: newCommandId(), threadId: target.id })
       if (!current()) return
       const coverage = projection?.coverage?.messages
-      if (projection?.schemaVersion !== 9 || projection.thread.id !== target.id || !coverage || typeof coverage.hasEarlier !== 'boolean'
+      if ((projection?.schemaVersion !== 9 && projection?.schemaVersion !== 10) || projection.thread.id !== target.id || !coverage || typeof coverage.hasEarlier !== 'boolean'
         || !Number.isSafeInteger(projection.throughGlobalSequence) || projection.throughGlobalSequence < 0
         || !orderedMessages(projection.messages)
         || (coverage.hasEarlier && !projection.messages.length)

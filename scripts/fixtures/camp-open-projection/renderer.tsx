@@ -558,6 +558,7 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
           targets: targets ?? [] }; return { deliveryIds: [], agentRunIds: [], addressedAgentIds: [] } }} onChangeLead={async () => {}} onTasksChanged={async () => {}}
         onResolveApproval={() => {}} onStop={() => {}} worldMapEnabled={false} executionPlacement={activePlacement}
         onExecutionPlacementChange={async next => { setActivePlacement(next); return next }}
+        executionAutoOpen={entryPreview}
         workspaceEntrySnapshotReady={entrySnapshotReady}
         openCoverage={windowed ? projection(60).coverage : null}
         inspectorVisible={open} inspectorTab={tab} detailEntryHost={entryHost}

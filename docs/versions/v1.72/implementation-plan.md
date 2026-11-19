@@ -8,6 +8,12 @@ last_updated: 2026-11-19
 
 # v1.72 实施与验收
 
+## 会话与使命归档（2026-11-19）
+
+迁移 230 在主线 schema 179 上添加归档字段和部分索引，升级至 schema 180。Core 用 Thread ID 游标分批返回摘要，界面取齐后按项目分组。见 [Thread Archive v1](../../contracts/thread-archive-v1.md)。
+
+`cargo test -p rovai-core --lib thread_archive` 覆盖归档事务回滚、当前 Thread 全部执行的取消、幂等和按 ID 分页。`node scripts/smoke-stop-continue.mjs --archive` 通过真实 Core 与测试运行时验证进程退出和恢复后的执行终态。设置页与使命板的 Electron 验收覆盖跨页归组、错误保留、草稿离开和旧链接跳转。
+
 ## 公共消息编辑、删除与撤回（2026-11-19）
 
 本轮在 `rovai/thread-message-mutations` 从 `0461437fdf80a8cd01e5b888ec7c67006dae85d` 实施。

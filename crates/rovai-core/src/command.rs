@@ -191,6 +191,31 @@ pub struct StoredCommandResult {
     camp_id: Option<String>,
 }
 
+impl StoredCommandResult {
+    fn from_handler<C: DomainCommand>(
+        envelope: &CommandEnvelope<C>,
+        handler_result: CommandHandlerResult,
+    ) -> Self {
+        Self {
+            command_id: envelope.command_id.clone(),
+            command_type: C::TYPE.to_string(),
+            status: handler_result.status,
+            code: handler_result.code,
+            payload: handler_result.payload,
+            result_entity: handler_result.result_entity,
+            recorded_at: chrono::Utc::now().to_rfc3339(),
+            actor_type: envelope.actor.actor_type().to_string(),
+            actor_id: envelope.actor.actor_id().to_string(),
+            source_agent_run_id: envelope.actor.source_agent_run_id().map(str::to_string),
+            command_client_id: envelope
+                .payload
+                .draft_client()
+                .map(|client| client.id().to_owned()),
+            camp_id: envelope.camp_id.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandExecution {
     pub result: StoredCommandResult,
@@ -246,18 +271,35 @@ impl DomainCommandGateway {
         C: DomainCommand,
         F: FnOnce(&Transaction<'_>) -> Result<CommandHandlerResult>,
     {
-        validate_envelope::<C>(envelope)?;
-
-        if let Some(result) = load_stored_result(database.connection(), &envelope.command_id)? {
-            return replay_or_conflict(result, envelope);
+        if let Some(replay) = self.replay_if_recorded(database, envelope)? {
+            return Ok(replay);
         }
+        self.execute_unless(database, envelope, |_| Ok(None), handler)
+    }
 
+    /// A transport callback can be discarded before it becomes a command. Check
+    /// under the writer lock, even on replay, so a stale callback cannot resume work.
+    pub(crate) fn execute_unless<C: DomainCommand>(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<C>,
+        discard: impl FnOnce(&Transaction<'_>) -> Result<Option<CommandHandlerResult>>,
+        handler: impl FnOnce(&Transaction<'_>) -> Result<CommandHandlerResult>,
+    ) -> Result<CommandExecution> {
+        validate_envelope::<C>(envelope)?;
         let message_output = database.message_changes.clone();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .context("failed to start domain command transaction")?;
 
+        if let Some(result) = discard(&transaction)? {
+            transaction.rollback()?;
+            return Ok(CommandExecution {
+                result: StoredCommandResult::from_handler(envelope, result),
+                replayed: false,
+            });
+        }
         if let Some(result) = load_stored_result(&transaction, &envelope.command_id)? {
             transaction.commit()?;
             return replay_or_conflict(result, envelope);
@@ -283,24 +325,7 @@ impl DomainCommandGateway {
         } else {
             handler(&transaction)?
         };
-        let recorded_at = chrono::Utc::now().to_rfc3339();
-        let mut stored_result = StoredCommandResult {
-            command_id: envelope.command_id.clone(),
-            command_type: C::TYPE.to_string(),
-            status: handler_result.status,
-            code: handler_result.code,
-            payload: handler_result.payload,
-            result_entity: handler_result.result_entity,
-            recorded_at,
-            actor_type: envelope.actor.actor_type().to_string(),
-            actor_id: envelope.actor.actor_id().to_string(),
-            source_agent_run_id: envelope.actor.source_agent_run_id().map(str::to_string),
-            command_client_id: envelope
-                .payload
-                .draft_client()
-                .map(|client| client.id().to_owned()),
-            camp_id: envelope.camp_id.clone(),
-        };
+        let mut stored_result = StoredCommandResult::from_handler(envelope, handler_result);
         append_command_result(&transaction, envelope, &stored_result)?;
         message_changes.commit(transaction)?;
         if stored_result.status != CommandResultStatus::Rejected {

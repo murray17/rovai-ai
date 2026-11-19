@@ -130,7 +130,7 @@ pub(super) fn pending(
          JOIN camp ON camp.id = request.camp_id
          WHERE request.status = 'queued' AND aggregate.provider = ?2
            AND request.ack_app_id IN (SELECT value FROM json_each(?1))
-           AND camp.deletion_operation_id IS NULL
+           AND camp.deletion_operation_id IS NULL AND camp.archived_at IS NULL
            AND json_array_length(aggregate.frozen_payload_json, '$.inboundAttachments.resources') >
                json_array_length(aggregate.frozen_payload_json, '$.inboundAttachments.sources')
          ORDER BY request.created_at, request.id LIMIT 20",
@@ -192,7 +192,7 @@ pub fn complete(
              JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
              WHERE request.id = ?1 AND request.ack_app_id = ?2 AND request.status = 'queued'
                AND aggregate.provider = ?3 AND binding.status = 'active'
-               AND camp.deletion_operation_id IS NULL",
+               AND camp.deletion_operation_id IS NULL AND camp.archived_at IS NULL",
             params![command.request_id, command.app_id, provider],
             |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).optional()?;
         let Some((camp_id, aggregate_id, encoded)) = row else {

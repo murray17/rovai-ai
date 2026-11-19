@@ -1,3 +1,4 @@
+import { isArchiveChangeEvent } from './thread-archive'
 import { useEffect, useRef, useState } from 'react'
 import type { ProjectFileEntry, ReferenceCandidate, ReferencePage } from '@contracts'
 import type { ThreadClient } from './camp-client'
@@ -30,6 +31,18 @@ export function useReferencePicker(scope: ReferenceScope | undefined, match: Com
   const key = JSON.stringify([scope?.threadId, anchor, query, manualFilter, inviteLayer, retry])
   const currentKey = useRef(key); currentKey.current = key
   const enabled = !!scope && query !== null && !inviteLayer
+  useEffect(() => {
+    if (!scope || !enabled) return
+    const invalidate = () => {
+      generation.current += 1
+      setRetry(value => value + 1)
+    }
+    const stopEvent = scope.client.onEvent?.(event => { if (isArchiveChangeEvent(event)) invalidate() })
+    const stopInvalidated = scope.client.onInvalidated?.(change => {
+      if (!change || change.resync || change.referencesChanged) invalidate()
+    })
+    return () => { stopEvent?.(); stopInvalidated?.() }
+  }, [scope?.client, enabled])
   const files = useProjectFileCandidates(scope, anchor, query, enabled && filesSupported && hasProject && (manualFilter === 'file' || !manualFilter && !!query?.trim()), retry)
   useEffect(() => {
     const ticket = ++generation.current

@@ -412,6 +412,8 @@ button.mission-tag { cursor: pointer; }
 .mission-board-card .mission-card-open h3 { margin: 0; }
 .mission-card-footer { padding-top: 11px; }
 .mission-card-top-actions { display: flex; flex: 0 0 auto; min-width: 0; align-items: center; justify-content: flex-end; margin-left: auto; }
+.mission-card-archive { padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.mission-card-archive:hover { background: var(--neutral-hover); }
 .mission-running { display: inline-flex; min-width: 0; align-items: center; gap: 5px; color: var(--muted); font-size: 11.5px; line-height: 18px; white-space: nowrap; }
 .mission-running-avatars { display: inline-flex; align-items: center; padding-left: 3px; }
 .mission-running-avatars .member-avatar { --member-avatar-size: 18px !important; border: 1px solid var(--surface-raised); }
@@ -425,7 +427,7 @@ button.mission-tag { cursor: pointer; }
 .mission-action-submenu .mission-state-glyph { flex: 0 0 14px; min-width: 14px; max-width: 14px; width: 14px; height: 14px; }
 .mission-state-glyph.is-in_progress::after { background: var(--info); clip-path: inset(0 50% 0 0); }
 .mission-list-cards[hidden] { display: none; }
-.mission-list-cards .mission-board-card { grid-template-columns: minmax(160px,2fr) minmax(155px,1.4fr) minmax(145px,1fr) 112px; }
+.mission-list-cards .mission-board-card { grid-template-columns: minmax(160px,2fr) minmax(155px,1.4fr) minmax(145px,1fr) minmax(112px,max-content); }
 .mission-list-cards .mission-card-meta { grid-column: 4; }
 .mission-list-cards .mission-project-tags { grid-column: 2; }
 .mission-list-cards .mission-card-footer { grid-column: 3; }
@@ -460,9 +462,9 @@ button.mission-tag { cursor: pointer; }
 .mission-session-leading > button { flex: 0 0 28px; }
 .mission-session-leading > button:hover { background: var(--neutral-hover); }
 .mission-session-header .file-preview-toggle svg { width: 17px; height: 17px; }
-.mission-activity-entry { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; height: 28px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; -webkit-app-region: no-drag; }
-.mission-activity-entry > svg { width: 14px; height: 14px; }
-.mission-activity-entry:hover { color: var(--ink); background: var(--neutral-hover); }
+.mission-header-action { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; height: 28px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; -webkit-app-region: no-drag; }
+.mission-header-action > svg { width: 14px; height: 14px; }
+.mission-header-action:hover { color: var(--ink); background: var(--neutral-hover); }
 .mission-activity-entry[aria-pressed="true"] { color: var(--ink); background: var(--neutral-selected); }
 .mission-definition-fields > label { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; font-weight: 550; }
 .mission-definition-fields > label:not(:first-child) { margin-top: 4px; }
@@ -490,7 +492,7 @@ button.mission-tag { cursor: pointer; }
 .mission-drawer-resize-handle:hover::after,.mission-drawer-resize-handle:focus-visible::after,.mission-drawer.is-resizing .mission-drawer-resize-handle::after { background: var(--resize-line); }
 html.mission-drawer-resizing,html.mission-drawer-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.mission-drawer-resizing :is(.file-preview-retained-host,iframe) { pointer-events: none; }
-:is(.mission-description-toggle,.mission-group-heading,.mission-create-options,.mission-session-leading button,.mission-activity-entry):focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
+:is(.mission-description-toggle,.mission-group-heading,.mission-create-options,.mission-session-leading button,.mission-header-action):focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
 html:not([data-rovai-platform="win32"]) .navigation-collapsed .mission-page-header { padding-left: 128px; }
 html:not([data-rovai-platform="win32"]) .navigation-collapsed .mission-full .topbar-conversation-context { padding-left: 142px; }
 @media(max-width:1190px) { .mission-board-page { padding-inline: 20px; }.mission-board-scroll > .mission-board { gap: 9px; }.mission-column { padding-inline: 7px; }.mission-board-card { padding-inline: 10px; }.mission-filter { padding-inline: 6px; }.mission-filter .mission-filter-value { max-width: 70px; }.mission-search { width: 112px; } }
@@ -500,7 +502,7 @@ html:not([data-rovai-platform="win32"]) .navigation-collapsed .mission-full .top
 }
 @container mission-header (max-width: 560px) {
   .camp-topbar.mission-session-header .topbar-conversation-context { gap: 2px; padding-inline: 6px; }
-  .camp-detail-entry, .mission-activity-entry { gap: 3px; padding-inline: 4px; }
+  .camp-detail-entry, .mission-header-action { gap: 3px; padding-inline: 4px; }
   .mission-session-leading { gap: 0; margin-right: 0; }
   .mission-session-header .file-preview-toggle-group { gap: 0; }
 }

@@ -1,3 +1,4 @@
+import { isArchiveChangeEvent } from './thread-archive'
 import { ForkIcon } from './ForkIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import { TeamGlyph } from './MissionDefinitionEditor'
@@ -193,6 +194,7 @@ export function ThreadNavigation({
   onExportThread,
   onForkThread,
   forkBusy = false,
+  onArchive,
   onRename,
   onDelete,
   onDeleteError,
@@ -246,6 +248,7 @@ export function ThreadNavigation({
   onForkThread?(thread: NavigationThreadItem): void
   forkBusy?: boolean
   onRename(thread: NavigationThreadItem, title: string): Promise<void>
+  onArchive?(thread: NavigationThreadItem): Promise<void>
   onDelete(thread: NavigationThreadItem): Promise<void>
   onDeleteError?(error: unknown): void
   onError(error: unknown): void
@@ -280,6 +283,7 @@ export function ThreadNavigation({
   const pinnedThreads = pins
     .filter((pin) => pin.kind === 'camp')
     .flatMap((pin) => campById.get(pin.targetKey) ?? [])
+    .filter(thread => !thread.archivedAt)
   const pinnedProjects = pins
     .filter((pin) => pin.kind === 'project')
     .flatMap((pin) => projectByKey.get(pin.targetKey) ?? [])
@@ -363,7 +367,11 @@ export function ThreadNavigation({
     void onSetThreadUnread?.(thread, unread).catch(onError)
   }
 
-  const openAction = (kind: 'rename' | 'delete', thread: NavigationThreadItem): void => {
+  const openAction = (kind: 'rename' | 'delete' | 'archive', thread: NavigationThreadItem): void => {
+    if (kind === 'archive') {
+      void onArchive?.(thread).catch(onError)
+      return
+    }
     setAction({ kind, thread })
     setRenameTitle(thread.title)
   }
@@ -752,7 +760,8 @@ export const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
       { key: 'memory', icon: 'brain', label: '记忆' },
       { key: 'appearance', icon: 'sun-moon', label:"外观" },
       { key: 'shortcuts', icon: 'keyboard', label: '快捷键' },
-      { key: 'notifications', icon: 'bell-ring', label:"提醒" }
+      { key: 'notifications', icon: 'bell-ring', label:"提醒" },
+      { key: 'archive', icon: 'archive', label: "归档" }
     ]
   },
   {
@@ -895,7 +904,20 @@ function CommandPalette({
   useEffect(() => {
     setLookup(null)
     if (!open || threadId === null) return
-    return startNavigationThreadLookup(threadId, setLookup, id => client.request('navigation.findThread', { threadId: id }))
+    let cancel: (() => void) | undefined
+    const refresh = () => {
+      cancel?.()
+      setLookup(null)
+      cancel = startNavigationThreadLookup(threadId, setLookup, id => client.request('navigation.findThread', { threadId: id }))
+    }
+    refresh()
+    const stopEvent = client.onEvent?.(event => {
+      if (isArchiveChangeEvent(event) && (event.params as { threadId?: string })?.threadId === threadId) refresh()
+    })
+    const stopInvalidated = client.onInvalidated?.(change => {
+      if (!change || change.resync || change.referencesChanged) refresh()
+    })
+    return () => { cancel?.(); stopEvent?.(); stopInvalidated?.() }
   }, [client, open, threadId])
 
   const selectedIndex = Math.min(activeIndex, Math.max(visible.length - 1, 0))
@@ -1033,7 +1055,7 @@ function ThreadGroup({
   onForkThread?(thread: NavigationThreadItem): void
   forkBusy?: boolean
   onThread(thread: NavigationThreadItem): void
-  onAction(kind: 'rename' | 'delete', thread: NavigationThreadItem): void
+  onAction(kind: 'rename' | 'delete' | 'archive', thread: NavigationThreadItem): void
 }): JSX.Element {
   const mobile = useMobileLayout()
   const projectMenuLabels = projectNavigationMenuLabels(pinned, platform)
@@ -1168,7 +1190,7 @@ function ThreadRow({
   onFork?(): void
   forkBusy?: boolean
   onThread(thread: NavigationThreadItem): void
-  onAction(kind: 'rename' | 'delete', thread: NavigationThreadItem): void
+  onAction(kind: 'rename' | 'delete' | 'archive', thread: NavigationThreadItem): void
 }): JSX.Element {
   const mobile = useMobileLayout()
   const pressMenu = useNavigationPressMenu(true)
@@ -1216,6 +1238,9 @@ function ThreadRow({
   if (onExport && thread.activationState !== 'pending') menuItems.push({
     key: 'export', label: menuLabels[5], icon: 'export', onSelect: onExport
   })
+  if (thread.activationState === 'active' && !thread.archivedAt) menuItems.push({
+    key: 'archive', label: uiAttribute(thread.marker === 'loading' ? '归档并停止执行' : '归档'), icon: 'archive', onSelect: () => onAction('archive', thread)
+  })
   menuItems.push({
     key: 'delete',
     label: menuLabels[6],
@@ -1260,7 +1285,7 @@ function ThreadRow({
 type SidebarActionMenuItem = {
   key: string
   label: string
-  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export' | 'fork'
+  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export' | 'fork' | 'archive'
   disabled?: boolean
   filled?: boolean
   danger?: boolean
@@ -1351,6 +1376,7 @@ function SidebarMenuIcon({ kind, filled = false }: {
   kind: SidebarActionMenuItem['icon']
   filled?: boolean
 }): JSX.Element {
+  if (kind === 'archive') return <NavigationIcon name="archive" />
   if (kind === 'square-pen') return <NavigationIcon name="square-pen" />
   if (kind === 'fork') return <ForkIcon className="sidebar-action-menu-icon" />
   if (kind === 'export') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5" /></svg>

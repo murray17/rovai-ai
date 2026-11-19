@@ -4,6 +4,7 @@ import { useThreadClient } from './camp-client'
 import { SETTINGS_SIDEBAR_GROUPS } from './ThreadNavigation'
 import { MobileBack, MobilePageHeader, useMobileLayout } from './MobileLayout'
 import { NavigationIcon } from './NavigationIcon'
+import { PanelToggleIcon } from './PanelToggleIcon'
 import { Icon } from './MissionControls'
 import { UiText, uiAttribute } from './interface-language'
 
@@ -37,7 +38,11 @@ export function MobileSettingsLayout({ overview, section, appearance, menuOpen, 
   if (!mobile) return <>{children}</>
   return <section className="mobile-settings-workspace" data-settings-section={overview ? 'index' : section}>
     {overview ? <MobilePageHeader title={uiAttribute("设置")} onOpenMenu={onOpenMenu} menuOpen={menuOpen} triggerRef={triggerRef} />
-      : <header className="mobile-page-heading settings-nav-header"><MobileBack label={uiAttribute("返回设置")} onClick={onBack} /><h1>{selected ? uiAttribute(selected.label) : uiAttribute("设置")}</h1></header>}
+      : <header className="mobile-page-heading settings-nav-header">
+        {section === 'archive' ? <button type="button" className="archive-settings-back" aria-label={uiAttribute("返回设置")} onClick={onBack}>
+          <PanelToggleIcon side="left" visible={false} /><UiText zh="设置" />
+        </button> : <><MobileBack label={uiAttribute("返回设置")} onClick={onBack} /><h1>{selected ? uiAttribute(selected.label) : uiAttribute("设置")}</h1></>}
+      </header>}
     <Activity mode={overview ? 'visible' : 'hidden'}>
       <div className="mobile-settings-index" ref={index}>
         {groups.map(group => <section className="settings-index-group" key={group.key} aria-labelledby={`mobile-settings-${group.key}`}>

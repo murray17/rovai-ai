@@ -106,7 +106,7 @@ describe('global Web connection recovery', () => {
     client.clear()
   })
 
-  it.each(['thread.messages.send', 'nativeInteractions.respond'] as const)('recovers %s after response loss without resending or clearing unrelated draft storage', async operation => {
+  it.each(['thread.messages.send', 'nativeInteractions.respond', 'threads.archive', 'threads.unarchive'] as const)('recovers %s after response loss without resending or clearing unrelated draft storage', async operation => {
     const saved = storage()
     saved.setItem('rovai.web.edits.v1', 'unsent draft')
     let recorded = false, sends = 0
@@ -119,7 +119,10 @@ describe('global Web connection recovery', () => {
     })
     const client = new ConsoleClient(origin, fetcher, saved)
     await client.login('test')
-    const pending = client.request(operation, command())
+    const params = operation === 'threads.archive' || operation === 'threads.unarchive'
+      ? { commandId: newCommandId(), command: { threadId: 'original' } }
+      : command()
+    const pending = client.request(operation, params)
     await vi.waitFor(() => expect(client.connectionState).toBe('offline'))
     recorded = true
     await client.retryPending()
@@ -127,6 +130,41 @@ describe('global Web connection recovery', () => {
     expect(sends).toBe(1)
     expect(saved.getItem('rovai.web.edits.v1')).toBe('unsent draft')
     expect(JSON.parse(saved.getItem(RECOVERY_KEY)!).pending).toEqual([])
+    client.clear()
+  })
+
+  it('ends a restored archive wait on a definitive business rejection after explicit retry', async () => {
+    const saved = storage()
+    const params = { commandId: newCommandId(), command: { threadId: 'original' } }
+    const sent: unknown[] = []
+    const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith('/login') || String(url).endsWith('/session')) return Response.json(identity)
+      const request = rpc(init)
+      if (request.operation === 'commands.reconcile') return unknown()
+      if (request.operation === 'threads.unarchive') {
+        sent.push(request.params)
+        if (sent.length === 1) throw new TypeError('reply lost')
+        return Response.json({ result: { status: 'rejected', code: 'camp.not_found', payload: {} } })
+      }
+      return Response.json({ result: {} })
+    })
+    const beforeReload = new ConsoleClient(origin, fetcher, saved)
+    await beforeReload.login('test')
+    void beforeReload.request('threads.unarchive', params).catch(() => undefined)
+    await vi.waitFor(() => expect(beforeReload.connectionState).toBe('offline'))
+    const client = new ConsoleClient(origin, fetcher, saved)
+    const notice = vi.fn()
+    client.onRecovered(notice)
+    await expect(client.restore()).resolves.toBe(true)
+    expect(client.pendingCommandCount).toBe(1)
+    expect(sent).toEqual([params])
+    expect(notice).not.toHaveBeenCalled()
+    await client.retryPending()
+    expect(sent).toEqual([params, params])
+    expect(client.pendingCommandCount).toBe(0)
+    expect(client.connectionState).toBe('live')
+    expect(notice).toHaveBeenCalled()
+    beforeReload.clear()
     client.clear()
   })
 

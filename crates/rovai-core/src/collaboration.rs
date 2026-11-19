@@ -3066,6 +3066,12 @@ impl CollaborationService {
         Self::validate_send_message_input(command)?;
         let camp_message_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
+            if crate::thread_archive::is_archived(transaction, &command.camp_id)? {
+                return Ok(rejected(
+                    "camp.archived",
+                    "Unarchive this Thread before sending",
+                ));
+            }
             // A rejected command receipt is committed by the gateway. Roll back
             // tentative first-send membership even on a normal business rejection.
             let pending_submission = matches!(

@@ -619,6 +619,12 @@ impl SingleChatService {
                     "Single Chat command is outside the Thread",
                 ));
             }
+            if crate::thread_archive::is_archived(transaction, &target.camp_id)? {
+                return Ok(rejected(
+                    "camp.archived",
+                    "Unarchive this Thread before sending",
+                ));
+            }
             if !active_member(transaction, &target.camp_id, &target.agent_id)? {
                 return Ok(rejected(
                     "single_chat.member_unavailable",
@@ -1441,6 +1447,12 @@ impl SingleChatService {
                 target.camp_id == command.camp_id,
                 "single_chat.camp_mismatch"
             );
+            if crate::thread_archive::is_archived(transaction, &target.camp_id)? {
+                return Ok(rejected(
+                    "camp.archived",
+                    "Pending input is paused while archived",
+                ));
+            }
             let pending = load_pending_input(
                 transaction,
                 &command.conversation_id,
@@ -1983,7 +1995,8 @@ pub fn ready_pending_inputs(database: &Database) -> Result<Vec<PublishSingleChat
                input.id, input.revision, input.user_id
         FROM single_chat_pending_input AS input
         JOIN conversation ON conversation.id = input.conversation_id
-        WHERE input.state = 'queued'
+        JOIN camp ON camp.id = conversation.camp_id
+        WHERE input.state = 'queued' AND camp.archived_at IS NULL
           AND conversation.kind = 'single_chat'
           AND conversation.ended_at IS NULL
           AND NOT EXISTS(

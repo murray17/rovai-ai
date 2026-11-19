@@ -1272,6 +1272,24 @@ impl ExecutionRuntimeService {
         camp_id: &str,
         command_id: &str,
     ) -> Result<()> {
+        Self::cancel_camp_work_in_transaction(
+            transaction,
+            camp_id,
+            command_id,
+            &ActorRef::System {
+                component_id: "camp-deletion".into(),
+            },
+            "camp_deleted",
+        )
+    }
+
+    pub(crate) fn cancel_camp_work_in_transaction(
+        transaction: &Transaction<'_>,
+        camp_id: &str,
+        command_id: &str,
+        actor: &ActorRef,
+        reason: &str,
+    ) -> Result<()> {
         let turn_ids = {
             let mut statement = transaction.prepare(
                 "SELECT id FROM camp_turn WHERE camp_id = ?1 AND status IN ('running', 'waiting')",
@@ -1295,27 +1313,24 @@ impl ExecutionRuntimeService {
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         let now = chrono::Utc::now().to_rfc3339();
-        let actor = ActorRef::System {
-            component_id: "camp-deletion".into(),
-        };
         for turn_id in turn_ids {
             transaction.execute(
                 "UPDATE camp_turn SET cancel_requested_at = COALESCE(cancel_requested_at, ?2), cancel_request_command_id = COALESCE(cancel_request_command_id, ?3) WHERE id = ?1",
                 params![turn_id, now, command_id],
             )?;
-            settle_abortive_camp_turn_in_tx(transaction, &turn_id, "camp_deleted", &actor, &now)?;
+            settle_abortive_camp_turn_in_tx(transaction, &turn_id, reason, actor, &now)?;
         }
         for run_id in batch_run_ids {
-            settle_abortive_agent_run_in_tx(transaction, &run_id, "camp_deleted", &actor, &now)?;
+            settle_abortive_agent_run_in_tx(transaction, &run_id, reason, actor, &now)?;
         }
         transaction.execute(
             r#"
             UPDATE camp_message_delivery
-            SET status = 'cancelled', failure_code = 'camp_deleted', ended_at = ?2,
+            SET status = 'cancelled', failure_code = ?3, ended_at = ?2,
                 version = version + 1, updated_at = ?2
             WHERE camp_id = ?1 AND status = 'waiting'
             "#,
-            params![camp_id, now],
+            params![camp_id, now, reason],
         )?;
         Ok(())
     }

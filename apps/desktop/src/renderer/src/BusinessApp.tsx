@@ -1,3 +1,5 @@
+import { ArchiveSettings } from './ArchiveSettings'
+import { isArchiveChangeEvent, writeArchive } from './thread-archive'
 import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { reportProjectFileReferenceRejection } from './useProjectFileAvailability'
 import { prepareFileEditsForQuit } from './file-edit-store'
@@ -224,7 +226,7 @@ export function shouldRefreshActiveThreadForCoreEvent(
   activeThreadId: string | null,
   shuttingDown = false
 ): boolean {
-  if (shuttingDown || !activeThreadId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) {
+  if (shuttingDown || !activeThreadId || (!ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method) && !isArchiveChangeEvent(event))) {
     return false
   }
   const eventThreadId = stringField(asRecord(event.params), 'threadId')
@@ -311,6 +313,7 @@ export type View = 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'm
 type ActivateThreadOptions = {
   memberPrepared?: boolean
   reconcileDefaultLead?: boolean
+  onArchived?: (message: string) => void
   initializeComposerDraft?: boolean
   preserveNotificationFocus?: boolean
   missionPresentation?: 'drawer'
@@ -1170,7 +1173,11 @@ export function BusinessApp({
   const [missionOpenRequest, setMissionOpenRequest] = useState(0)
   const [newMissionOpen, setNewMissionOpen] = useState(false)
   const missionCreation = useRef<{id: string; command: MissionCreate; attachments: MissionAttachmentDraft[]; attachmentSignature: string} | null>(null)
-  const activeMission = missionList.missions.find(m => m.threadId === activeThreadId)
+  const boardMission = missionList.missions.find(mission => mission.threadId === activeThreadId)
+  // Keep the mounted editor through a board invalidation until its ordinary leave guard saves the draft.
+  const displayedMission = useRef<MissionRecord | undefined>(undefined)
+  if (boardMission || displayedMission.current?.threadId !== activeThreadId || view !== 'camp') displayedMission.current = boardMission
+  const activeMission = boardMission ?? displayedMission.current
   const missionThread = !!activeMission || !!(campSnapshot?.thread.id === activeThreadId && campSnapshot?.thread.missionId)
   const missionDrawer = !mobile && view === 'camp' && !!activeMission && missionPresentation === 'drawer'
   const [newConversationOpen, setNewConversationOpen] = useState(false)
@@ -1197,6 +1204,7 @@ export function BusinessApp({
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
   const [runtimeRecovery, setRuntimeRecovery] = useState<ThreadRuntimeRecovery | null>(null)
   const campEventSequenceMarker = useRef(0)
+  const archiveWrites = useRef(new Set<string>())
   const campSelectionGeneration = useRef(0)
   const campOpenFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const campSnapshotCache = useRef(new Map<string, ThreadSurfaceSnapshot>())
@@ -1252,7 +1260,7 @@ export function BusinessApp({
     notificationPresentationRef.current = createNotificationPresentationCoordinator()
   }
 
-  const setThreadSnapshot = useCallback((
+  const storeThreadSnapshot = useCallback((
     snapshot: ThreadSurfaceSnapshot | null,
     entryPreview = false,
     initialComposerDraft: ThreadComposerDraftView | null = null
@@ -1352,6 +1360,37 @@ export function BusinessApp({
     return true
   }, [])
 
+  const showArchiveLanding = useCallback((mission: boolean, onNotice?: (message: string) => void): void => {
+    setActiveThreadId(null)
+    storeThreadSnapshot(null)
+    setNotificationFocus(null)
+    setView(mission ? 'missions' : 'compose')
+    onNotice?.(uiAttribute(mission ? '该使命已归档，可在「设置 → 归档」中取消归档' : '该会话已归档，可在「设置 → 归档」中取消归档'))
+  }, [storeThreadSnapshot])
+
+  const leaveArchivedWorkspace = useCallback((threadId: string, mission: boolean, onNotice?: (message: string) => void): void => {
+    if (viewRef.current !== 'camp' || activeThreadIdRef.current !== threadId) return
+    const { entries, index } = desktopNavigation.getSnapshot()
+    const target = entries[index]
+    if (target?.kind === 'camp' && target.threadId === threadId
+      && desktopNavigation.captureCurrentEntry().update({ kind: mission ? 'missions' : 'quick_chat' })) {
+      showArchiveLanding(mission, onNotice)
+    }
+  }, [desktopNavigation, showArchiveLanding])
+
+  const setThreadSnapshot = useCallback((snapshot: ThreadSurfaceSnapshot | null, entryPreview = false,
+    initialComposerDraft: ThreadComposerDraftView | null = null): void => {
+    if (snapshot?.thread.archivedAt) {
+      const { id, missionId } = snapshot.thread
+      campSnapshotCache.current.delete(id)
+      if (activeThreadIdRef.current === id && viewRef.current === 'camp' && !archiveWrites.current.has(id)) {
+        void leaveActiveThread(() => leaveArchivedWorkspace(id, !!missionId, notify))
+      }
+      return
+    }
+    storeThreadSnapshot(snapshot, entryPreview, initialComposerDraft)
+  }, [leaveActiveThread, leaveArchivedWorkspace, notify, storeThreadSnapshot])
+
   const registerAutomationLeaveGuard = useCallback((guard: AutomationLeaveGuard | null): void => {
     automationLeaveGuardRef.current = guard
   }, [])
@@ -1439,13 +1478,13 @@ export function BusinessApp({
     // A capability change can race an enter for a different Thread. Re-read an
     // obsolete projection without replaying enter or refreshing every navigation.
     // The revision also catches off/on cycles during the same request.
-    while (projection.schemaVersion === 9
+    while ((projection.schemaVersion === 9 || projection.schemaVersion === 10)
       && capabilityRevision !== taskCapabilityRevisionRef.current
       && projection.tasksEnabled !== taskCapabilityRef.current) {
       capabilityRevision = taskCapabilityRevisionRef.current
       projection = await requestAuthoritativeThreadOpenProjection(client, threadId, traceId)
     }
-    if (projection.schemaVersion !== 9) throw new Error(uiAttribute('会话打开数据版本不兼容。'))
+    if (projection.schemaVersion !== 9 && projection.schemaVersion !== 10) throw new Error(uiAttribute('会话打开数据版本不兼容。'))
     const receivedAt = performance.now()
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
@@ -1533,8 +1572,12 @@ export function BusinessApp({
         readThreads: (threadIds) => client.request<NavigationThreadRows>('navigation.threads', { threadIds }),
         getPinnedThreadIds: () => pinnedThreadIdsRef.current,
         onRows: (rows, requestedIds) => {
-          setPinnedThreadItems(current => current.flatMap(thread =>
-            requestedIds.includes(thread.id) ? rows.threads.find(next => next.id === thread.id) ?? [] : thread))
+          const pinnedIds = new Set(pinnedThreadIdsRef.current)
+          const updatedIds = new Set(requestedIds)
+          setPinnedThreadItems(current => [
+            ...current.filter(thread => pinnedIds.has(thread.id) && !updatedIds.has(thread.id)),
+            ...rows.threads.filter(thread => pinnedIds.has(thread.id) && !deletingThreadIdsRef.current.has(thread.id))
+          ])
           const activeRow = rows.threads.find(thread => thread.id === activeThreadIdRef.current)
           if (activeRow) setOpenedNavigationRow(activeRow)
         },
@@ -1908,7 +1951,7 @@ export function BusinessApp({
     }
     // A preview commits navigation before the authoritative request finishes.
     // Fork recovery must preserve the current page until full opening succeeds.
-    if (previewSnapshot && !options.stayOnOpenFailure) {
+    if (previewSnapshot && !previewSnapshot.thread.archivedAt && !options.stayOnOpenFailure) {
       commitThreadSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
@@ -1927,6 +1970,12 @@ export function BusinessApp({
         return false
       }
       clearThreadOpenFeedback()
+      if (snapshot.thread.archivedAt) {
+        campSnapshotCache.current.delete(threadId)
+        const mission = !!snapshot.thread.missionId
+        if (!transaction || transaction.commit({ kind: mission ? 'missions' : 'quick_chat' })) showArchiveLanding(mission, options.onArchived ?? notify)
+        return false
+      }
       commitThreadSurface(snapshot, false, null)
       await afterNextPaint()
       if (selectionGeneration !== campSelectionGeneration.current) return false
@@ -1965,7 +2014,7 @@ export function BusinessApp({
       }
       return false
     }
-  }, [clearThreadOpenFeedback, navigationRefreshCoordinator, requestThreadProjection, setThreadSnapshot, userAnchorNavigationFor])
+  }, [clearThreadOpenFeedback, navigationRefreshCoordinator, notify, requestThreadProjection, setThreadSnapshot, showArchiveLanding, userAnchorNavigationFor])
 
   const activateThread = useCallback(async (
     threadId: string,
@@ -2411,6 +2460,11 @@ export function BusinessApp({
         }
         if (cancelled) return
         const { snapshot, traceId, startedAt, receivedAt } = opened
+        if (snapshot.thread.archivedAt) {
+          showArchiveLanding(!!snapshot.thread.missionId, notify)
+          completeStartup(startupSnapshot.sessionId)
+          return
+        }
         cancelPendingThreadActivation()
         const selectionGeneration = campSelectionGeneration.current
         campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -2470,6 +2524,8 @@ export function BusinessApp({
     requestThreadProjection,
     userAnchorNavigationFor,
     setThreadSnapshot,
+    showArchiveLanding,
+    notify,
     startupPrerequisitesReady,
     startupSnapshot
   ])
@@ -2487,6 +2543,7 @@ export function BusinessApp({
       ? { kind: 'camp', threadId: activeThreadId }
       : view === 'members' ? { kind: 'members', agentId: restoredMemberId(selectedMemberId, agents), tab: memberTab }
       : view === 'teams' ? { kind: 'teams' }
+      : view === 'missions' ? { kind: 'missions' }
       : view === 'memory' ? memoryTarget
       : { kind: 'quick_chat' }
     desktopNavigation.reset(target)
@@ -2613,8 +2670,7 @@ export function BusinessApp({
     const threadId = activeThreadId
     const throughGlobalSequence = campSnapshot.throughGlobalSequence
     if (campSnapshotState.entryPreview) return undefined
-    const mission = campSnapshot.thread.missionId
-      ? missionList.missions.find(item => item.threadId === threadId) : null
+    const mission = campSnapshot.thread.missionId && activeMission?.threadId === threadId ? activeMission : null
     const row = (navigation ? allNavigationThreads(navigation).find(thread => thread.id === threadId) : null)
       ?? (openedNavigationRow?.id === threadId ? openedNavigationRow : null)
       ?? pinnedThreadItems.find(thread => thread.id === threadId)
@@ -2640,8 +2696,9 @@ export function BusinessApp({
           threadId,
           throughGlobalSequence
         })
-        if (mission) void missionList.refresh()
-        else navigationRefreshCoordinator.acceptRows(acknowledgement.navigation)
+        if (mission) {
+          void missionList.refresh()
+        } else navigationRefreshCoordinator.acceptRows(acknowledgement.navigation)
       } catch {
         if (campViewedAcknowledgements.current.get(threadId) === observedCompletion) {
           campViewedAcknowledgements.current.delete(threadId)
@@ -2670,7 +2727,7 @@ export function BusinessApp({
     navigation,
     pinnedThreadItems,
     openedNavigationRow,
-    missionList.missions,
+    activeMission,
     missionList.refresh,
     campSnapshotState.entryPreview,
     navigationRefreshCoordinator,
@@ -2745,6 +2802,10 @@ export function BusinessApp({
         }).catch(() => undefined)
       }
       const threadId = activeThreadIdRef.current
+      if (isArchiveChangeEvent(event) && typeof params.threadId === 'string') campSnapshotCache.current.delete(params.threadId)
+      if (isArchiveChangeEvent(event) && params.threadId === threadId && typeof params.throughGlobalSequence === 'number') {
+        campEventSequenceMarker.current = Math.max(campEventSequenceMarker.current, params.throughGlobalSequence)
+      }
       const refresh = threadId && deletingThreadIdsRef.current.has(threadId)
         ? null
         : refreshActiveThreadForCoreEvent(
@@ -2922,6 +2983,7 @@ export function BusinessApp({
   useEffect(() => client.onInvalidated?.((change) => {
     if (memoryCapabilityRef.current.active && viewRef.current !== 'memory'
       && (!change || change.resync || change.memoryContentChanged)) setMemoryRefreshKey(current => current + 1)
+    if (!change || change.resync || change.referencesChanged) campSnapshotCache.current.clear()
     campViewedAcknowledgements.current.clear()
     setOpenedNavigationRow(null)
     void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
@@ -3109,8 +3171,8 @@ export function BusinessApp({
           if (transaction.commit() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
           return
         }
-        await activateThreadWithoutLeaveGuard(target.threadId, context?.campOptions ?? {}, selectionGeneration, transaction)
-        if (transaction.isCurrent() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+        const opened = await activateThreadWithoutLeaveGuard(target.threadId, context?.campOptions ?? {}, selectionGeneration, transaction)
+        if (opened && transaction.isCurrent() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
         return
       }
       const previous = desktopNavigation.getSnapshot()
@@ -3387,7 +3449,9 @@ export function BusinessApp({
             }
             : null
         setNotificationFocus(target ? { ...target, active: false } : null)
+        let archivedNotice: string | undefined
         const activated = await activateThread(action.threadId, {
+          onArchived: message => { archivedNotice = message },
           memberPrepared: true,
           preserveNotificationFocus: target !== null,
           missionPresentation: 'drawer',
@@ -3400,7 +3464,7 @@ export function BusinessApp({
         if (!activated) {
           result = {
             status: 'failed',
-            message:uiAttribute("暂时无法打开通知来源。通知仍保留，可稍后重试。")
+            message: archivedNotice ?? uiAttribute("暂时无法打开通知来源。通知仍保留，可稍后重试。")
           }
           return
         }
@@ -3575,6 +3639,39 @@ export function BusinessApp({
       ])
     } finally {
       setBusy(null)
+    }
+  }
+
+  const changeArchive = async (
+    threadId: string, archived: boolean, mission: boolean
+  ): Promise<void> => {
+    if (archiveWrites.current.has(threadId)) return
+    archiveWrites.current.add(threadId)
+    const apply = async (): Promise<void> => {
+      let changed: boolean
+      try {
+        changed = (await writeArchive(client, archived, { threadId })).changed
+      } catch (error) {
+        const reason = errorMessage(error)
+        notifyError(archived ? uiAttribute('归档失败：{0}', reason) : uiAttribute('取消归档失败：{0}', reason))
+        return
+      }
+      campSnapshotCache.current.delete(threadId)
+      if (archived) leaveArchivedWorkspace(threadId, mission)
+      if (changed && archived) {
+        setToast(current => current?.persistent ? current : {
+          message: uiAttribute('已归档。'), tone: 'neutral',
+          action: { label: uiAttribute('撤销'), onSelect: () => {
+            void changeArchive(threadId, false, mission).catch(error => notifyError(errorMessage(error)))
+          } }
+        })
+      } else if (changed) notify(uiAttribute('已取消归档'))
+    }
+    try {
+      if (archived && viewRef.current === 'camp' && activeThreadIdRef.current === threadId) await leaveActiveThread(apply)
+      else await apply()
+    } finally {
+      archiveWrites.current.delete(threadId)
     }
   }
 
@@ -4239,7 +4336,7 @@ export function BusinessApp({
     })
   }
 
-  async function openMission(mission: MissionRecord): Promise<void> {
+  async function openMission(mission: Pick<MissionRecord, 'threadId'>): Promise<void> {
     setMissionPresentation('drawer')
     await activateThread(mission.threadId, { reconcileDefaultLead: false })
     if (activeThreadIdRef.current === mission.threadId && viewRef.current === 'camp') {
@@ -4522,6 +4619,7 @@ export function BusinessApp({
     onThreadIdCopied={() => {
       setError(null)
     }}
+    onArchive={async thread => { await changeArchive(thread.id, true, false) }}
     onRename={renameThread}
     onDelete={deleteThread}
     onDeleteError={(nextError) => notifyError(errorMessage(nextError))}
@@ -4543,7 +4641,7 @@ export function BusinessApp({
         await openMission(mission)
       }
     }}>
-    <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
+    <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onArchive={async mission => { await changeArchive(mission.threadId, true, true) }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!startupGateVisible && !shuttingDown && (forkLoading || forkState.phase === 'unknown' || forkState.phase === 'rejected') && <AppToast
         toast={forkState.phase === 'unknown' ? { message: uiAttribute('分叉结果尚未确认'), tone: 'danger', persistent: true, keepOnAction: true, dismissible: false,
@@ -4594,7 +4692,7 @@ export function BusinessApp({
           hidden={view !== 'missions' && !missionDrawer} selectedId={missionDrawer ? activeMission?.missionId : undefined} onRefresh={missionList.refresh}
           onOpenMenu={openMobileMenu} menuOpen={mobileConversationDrawerOpen} menuTriggerRef={mobileConversationListButtonRef}
           onNew={() => { setNewMissionOpen(true) }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }}/>} 
-        {!startupGateVisible && view === 'camp' && missionThread && !activeMission && <section className="mission-section-empty" role={missionList.error ? 'alert' : 'status'}><p>{missionList.error || (missionList.loading ? uiAttribute("正在读取使命…") : uiAttribute("此使命当前不可用。"))}</p>{!missionList.loading && <button className="quiet-button" onClick={() => void missionList.refresh()}><UiText zh={"重试"} /></button>}<button className="quiet-button" onClick={returnToMissions}><UiText zh={"返回使命板"} /></button></section>}
+        {!startupGateVisible && view === 'camp' && missionThread && !activeMission && <section className="mission-section-empty" role={missionList.error ? 'alert' : 'status'}><p>{missionList.error || (missionList.loading ? uiAttribute("正在读取使命…") : uiAttribute("此使命当前不可用。"))}</p>{!missionList.loading && <button className="quiet-button" onClick={missionList.refresh}><UiText zh={"重试"} /></button>}<button className="quiet-button" onClick={returnToMissions}><UiText zh={"返回使命板"} /></button></section>}
         {canRenderThread && (
           <MissionSurface key={activeThreadId} enabled={!!activeMission} full={!missionDrawer} onExpand={() => setMissionPresentation('full')} onClose={returnToMissions}>
           {activeMission && <MissionHeader mission={activeMission} drawer={missionDrawer} thread={visibleThreadSnapshot} projectName={activeThreadProject?.name ?? activeThreadContextLabel}
@@ -4762,6 +4860,8 @@ export function BusinessApp({
             installations={installations}
             busy={busy}
             section={settingsSection}
+            archiveContent={settingsSection === 'archive' && <ArchiveSettings projectNames={projectNames}
+              onDeleted={threadId => { hideAcceptedThreadDeletion(threadId); void missionList.refresh() }} onNotify={notify} />}
             updates={appUpdates}
             serverUpdates={environment.serverUpdates}
             commonEnvironmentReturn={commonEnvironmentReturn ? {
@@ -5041,6 +5141,7 @@ export function SettingsView({
   installations,
   busy,
   section,
+  archiveContent,
   updates,
   serverUpdates,
   onDiagnosticsNavigate,
@@ -5063,6 +5164,7 @@ export function SettingsView({
   installations: AdapterInstallation[]
   busy: string | null
   section: SettingsSection
+  archiveContent?: React.ReactNode
   updates: AppUpdatesController
   serverUpdates?: import('@contracts').AppUpdatesApi
   commonEnvironmentReturn?: { kind: AdapterKind; memberName: string; onBack(): void }
@@ -5106,6 +5208,7 @@ export function SettingsView({
         {section === 'notifications' && (
           <NotificationSettings />
         )}
+        {section === 'archive' && archiveContent}
         {section === 'monitoring' && (
           <RuntimeMonitoring platform={platform} health={health} />
         )}
@@ -5205,7 +5308,7 @@ export async function resolveNotificationAgentRun(
     : null
   if (cachedRun) return cachedRun
   const snapshot = await client.request<ThreadSnapshot>('threads.snapshot', { threadId })
-  if (snapshot.schemaVersion !== THREAD_SNAPSHOT_SCHEMA_VERSION || snapshot.thread.id !== threadId) {
+  if ((snapshot.schemaVersion !== THREAD_SNAPSHOT_SCHEMA_VERSION && snapshot.schemaVersion !== 36) || snapshot.thread.id !== threadId) {
     throw new Error(uiAttribute('执行定位合同不兼容。'))
   }
   return snapshot.agentRuns.find(({ id }) => id === agentRunId) ?? null

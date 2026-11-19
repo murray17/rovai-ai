@@ -4,6 +4,7 @@ import { AppHeader } from './AppHeader'
 import { useMobileLayout } from './MobileLayout'
 import { DialogControlIcon } from './AppDialog'
 import { Icon } from './MissionControls'
+import { MissionArchiveButton } from './MissionBoard'
 import { useFilePreview } from './FilePreviewContext'
 import { UiText, uiAttribute } from './interface-language'
 
@@ -31,7 +32,8 @@ export function MissionHeader({ mission, drawer, projectName, thread, openReques
     preview.openExecution,
     preview.openMissionActivity
   ])
-  if (mobile) return <AppHeader threadTitle={mission.title} contextLabel={projectName} thread={thread}
+  const archive = thread.thread.activationState === 'active' && !thread.thread.archivedAt ? <MissionArchiveButton mission={mission} header /> : null
+  if (mobile) return <AppHeader threadTitle={mission.title} contextLabel={projectName} thread={thread} conversationActions={archive}
     detailEntryHostRef={detailEntryHostRef} onFocusApprovals={onFocusApprovals}
     onOpenConversationList={onClose} conversationListLabel={uiAttribute("返回使命板")} />
   return <AppHeader threadTitle={mission.title} contextLabel={projectName} thread={thread} detailEntryHostRef={detailEntryHostRef}
@@ -44,9 +46,9 @@ export function MissionHeader({ mission, drawer, projectName, thread, openReques
         <Icon name={drawer ? 'expand' : 'collapse'}/>
       </button>
     </div>}
-    conversationActions={<button className="mission-activity-entry" aria-pressed={activitySelected} onClick={() => {
+    conversationActions={<>{archive}<button className="mission-header-action mission-activity-entry" aria-pressed={activitySelected} onClick={() => {
       if (activitySelected && activityTab) preview.close(activityTab.id)
       else preview.openMissionActivity(mission.missionId)
-    }}><Icon name="history"/><span><UiText zh={"活动"} /></span></button>}
+    }}><Icon name="history"/><span><UiText zh={"活动"} /></span></button></>}
   />
 }

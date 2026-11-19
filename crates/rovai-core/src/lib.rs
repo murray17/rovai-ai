@@ -144,6 +144,7 @@ pub mod task_capability;
 pub mod team_tool;
 pub mod team_tool_catalog;
 pub mod teams;
+mod thread_archive;
 pub mod thread_compat;
 pub mod thread_reference;
 pub mod thread_runs;

@@ -227,7 +227,7 @@ pub fn list(connection: &Connection, params: ListParams) -> Result<ReferencePage
     };
     let activity = "COALESCE(c.navigation_activity_at,c.created_at)";
     let sql = format!(
-        "SELECT {id},{title},c.project_binding_kind,c.project_path,{activity} FROM camp c {join} WHERE c.id<>?1 AND c.deletion_operation_id IS NULL {visible} AND (?2='' OR rovai_reference_match({title},?2)) AND (?3 IS NULL OR {activity}<?3 OR ({activity}=?3 AND {id}>?4)) ORDER BY {activity} DESC,{id} LIMIT 9"
+        "SELECT {id},{title},c.project_binding_kind,c.project_path,{activity} FROM camp c {join} WHERE c.id<>?1 AND c.archived_at IS NULL AND c.deletion_operation_id IS NULL {visible} AND (?2='' OR rovai_reference_match({title},?2)) AND (?3 IS NULL OR {activity}<?3 OR ({activity}=?3 AND {id}>?4)) ORDER BY {activity} DESC,{id} LIMIT 9"
     );
     let mut statement = connection.prepare(&sql)?;
     let mut rows = statement
@@ -282,7 +282,12 @@ pub fn invalidates_directory(method: &str, params: &serde_json::Value) -> bool {
         ),
         "navigation.invalidated" => matches!(
             params["reason"].as_str(),
-            Some("camps.rename" | "camps.delete_accepted" | "camp.deleted")
+            Some(
+                "camps.rename"
+                    | "camps.delete_accepted"
+                    | "camp.deleted"
+                    | "threads.archive_changed"
+            )
         ),
         _ => false,
     }
@@ -381,7 +386,7 @@ mod tests {
             }
         }
         let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch("CREATE TABLE camp(id TEXT PRIMARY KEY,title TEXT,project_binding_kind TEXT,project_path TEXT,deletion_operation_id TEXT,activation_state TEXT,navigation_activity_at TEXT,created_at TEXT); CREATE TABLE mission(id TEXT PRIMARY KEY,camp_id TEXT,title TEXT);").unwrap();
+        connection.execute_batch("CREATE TABLE camp(id TEXT PRIMARY KEY,title TEXT,project_binding_kind TEXT,project_path TEXT,deletion_operation_id TEXT,activation_state TEXT,navigation_activity_at TEXT,created_at TEXT,archived_at TEXT); CREATE TABLE mission(id TEXT PRIMARY KEY,camp_id TEXT,title TEXT);").unwrap();
         let invalidations: Vec<serde_json::Value> = serde_json::from_str(include_str!(
             "../../../packages/contracts/fixtures/thread-reference-invalidation.json"
         ))
@@ -395,7 +400,7 @@ mod tests {
         }
         let current = ThreadId::new().to_string();
         let insert = |id: &str, title: &str| {
-            connection.execute("INSERT INTO camp VALUES (?1,?2,'directory','/project',NULL,'active','2026-10-22','2026-10-22')", params![id,title]).unwrap();
+            connection.execute("INSERT INTO camp VALUES (?1,?2,'directory','/project',NULL,'active','2026-10-22','2026-10-22',NULL)", params![id,title]).unwrap();
         };
         insert(&current, "登录当前");
         let ids: Vec<_> = (0..19).map(|_| ThreadId::new().to_string()).collect();

@@ -138,11 +138,14 @@ export function orderedUniqueDingTalkInboundObservations<T extends {
   return [...byApp.values()]
 }
 
+type InboundObservationResult = boolean | 'ignored'
+
 export function dingtalkCanonicalReplayCarrier<T>(
   observed: readonly T[],
-  completed: readonly boolean[]
+  completed: readonly InboundObservationResult[]
 ): T | null {
   if (observed.length !== completed.length) throw new Error('dingtalk_inbound_batch_invalid')
+  if (completed.includes('ignored')) return null
   const completedIndex = completed.findIndex(Boolean)
   return observed[completedIndex >= 0 ? completedIndex : 0] ?? null
 }
@@ -340,7 +343,7 @@ export class DingTalkChannelSettingsService {
   readonly #inboundBatch = new Map<string, Map<string, {
     message: DingTalkInboundMessage
     agentId: string
-    observation: Promise<boolean>
+    observation: Promise<InboundObservationResult>
   }>>()
   readonly #executionCardStates = new Map<string, DingTalkExecutionCardPresentationState>()
   readonly #executionCardTails = new Map<string, Promise<unknown>>()
@@ -1146,13 +1149,26 @@ export class DingTalkChannelSettingsService {
 
   async #queueInbound(message: DingTalkInboundMessage): Promise<void> {
     if (this.#stopped || !hasCanonicalSingleDingTalkBotTarget(message)) return
-    this.#hostPump.wake()
+    const owner = await this.#command('channels.dingtalk.owner.verify', {
+      provider: 'dingtalk',
+      appId: message.appId,
+      tenantKey: message.tenantKey,
+      inbound: { chatId: message.chatId, topicKey: '', conversationKind: message.conversationKind },
+      senderOpenId: null,
+      senderUserId: message.senderUserId,
+      senderUnionId: null,
+      senderDisplayName: message.senderDisplayName
+    }, false)
+    if (owner.code === 'channel.inbound.ignored_archived') return
     const snapshot = await this.#snapshot()
     const bot = snapshot.memberBots.find((candidate) => candidate.appKey === message.appId)
     if (!bot || bot.status !== 'published') return
+    if (owner.payload.classification !== 'owner') {
+      if (message.conversationKind === 'p2p') await this.#sendNonOwnerHint(message)
+      return
+    }
     if (message.conversationKind === 'p2p') {
       await this.#processInbound(message, [bot.agentId], [message.appId], true)
-      this.#hostPump.wake()
       return
     }
     const key = `${message.tenantKey}\0${message.externalMessageId}`
@@ -1207,27 +1223,14 @@ export class DingTalkChannelSettingsService {
     agentIds: readonly string[],
     expectedAppIds: readonly string[],
     canonicalMentionsComplete: boolean
-  ): Promise<boolean> {
+  ): Promise<InboundObservationResult> {
     const acknowledgementAppId = expectedAppIds[0]
     const primaryAgentId = agentIds[0]
     if (!acknowledgementAppId || !primaryAgentId || agentIds.length !== expectedAppIds.length) {
       throw new Error('dingtalk_inbound_target_set_invalid')
     }
-    const owner = await this.#command('channels.dingtalk.owner.verify', {
-      provider: 'dingtalk',
-      appId: message.appId,
-      tenantKey: message.tenantKey,
-      senderOpenId: null,
-      senderUserId: message.senderUserId,
-      senderUnionId: null,
-      senderDisplayName: message.senderDisplayName
-    }, false)
-    if (owner.payload.classification !== 'owner') {
-      if (message.conversationKind === 'p2p') await this.#sendNonOwnerHint(message)
-      return false
-    }
     if (message.conversationKind === 'p2p' && message.body === '/new' && message.resources.length === 0) {
-      await this.#command('channels.dingtalk.dm.startNew', {
+      const started = await this.#command('channels.dingtalk.dm.startNew', {
         provider: 'dingtalk',
         appId: message.appId,
         tenantKey: message.tenantKey,
@@ -1235,6 +1238,8 @@ export class DingTalkChannelSettingsService {
         conversationDisplayName: message.conversationDisplayName,
         targetAgentId: primaryAgentId
       })
+      if (started.code === 'channel.inbound.ignored_archived') return 'ignored'
+      this.#hostPump.wake()
       return true
     }
     const observed = await this.#command('channels.dingtalk.inbound.observe', {
@@ -1260,6 +1265,7 @@ export class DingTalkChannelSettingsService {
       expectedAppIds: [...expectedAppIds],
       acknowledgementAppId
     })
+    if (observed.code === 'channel.inbound.ignored_archived') return 'ignored'
     this.#hostPump.wake()
     if (canonicalMentionsComplete && observed.payload.readyToFinalize === true) {
       if (message.conversationKind === 'group') await this.#reconcileRoster(message)

@@ -73,6 +73,8 @@ pub(super) fn reconcile(
         "missions.start" => user!(crate::mission::StartMissionCommand),
         "missions.linkPr" => user!(crate::mission::LinkMissionPrCommand),
         "camps.rename" => camp!(RenameThreadCommand),
+        "camps.archive" => camp!(rovai_core::thread_archive::ArchiveThreadCommand),
+        "camps.unarchive" => camp!(rovai_core::thread_archive::UnarchiveThreadCommand),
         "camps.delete" => camp!(DeleteThreadCommand),
         "camps.retryDeletion" => user!(RetryThreadDeletionCommand),
         "camps.discardPending" => camp!(DiscardPendingThreadCommand),

@@ -958,7 +958,7 @@ describe('Thread snapshot cache', () => {
 
     const snapshot = campOpenProjectionAsSnapshot(projection, previous)
 
-    expect(snapshot.schemaVersion).toBe(36)
+    expect(snapshot.schemaVersion).toBe(37)
     expect(snapshot.messages.map(({ id }) => id)).toEqual(['older', 'recent'])
     expect(snapshot.timeline).toEqual([])
     expect(snapshot.messages.every((message) => message.timelineGlobalSequence === null)).toBe(true)
@@ -3416,12 +3416,15 @@ describe('task event projections', () => {
       appearance: '外观',
       shortcuts: '快捷键',
       notifications: '提醒',
+      archive: '归档',
       monitoring: '运行监控',
       diagnostics: '诊断与修复',
       about: '关于与更新'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
-      const markup = renderToStaticMarkup(createElement(SettingsView, { remoteConnection: createElement(RemoteConnectionStatus, { origin: 'http://fixture.invalid', state: 'live', onLogout: () => undefined }), preferencesApi: {} as import('@contracts').GeneralPreferencesApi, ...baseProps, section }))
+      const markup = renderToStaticMarkup(createElement(SettingsView, { remoteConnection: createElement(RemoteConnectionStatus, { origin: 'http://fixture.invalid', state: 'live', onLogout: () => undefined }), preferencesApi: {} as import('@contracts').GeneralPreferencesApi, ...baseProps, section,
+        archiveContent: createElement('header', { className: 'settings-page-heading' }, createElement('h1', null, '归档'))
+      }))
       if (section === 'shortcuts') {
         expect(markup).not.toContain('<h1>快捷键</h1>') // Desktop capability is required.
       } else if (section === 'mcp') {

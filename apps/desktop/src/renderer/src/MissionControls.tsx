@@ -164,9 +164,10 @@ export function MissionFilter({ label, icon, options, values, onChange, searchab
   </Popover.Content></Popover.Portal></Popover.Root>
 }
 export type ContextPosition = { id: string; x: number; y: number; origin: HTMLElement | null }
-export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onStatus, onLead, onSaveTags, onCleanup, onDelete }: {
+export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onStatus, onLead, onSaveTags, onCleanup, onDelete, onArchive }: {
   m: Mission | undefined; position: ContextPosition | null; onClose(): void; onStatus(status: Status): void;
   catalog: string[]; onEdit(): void; onLead(id: string): void; onSaveTags(tags: string[]): Promise<void>; onCleanup(): void; onDelete(): void
+  onArchive?(): void
 }) {
   const person=usePeople();
   const mobile=useMobileLayout()
@@ -205,6 +206,7 @@ export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onSt
       {panels.map(item => submenu(item.id, item.label, item.content, item.className))}
       {m.cleanupAvailable && <Menu.Item className="compact-option" onSelect={onCleanup}><span><UiText zh={"清理使命 Worktree"} /></span></Menu.Item>}
       <Menu.Separator className="sidebar-action-menu-separator"/>
+      {onArchive && !m.archivedAt && <Menu.Item className="compact-option" onSelect={onArchive}><span><UiText zh={m.runningAgentIds?.length ? '归档并停止执行' : '归档'} /></span></Menu.Item>}
       <Menu.Item className="compact-option mission-danger-item" onSelect={onDelete}><span><UiText zh={"删除"} /></span></Menu.Item>
       </>}
     </Menu.Content></Menu.Portal>}

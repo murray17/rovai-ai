@@ -16,15 +16,17 @@ external_principal 消息推进。查看、重命名、队员消息和 Run 终�
 | 接口 | 请求 | 权威返回与范围 |
 | --- | --- | --- |
 | `navigation.camps` | `{ campIds: string[] }` | `{ throughGlobalSequence, groupKeys, camps }`，按 ID 读取；不在调用者导航范围内的行不返回，不读取其他 Camp；groupKeys 从仍存在的目标 Camp 取得，包含删除受理后尚未物理删除的所属组 |
-| `navigation.snapshot` | `{ groupLimits?, groupKeys? }` | schema 3；省略 groupKeys 表示完整快照，提供时只返回指定组；quickChat 未被请求时为空；缺失/空项目不创建项目项 |
-| `navigation.groupCamps` | `{ projectPath?, offset?, limit? }` | schema 3；单组 SQL COUNT + LIMIT/OFFSET，limit 限制为 1–200；保留现有 page shape |
+| `navigation.snapshot` | `{ groupLimits?, groupKeys? }` | schema 4。省略 groupKeys 表示完整快照，提供时只返回指定组。quickChat 未被请求时为空。缺失或空项目不创建项目项 |
+| `navigation.groupCamps` | `{ projectPath?, offset?, limit? }` | schema 4。单组 SQL COUNT + LIMIT/OFFSET，limit 限制为 1–200 |
 
 `groupKeys` 为 `quick-chat` 或 `directory:<projectPath>`。`groupLimits` 为完整前缀大小，默认/最少 5；
 未知 key 不创建组。分组响应在同一个事务里获得总数与排序后的前 N 条，不能用部分本地数据推导补位或名次。
 完整快照只跨组读取目录/计数元数据，各组详细行按索引限定窗口；正常路径不访问 event_log。
 置顶 Camp 用已知 ID 批量读取，不遍历其他组寻找；完整恢复同时按 ID 核对窗口外的置顶项，普通切换不带起其他置顶项读取。
 
-NavigationCampItem 延续 schema 3 字段，并提供 `lastSeenGlobalSequence`（读取旧 fixture 时可缺省为 0）。
+NavigationCampItem 提供 `lastSeenGlobalSequence`（读取旧 fixture 时可缺省为 0）。
+schema 4 增加归档状态，按 ID 的摘要仍返回有权限读取的归档记录。分组前缀、计数、普通搜索和置顶展示以
+[Thread Archive v1](thread-archive-v1.md) 的可见性为准。
 `lastActivityAt`、`lastActivityGlobalSequence`、`latestCompletionGlobalSequence` 来自 camp 摘要；
 `marker` 从现有活跃 Run 与 camp_view_state 推导，loading 优先于 unread_completed。
 Renderer 的运行环沿用 loading，而未读独立使用最新回复与查看水位计算，允许运行和未读同时显示；

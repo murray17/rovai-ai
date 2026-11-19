@@ -70,7 +70,7 @@ fn eligible(
          JOIN agent_profile AS profile ON profile.id=conversation.agent_id
          WHERE run.id=?1 AND run.camp_id=?2 AND conversation.camp_id=?2
            AND conversation.kind='camp_member' AND run.invocation_kind='batch'
-           AND run.status IN ('failed','cancelled') AND camp.deletion_operation_id IS NULL
+           AND run.status IN ('failed','cancelled') AND camp.deletion_operation_id IS NULL AND camp.archived_at IS NULL
            AND member.status='active' AND member.leave_requested_at IS NULL AND profile.profile_status='present'
            AND NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id=run.camp_id AND mission.status='completed')
            AND (

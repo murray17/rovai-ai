@@ -66,6 +66,8 @@ mod subagent;
 mod task_capability;
 #[path = "db_teams.rs"]
 mod teams;
+#[path = "db_thread_archive.rs"]
+mod thread_archive;
 #[path = "db_web_pasted_text.rs"]
 mod web_pasted_text;
 #[cfg(test)]
@@ -526,7 +528,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 179;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 180;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1031,6 +1033,7 @@ struct CurrentMigrationState {
     v227: bool,
     v228: bool,
     v229: bool,
+    v230: bool,
 }
 
 impl CurrentMigrationState {
@@ -1052,6 +1055,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v230 {
+            let mut previous = *self;
+            previous.v230 = false;
+            return schema == 180 && previous.admits(contract, 179, classifier);
+        }
         if self.v229 {
             let mut previous = *self;
             previous.v229 = false;
@@ -3862,6 +3870,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 180
+                || thread_archive::schema_matches(connection)?)
             && (marker.projection_schema_version < 179 || message_fts_retired(connection)?)
             && (marker.projection_schema_version < 178
                 || message_mutations::indexed_inputs_schema_matches(connection)?)
@@ -6283,7 +6293,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=226),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=227),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=228),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=229)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=229),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=230)
         "#,
         [],
         |row| {
@@ -6448,6 +6459,7 @@ fn load_current_migration_state(
                 v227: row.get(157)?,
                 v228: row.get(158)?,
                 v229: row.get(159)?,
+                v230: row.get(160)?,
             })
         },
     )
@@ -8854,6 +8866,9 @@ impl Database {
         }
         if !self.schema_migration_applied(229)? {
             observe_migration_step(progress, "migration_229", || self.retire_message_fts())?;
+        }
+        if !self.schema_migration_applied(230)? {
+            observe_migration_step(progress, "migration_230", || thread_archive::migrate(self))?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40476,6 +40491,7 @@ mod tests {
         use crate::database_admission::{AdmissionAssessment, DatabaseAdmission};
 
         let mut fixture = crate::test_support::fresh_schema_database_fast_owned();
+        thread_archive::downgrade_for_test(fixture.connection());
         assert!(message_fts_retired(fixture.connection()).unwrap());
         fixture.connection().execute_batch(
             r#"
@@ -40564,7 +40580,7 @@ mod tests {
             let AdmissionAssessment::AdmittedExisting(ticket) =
                 DatabaseAdmission::assess(&lease).unwrap()
             else {
-                panic!("schema 179 should admit without another migration");
+                panic!("the current schema should admit without another migration");
             };
             let database = Database::open_admitted(*ticket).unwrap();
             assert!(connection_has_current_data_contract(database.connection()).unwrap());
@@ -40610,7 +40626,8 @@ mod tests {
         assert!(full_stages.ends_with(&[
             "migration_227".into(),
             "migration_228".into(),
-            "migration_229".into()
+            "migration_229".into(),
+            "migration_230".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40687,12 +40704,14 @@ mod tests {
             [
                 "migration_reconciliation",
                 "migration_main_metrics_convergence",
-                "migration_229"
+                "migration_229",
+                "migration_230"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
         assert!(older.schema_migration_applied(228).unwrap());
         assert!(older.schema_migration_applied(229).unwrap());
+        assert!(older.schema_migration_applied(230).unwrap());
         assert!(!older.schema_migration_applied(115).unwrap());
         assert!(message_mutations::schema_matches(older.connection()).unwrap());
         assert!(connection_has_current_data_contract(older.connection()).unwrap());
@@ -42776,6 +42795,7 @@ mod tests {
             v227: version >= 227,
             v228: version >= 228,
             v229: version >= 229,
+            v230: version >= 230,
         }
     }
 

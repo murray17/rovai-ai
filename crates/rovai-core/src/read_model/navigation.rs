@@ -30,7 +30,8 @@ fn load_rows(
             (EXISTS(SELECT 1 FROM agent_run r WHERE r.camp_id = camp.id AND r.status IN ('queued', 'running', 'waiting'))
              OR EXISTS(SELECT 1 FROM camp_turn t JOIN agent_run r ON r.camp_turn_id = t.id
                        WHERE t.camp_id = camp.id AND r.camp_id IS NULL AND r.status IN ('queued', 'running', 'waiting'))),
-            camp.version, camp.activation_state, channel.provider, channel.conversation_kind
+            camp.version, camp.activation_state, channel.provider, channel.conversation_kind,
+            camp.archived_at
         FROM camp
         LEFT JOIN agent_profile lead ON lead.id = camp.default_lead_agent_id
         LEFT JOIN camp_view_state v ON v.camp_id = camp.id
@@ -81,6 +82,7 @@ fn load_rows(
                 latest_completion_global_sequence: completion,
                 last_seen_global_sequence: seen,
                 version: row.get(11)?,
+                archived_at: row.get(15)?,
             })
         },
     )?;
@@ -108,7 +110,7 @@ pub(super) fn navigation_group_count(
     key: &str,
 ) -> Result<usize> {
     Ok(tx.query_row(
-        &format!("SELECT COUNT(*) FROM camp WHERE {GROUP_KEY} = ?2 AND {VISIBLE}"),
+        &format!("SELECT COUNT(*) FROM camp WHERE {GROUP_KEY} = ?2 AND {VISIBLE} AND camp.archived_at IS NULL"),
         params![client.id(), key],
         |row| row.get::<_, i64>(0),
     )? as usize)
@@ -121,7 +123,14 @@ pub(super) fn load_navigation_group(
     offset: usize,
     limit: usize,
 ) -> Result<Vec<NavigationThreadItem>> {
-    load_rows(tx, client, &format!("{GROUP_KEY} = ?2"), key, offset, limit)
+    load_rows(
+        tx,
+        client,
+        &format!("{GROUP_KEY} = ?2 AND camp.archived_at IS NULL"),
+        key,
+        offset,
+        limit,
+    )
 }
 
 pub(super) fn load_navigation_groups(
@@ -138,7 +147,7 @@ pub(super) fn load_navigation_groups(
         "?2 IS NULL".into()
     };
     let mut statement = tx.prepare(&format!(
-        "SELECT {GROUP_KEY}, COUNT(*) FROM camp WHERE {filter} AND {VISIBLE} GROUP BY {GROUP_KEY}"
+        "SELECT {GROUP_KEY}, COUNT(*) FROM camp WHERE {filter} AND {VISIBLE} AND camp.archived_at IS NULL GROUP BY {GROUP_KEY}"
     ))?;
     let groups = statement
         .query_map(

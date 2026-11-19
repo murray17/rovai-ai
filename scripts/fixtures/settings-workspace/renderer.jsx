@@ -1,3 +1,5 @@
+import { ArchiveSettings } from '@renderer/ArchiveSettings'
+import { ThreadClientProvider } from '@renderer/camp-client'
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThreadNavigation } from '@renderer/ThreadNavigation'
@@ -28,7 +30,7 @@ const state = {
   preferences: fixture.preferences(), notifications: fixture.notifications(),
   channels: fixture.channelsSnapshot(), executionWeb: fixture.executionWeb(),
   memory: { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 },
-  startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
+  startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null, archiveDeleteRejection: null
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)
 function aboutSnapshot() {
@@ -77,6 +79,53 @@ const memoryClient = {
     return clone(state.memory)
   },
   onEvent(listener) { memoryListeners.add(listener); return () => memoryListeners.delete(listener) }
+}
+const archiveRows = Array.from({ length: 205 }, (_, index) => ({
+  threadId: `archive-fixture-${index}`, missionId: null,
+  title: `归档样例 ${index + 1}`, projectKey: 'directory:/fixture',
+  lastMessageAt: '2026-11-18T14:32:00.000Z', threadVersion: 9
+}))
+const archivedMission = {
+  missionId: 'archive-mission', title: '归档使命样例', workspaceEverCreated: true, workspaceResourcesPresent: true
+}
+archiveRows.push({
+  ...archiveRows[0], threadId: 'archive-mission-thread',
+  missionId: archivedMission.missionId, title: archivedMission.title
+})
+const archiveNotices = []
+const archiveListeners = new Set()
+const invalidateArchive = (threadId, reason) => {
+  for (const listener of archiveListeners) listener({ method: 'navigation.invalidated', params: { threadId, reason } })
+}
+const archiveClient = {
+  onEvent(listener) { archiveListeners.add(listener); return () => archiveListeners.delete(listener) },
+  async request(method, params) {
+    await request(method, params)
+    if (method === 'threads.archive.list') {
+      if (state.loopArchiveCursor) return { items: [], nextCursor: 'repeated' }
+      const remaining = archiveRows.filter(item => !params.cursor || item.threadId > params.cursor)
+        .sort((a, b) => a.threadId < b.threadId ? -1 : 1)
+      const items = remaining.slice(0, params.limit ?? 200)
+      return { items: clone(items), nextCursor: remaining.length > items.length ? items.at(-1).threadId : null }
+    }
+    if (method === 'threads.unarchive') {
+      const { threadId } = params.command
+      archiveRows.splice(archiveRows.findIndex(row => row.threadId === threadId), 1)
+      invalidateArchive(threadId, 'threads.archive_changed')
+      return { status: 'applied', payload: { threadId, archivedAt: null, changed: true } }
+    }
+    if (method === 'missions.get') return archivedMission
+    if (method === 'missions.delivery') return { workspace: null }
+    if (method === 'threads.delete') {
+      const index = archiveRows.findIndex(row => row.threadId === params.command.threadId)
+      const code = state.archiveDeleteRejection
+      state.archiveDeleteRejection = null
+      if (code === 'command.version_conflict') archiveRows[index].threadVersion += 1
+      if (!code || code === 'camp.not_found') archiveRows.splice(index, 1)
+      if (code !== 'camp.not_found') invalidateArchive(params.command.threadId, code === 'command.version_conflict' ? 'camps.rename' : 'camps.delete_accepted')
+      return code ? { status: 'rejected', code } : { status: 'accepted', code: 'camp.delete_accepted' }
+    }
+  }
 }
 const savePreference = key => async value => {
   await request(key, value)
@@ -220,6 +269,10 @@ function Fixture() {
         {page === 'remote' && <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
+        {page === 'archive' && <ThreadClientProvider client={archiveClient}>
+          <ArchiveSettings projectNames={{ 'directory:/fixture': '本机项目名称' }} onDeleted={ignore}
+            onNotify={message => archiveNotices.push(message)} />
+        </ThreadClientProvider>}
         {page === 'runtime' && <RuntimeInstallationsPanel health={runtimeHealth} installations={[]} onReload={async () => { await request('runtime.reload') }} />}
         {page === 'channels' && <ChannelSettings agents={fixture.agents} />}
         {page === 'monitoring' && <RuntimeMonitoring />}
@@ -231,6 +284,7 @@ function Fixture() {
   </div>
 }
 window.settingsTest = {
+  archiveNotices,
   finishRuntimeCheck: (kind, result) => { pendingRuntimeChecks.get(kind)(result); pendingRuntimeChecks.delete(kind) },
   requests, state,
   releaseHostStatus: () => releaseHostStatus?.(),

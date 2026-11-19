@@ -134,6 +134,7 @@ pub(super) fn migrate_input_storage(db: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    thread_archive::downgrade_for_test(c);
     if !schema_matches(c).unwrap() {
         return;
     }

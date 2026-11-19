@@ -40,6 +40,22 @@ All categories implement Loading, Empty, Partial, Error, Disabled, Submitting an
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
 scroll and focus.
 
+## 归档
+
+普通会话从侧栏会话行的「⋯」菜单归档。使命卡片和列表行在右侧提供「归档」，也可从操作菜单或已打开的使命详情页头归档。
+「设置 → 归档」保留页面标题和说明。桌面正文最宽 1040px，类型标签、项目多选和搜索共用一条工具栏。
+窄屏将筛选与搜索放到标签下方。会话和使命共用搜索词及项目条件，当前类型无匹配时可直接查看另一类型的匹配记录。
+列表按项目分组，使用文件夹图标和圆角边框。每行标题下方显示最后可见消息时间，右侧提供描边的「取消归档」按钮和删除图标。
+结果查询、计数、恢复和首次删除受理遵循 [Thread Archive v1](../../contracts/thread-archive-v1.md)。
+
+列表后台刷新保留输入、筛选和已显示的完整结果。取消归档后继续留在页面。
+本次操作移除当前焦点所在条目后，焦点移到下一条操作或当前类型标签。删除确认沿用现有使命工作树选项。
+删除失败时在确认框内显示原因并保留用户选择。确认依据过期时，用户关闭并重新打开确认框才能提交。
+
+归档同时停止该会话或使命的执行。保存当前工作区的草稿后，会话返回新建页，使命返回使命板。
+归档记录的标题是普通文本。打开已归档记录的旧链接时，提示可前往「设置 → 归档」取消归档。
+列表按 Thread ID 分页读取，取齐后在本机筛选、计数和按项目分组。
+
 ## 通用
 
 General owns stable startup location, world-map availability and window reset. Windows Desktop also owns the local

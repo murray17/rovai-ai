@@ -769,6 +769,48 @@ describe('channel settings service', () => {
     } finally { stream.destroy(); await service.stop() }
   })
 
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('$kind silently discards messages to archived DMs and topics', async (profile) => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    harness.getChatMode.mockRejectedValue(new Error('chat mode temporarily unavailable'))
+    let knownTopics: Array<{ chatId: string; tenantKey: string; conversationKind: string }> = []
+    const scopes: unknown[] = []
+    const dispatches: string[] = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(), profile, createChannel: harness.createChannel,
+      credentialStore: memoryCredentialStore({ 'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' } }, () => profile.kind),
+      core: channelCore((method, raw) => {
+        if (method === `${profile.methodPrefix}snapshot`) return coreSnapshot({ transportConversations: knownTopics, memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', brand: profile.kind, appId: 'cli_a',
+          botDisplayName: '审阅员', credentialRef: 'feishu-member-a', status: 'published',
+          failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        }] })
+        if (method.endsWith('owner.verify')) {
+          scopes.push((raw as { command: { inbound: unknown } }).command.inbound)
+          return { status: 'applied', code: 'channel.inbound.ignored_archived', payload: { status: 'ignored' } }
+        }
+        if (method.endsWith('host.tick')) return { deliveries: [] }
+        if (/inbound\.|dm\.startNew|roster\.reconcile/.test(method)) dispatches.push(method)
+        return { status: 'applied', payload: {} }
+      })
+    })
+    try {
+      await service.start()
+      const receive = harness.handlers.get('cli_a:message')!
+      await receive(normalizedMessage({ messageId: 'dm-new', senderUserId: 'owner', content: '/new' }))
+      knownTopics = [{ chatId: 'oc_forum', tenantKey: 'tenant-1', conversationKind: 'topic' }]
+      await receive(normalizedMessage({ messageId: 'topic-file', senderUserId: 'owner', content: '请看附件',
+        chatId: 'oc_forum', chatType: 'group', rootId: 'topic-root', resources: [{ type: 'file', fileKey: 'ignored', fileName: 'note.txt' }],
+        mentions: [{ key: '@_user_1', isBot: true }] }))
+      expect(scopes).toEqual([
+        { chatId: 'oc_test', topicKey: '', conversationKind: 'p2p' },
+        { chatId: 'oc_forum', topicKey: 'topic-root', conversationKind: 'topic' }
+      ])
+      expect(dispatches).toEqual([])
+      expect(harness.getResource).not.toHaveBeenCalled()
+      expect(harness.send).not.toHaveBeenCalled()
+    } finally { await service.stop() }
+  })
+
   it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('$kind rejects unsupported rich-post folders through its download queue', async (profile) => {
     const hostMethod = (name: string): string => `${profile.hostMethodPrefix}${name}`
     let observed = false
