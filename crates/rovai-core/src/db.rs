@@ -7075,6 +7075,17 @@ fn database_sqlite_open_error(
     DatabaseOpenError::operation(code, operation, path, error)
 }
 
+fn observe_migration_step<T>(
+    progress: &mut dyn FnMut(&str, Duration),
+    stage: &str,
+    operation: impl FnOnce() -> T,
+) -> T {
+    let started = Instant::now();
+    let result = operation();
+    progress(stage, started.elapsed());
+    result
+}
+
 fn configure_runtime_connection(
     connection: &Connection,
     path: &Path,
@@ -8805,40 +8816,59 @@ impl Database {
         fresh_database: bool,
         progress: &mut dyn FnMut(&str, Duration),
     ) -> Result<()> {
-        // Observes existing steps only; no registry, alternate chain or outer
-        // transaction. Each migration still commits its own schema and receipt.
-        macro_rules! migration_step {
-            ($stage:expr, $operation:expr) => {{
-                let started = Instant::now();
-                let result = $operation;
-                progress($stage, started.elapsed());
-                result?
-            }};
-        }
         configure_runtime_connection(&self.connection, &self.path)?;
-        if !fresh_database
-            && let DatabaseContractClassification::SupportedMigrationSource(marker) =
-                classify_startup_contract(&self.connection)?
-            && matches!(marker.projection_schema_version, 176 | 177)
-        {
-            // A recognized recent store can omit historical receipts. Apply only
-            // the successors of its admitted schema, without replaying historical DDL.
-            if marker.projection_schema_version == 176 {
-                migration_step!("migration_227", message_mutations::migrate(self));
-            }
-            migration_step!("migration_228", self.retire_message_fts());
-            self.maintain_notifications_after_migration();
-            return Ok(());
-        }
         if !fresh_database {
-            migration_step!(
-                "migration_reconciliation",
+            observe_migration_step(progress, "migration_reconciliation", || {
                 self.reconcile_legacy_feishu_migration_collision()
-            );
-            migration_step!(
-                "migration_main_metrics_convergence",
+            })?;
+            observe_migration_step(progress, "migration_main_metrics_convergence", || {
                 self.reconcile_main_metrics_lineage()
-            );
+            })?;
+        }
+        if fresh_database || !self.has_admitted_sparse_migration_prefix()? {
+            self.migrate_through_226(fresh_database, progress)?;
+        }
+        if !self.schema_migration_applied(227)? {
+            observe_migration_step(progress, "migration_227", || {
+                message_mutations::migrate(self)
+            })?;
+        }
+        if !self.schema_migration_applied(228)? {
+            observe_migration_step(progress, "migration_228", || self.retire_message_fts())?;
+        }
+        if let Err(error) =
+            crate::notification::maintain_notification_episode_retention(self.connection())
+        {
+            eprintln!("Notification Episode startup retention failed: {error:#}");
+        }
+        Ok(())
+    }
+
+    fn has_admitted_sparse_migration_prefix(&self) -> Result<bool> {
+        // Only a recognized source with gaps in 1..=226 can skip that historical
+        // prefix. Preserve its receipts instead of replaying superseded DDL.
+        let sparse: bool = self.connection.query_row(
+            "SELECT count(*) < 226 FROM schema_migration WHERE version BETWEEN 1 AND 226",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(sparse
+            && matches!(
+                classify_startup_contract(&self.connection)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.projection_schema_version >= 176
+            ))
+    }
+
+    fn migrate_through_226(
+        &mut self,
+        fresh_database: bool,
+        progress: &mut dyn FnMut(&str, Duration),
+    ) -> Result<()> {
+        macro_rules! migration_step {
+            ($stage:expr, $operation:expr) => {
+                observe_migration_step(progress, $stage, || $operation)?
+            };
         }
         if fresh_database {
             let transaction = self
@@ -9766,13 +9796,6 @@ impl Database {
             if !self.schema_migration_applied(226)? {
                 migration_step!("migration_226", runcard_usage::migrate(self));
             }
-            if !self.schema_migration_applied(227)? {
-                migration_step!("migration_227", message_mutations::migrate(self));
-            }
-            if !self.schema_migration_applied(228)? {
-                migration_step!("migration_228", self.retire_message_fts());
-            }
-            self.maintain_notifications_after_migration();
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -10671,22 +10694,7 @@ impl Database {
         if !self.schema_migration_applied(226)? {
             migration_step!("migration_226", runcard_usage::migrate(self));
         }
-        if !self.schema_migration_applied(227)? {
-            migration_step!("migration_227", message_mutations::migrate(self));
-        }
-        if !self.schema_migration_applied(228)? {
-            migration_step!("migration_228", self.retire_message_fts());
-        }
-        self.maintain_notifications_after_migration();
         Ok(())
-    }
-
-    fn maintain_notifications_after_migration(&self) {
-        if let Err(error) =
-            crate::notification::maintain_notification_episode_retention(self.connection())
-        {
-            eprintln!("Notification Episode startup retention failed: {error:#}");
-        }
     }
 
     fn retire_message_fts(&mut self) -> Result<()> {
@@ -40567,7 +40575,49 @@ mod tests {
             .connection()
             .execute("DELETE FROM schema_migration WHERE version=115", [])
             .unwrap();
-        older.migrate(false).unwrap();
+        let mut stages = Vec::new();
+        older
+            .connection()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_successor BEFORE INSERT ON schema_migration
+             WHEN NEW.version=228 BEGIN SELECT RAISE(ABORT,'fail successor'); END;",
+            )
+            .unwrap();
+        let failure = older
+            .migrate_with_progress(false, &mut |stage, _| stages.push(stage.to_owned()))
+            .unwrap_err();
+        assert!(failure.to_string().contains("fail successor"));
+        assert_eq!(
+            stages,
+            [
+                "migration_reconciliation",
+                "migration_main_metrics_convergence",
+                "migration_227",
+                "migration_228"
+            ]
+        );
+        assert!(older.schema_migration_applied(227).unwrap());
+        assert!(!older.schema_migration_applied(228).unwrap());
+        assert!(
+            matches!(classify_startup_contract(older.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 177)
+        );
+        older
+            .connection()
+            .execute_batch("DROP TRIGGER fail_successor;")
+            .unwrap();
+        stages.clear();
+        older
+            .migrate_with_progress(false, &mut |stage, _| stages.push(stage.to_owned()))
+            .unwrap();
+        assert_eq!(
+            stages,
+            [
+                "migration_reconciliation",
+                "migration_main_metrics_convergence",
+                "migration_228"
+            ]
+        );
         assert!(older.schema_migration_applied(227).unwrap());
         assert!(older.schema_migration_applied(228).unwrap());
         assert!(!older.schema_migration_applied(115).unwrap());

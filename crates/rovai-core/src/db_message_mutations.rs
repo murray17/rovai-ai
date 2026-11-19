@@ -86,7 +86,9 @@ pub(super) fn migrate(db: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 177
+                DatabaseContractClassification::Current(ref m)
+                    | DatabaseContractClassification::SupportedMigrationSource(ref m)
+                    if m.projection_schema_version == 177
             ),
             "Message editing schema admission failed"
         );
