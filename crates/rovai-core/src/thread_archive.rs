@@ -96,7 +96,6 @@ pub(crate) fn change<const ARCHIVE: bool>(
                     "user_requested_agent_run_stop",
                 )?;
             }
-            crate::message_changes::record_archive(transaction, id)?;
             append_domain_event(
                 transaction,
                 if ARCHIVE {
@@ -180,8 +179,6 @@ mod tests {
         let archive = |id: &str| envelope(id, ArchiveThreadCommand { camp_id: id.into() });
         let restore = |id: &str| envelope(id, UnarchiveThreadCommand { camp_id: id.into() });
         let original = archive(&a);
-        let (out, mut notices) = tokio::sync::mpsc::unbounded_channel();
-        db.message_changes = Some(out);
         for id in [&a, &b, &c] {
             insert_test_camp(&db, id);
         }
@@ -192,17 +189,10 @@ mod tests {
             change(&mut db, &original).unwrap().result.payload["changed"],
             true
         );
-        assert!(
-            notices
-                .try_recv()
-                .unwrap()
-                .contains("threads.archive_changed")
-        );
         assert_eq!(
             change(&mut db, &archive(&a)).unwrap().result.payload["changed"],
             false
         );
-        assert!(notices.try_recv().is_err());
         for (i, id) in [&b, &c].into_iter().enumerate() {
             change(&mut db, &archive(id)).unwrap();
             let msg = format!("archived-{i}");

@@ -2,88 +2,46 @@
 document_type: protocol-contract
 contract: thread-archive-v1
 authority: thread-archive
-status: superseded
+status: accepted
 version: 1
 source_version: v1.72
 last_updated: 2026-11-19
 ---
 
-# Thread Archive v1（历史）
+# Thread Archive v1
 
-当前合同见 [Thread Archive v2](thread-archive-v2.md)。
+用户可归档 Active 会话和使命。Mission 通过关联 Thread 使用其归档状态，同时保留原业务状态。归档保留 Thread ID、项目、置顶顺序、消息、附件和草稿。
 
-用户可归档任何 Active Thread。存在 Mission 关联的 Thread 按使命管理，其余按会话管理。归档保留
-Thread 与 Mission 的身份、成员、消息、附件、项目和执行状态。使命业务状态沿用 [Mission 合同](mission-v14.md)。
+## 归档与停止执行
 
-## 持久状态与公开消息
+Core 在命令网关的同一写事务内设置 `camp.archived_at`，取消该 Thread 内 queued、running、waiting 的 AgentRun、活动 ThreadTurn 和尚待派发的公开 Delivery，并保存命令回执。运行时按原有停止协议隔离这些执行并确认清理。事务回滚时归档和取消一起回滚。并发到达的写入由 Core 的提交顺序决定。
 
-Migration 227 从 schema 176 升级至 177，在 `camp` 新增三列。
+只有用户手动取消归档才能恢复 Thread。归档期间工作区关闭，用户发言返回 `camp.archived`。单聊中尚未发布的本机用户输入保留在原队列，归档期间暂停派发。已取消的 Run 保留终态。
 
-| 列 | 语义 |
-| --- | --- |
-| `archived_at` | Core 生成的归档时间，空值表示在普通列表展示 |
-| `archived_through_global_sequence` | 归档之前已提交的全局水位，与归档时间同时赋值及清空 |
-| `archive_revision` | 从 0 开始，手动或自动实际转换时加一 |
+已绑定此 Thread 的飞书、Lark 和钉钉消息由 Host 静默接收，Core 在写入前丢弃，涵盖正文、附件和私聊 `/new`。归档时已进入渠道队列、尚未发布为会话消息的输入停止处理。已有消息和渠道绑定保留，手动取消归档后，后续入站消息继续进入原会话。
 
-归档和取消归档在 Command Gateway 的写事务中比较归档版本、更新归档列、追加事件和保存回执。
-真实公开发布复用现有全局分配器。迁移以现有分配水位和事件最大序列的较大值对齐水位，显式写入序列也在事务中推进分配器。
-消息可见、Thread 未进入删除流程且消息首次公开发布序列超过归档边界时，同一发布事务清空归档列并递增版本。
-`camp_message.sent` 和 `camp_message.public_a2a_sent` 按消息 ID 取首次发布序列，覆盖显式序列插入与插入后分配。
-纯执行状态、审批、任务进度、草稿、正文更新、重复发布和撤回均保留当前归档状态。
+迁移 229 将投影 schema 从 178 升至 179，为 `camp` 增加可空的 `archived_at` 和归档列表部分索引。已有 Thread 默认未归档。
 
-## 用户端命令
+## 命令和恢复
 
-Desktop 与认证 Web 使用 `threads.archive` 和 `threads.unarchive`。
-归档接口位于用户端 Host 路由，Agent 工具目录和分发沿用原有工具集合。
+认证的用户界面调用 `threads.archive` 和 `threads.unarchive`，使用现有 `{ commandId, command: { threadId } }` 封装和 `StoredCommandResult`。成功的 payload 包含 `threadId`、`archivedAt`、`changed`。相同命令 ID 重放返回原回执。新命令发现状态已满足时返回 `changed: false`。Pending Thread 返回 `camp.archive_requires_active`。删除中的记录使用原删除守卫。
 
-```ts
-type ArchiveCommandEnvelope = {
-  commandId: string
-  command: { threadId: string; expectedArchiveRevision: number }
-}
-type ArchiveCommandPayload = {
-  threadId: string
-  archivedAt: string | null
-  archiveRevision: number
-  changed: boolean
-}
-```
+撤销归档调用 `threads.unarchive`。多个窗口设置相反状态时以最后提交的操作为准。提交后的失效通知驱动视图刷新。Web 自动重连先对账，用户显式重试继续使用原命令。确认目标已删除时释放等待并刷新。Agent 的工具目录、分发和权限沿用原有边界。
 
-成功结果使用 `StoredCommandResult.payload`。同版本且处于目标状态返回 `changed: false`。
-归档状态冲突返回 `camp.archive_conflict`，Pending 返回 `camp.archive_requires_active`。
-删除途中的 Thread 由现有删除守卫拒绝。普通回执沿用 Thread 生命周期，提交或对账恢复后读回当前状态。
-Web 自动重连只查回执。显式恢复使用原命令 ID 与参数，Desktop 同窗口对同一操作重试时也使用原命令 ID。
-目标物理删除后，明确的 `camp.not_found` 业务拒绝结束等待，提示目标已移除并重新读取归档列表。
-归档提示中的撤销直接向取消归档命令传入本次归档回执提供的版本。
+## 导航、使命和详情
 
-## 发现和详情
+普通会话、置顶展示、普通搜索、使命板、命令面板和新增引用候选只包含未归档记录。按 ID 仍可取得带 `archivedAt` 的摘要或快照，供置顶恢复和入口检查。使命板和当前展示的使命共用 `missions.list`。
 
-普通导航前缀、普通完整 ID 搜索、使命板、会话与使命引用候选排除已归档记录。
-按已知 ID 的导航摘要、已打开详情和已有引用按既有授权读取。置顶偏好保留 ID 和顺序，恢复时按原 ID 补读摘要。
-导航快照与分页升级至 schema 4，Thread Open 升级至 schema 10，Thread Snapshot 升级至 schema 37。
-这些摘要和用户侧使命摘要提供 `archivedAt`、`archiveRevision`。使命详情按 `missions.get` 独立读取。
-归档及恢复沿用原排序和已读水位。归档状态变更在提交后失效相应视图，使命同步显式失效使命板。
+在本窗口归档已打开的记录时，先按现有离开流程保存本机草稿。保存成功后提交归档，会话回到新建页，使命回到使命板。其他窗口归档时，当前窗口在收到正式快照后也走离开流程。通过已有引用、通知、深链或启动恢复进入归档记录时，显示设置入口提示，转到对应落点。手动取消归档后，记录按原项目、置顶顺序或使命状态展示，已读状态和草稿沿用原值。「设置 → 归档」中的取消归档操作让用户停留在列表。
 
-## 归档查询
+## 归档管理列表
 
-`threads.archive.list` 接收 `{ kind: 'chat' | 'mission', query?, projectKeys?, limit? }`。
-Core 在一个读事务中取得 schema 1 前缀、未筛选类型总数、筛选后两类型计数、项目候选、各项目完整匹配数、
-`hasMore` 和 `throughGlobalSequence`。默认前 50 条，展开以 50 条递增，每次整体替换前缀。
-改变类型、搜索或项目条件后从 50 条开始。后台失效刷新保留已展开数量、筛选与可见行滚动锚点。
-合并归档、删除受理、改名、项目或最后可见消息等失效，范围覆盖结果当前前缀之外的记录。
+`threads.archive.list({ cursor?, limit? })` 只返回 `{ items, nextCursor }`。每条摘要含 `threadId`、`missionId`、`title`、`projectKey`、`lastMessageAt`、`threadVersion`。Core 从归档且未进入删除流程的记录中按 Thread ID 升序读取游标之后的记录。默认每页 200 条，有效范围 1 至 500。多取一条判定后续页，若有下一页则返回本页最后一个 Thread ID，末页返回 null。查询使用有界读队列和归档部分索引。最后消息时间沿用可见消息摘要和已有的只读回退。
 
-搜索按首尾裁剪、NFKC 和逐 Unicode 字符小写后对子串匹配，字段为当前标题与 Thread ID。
-项目候选覆盖两种类型的全部归档项目及已选项目。项目候选计数为当前类型的项目全量计数，
-类型标签与组标题计数应用搜索和项目条件。目录项目以 `directory:<projectPath>` 标识，
-快速对话使用 `quick-chat`，无法归属的记录进入不可用组。客户端使用既有导航偏好显示别名。
+页面依次取齐各页后整体替换。归档状态变化、删除、窗口重新获得焦点时重新读取，期间保留上次完整结果和当前筛选。重复游标使此次读取失败，用户可重试。前端按 `missionId` 区分类型，按裁剪、NFKC 和逐字符小写匹配标题及 Thread ID。标签数量使用搜索和项目条件下的全部匹配记录。项目候选覆盖两种类型及已选项目，候选计数使用当前类型在该项目的全部归档数。
 
-项目按该组最新匹配消息时间排序，行按最后可见公开消息时间倒序，项目键和 Thread ID 稳定处理同值。
-确认无可见消息时返回空时间。未初始化的历史摘要走同一可见消息口径的只读查找。
-仅查询必要摘要，读取接入现有有界读队列。
+前端按组内最新可见消息时间降序排列项目，再按组内消息时间降序排列记录。同时间分别按项目键和 Thread ID 排序，空时间排最后。项目名称使用本机别名。归档页标题为静态文本，每行操作为取消归档和删除。
 
-## 删除受理
+## 删除
 
-归档页仍使用 [永久删除合同](camp-permanent-deletion-v4.md) 的 `threads.delete`。
-确认框打开时冻结 Thread 版本和归档版本，提交可选 `archiveGuard: { expectedArchiveRevision }`。
-回放与已有删除操作优先返回。首次受理检查 Thread 仍归档、两种版本一致及原删除权限。
-使命默认保留工作树和本地分支，显式清理沿用现有选项。用户看到“已提交删除”，后续清理由原工作流处理。
+归档页采用[现有永久删除命令](camp-permanent-deletion-v4.md)，提交确认时使用对话框打开时取得的 Thread 版本。普通删除的权限、幂等、版本检查、工作树处置和后续清理继续适用。使命默认保留工作树与分支。可重试失败在原确认框内显示，保留清理选择。受理成功时显示「已提交删除」。

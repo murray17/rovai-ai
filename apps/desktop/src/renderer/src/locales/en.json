@@ -30,6 +30,8 @@
   "归档并停止执行": "Archive and stop running work",
   "归档 {0} 并停止执行": "Archive {0} and stop running work",
   "已归档。": "Archived.",
+  "归档失败：{0}": "Could not archive: {0}",
+  "取消归档失败：{0}": "Could not unarchive: {0}",
   "撤销": "Undo",
   "目标已移除": "This record was removed",
   "记录已变化，请关闭并重新打开删除确认。": "The record changed. Close and reopen the deletion dialog.",

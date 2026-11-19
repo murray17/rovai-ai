@@ -313,7 +313,6 @@ export type View = 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'm
 type ActivateThreadOptions = {
   memberPrepared?: boolean
   reconcileDefaultLead?: boolean
-  allowCachedPreview?: boolean
   onArchived?: (message: string) => void
   initializeComposerDraft?: boolean
   preserveNotificationFocus?: boolean
@@ -1952,7 +1951,7 @@ export function BusinessApp({
     }
     // A preview commits navigation before the authoritative request finishes.
     // Fork recovery must preserve the current page until full opening succeeds.
-    if (previewSnapshot && !previewSnapshot.thread.archivedAt && options.allowCachedPreview && !options.stayOnOpenFailure) {
+    if (previewSnapshot && !previewSnapshot.thread.archivedAt && !options.stayOnOpenFailure) {
       commitThreadSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
@@ -2670,7 +2669,7 @@ export function BusinessApp({
     ) return undefined
     const threadId = activeThreadId
     const throughGlobalSequence = campSnapshot.throughGlobalSequence
-    if (campSnapshotState.entryPreview || campSnapshot.thread.archivedAt) return undefined
+    if (campSnapshotState.entryPreview) return undefined
     const mission = campSnapshot.thread.missionId && activeMission?.threadId === threadId ? activeMission : null
     const row = (navigation ? allNavigationThreads(navigation).find(thread => thread.id === threadId) : null)
       ?? (openedNavigationRow?.id === threadId ? openedNavigationRow : null)
@@ -2724,7 +2723,6 @@ export function BusinessApp({
   }, [
     activeThreadId,
     campSnapshot?.thread.id,
-    campSnapshot?.thread.archivedAt,
     campSnapshot?.throughGlobalSequence,
     navigation,
     pinnedThreadItems,
@@ -3298,7 +3296,7 @@ export function BusinessApp({
   }
 
   const chooseThread = (thread: NavigationThreadTarget): void => {
-    void activateThread(thread.id, { reconcileDefaultLead: thread.activationState !== 'pending', allowCachedPreview: true })
+    void activateThread(thread.id, { reconcileDefaultLead: thread.activationState !== 'pending' })
       .catch((nextError) => notifyError(errorMessage(nextError)))
   }
 
@@ -3650,17 +3648,24 @@ export function BusinessApp({
     if (archiveWrites.current.has(threadId)) return
     archiveWrites.current.add(threadId)
     const apply = async (): Promise<void> => {
-      const result = await writeArchive(client, archived, { threadId })
+      let changed: boolean
+      try {
+        changed = (await writeArchive(client, archived, { threadId })).changed
+      } catch (error) {
+        const reason = errorMessage(error)
+        notifyError(archived ? uiAttribute('归档失败：{0}', reason) : uiAttribute('取消归档失败：{0}', reason))
+        return
+      }
       campSnapshotCache.current.delete(threadId)
       if (archived) leaveArchivedWorkspace(threadId, mission)
-      if (result.changed && archived) {
+      if (changed && archived) {
         setToast(current => current?.persistent ? current : {
           message: uiAttribute('已归档。'), tone: 'neutral',
           action: { label: uiAttribute('撤销'), onSelect: () => {
             void changeArchive(threadId, false, mission).catch(error => notifyError(errorMessage(error)))
           } }
         })
-      } else if (result.changed) notify(uiAttribute('已取消归档'))
+      } else if (changed) notify(uiAttribute('已取消归档'))
     }
     try {
       if (archived && viewRef.current === 'camp' && activeThreadIdRef.current === threadId) await leaveActiveThread(apply)

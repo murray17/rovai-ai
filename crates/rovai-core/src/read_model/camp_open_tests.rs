@@ -566,6 +566,12 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
          FROM camp_message WHERE id = 'open-agent-message'",
         [&active_run],
     ).unwrap();
+    // 227 stored JSON even for unchanged inputs. Reading this second, off-page
+    // item should use its current message, regardless of the old snapshot payload.
+    database.connection().execute(
+        "UPDATE agent_run_input SET input_snapshot_json='{}' WHERE agent_run_id=?1 AND ordinal=1",
+        [&active_run],
+    ).unwrap();
     database
         .connection()
         .execute(
@@ -636,13 +642,24 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
             false,
             Some("Message withdrawn"),
         ),
-        ("deleted text", "closed", true, None),
+        ("deleted text", "closed", true, Some("原消息已删除")),
     ] {
         database.connection().execute(
             "UPDATE camp_message SET body = ?2, structured_content_json = ?3,
              recall_state = ?4, tombstoned_at = CASE WHEN ?5 THEN '2026-08-31T00:00:00Z' END WHERE id = ?1",
             params![source_id, body, json!([{"kind":"text", "text":body}]).to_string(), recall, tombstoned],
         ).unwrap();
+        if body == long_body {
+            let full = ReadModelService
+                .camp_snapshot(&mut database, &camp_id)
+                .unwrap();
+            let run = full
+                .agent_runs
+                .iter()
+                .find(|run| run.id == active_run)
+                .unwrap();
+            assert_eq!(run.input_previews[&source_id].summary.as_deref(), expected);
+        }
         let (open, _, _) = read_metered(&mut database, &camp_id);
         assert_eq!(open.messages.len(), 20);
         assert!(open.messages.iter().all(|message| message.id != source_id));
@@ -651,6 +668,10 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
         assert!(open.agent_run_file_changes.is_empty());
         for run in &open.agent_runs {
             assert_eq!(run.input_summary.as_deref(), expected, "{}", run.id);
+            assert_eq!(
+                run.input_previews["open-agent-message"].summary.as_deref(),
+                Some("交接")
+            );
             // The immutable claim boundary survives after its message leaves
             // the page; it must not become the newer public tail (32).
             assert_eq!(
@@ -665,6 +686,10 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
         .camp_snapshot(&mut database, &camp_id)
         .unwrap();
     for run in &snapshot.agent_runs {
+        assert!(
+            !run.input_previews.contains_key("open-agent-message"),
+            "the full page already supplies this unchanged input"
+        );
         let expected = if run.id == active_run {
             json!(2)
         } else {

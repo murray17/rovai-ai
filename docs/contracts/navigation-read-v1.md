@@ -26,7 +26,7 @@ external_principal 消息推进。查看、重命名、队员消息和 Run 终�
 
 NavigationCampItem 提供 `lastSeenGlobalSequence`（读取旧 fixture 时可缺省为 0）。
 schema 4 增加归档状态，按 ID 的摘要仍返回有权限读取的归档记录。分组前缀、计数、普通搜索和置顶展示以
-[Thread Archive v2](thread-archive-v2.md) 的可见性为准。
+[Thread Archive v1](thread-archive-v1.md) 的可见性为准。
 `lastActivityAt`、`lastActivityGlobalSequence`、`latestCompletionGlobalSequence` 来自 camp 摘要；
 `marker` 从现有活跃 Run 与 camp_view_state 推导，loading 优先于 unread_completed。
 Renderer 的运行环沿用 loading，而未读独立使用最新回复与查看水位计算，允许运行和未读同时显示；

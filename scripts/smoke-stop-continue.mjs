@@ -18,6 +18,7 @@ const fixture = await realpath(process.env.ROVAI_STOP_CONTINUE_FIXTURE_ROOT ?? a
 const data = join(fixture, 'core'), home = join(fixture, 'home'), workspace = join(fixture, 'workspace')
 const journal = join(fixture, 'prompts.jsonl'), executable = join(fixture, 'copilot-fixture')
 const archive = process.argv.includes('--archive')
+const archiveEvents = []
 const shutdownText = process.argv.includes('--shutdown-text')
 const historicalStartup = process.argv.includes('--historical-startup')
 const historicalMission = process.argv.includes('--historical-mission')
@@ -93,6 +94,7 @@ try {
     if (error.code === 'ENOENT') return []
     throw error
   })
+  const archiveCommand = { commandId: crypto.randomUUID(), command: { threadId } }
   const snapshot = () => core.request('threads.snapshot', { threadId })
   if (stopDuringLaunch) {
     await until(() => readFile(`${journal}.launch-started`, 'utf8').catch(() => null), 'Host initialization before prompt')
@@ -140,7 +142,7 @@ try {
         'failed source after unexpected Runtime exit')
     } else {
       const stopped = archive
-        ? await core.request('threads.archive', { commandId: crypto.randomUUID(), command: { threadId } })
+        ? await core.request('threads.archive', archiveCommand)
         : await core.request('agentRuns.cancel', {
           commandId: crypto.randomUUID(), command: { threadId, agentRunId: first.id, expectedVersion: first.version }
         })
@@ -183,6 +185,16 @@ try {
     if (!stopDuringLaunch) assert.equal(oldDelivery.status, pi ? 'accepted' : 'delivery_unknown')
     if (archive) {
       assert((await snapshot()).thread.archivedAt)
+      const expectedHints = missionId ? ['navigation.invalidated', 'missions.invalidated'] : ['navigation.invalidated']
+      const hints = () => archiveEvents.filter(event => event.params.threadId === threadId)
+      assert.deepEqual(hints().map(event => event.method), expectedHints)
+      const archivedThrough = hints()[0].params.throughGlobalSequence
+      assert(archivedThrough > 0)
+      const replay = await core.request('threads.archive', archiveCommand)
+      assert.equal(replay.payload.changed, true)
+      const duplicate = await core.request('threads.archive', { commandId: crypto.randomUUID(), command: { threadId } })
+      assert.equal(duplicate.payload.changed, false)
+      assert.deepEqual(hints().map(event => event.method), expectedHints)
       assert.equal((await core.request('threads.archive.list', {})).items[0].threadId, threadId)
       const sent = await core.request('thread.messages.send', { commandId: crypto.randomUUID(), threadId,
         content: composerDocumentForAddress({ mode: 'default' }, 'Should stay archived'), sourceAttachments: [], quotes: [],
@@ -190,6 +202,8 @@ try {
       assert.equal(sent.commandResult.code, 'camp.archived')
       const restored = await core.request('threads.unarchive', { commandId: crypto.randomUUID(), command: { threadId } })
       assert.equal(restored.payload.changed, true)
+      assert.deepEqual(hints().map(event => event.method), [...expectedHints, ...expectedHints])
+      assert(hints()[expectedHints.length].params.throughGlobalSequence > archivedThrough)
       assert.deepEqual((await snapshot()).agentRuns.map(run => [run.id, run.status]), [[first.id, 'cancelled']])
     }
     const continued = await core.request('agentRuns.continue', {
@@ -390,6 +404,7 @@ function startCore() {
     if (message.kind === 'core_startup' && ['blocked', 'failed'].includes(message.status)) {
       stderr += `Core startup ${message.status}: ${message.error?.code}\n`
     }
+    if (archive && message.params?.reason === 'threads.archive_changed') archiveEvents.push(message)
     if (!entry) return
     clearTimeout(entry.timer); pending.delete(message.id)
     if (message.error) entry.reject(new Error(message.error.message))

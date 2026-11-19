@@ -1271,7 +1271,7 @@ impl ReadModelService {
         let messages = load_messages(&transaction, camp_id, 1_000)?;
         let message_deliveries = load_message_deliveries(&transaction, camp_id, None)?;
         let turns = load_turns(&transaction, camp_id, None)?;
-        let agent_runs = load_agent_runs(&transaction, camp_id, None)?;
+        let agent_runs = load_agent_runs(&transaction, camp_id, None, &messages)?;
         let mut execution_evidence = load_execution_evidence(
             &transaction,
             camp_id,
@@ -1338,7 +1338,12 @@ impl ReadModelService {
         let message_deliveries =
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
-        let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
+        let agent_runs = load_agent_runs(
+            &transaction,
+            camp_id,
+            Some(CAMP_OPEN_AGENT_RUN_LIMIT),
+            &messages,
+        )?;
         // Execution content is requested only by an opened, visible Run surface.
         let execution_evidence = Vec::new();
         let agent_run_file_changes = list_completed_run_file_changes(&transaction, camp_id)?;
@@ -3076,6 +3081,7 @@ fn load_agent_runs(
     transaction: &Transaction<'_>,
     camp_id: &str,
     limit: Option<i64>,
+    messages: &[ThreadMessageView],
 ) -> Result<Vec<AgentRunView>> {
     let mut statement = transaction.prepare(
         r#"
@@ -3244,7 +3250,7 @@ fn load_agent_runs(
         "#,
     )?;
     let rows = statement
-        .query_map(params![camp_id, limit], |row| {
+        .query_and_then(params![camp_id, limit], |row| -> Result<_> {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -3284,7 +3290,8 @@ fn load_agent_runs(
                 row.get::<_, Option<String>>(35)?,
                 row.get::<_, Option<String>>(36)?,
                 row.get::<_, Option<String>>(37)?,
-                row.get::<_, String>(38)?,
+                serde_json::from_str::<Vec<String>>(&row.get::<_, String>(38)?)
+                    .context("AgentRun input Message IDs are invalid")?,
                 row.get::<_, Option<String>>(39)?,
                 row.get::<_, Option<String>>(40)?,
                 row.get::<_, bool>(41)?,
@@ -3293,14 +3300,20 @@ fn load_agent_runs(
                 row.get::<_, Option<String>>(44)?,
             ))
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let message_ids = rows
-        .iter()
-        .filter_map(|row| row.40.as_deref())
-        .collect::<BTreeSet<_>>();
-    let summaries = load_run_input_summaries(transaction, camp_id, &message_ids)?;
+        .collect::<Result<Vec<_>>>()?;
     let run_ids = rows.iter().map(|row| row.0.as_str()).collect::<Vec<_>>();
     let mut input_previews = load_run_input_previews(transaction, camp_id, &run_ids)?;
+    let page: BTreeMap<_, _> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
+    let mut summary_ids = BTreeSet::new();
+    for row in &rows {
+        let historical = input_previews.get(&row.0);
+        for id in row.40.iter().chain(&row.38) {
+            if !historical.is_some_and(|previews| previews.contains_key(id)) {
+                summary_ids.insert(id.as_str());
+            }
+        }
+    }
+    let summaries = load_run_input_summaries(transaction, camp_id, &summary_ids, &page)?;
     rows.into_iter()
         .map(
             |(
@@ -3342,7 +3355,7 @@ fn load_agent_runs(
                 public_runtime_failure_json,
                 runtime_model_selection,
                 runtime_observed_model_id,
-                input_message_ids_json,
+                input_message_ids,
                 anchor_message_id,
                 summary_message_id,
                 has_accepted_continuation,
@@ -3382,7 +3395,26 @@ fn load_agent_runs(
                         .is_none_or(|failure| failure.code != "context_payload_too_large")
                     && crate::run_continuation::eligible_source(transaction, camp_id, &id)?
                         .is_some();
-                let previews = input_previews.remove(&id).unwrap_or_default();
+                let mut previews = input_previews.remove(&id).unwrap_or_default();
+                for input in &input_message_ids {
+                    let Some(summary) = summaries.get(input) else {
+                        continue;
+                    };
+                    // The Renderer can use a visible message directly when it would
+                    // show the same short text. Off-page batch items need their label.
+                    let needs_preview = match page.get(input.as_str()) {
+                        Some(message) => summary.as_deref() != Some(message.body.as_str())
+                            || message.content.iter().any(|segment| matches!(segment,
+                                crate::camp_content::StructuredThreadMessageSegment::CurrentUserMention { .. })),
+                        None => input_message_ids.len() > 1,
+                    };
+                    if needs_preview {
+                        previews.entry(input.clone()).or_insert_with(|| RunInputPreview {
+                            summary: summary.clone(),
+                            deleted: false,
+                        });
+                    }
+                }
                 let summary = summary_message_id.as_ref().and_then(|message_id| {
                     match previews.get(message_id) {
                         Some(preview) => preview.summary.clone(),
@@ -3395,8 +3427,7 @@ fn load_agent_runs(
                     can_continue,
                     id,
                     camp_turn_id,
-                    input_message_ids: serde_json::from_str(&input_message_ids_json)
-                        .context("AgentRun input Message IDs are invalid")?,
+                    input_message_ids,
                     anchor_message_id,
                     public_tail_sequence_at_start,
                     input_summary: summary,
@@ -3476,10 +3507,9 @@ fn load_run_input_previews(
     let mut statement = transaction.prepare(
         "SELECT i.agent_run_id,i.message_id,m.tombstoned_at IS NOT NULL,
             CASE WHEN m.tombstoned_at IS NULL THEN i.input_snapshot_json END
-         FROM json_each(?2) runs JOIN agent_run_input i ON i.agent_run_id=runs.value
-         JOIN camp_message m ON m.id=i.message_id AND m.camp_id=?1
-         WHERE m.tombstoned_at IS NOT NULL OR i.input_snapshot_json IS NOT NULL
-            OR m.content_revision<>i.message_content_revision",
+         FROM json_each(?2) runs CROSS JOIN agent_run_input i ON i.agent_run_id=runs.value
+         CROSS JOIN camp_message m ON m.id=i.message_id AND m.camp_id=?1
+         WHERE m.tombstoned_at IS NOT NULL OR m.content_revision<>i.message_content_revision",
     )?;
     let rows = statement.query_map(params![camp_id, serde_json::to_string(run_ids)?], |r| {
         Ok((
@@ -3497,7 +3527,7 @@ fn load_run_input_previews(
         } else {
             snapshot
                 .as_deref()
-                .map(crate::collaboration::message_mutation::snapshot_summary)
+                .map(frozen_input_summary)
                 .transpose()?
                 .flatten()
         };
@@ -3509,78 +3539,107 @@ fn load_run_input_previews(
     Ok(result)
 }
 
-// Title sources are loaded by exact ID for the selected Runs, independently of
-// the conversation's message page. Reuse message rendering and attachment order
-// without reading publication events, attachment files, or unrelated history.
+fn run_input_summary<'a>(
+    body: &str,
+    mut attachments: impl Iterator<Item = &'a str>,
+) -> Option<String> {
+    let mut words = body.split_whitespace();
+    if let Some(first) = words.next() {
+        let rest = words.flat_map(|word| std::iter::once(' ').chain(word.chars()));
+        return Some(bounded_input_summary(first.chars().chain(rest)));
+    }
+    let name = attachments.next()?;
+    let count = 1 + attachments.count();
+    Some(if count == 1 {
+        bounded_input_summary(name.chars())
+    } else {
+        bounded_input_summary(format!("{name} 等 {count} 个附件").chars())
+    })
+}
+
+fn bounded_input_summary(mut chars: impl Iterator<Item = char>) -> String {
+    let mut summary: String = chars.by_ref().take(240).collect();
+    if chars.next().is_some() {
+        summary.pop();
+        summary.push('…');
+    }
+    summary
+}
+
+fn frozen_input_summary(snapshot: &str) -> Result<Option<String>> {
+    let snapshot: Value = serde_json::from_str(snapshot)?;
+    let names = ["sourceAttachments", "attachments", "managedAttachments"]
+        .into_iter()
+        .flat_map(|field| snapshot[field].as_array().into_iter().flatten())
+        .filter_map(|file| file["displayName"].as_str());
+    Ok(run_input_summary(
+        snapshot["body"].as_str().unwrap_or_default(),
+        names,
+    ))
+}
+
+// Titles and out-of-page batch inputs share one lookup per distinct live message.
 fn load_run_input_summaries(
     transaction: &Transaction<'_>,
     camp_id: &str,
     message_ids: &BTreeSet<&str>,
+    page: &BTreeMap<&str, &ThreadMessageView>,
 ) -> Result<BTreeMap<String, Option<String>>> {
-    if message_ids.is_empty() {
-        return Ok(BTreeMap::new());
+    let mut summaries = BTreeMap::new();
+    let mut missing = Vec::new();
+    for &id in message_ids {
+        if let Some(message) = page.get(id) {
+            let summary = if message.withdrawn {
+                Some("Message withdrawn".to_owned())
+            } else {
+                run_input_summary(
+                    &message.body,
+                    message.attachments.iter().map(|a| a.display_name.as_str()),
+                )
+            };
+            summaries.insert(id.to_owned(), summary);
+        } else {
+            missing.push(id);
+        }
+    }
+    if missing.is_empty() {
+        return Ok(summaries);
     }
     let mut statement = transaction.prepare(
-        r#"
-        SELECT message.id, message.sequence, NULL AS timeline_global_sequence,
-               message.author_type, message.author_id, message.source_agent_run_id,
-               message.body, message.structured_content_json,
-               message.source_attachments_json, message.address_mode,
-               message.addressed_agent_ids_json, message.reply_to_camp_message_id,
-               message.camp_turn_id,
-               CASE WHEN message.author_type = 'agent'
-                    THEN message.recipient_presentation_json ELSE message.presentation_json END,
-               message.created_at, message.recall_state, message.version
-        FROM json_each(?2) AS requested
-        JOIN camp_message AS message ON message.id = requested.value
-        WHERE message.camp_id = ?1 AND message.tombstoned_at IS NULL
-        "#,
+        "SELECT m.id, m.structured_content_json, m.recall_state='withdrawn'
+         FROM json_each(?2) ids CROSS JOIN camp_message m ON m.id=ids.value
+         WHERE m.camp_id=?1 AND m.tombstoned_at IS NULL",
     )?;
-    let rows = statement
-        .query_map(
-            params![camp_id, serde_json::to_string(message_ids)?],
-            camp_message_row,
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(hydrate_message_views(transaction, rows)?
-        .into_iter()
-        .map(|message| {
-            let summary = if message.withdrawn {
-                Some("Message withdrawn".to_string())
+    let mut attachments = transaction.prepare(
+        "SELECT name FROM (
+           SELECT json_extract(file.value,'$.displayName') AS name, 0 AS source,
+                  CAST(file.key AS INTEGER) AS position, '' AS id
+             FROM camp_message m, json_each(m.source_attachments_json) file WHERE m.id=?1
+           UNION ALL SELECT display_name,1,position,id FROM message_attachment WHERE camp_message_id=?1
+           UNION ALL SELECT display_name_snapshot,1,ordinal,attachment_id FROM camp_message_attachment_ref
+             WHERE camp_message_id=?1
+         ) ORDER BY source,position,id",
+    )?;
+    let mut rows = statement.query(params![camp_id, serde_json::to_string(&missing)?])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let summary = if row.get::<_, bool>(2)? {
+            Some("Message withdrawn".to_owned())
+        } else {
+            let content = normalize_content(serde_json::from_str(&row.get::<_, String>(1)?)?);
+            let body = render_structured_message_content(transaction, &content)?;
+            let names = if body.trim().is_empty() {
+                attachments
+                    .query_map([&id], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             } else {
-                let body = message
-                    .body
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let text = if !body.is_empty() {
-                    Some(body)
-                } else {
-                    message.attachments.first().map(|attachment| {
-                        if message.attachments.len() > 1 {
-                            format!(
-                                "{} 等 {} 个附件",
-                                attachment.display_name,
-                                message.attachments.len()
-                            )
-                        } else {
-                            attachment.display_name.clone()
-                        }
-                    })
-                };
-                text.map(|text| {
-                    let mut chars = text.chars();
-                    let mut summary = chars.by_ref().take(240).collect::<String>();
-                    if chars.next().is_some() {
-                        summary.pop();
-                        summary.push('…');
-                    }
-                    summary
-                })
+                Vec::new()
             };
-            (message.id, summary)
-        })
-        .collect())
+            run_input_summary(&body, names.iter().map(String::as_str))
+        };
+        summaries.insert(id, summary);
+    }
+    Ok(summaries)
 }
 
 fn load_execution_evidence(

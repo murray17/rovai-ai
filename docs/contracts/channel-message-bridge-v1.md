@@ -18,7 +18,7 @@ It does not wait for execution or an outbound reply. Later inbound messages ente
 
 For an archived bound Thread, the Host acknowledges the transport and silently discards incoming text,
 resources and DM `/new`. Core checks the binding before recording the sender, observation or command
-receipt. New messages resume on the same binding after manual unarchive. [Thread Archive v2](thread-archive-v2.md)
+receipt. New messages resume on the same binding after manual unarchive. [Thread Archive v1](thread-archive-v1.md)
 
 A Camp has at most one Channel binding. Every Agent message published through ordinary `rovai send` in a
 bound Camp atomically creates one idempotent ChannelDelivery for that message. The outbound payload is the

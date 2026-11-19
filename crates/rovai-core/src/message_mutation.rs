@@ -162,9 +162,7 @@ impl CollaborationService {
             let targets = resolution.targets.into_iter().map(|target| target.agent_id).collect::<Vec<_>>();
             let now = chrono::Utc::now().to_rfc3339();
             let addressed = serde_json::to_string(&targets)?;
-            // Before a first edit of a legacy message, the matching original row
-            // is still available for Runs which predate per-input snapshots.
-            freeze_legacy_inputs(tx,id)?;
+            freeze_claimed_inputs(tx,id)?;
             tx.execute("UPDATE camp_message
                 SET body=?2,structured_content_json=?3,content_digest=?4,source_attachments_json=?5,
                     address_mode=?6,addressed_agent_ids_json=?7,recipient_presentation_json='{}',
@@ -205,7 +203,7 @@ impl CollaborationService {
                 return Ok(rejected("message.delete_unavailable","The message cannot currently be deleted"));
             }
             let now = chrono::Utc::now().to_rfc3339();
-            freeze_legacy_inputs(tx,id)?;
+            freeze_claimed_inputs(tx,id)?;
             tx.execute("UPDATE camp_message SET body='',structured_content_json='[]',quotes_json='[]',
                 source_attachments_json='[]',recipient_presentation_json='{}',content_digest='erased',
                 tombstoned_at=?2,updated_at=?2,version=version+1 WHERE id=?1", params![id,now])?;
@@ -227,10 +225,11 @@ impl CollaborationService {
     }
 }
 
-/// Called within the claim transaction, or while an exact legacy revision is still current.
-pub(crate) fn input_snapshot(tx: &Connection, id: &str) -> Result<String> {
-    Ok(tx.query_row(
-        "SELECT json_object('body',m.body,'content',json(m.structured_content_json),
+/// Capture the outgoing version once, before its message or attachment links change.
+fn freeze_claimed_inputs(tx: &Transaction<'_>, id: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE agent_run_input SET input_snapshot_json = (
+          SELECT json_object('body',m.body,'content',json(m.structured_content_json),
             'sourceAttachments',json(m.source_attachments_json),'quotes',json(m.quotes_json),
             'addressedAgentIds',json(m.addressed_agent_ids_json),'replyToThreadMessageId',m.reply_to_camp_message_id,
             'attachments',json((SELECT json_group_array(json_object('id',id,'displayName',name)) FROM (
@@ -238,55 +237,14 @@ pub(crate) fn input_snapshot(tx: &Connection, id: &str) -> Result<String> {
             ))),'managedAttachments',json((SELECT json_group_array(json_object('id',id,'displayName',name)) FROM (
                 SELECT attachment_id AS id,display_name_snapshot AS name FROM camp_message_attachment_ref
                 WHERE camp_message_id=m.id ORDER BY ordinal
-            )))) FROM camp_message m WHERE m.id=?1",
-        [id],|r|r.get(0),
-    )?)
-}
-
-fn freeze_legacy_inputs(tx: &Connection, id: &str) -> Result<()> {
-    let snapshot = input_snapshot(tx, id)?;
-    tx.execute("UPDATE agent_run_input SET input_snapshot_json=?2 WHERE message_id=?1 AND input_snapshot_json IS NULL
-        AND EXISTS (SELECT 1 FROM camp_message m WHERE m.id=?1 AND m.content_revision=agent_run_input.message_content_revision
-            AND m.content_digest=agent_run_input.message_content_digest AND m.recall_state<>'withdrawn')",
-        params![id,snapshot])?;
+            )))) FROM camp_message m WHERE m.id=?1)
+         WHERE message_id=?1 AND input_snapshot_json IS NULL
+           AND (message_content_revision,message_content_digest) = (
+             SELECT content_revision,content_digest FROM camp_message WHERE id=?1 AND recall_state<>'withdrawn'
+           )",
+        [id],
+    )?;
     Ok(())
-}
-
-pub(crate) fn snapshot_summary(snapshot: &str) -> Result<Option<String>> {
-    let snapshot: Value = serde_json::from_str(snapshot)?;
-    let body = snapshot["body"]
-        .as_str()
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let text = if body.is_empty() {
-        let attachments = ["sourceAttachments", "attachments", "managedAttachments"]
-            .into_iter()
-            .flat_map(|field| snapshot[field].as_array().into_iter().flatten())
-            .collect::<Vec<_>>();
-        attachments
-            .first()
-            .and_then(|file| file["displayName"].as_str())
-            .map(|name| {
-                if attachments.len() == 1 {
-                    name.to_owned()
-                } else {
-                    format!("{name} 等 {} 个附件", attachments.len())
-                }
-            })
-    } else {
-        Some(body)
-    };
-    Ok(text.map(|text| {
-        let mut chars = text.chars();
-        let mut summary = chars.by_ref().take(240).collect::<String>();
-        if chars.next().is_some() {
-            summary.pop();
-            summary.push('…');
-        }
-        summary
-    }))
 }
 
 fn message_result(tx: &Connection, id: &str, outcome: &str) -> Result<CommandHandlerResult> {

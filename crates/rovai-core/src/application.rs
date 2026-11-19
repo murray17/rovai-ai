@@ -3153,6 +3153,40 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    async fn change_thread_archive<const ARCHIVE: bool>(&self, params: &Value) -> Result<Value> {
+        let params: UserCommandParams<rovai_core::thread_archive::ChangeArchiveCommand<ARCHIVE>> =
+            serde_json::from_value(params.clone())?;
+        let thread_id = params.command.camp_id.clone();
+        let envelope =
+            user_camp_command_envelope(params.command_id, thread_id.clone(), params.command);
+        let mut database = self.database.lock().await;
+        let execution = rovai_core::thread_archive::change(&mut database, &envelope)?;
+        if !execution.replayed && execution.result.payload["changed"] == true {
+            let (through, mission): (i64, bool) = database.connection().query_row(
+                "SELECT last_sequence, EXISTS(SELECT 1 FROM mission WHERE camp_id=?1)
+                 FROM event_sequence WHERE singleton=1",
+                [&thread_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            emit(
+                &self.output,
+                "navigation.invalidated",
+                json!({
+                    "reason": "threads.archive_changed", "threadId": thread_id,
+                    "scope": "group", "throughGlobalSequence": through,
+                }),
+            );
+            if mission {
+                emit_missions_invalidated(
+                    &self.output,
+                    "threads.archive_changed",
+                    Some(&thread_id),
+                );
+            }
+        }
+        Ok(serde_json::to_value(execution.result)?)
+    }
+
     async fn resolve_project_file(
         &self,
         params: &ResolveFilePreviewSourceParams,
@@ -12090,32 +12124,8 @@ impl Core {
                     rovai_core::read_model::archive::list(&mut database, params)?,
                 )?)
             }
-            "camps.archive" => {
-                let params: UserCommandParams<rovai_core::thread_archive::ArchiveThreadCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let envelope = user_camp_command_envelope(
-                    params.command_id,
-                    params.command.camp_id.clone(),
-                    params.command,
-                );
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    rovai_core::thread_archive::change(&mut database, &envelope)?.result,
-                )?)
-            }
-            "camps.unarchive" => {
-                let params: UserCommandParams<rovai_core::thread_archive::UnarchiveThreadCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let envelope = user_camp_command_envelope(
-                    params.command_id,
-                    params.command.camp_id.clone(),
-                    params.command,
-                );
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    rovai_core::thread_archive::change(&mut database, &envelope)?.result,
-                )?)
-            }
+            "camps.archive" => self.change_thread_archive::<true>(&request.params).await,
+            "camps.unarchive" => self.change_thread_archive::<false>(&request.params).await,
             "camps.delete" => {
                 let started_at = Instant::now();
                 let params: UserCommandParams<DeleteThreadCommand> =
