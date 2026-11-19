@@ -53,7 +53,6 @@ export class ArchiveCommandRejected extends Error {
   constructor(readonly code: string) {
     const messages: Record<string, string> = {
       'camp.not_found': uiAttribute('目标已移除'),
-      'command.version_conflict': uiAttribute('记录已变化，请关闭并重新打开删除确认。'),
       'camp.workspace_cleanup_pending': uiAttribute('工作区正在清理，请稍后重试。'),
       'camp.deletion_in_progress': uiAttribute('记录正在删除。')
     }

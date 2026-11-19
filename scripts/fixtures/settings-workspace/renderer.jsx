@@ -83,7 +83,7 @@ const memoryClient = {
 const archiveRows = Array.from({ length: 205 }, (_, index) => ({
   threadId: `archive-fixture-${index}`, missionId: null,
   title: `归档样例 ${index + 1}`, projectKey: 'directory:/fixture',
-  lastMessageAt: '2026-11-18T14:32:00.000Z', threadVersion: 9
+  lastMessageAt: '2026-11-18T14:32:00.000Z'
 }))
 const archivedMission = {
   missionId: 'archive-mission', title: '归档使命样例', workspaceEverCreated: true, workspaceResourcesPresent: true
@@ -120,9 +120,8 @@ const archiveClient = {
       const index = archiveRows.findIndex(row => row.threadId === params.command.threadId)
       const code = state.archiveDeleteRejection
       state.archiveDeleteRejection = null
-      if (code === 'command.version_conflict') archiveRows[index].threadVersion += 1
       if (!code || code === 'camp.not_found') archiveRows.splice(index, 1)
-      if (code !== 'camp.not_found') invalidateArchive(params.command.threadId, code === 'command.version_conflict' ? 'camps.rename' : 'camps.delete_accepted')
+      if (!code) invalidateArchive(params.command.threadId, 'camps.delete_accepted')
       return code ? { status: 'rejected', code } : { status: 'accepted', code: 'camp.delete_accepted' }
     }
   }

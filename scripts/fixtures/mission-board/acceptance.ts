@@ -632,6 +632,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   cases.push('workspace cleanup persists progress, partial failure, actionable recovery and one-shot success independently of its dialog')
 
+  const deleteStartedAt = qa.calls.length
   const deleteMission = qa.items.find((item:any) => item.title === '使命累计变更回归测试')
   const deleteCard = Array.from(document.querySelectorAll<HTMLElement>('.mission-board-card')).find(node => node.textContent?.includes(deleteMission.title))!
   const deleteGroup = deleteCard.closest<HTMLElement>('.mission-list-group')
@@ -647,8 +648,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await until(() => deletionCommitted() || deletionError(), 'Mission deletion either commits or reports its request failure')
   check(!deletionError(), `Mission deletion must not fail before the command is admitted: ${deletionError()}`)
   check(deletionCommitted(), 'Mission card disappears as soon as deletion and cleanup intent commit')
-  const deleteVersionRead = qa.calls.findLast((call:any) => call.method === 'threads.open' && call.p.threadId === deleteMission.threadId)
-  check(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deleteVersionRead?.p.traceId ?? ''), 'Mission deletion reads the exact Camp version with a valid trace ID')
+  check(!qa.calls.slice(deleteStartedAt).some((call:any) => call.method === 'threads.open' && call.p.threadId === deleteMission.threadId), 'Mission deletion opened the Thread to read its version')
   qa.failOrphanCleanup(true)
   await until(() => document.querySelector('.mission-cleanup-notice')?.textContent?.includes('1 个工作区待清理'), 'Deleted Mission cleanup failure remains on the existing workspace route')
   await until(() => document.querySelector('.app-toast')?.textContent?.includes('使命 rovai/mission/015 分支清理失败'), 'Deleted Mission cleanup failure also raises an actionable Toast')
@@ -668,7 +668,7 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   return { ok: true, cases }
 }
 
-export async function runMissionDeleteTraceAcceptance(): Promise<{ ok: true; cases: string[] }> {
+export async function runMissionDeleteAcceptance(): Promise<{ ok: true; cases: string[] }> {
   const qa = (window as any).missionQA
   const check = (value: unknown, message: string): void => { if (!value) throw new Error(message) }
   const frames = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
@@ -682,6 +682,7 @@ export async function runMissionDeleteTraceAcceptance(): Promise<{ ok: true; cas
   const button = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
     .find(element => element.getAttribute('aria-label') === label || element.textContent?.trim() === label)
   await until(() => document.querySelector('.mission-board-card'), 'Mission board did not load for deletion acceptance')
+  const deleteStartedAt = qa.calls.length
   const mission = qa.items.find((item:any) => item.title === '使命累计变更回归测试')
   const card = Array.from(document.querySelectorAll<HTMLElement>('.mission-board-card')).find(node => node.textContent?.includes(mission.title))
   check(card, 'Deletion acceptance Mission card is unavailable')
@@ -695,10 +696,9 @@ export async function runMissionDeleteTraceAcceptance(): Promise<{ ok: true; cas
   await until(() => deletionCommitted() || deletionError(), 'Mission deletion neither committed nor reported an error')
   check(!deletionError(), `Mission deletion must not fail before the command is admitted: ${deletionError()}`)
   check(deletionCommitted(), 'Mission deletion did not remove its card')
-  const versionRead = qa.calls.findLast((call:any) => call.method === 'threads.open' && call.p.threadId === mission.threadId)
-  check(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(versionRead?.p.traceId ?? ''), 'Mission deletion version read did not carry a valid trace ID')
+  check(!qa.calls.slice(deleteStartedAt).some((call:any) => call.method === 'threads.open' && call.p.threadId === mission.threadId), 'Mission deletion opened the Thread to read its version')
   check(qa.calls.some((call:any) => call.method === 'threads.delete' && call.p.command?.threadId === mission.threadId), 'Mission deletion command was not admitted')
-  return { ok: true, cases: ['Mission deletion reads the exact Camp version with a valid trace ID before deleting'] }
+  return { ok: true, cases: ['Mission deletion submits the selected Thread ID without opening its history'] }
 }
 
 export async function runMissionLargeDiffAcceptance(): Promise<{ ok: true; cases: string[] }> {

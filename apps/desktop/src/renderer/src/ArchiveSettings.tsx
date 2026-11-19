@@ -153,7 +153,7 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   async function remove(item: ArchiveItem, workspaceDisposition: 'retain' | 'cleanup' = 'retain'): Promise<void> {
     await operate(item, async () => {
       const command: DeleteThreadCommand = {
-        threadId: item.threadId, expectedVersion: item.threadVersion, workspaceDisposition
+        threadId: item.threadId, workspaceDisposition
       }
       try {
         await requestArchiveCommand(client, 'threads.delete', command)

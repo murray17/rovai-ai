@@ -851,29 +851,25 @@ async function assertExpandedWindowFreshness(cdp) {
   const target = group.recentThreads[7]
   const targetSelector = `[data-sidebar-menu-target="camp:${target.id}"]`
   const titleIs = title => `document.querySelector(${JSON.stringify(targetSelector)})?.closest('.camp-nav-row')?.textContent.includes(${JSON.stringify(title)})`
-  const rename = async (title, version) => {
+  const rename = async title => {
     const result = await request(cdp, 'camps.rename', {
       commandId: crypto.randomUUID(),
-      command: { threadId: target.id, title, expectedVersion: version }
+      command: { threadId: target.id, title }
     })
     assert(result.status === 'applied', `Fixture rename failed: ${JSON.stringify(result)}`)
   }
   // This mutation runs through Core IPC, not the App's explicit rename follow-up.
   // The normal invalidation reader must refresh the eighth visible row.
-  await rename('已展开窗口的最新标题', target.version)
+  await rename('已展开窗口的最新标题')
   await waitForExpression(cdp, titleIs('已展开窗口的最新标题'))
   await clickProjectControl(cdp, selector, '.collapse-camps')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
-  const refreshed = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
-  const renamed = refreshed.projects.find(project => project.projectKey === projectKey).recentThreads.find(camp => camp.id === target.id)
-  await rename('收起期间更新后重新展开', renamed.version)
+  await rename('收起期间更新后重新展开')
   await clickProjectControl(cdp, selector, '.show-more-camps')
   await waitForExpression(cdp, titleIs('收起期间更新后重新展开'))
-  const beforeDelete = await request(cdp, 'navigation.snapshot', { groupLimits: { [projectKey]: 15 } })
-  const current = beforeDelete.projects.find(project => project.projectKey === projectKey).recentThreads.find(camp => camp.id === target.id)
   const deleted = await request(cdp, 'camps.delete', {
     commandId: crypto.randomUUID(),
-    command: { threadId: target.id, expectedVersion: current.version, force: true }
+    command: { threadId: target.id, force: true }
   })
   assert(deleted.status === 'accepted', `Fixture delete was not accepted: ${JSON.stringify(deleted)}`)
   await waitForExpression(cdp, `!document.querySelector(${JSON.stringify(targetSelector)})

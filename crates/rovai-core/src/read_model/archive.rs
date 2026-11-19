@@ -16,7 +16,6 @@ pub(crate) struct ArchiveItem {
     title: String,
     project_key: String,
     last_message_at: Option<String>,
-    thread_version: i64,
 }
 
 #[derive(Serialize)]
@@ -35,7 +34,7 @@ pub(crate) fn list(database: &mut Database, query: ArchiveListQuery) -> Result<A
                 WHEN camp.project_binding_kind = 'directory' AND length(trim(camp.project_path)) > 0
                     THEN 'directory:' || camp.project_path ELSE 'unavailable' END,
             CASE WHEN camp.history_activity_initialized = 1 THEN camp.history_activity_at
-                ELSE ({last_visible_time}) END, camp.version
+                ELSE ({last_visible_time}) END
          FROM camp LEFT JOIN mission ON mission.camp_id = camp.id
          WHERE camp.archived_at IS NOT NULL AND camp.deletion_operation_id IS NULL
            AND camp.id > COALESCE(?1, '')
@@ -49,7 +48,6 @@ pub(crate) fn list(database: &mut Database, query: ArchiveListQuery) -> Result<A
                 title: row.get(2)?,
                 project_key: row.get(3)?,
                 last_message_at: row.get(4)?,
-                thread_version: row.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

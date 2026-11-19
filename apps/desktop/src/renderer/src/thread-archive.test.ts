@@ -4,7 +4,7 @@ import { archiveView, normalizeArchiveText } from './thread-archive'
 
 it('orders complete projects by their latest matching chat and keeps counts across filters', () => {
   const row = (threadId: string, projectKey: string, day: number | null, missionId: string | null = null): ArchiveItem => ({
-    threadId, projectKey, title: 'Ｒｅｐｏｒｔ', missionId, threadVersion: 1,
+    threadId, projectKey, title: 'Ｒｅｐｏｒｔ', missionId,
     lastMessageAt: day ? `2026-11-${day}T10:30:00Z` : null
   })
   const items = [row('f', 'P', null), row('b', 'Q', 14), row('c', 'P', 14), row('a', 'P', 14),

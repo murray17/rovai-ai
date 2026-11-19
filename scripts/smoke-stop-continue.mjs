@@ -270,9 +270,8 @@ try {
       await until(() => database.prepare('SELECT 1 FROM mission_workspace WHERE mission_id=? AND cleanup_worktree_removed=1 AND cleanup_branch_removed=1').get(missionId), 'historical Mission resource cleanup')
       await assert.rejects(access(resource.worktree_path), { code: 'ENOENT' })
       assert.equal(database.prepare('SELECT cancel_acknowledged_at FROM agent_run WHERE id=?').get(first.id).cancel_acknowledged_at, null)
-      const version = database.prepare('SELECT version FROM camp WHERE id=?').get(threadId).version
       const deletionId = crypto.randomUUID()
-      const deleted = await core.request('camps.delete', { commandId: deletionId, command: { threadId, expectedVersion: version, workspaceDisposition: 'retain' } })
+      const deleted = await core.request('camps.delete', { commandId: deletionId, command: { threadId, workspaceDisposition: 'retain' } })
       assert.equal(deleted.status, 'accepted', JSON.stringify(deleted))
       await until(() => !database.prepare('SELECT 1 FROM camp WHERE id=?').get(threadId), 'historical Thread business deletion')
       await until(() => database.prepare("SELECT 1 FROM camp_attachment_view_operation WHERE command_id=? AND kind='camp_delete_cleanup' AND status='completed'").get(deletionId), 'historical Thread managed-resource cleanup')

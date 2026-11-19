@@ -5948,10 +5948,7 @@ mod tests {
     use super::*;
     use crate::{
         camp_attachment::ThreadAttachmentStore,
-        collaboration::{
-            CollaborationService, CreateThreadCommand, DeleteThreadCommand,
-            SendUserThreadDraftCommand,
-        },
+        collaboration::{CollaborationService, CreateThreadCommand, SendUserThreadDraftCommand},
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
     };
 
@@ -7488,35 +7485,9 @@ mod tests {
             .prepare_camp_delete_cleanup(&mut database, &camp_id, &delete_command_id)
             .unwrap()
             .unwrap();
-        let version: i64 = database
-            .connection()
-            .query_row(
-                "SELECT version FROM camp WHERE id = ?1",
-                [&camp_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let deleted = CollaborationService::default()
-            .delete_camp(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: delete_command_id,
-                    actor: ActorRef::User {
-                        user_id: "test-user".to_string(),
-                    },
-                    camp_id: Some(camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: DeleteThreadCommand {
-                        camp_id: camp_id.clone(),
-                        expected_version: version,
-                        force: true,
-                        workspace_disposition: Default::default(),
-                    },
-                },
-            )
-            .unwrap();
-        assert_eq!(deleted.result.status, CommandResultStatus::Applied);
+        let transaction = database.connection_mut().transaction().unwrap();
+        crate::collaboration::delete_camp_aggregate(&transaction, &camp_id).unwrap();
+        transaction.commit().unwrap();
 
         // Simulate a crash after the Camp transaction commits but before the
         // cleanup operation advances from planned. Startup reconciliation must

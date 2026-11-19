@@ -16,7 +16,7 @@ last_updated: 2026-09-27
 首条通过统一原子 admission 的有效 Owner 消息，复用普通 Camp 的 Structured Content 命名函数：
 移除行首连续真实寻址 Mention、规范化空白、限制为 80 个 Unicode scalar，并在同一消息/Turn/Run
 事务中把 `default` 改为 `generated`。collecting、待选项目、被拒绝或回滚的消息不产生生成名。
-已为 `generated` 或 `user` 的标题不被后续消息覆盖；手动重命名仍只更新普通标题及 `name_origin=user`。
+普通会话通过 `threads.rename({ threadId, title })` 由用户改名。Core 在提交时校验并写入新标题，设置 `name_origin=user` 并递增 Thread 版本。并发改名以最后提交的标题为准。后续消息保留 `generated` 或 `user` 标题。
 
 `/new` 只创建新的默认命名 Camp；新 Camp 的首条有效消息独立命名。旧 Camp 与旧绑定仍保留。
 本次不迁移、批量重命名旧 Camp，也不根据旧标题猜测是否为用户手动名称。

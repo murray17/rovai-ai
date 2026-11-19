@@ -69,9 +69,8 @@ test('production Web retains its mounted Composer and authentication across a re
     assert.equal(await browser.evaluate(`document.querySelector('.web-offline-dialog') === null`), true)
     // Reproduce a persisted, never-admitted command without a Runtime. Recovery
     // must also unblock the real initial navigation reads after a page reload.
-    const snapshot = await host.request('camps.open', { threadId: created.payload.threadId, traceId: crypto.randomUUID() })
     const pending = { operation: 'threads.rename', params: { commandId: crypto.randomUUID(), command: {
-      threadId: created.payload.threadId, title: '原提交恢复完成', expectedVersion: snapshot.thread.version } } }
+      threadId: created.payload.threadId, title: '原提交恢复完成' } } }
     await browser.evaluate(`(() => { const saved = JSON.parse(sessionStorage.getItem('rovai.web.session.v1')); saved.pending = [${JSON.stringify(pending)}]; sessionStorage.setItem('rovai.web.session.v1', JSON.stringify(saved)) })()`)
     await browser.send('Page.reload')
     await browser.wait(`document.querySelector('.web-offline-retry') !== null`)

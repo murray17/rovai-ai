@@ -122,10 +122,9 @@ try {
     throw new Error(`Directory Camps did not survive Core restart: ${JSON.stringify(restoredNavigation)}`)
   }
   for (const threadId of [ordinaryCamp.payload.threadId, emptyGitCamp.payload.threadId]) {
-    const snapshot = await core.request('camps.snapshot', { threadId })
     const deletion = await core.request('camps.delete', {
       commandId: crypto.randomUUID(),
-      command: { threadId, expectedVersion: snapshot.thread.version }
+      command: { threadId }
     })
     if (deletion.status !== 'accepted' || deletion.code !== 'camp.delete_accepted') {
       throw new Error(`Smoke Camp deletion failed: ${JSON.stringify(deletion)}`)
