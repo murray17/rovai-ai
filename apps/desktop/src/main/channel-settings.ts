@@ -1499,10 +1499,7 @@ export class ChannelSettingsService {
       channel,
       unsubscribers: []
     }
-    managed.unsubscribers.push(channel.on('message', (message) => {
-      logFeishuBotDiagnostic('message.normalized', messageDiagnostic(managed, message))
-      return this.#handleMessage(managed, message)
-    }))
+    managed.unsubscribers.push(channel.on('message', (message) => this.#handleMessage(managed, message)))
     managed.unsubscribers.push(channel.on('cardAction', (event) => (
       this.#handleCardAction(managed, event)
     )))
@@ -1641,9 +1638,7 @@ export class ChannelSettingsService {
       reject('host_stopped')
       return
     }
-    this.#hostPump?.wake()
     const raw = (message.raw ?? {}) as RawInboundEvent
-    const coreSnapshot = await this.#coreSnapshot()
     const tenantKey = raw.sender?.tenant_key || raw.tenant_key
     if (!tenantKey) {
       reject('tenant_key_missing')
@@ -1656,6 +1651,10 @@ export class ChannelSettingsService {
       || raw.sender?.sender_id?.user_id
       || raw.sender?.sender_id?.open_id
       || message.senderId
+    const conversationKind = await this.#conversationKind(managed.channel, message, tenantKey)
+    const topicKey = conversationKind === 'topic'
+      ? (message.rootId || (message.replyToMessageId ? '' : message.messageId))
+      : ''
     const owner = await this.#commandWithId(
       this.#method('owner.verify'),
       stableCommandId('owner', managed.appId, tenantKey, message.messageId),
@@ -1663,6 +1662,7 @@ export class ChannelSettingsService {
         provider: this.#profile.kind,
         appId: managed.appId,
         tenantKey,
+        inbound: { chatId: message.chatId, topicKey, conversationKind },
         senderOpenId,
         senderUserId,
         senderUnionId,
@@ -1670,6 +1670,9 @@ export class ChannelSettingsService {
       },
       false
     )
+    if (owner.code === 'channel.inbound.ignored_archived') return
+    this.#hostPump?.wake()
+    logFeishuBotDiagnostic('message.normalized', messageDiagnostic(managed, message))
     if (owner.payload.classification !== 'owner') {
       reject(
         owner.payload.classification === 'unverified'
@@ -1699,7 +1702,7 @@ export class ChannelSettingsService {
         }
       }).catch(() => undefined)
     }
-    const conversationKind = await this.#conversationKind(managed.channel, message)
+    const coreSnapshot = await this.#coreSnapshot()
     if (conversationKind === 'group' && message.threadId) {
       reject('message_thread_unsupported', conversationKind)
       return
@@ -1713,9 +1716,6 @@ export class ChannelSettingsService {
       reject('roster_reconciliation_failed', conversationKind)
       return
     }
-    const topicKey = conversationKind === 'topic'
-      ? (message.rootId || (message.replyToMessageId ? '' : message.messageId))
-      : ''
     if (conversationKind === 'topic' && !topicKey) {
       reject('topic_key_missing', conversationKind)
       return
@@ -1794,6 +1794,7 @@ export class ChannelSettingsService {
         },
         false
       )
+      if (started.code === 'channel.inbound.ignored_archived') return
       await managed.channel.send(message.chatId, {
         text: started.status === 'rejected'
           ? started.code === 'channel.dm.busy'
@@ -1839,6 +1840,7 @@ export class ChannelSettingsService {
       expectedAppIds: expectedApps,
       acknowledgementAppId
     }, false)
+    if (observation.code === 'channel.inbound.ignored_archived') return
     if (observation.status === 'rejected') {
       reject(`core_${safeDiagnosticReason(observation.code)}`, conversationKind)
       return
@@ -2285,12 +2287,19 @@ export class ChannelSettingsService {
 
   async #conversationKind(
     channel: LarkChannel,
-    message: NormalizedMessage
+    message: NormalizedMessage,
+    tenantKey: string
   ): Promise<'p2p' | 'group' | 'topic'> {
     if (message.chatType === 'p2p') return 'p2p'
     const cached = this.#chatModeCache.get(message.chatId)
     if (cached) return cached
-    const mode = await channel.getChatMode(message.chatId).catch(() => 'group' as const)
+    const mode = await channel.getChatMode(message.chatId).catch(() => null)
+    if (!mode) {
+      const snapshot = await this.#coreSnapshot()
+      return snapshot.transportConversations.find(conversation =>
+        conversation.chatId === message.chatId && conversation.tenantKey === tenantKey
+      )?.conversationKind ?? 'group'
+    }
     this.#chatModeCache.set(message.chatId, mode)
     return mode
   }

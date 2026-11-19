@@ -78,7 +78,11 @@ pub(crate) fn change<const ARCHIVE: bool>(
         }
         let changed = ARCHIVE != archived_at.is_some();
         if changed {
-            archived_at = ARCHIVE.then(|| chrono::Utc::now().to_rfc3339());
+            let now = chrono::Utc::now().to_rfc3339();
+            // Also close any unpublished channel input left by an older Core
+            // before reopening this Thread.
+            crate::channel::stop_pending_inbound(transaction, id, &now)?;
+            archived_at = ARCHIVE.then_some(now);
             transaction.execute(
                 "UPDATE camp SET archived_at = ?2 WHERE id = ?1",
                 params![id, archived_at],

@@ -64,7 +64,7 @@ pub(crate) fn enqueue_message_deliveries(
     recipient_agent_ids: &[String],
     now: &str,
 ) -> Result<Vec<EnqueuedDelivery>> {
-    // Inbound messages can still be recorded while archived. They carry no new work.
+    // A late delivery must not start new work in an archived Thread.
     if !recipient_agent_ids.is_empty() && crate::thread_archive::is_archived(transaction, camp_id)?
     {
         return Ok(Vec::new());

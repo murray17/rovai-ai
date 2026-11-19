@@ -36,7 +36,8 @@ import {
   MAX_DINGTALK_MEDIA_UPLOAD_BYTES,
   encodeDingTalkCardActionId
 } from './dingtalk-open-api'
-import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
+import * as streamTransport from './dingtalk-stream-registry'
+import { normalizeDingTalkRobotMessage } from './dingtalk-inbound'
 import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
 import { DINGTALK_QUESTION_TEMPLATE_ID, type NativeCardSource } from './native-interaction-cards'
 
@@ -1013,10 +1014,42 @@ describe('DingTalk channel account connection', () => {
     expect(dingtalkCanonicalReplayCarrier([first, second], [true, false])).toBe(first)
     expect(dingtalkCanonicalReplayCarrier([first, second], [false, true])).toBe(second)
     expect(dingtalkCanonicalReplayCarrier([first, second], [false, false])).toBe(first)
+    expect(dingtalkCanonicalReplayCarrier([first, second], [true, 'ignored'])).toBeNull()
+    expect(dingtalkCanonicalReplayCarrier([first], ['ignored'])).toBeNull()
     expect(dingtalkCanonicalReplayCarrier([], [])).toBeNull()
     expect(() => dingtalkCanonicalReplayCarrier([first], [])).toThrow(
       'dingtalk_inbound_batch_invalid'
     )
+  })
+
+  it('discards archived DingTalk callbacks before DM rotation or group batching', async () => {
+    const StreamRegistry = streamTransport.DingTalkStreamRegistry
+    const registry = vi.spyOn(streamTransport, 'DingTalkStreamRegistry').mockImplementation(function (options) {
+      return new StreamRegistry(options)
+    })
+    try {
+      const fixture = completedBotFixture({ useHostStream: true })
+      const [{ onMessage }] = registry.mock.lastCall!
+      const request = vi.spyOn(fixture.core, 'request').mockResolvedValue({
+        status: 'applied', code: 'channel.inbound.ignored_archived', payload: { status: 'ignored' }
+      })
+      for (const conversationType of ['1', '2']) {
+        const message = normalizeDingTalkRobotMessage({
+          conversationType, conversationId: 'chat', msgId: `message-${conversationType}`,
+          senderStaffId: 'owner', senderCorpId: 'corp', msgtype: 'text', text: { content: '/new' },
+          isInAtList: true
+        }, { appKey: 'app', robotCode: 'bot' })
+        await onMessage(message)
+      }
+      expect(request.mock.calls.map(([method]) => method)).toEqual([
+        'channels.dingtalk.owner.verify', 'channels.dingtalk.owner.verify'
+      ])
+      expect(request.mock.calls.map(([, envelope]) => (envelope as { command: { inbound: unknown } }).command.inbound))
+        .toEqual(['p2p', 'group'].map(conversationKind => ({ chatId: 'chat', topicKey: '', conversationKind })))
+      await fixture.service.stop()
+    } finally {
+      registry.mockRestore()
+    }
   })
 
   it('renders an honest permanent Markdown parent summary without claiming native reply', () => {
@@ -1200,6 +1233,7 @@ describe('DingTalk channel account connection', () => {
 })
 
 function completedBotFixture(options: {
+  useHostStream?: boolean
   credentialPresent?: boolean
   rejectCredentialWrites?: number
   otherAccount?: boolean
@@ -1290,7 +1324,7 @@ function completedBotFixture(options: {
       return { status: 'applied', code: `${method}.applied`, payload: {} }
     }
   } as unknown as Pick<CoreClient, 'request'>
-  const stream = new DingTalkStreamRegistry({
+  const stream = new streamTransport.DingTalkStreamRegistry({
     onMessage: async () => undefined, onCard: async () => undefined
   })
   const streamStart = vi.spyOn(stream, 'start').mockResolvedValue(undefined)
@@ -1332,7 +1366,7 @@ function completedBotFixture(options: {
     },
     provisioner: { create: provision },
     avatarSource: options.avatarSource ?? { resolve: async () => ({ pngBytes: new Uint8Array([1, 2, 3]) }) },
-    streamRegistry: stream,
+    streamRegistry: options.useHostStream ? undefined : stream,
     createApiClient: () => { apiAvailable = true; return api }
   })
   return { service, core, commands, commandPayloads, attachmentLookups, api, provision, streamStart, verifyCard,

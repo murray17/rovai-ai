@@ -494,10 +494,19 @@ pub struct VerifyChannelOwnerCommand<const LARK: bool> {
     pub provider: String,
     pub app_id: String,
     pub tenant_key: String,
+    pub inbound: Option<InboundConversation>,
     pub sender_open_id: Option<String>,
     pub sender_user_id: Option<String>,
     pub sender_union_id: Option<String>,
     pub sender_display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboundConversation {
+    pub chat_id: String,
+    pub topic_key: String,
+    pub conversation_kind: String,
 }
 
 pub type VerifyFeishuOwnerCommand = VerifyChannelOwnerCommand<false>;
@@ -4518,10 +4527,35 @@ impl ChannelService {
             envelope.payload.sender_union_id.as_deref(),
         )?;
         let display_name = normalize_display_name(&envelope.payload.sender_display_name)?;
-        self.gateway.execute(database, envelope, |transaction| {
-            if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider)
-                || (envelope.payload.provider != self.spec.provider
-                    && (LARK || envelope.payload.provider != DINGTALK_PROVIDER))
+        let command = &envelope.payload;
+        let conversation_id = command
+            .inbound
+            .as_ref()
+            .map(|inbound| {
+                stable_channel_conversation_id(
+                    &command.provider,
+                    &command.tenant_key,
+                    &inbound.chat_id,
+                    &inbound.topic_key,
+                    if inbound.conversation_kind == "p2p" {
+                        &command.app_id
+                    } else {
+                        ""
+                    },
+                )
+            })
+            .transpose()?;
+        let provider_matches = command.provider == self.spec.provider
+            || (!LARK && command.provider == DINGTALK_PROVIDER);
+        let discard = |tx: &Transaction<'_>| match &conversation_id {
+            Some(id) if provider_matches => {
+                discard_archived_inbound(tx, &envelope.actor, &command.provider, id)
+            }
+            _ => Ok(None),
+        };
+        let handle = |transaction: &Transaction<'_>| {
+            if !provider_matches
+                || !is_channel_host_for_provider(&envelope.actor, &command.provider)
             {
                 return Ok(rejected(
                     "channel.host_required",
@@ -4566,7 +4600,9 @@ impl ChannelService {
                     None,
                 )),
             }
-        })
+        };
+        self.gateway
+            .execute_unless(database, envelope, discard, handle)
     }
 
     pub fn start_new_feishu_dm(
@@ -4588,7 +4624,22 @@ impl ChannelService {
         let conversation_display_name =
             normalize_display_name(&envelope.payload.conversation_display_name)?;
         let canonical_path = canonical_managed_quick_chat_path(quick_chat_path)?;
-        self.gateway.execute(database, envelope, |transaction| {
+        let conversation_id = stable_channel_conversation_id(
+            &envelope.payload.provider,
+            &envelope.payload.tenant_key,
+            &envelope.payload.chat_id,
+            "",
+            &envelope.payload.app_id,
+        )?;
+        let discard = |tx: &Transaction<'_>| {
+            discard_archived_inbound(
+                tx,
+                &envelope.actor,
+                &envelope.payload.provider,
+                &conversation_id,
+            )
+        };
+        let handle = |transaction: &Transaction<'_>| {
             if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
@@ -4596,7 +4647,8 @@ impl ChannelService {
                 ));
             }
             let owner = load_verified_owner_for_app(
-                ChannelProviderSpec::for_provider(&envelope.payload.provider).unwrap_or(&FEISHU_SPEC),
+                ChannelProviderSpec::for_provider(&envelope.payload.provider)
+                    .unwrap_or(&FEISHU_SPEC),
                 transaction,
                 &envelope.payload.provider,
                 &envelope.payload.app_id,
@@ -4629,13 +4681,6 @@ impl ChannelService {
                     "The DM target Bot is not a published managed Agent",
                 ));
             }
-            let conversation_id = stable_channel_conversation_id(
-                &envelope.payload.provider,
-                &envelope.payload.tenant_key,
-                &envelope.payload.chat_id,
-                "",
-                &envelope.payload.app_id,
-            )?;
             let now = Utc::now().to_rfc3339();
             upsert_channel_conversation(
                 transaction,
@@ -4778,7 +4823,9 @@ impl ChannelService {
                     entity_id: binding_id,
                 }),
             ))
-        })
+        };
+        self.gateway
+            .execute_unless(database, envelope, discard, handle)
     }
 
     pub fn reconcile_feishu_group_roster(
@@ -4980,7 +5027,15 @@ impl ChannelService {
                 ""
             },
         )?;
-        self.gateway.execute(database, envelope, |transaction| {
+        let discard = |tx: &Transaction<'_>| {
+            discard_archived_inbound(
+                tx,
+                &envelope.actor,
+                &envelope.payload.provider,
+                &conversation_id,
+            )
+        };
+        let handle = |transaction: &Transaction<'_>| {
             if !is_channel_host_for_provider(&envelope.actor, &envelope.payload.provider) {
                 return Ok(rejected(
                     "channel.host_required",
@@ -5343,7 +5398,9 @@ impl ChannelService {
                     entity_id: aggregate_id.clone(),
                 }),
             ))
-        })
+        };
+        self.gateway
+            .execute_unless(database, envelope, discard, handle)
     }
 
     pub fn finalize_inbound(
@@ -5403,6 +5460,14 @@ impl ChannelService {
             }
             let now = Utc::now();
             let now_text = now.to_rfc3339();
+            let frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
+                .context("channel inbound frozen payload is invalid")?;
+            if let Some(ignored) = discard_archived_inbound(
+                transaction, &envelope.actor, &aggregate.provider, &frozen.conversation_id,
+            )? {
+                mark_aggregate_failed(transaction, &aggregate.id, "camp.archived", &now_text)?;
+                return Ok(ignored);
+            }
             let expected = parse_string_set(&aggregate.expected_app_ids_json)?;
             let observed = parse_string_set(&aggregate.observed_app_ids_json)?;
             let mut ready = if aggregate.provider == DINGTALK_PROVIDER {
@@ -5466,8 +5531,6 @@ impl ChannelService {
                     None,
                 ));
             }
-            let frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
-                .context("channel inbound frozen payload is invalid")?;
             let conversation = load_channel_conversation(
                 transaction,
                 &frozen.conversation_id,
@@ -8375,6 +8438,73 @@ fn group_roster_readiness(
     Ok(GroupRosterReadiness::Ready(present_agents))
 }
 
+fn discard_archived_inbound(
+    tx: &Transaction<'_>,
+    actor: &ActorRef,
+    provider: &str,
+    conversation_id: &str,
+) -> Result<Option<CommandHandlerResult>> {
+    if !is_channel_host_for_provider(actor, provider) {
+        return Ok(None);
+    }
+    let archived: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM channel_conversation_binding AS binding
+         JOIN camp ON camp.id = binding.camp_id
+         WHERE binding.channel_conversation_id = ?1 AND binding.status = 'active'
+           AND camp.archived_at IS NOT NULL)",
+        [conversation_id],
+        |row| row.get(0),
+    )?;
+    Ok(archived.then(|| {
+        CommandHandlerResult::applied(
+            "channel.inbound.ignored_archived",
+            json!({ "status": "ignored" }),
+            None,
+        )
+    }))
+}
+
+/// Close transport work which has not published a message. Already published
+/// history and the active conversation binding still belong to the Thread.
+pub(crate) fn stop_pending_inbound(tx: &Transaction<'_>, camp_id: &str, now: &str) -> Result<()> {
+    let binding = tx
+        .query_row(
+            "SELECT id, channel_conversation_id, status FROM channel_conversation_binding
+         WHERE camp_id = ?1",
+            [camp_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((binding_id, conversation_id, status)) = binding else {
+        return Ok(());
+    };
+    if status == "active" {
+        tx.execute(
+            "UPDATE channel_inbound_aggregate SET status = 'failed', failure_code = 'camp.archived',
+             finalized_at = ?2, updated_at = ?2 WHERE status = 'collecting'
+             AND json_extract(frozen_payload_json, '$.conversationId') = ?1", params![conversation_id, now],
+        )?;
+    }
+    let queued = query_rows(
+        tx,
+        "UPDATE channel_turn_request SET status = 'failed', failure_code = 'camp.archived',
+         completed_at = ?2, updated_at = ?2, version = version + 1
+         WHERE binding_id = ?1 AND status = 'queued' RETURNING id, ack_app_id",
+        params![binding_id, now],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    for (id, app_id) in queued {
+        close_queue_ack_for_request(tx, &id, &app_id, now)?;
+    }
+    Ok(())
+}
+
 fn load_active_channel_binding(
     transaction: &Transaction<'_>,
     conversation_id: &str,
@@ -9420,6 +9550,10 @@ fn try_admit_request(
         )
         .optional()?;
     if let Some(camp_id) = camp_id {
+        if crate::thread_archive::is_archived(transaction, &camp_id)? {
+            stop_pending_inbound(transaction, &camp_id, now)?;
+            return Ok(AdmissionAttempt::Failed("camp.archived".into()));
+        }
         settled_run_ids.extend(crate::runtime::settle_pending_camp_cancellations_in_tx(
             transaction,
             &camp_id,
@@ -14655,6 +14789,7 @@ mod tests {
                             actor,
                             wrong("owner"),
                             VerifyChannelOwnerCommand::<LARK> {
+                                inbound: None,
                                 provider: provider.to_string(),
                                 app_id: world.app_id.clone(),
                                 tenant_key: "tenant_1".to_string(),
@@ -14901,6 +15036,7 @@ mod tests {
                         spec,
                         "verify-owner",
                         VerifyChannelOwnerCommand::<LARK> {
+                            inbound: None,
                             provider: provider.to_string(),
                             app_id: app_id.clone(),
                             tenant_key: "tenant_1".to_string(),
@@ -15264,6 +15400,7 @@ mod tests {
                 &host_envelope(
                     "verify-owner-for-late-console",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -15651,6 +15788,162 @@ mod tests {
         );
     }
 
+    fn assert_archived_channel_discards_inbound(
+        db: &mut Database,
+        quick: &Path,
+        camp_id: &str,
+        mut observation: ObserveChannelInboundCommand,
+        command: inbound_attachments::CompleteAttachmentsCommand,
+    ) {
+        fn set_archive<const ARCHIVE: bool>(db: &mut Database, camp_id: &str) {
+            use crate::thread_archive::{ChangeArchiveCommand, change};
+            let user = ActorRef::User {
+                user_id: "local_user".into(),
+            };
+            let change_command = ChangeArchiveCommand::<ARCHIVE> {
+                camp_id: camp_id.into(),
+            };
+            let envelope = actor_envelope(&user, Uuid::new_v4().to_string(), change_command);
+            assert_eq!(
+                change(db, &envelope).unwrap().result.payload["changed"],
+                true
+            );
+        }
+
+        let service = ChannelService::default();
+        let provider = observation.provider.clone();
+        let app_id = observation.app_id.clone();
+        let provider = provider.as_str();
+        let app_id = app_id.as_str();
+        let mut waiting = observation.clone();
+        waiting.external_message_id = "observed-before-archive".into();
+        let collecting = service
+            .observe_inbound(
+                db,
+                &provider_host_envelope(provider, "collect-before-archive", waiting),
+            )
+            .unwrap();
+        let waiting_id = collecting.result.payload["aggregateId"].as_str().unwrap();
+        set_archive::<true>(db, camp_id);
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT failure_code FROM channel_inbound_aggregate WHERE id=?1",
+                    [waiting_id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "camp.archived"
+        );
+        assert!(
+            inbound_attachments::pending(db.connection(), provider, &[app_id.into()])
+                .unwrap()
+                .is_empty()
+        );
+        let completed = inbound_attachments::complete(
+            db,
+            &provider_host_envelope(provider, "late-download", command),
+        )
+        .unwrap();
+        assert_eq!(completed.result.code, "channel.attachments.closed");
+        let output = crate::storage_layout::camp_attachment_output_root(
+            db.runtime_camp_files_root(),
+            camp_id,
+        )
+        .unwrap();
+        assert!(!output.join(provider).exists());
+
+        let writes = db.connection().total_changes();
+        let identity = VerifyFeishuOwnerCommand {
+            provider: provider.into(),
+            app_id: app_id.into(),
+            tenant_key: observation.tenant_key.clone(),
+            inbound: Some(InboundConversation {
+                chat_id: observation.chat_id.clone(),
+                topic_key: "".into(),
+                conversation_kind: "p2p".into(),
+            }),
+            sender_open_id: observation.sender_open_id.clone(),
+            sender_user_id: observation.sender_user_id.clone(),
+            sender_union_id: observation.sender_union_id.clone(),
+            sender_display_name: "Ignored sender".into(),
+        };
+        let owner = service
+            .verify_feishu_owner(
+                db,
+                &provider_host_envelope(provider, "ignored-owner", identity),
+            )
+            .unwrap();
+        let rotate = service
+            .start_new_feishu_dm(
+                db,
+                quick,
+                &provider_host_envelope(
+                    provider,
+                    "ignored-new",
+                    StartNewFeishuDmCommand {
+                        provider: provider.into(),
+                        app_id: app_id.into(),
+                        tenant_key: observation.tenant_key.clone(),
+                        chat_id: observation.chat_id.clone(),
+                        conversation_display_name: "Ignored chat".into(),
+                        target_agent_id: "agent_1".into(),
+                    },
+                ),
+            )
+            .unwrap();
+        let replay = service
+            .observe_inbound(
+                db,
+                &provider_host_envelope(provider, "images-observe", observation.clone()),
+            )
+            .unwrap();
+        observation.external_message_id = "archived-file".into();
+        let ignored = service
+            .observe_inbound(
+                db,
+                &provider_host_envelope(provider, "ignored-file", observation.clone()),
+            )
+            .unwrap();
+        for result in [owner, rotate, replay, ignored] {
+            assert_eq!(result.result.code, "channel.inbound.ignored_archived");
+        }
+        // Includes command receipts, identity updates and channel observations.
+        assert_eq!(db.connection().total_changes(), writes);
+
+        set_archive::<false>(db, camp_id);
+        assert!(
+            inbound_attachments::pending(db.connection(), provider, &[app_id.into()])
+                .unwrap()
+                .is_empty()
+        );
+
+        observation.external_message_id = "new-after-unarchive".into();
+        observation.resources.clear();
+        observation.attachment_summaries.clear();
+        let new = service
+            .observe_inbound(
+                db,
+                &provider_host_envelope(provider, "restored-observe", observation),
+            )
+            .unwrap();
+        let admitted = service
+            .finalize_inbound(
+                db,
+                quick,
+                &provider_host_envelope(
+                    provider,
+                    "restored-finalize",
+                    FinalizeChannelInboundCommand {
+                        aggregate_id: new.result.payload["aggregateId"].as_str().unwrap().into(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(admitted.result.payload["threadId"], camp_id);
+        assert_eq!(admitted.result.code, "channel.turn.admitted");
+    }
+
     #[test]
     fn inbound_attachments_gate_atomic_admission_and_survive_retry_without_duplicate_messages() {
         use crate::local_attachment_source::LocalAttachmentSourceRef;
@@ -15661,7 +15954,7 @@ mod tests {
             [FEISHU_PROVIDER, DINGTALK_PROVIDER]
                 .into_iter()
                 .flat_map(|provider| {
-                    ["ready", "retry", "failed", "deleted", "folder"]
+                    ["ready", "retry", "failed", "deleted", "archived", "folder"]
                         .map(|scenario| (provider, scenario))
                 })
         {
@@ -15745,7 +16038,7 @@ mod tests {
             let replay = service
                 .observe_inbound(
                     &mut database,
-                    &provider_host_envelope(provider, "images-observe-again", observation),
+                    &provider_host_envelope(provider, "images-observe-again", observation.clone()),
                 )
                 .unwrap();
             assert_eq!(replay.result.payload["aggregateId"], aggregate_id);
@@ -15832,6 +16125,16 @@ mod tests {
             )
             .unwrap();
             assert_eq!(cross_provider.result.code, "channel.attachments.closed");
+            if scenario == "archived" {
+                assert_archived_channel_discards_inbound(
+                    &mut database,
+                    &quick,
+                    &camp_id,
+                    observation,
+                    command,
+                );
+                continue;
+            }
             if scenario == "deleted" {
                 database
                     .connection()
@@ -16099,6 +16402,7 @@ mod tests {
                 provider,
                 "native-owner",
                 VerifyFeishuOwnerCommand {
+                    inbound: None,
                     provider: provider.into(),
                     app_id: app.into(),
                     tenant_key: tenant.into(),
@@ -19372,6 +19676,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-owner-verify",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         app_id: "ding-app-agent_1".to_string(),
                         tenant_key: "ding-corp-1".to_string(),
@@ -20323,6 +20628,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-group-owner-verify",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         app_id: "ding-app-agent_1".to_string(),
                         tenant_key: "ding-corp-1".to_string(),
@@ -21128,6 +21434,7 @@ mod tests {
                 &host_envelope(
                     "verify-owner-distinct-tenant-key",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "event_tenant_key_1".to_string(),
@@ -21148,6 +21455,7 @@ mod tests {
                 &host_envelope(
                     "verify-owner-conflicting-tenant-key",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "event_tenant_key_2".to_string(),
@@ -21207,6 +21515,7 @@ mod tests {
                 &host_envelope(
                     "verify-owner-canonical-workspace",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -21284,6 +21593,7 @@ mod tests {
                 &host_envelope(
                     "verify-owner-dm",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -22198,6 +22508,7 @@ mod tests {
                 &host_envelope(
                     "verify-owner-for-exact-cancel",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -22356,6 +22667,7 @@ mod tests {
                 &host_envelope(
                     "verify-terminal-console-owner",
                     VerifyFeishuOwnerCommand {
+                        inbound: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         app_id: "cli_app_1".to_string(),
                         tenant_key: "tenant_1".to_string(),
