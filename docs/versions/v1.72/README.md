@@ -15,6 +15,10 @@ last_updated: 2026-11-19
 
 会话与使命通过原 Thread 归档。归档会取消其中的执行，保存本机草稿并离开工作区。用户在「设置 → 归档」中恢复或删除记录。归档状态和分页读取遵循 [Thread Archive v1](../../contracts/thread-archive-v1.md)。
 
+## 公开消息正文搜索（2026-11-19）
+
+当前公屏与历史公屏统一支持连续原文搜索。扫描完成后成功结果只含 `results` 和 `truncated`。输入文案、迁移与验证见[消息搜索上下文对照 R3](model-context-change-message-search.md)、[History v18](../../contracts/camp-history-v18.md) 和 [Transport v46](../../contracts/builtin-tool-transport-v46.md)。
+
 ## 公共消息编辑与删除（2026-11-19）
 
 正文与附件可原地修改。旧批次的有效普通输入自动重排，主动继续授权留在原队员。

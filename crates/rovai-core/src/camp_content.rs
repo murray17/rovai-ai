@@ -1178,9 +1178,8 @@ fn render_plain_text_for_connection_with_current_user(
 }
 
 /// Rebuilds the derived body cache for every surviving message that addresses
-/// the current user. The caller owns the transaction, so an invalid segment or
-/// unresolved member identity cannot leave projected bodies and FTS rows at
-/// different presentation versions.
+/// the current user. The caller owns the transaction so an invalid segment or
+/// unresolved member identity cannot leave a partially reprojected body cache.
 pub fn reproject_current_user_messages(
     transaction: &Transaction<'_>,
     current_user_display_name: &str,
@@ -1832,7 +1831,7 @@ mod tests {
     }
 
     #[test]
-    fn current_user_reprojection_updates_body_and_fts_without_changing_semantics() {
+    fn current_user_reprojection_updates_body_without_changing_semantics() {
         let mut connection = reprojection_fixture();
         let content = vec![
             Segment::CurrentUserMention {
@@ -1881,20 +1880,10 @@ mod tests {
         let stored: Vec<Segment> = serde_json::from_str(&stored_content).unwrap();
         assert_eq!(body, "@You 请选择方案");
         assert_eq!(canonical_content_digest(&stored).unwrap(), digest);
-        assert_eq!(
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'You'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap(),
-            1
-        );
     }
 
     #[test]
-    fn failed_current_user_reprojection_rolls_back_every_body_and_fts_row() {
+    fn failed_current_user_reprojection_rolls_back_every_body() {
         let mut connection = reprojection_fixture();
         let current_only = serde_json::to_string(&vec![
             Segment::CurrentUserMention {
@@ -1941,16 +1930,6 @@ mod tests {
                 .unwrap(),
             "@你 保留中文"
         );
-        assert_eq!(
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'You'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap(),
-            0
-        );
     }
 
     fn reprojection_fixture() -> Connection {
@@ -1967,21 +1946,6 @@ mod tests {
                     body TEXT NOT NULL,
                     structured_content_json TEXT NOT NULL
                 );
-                CREATE VIRTUAL TABLE camp_message_fts USING fts5(
-                    body,
-                    content='camp_message',
-                    content_rowid='rowid'
-                );
-                CREATE TRIGGER camp_message_fts_insert
-                AFTER INSERT ON camp_message BEGIN
-                    INSERT INTO camp_message_fts(rowid, body) VALUES (new.rowid, new.body);
-                END;
-                CREATE TRIGGER camp_message_fts_update
-                AFTER UPDATE OF body ON camp_message BEGIN
-                    INSERT INTO camp_message_fts(camp_message_fts, rowid, body)
-                    VALUES ('delete', old.rowid, old.body);
-                    INSERT INTO camp_message_fts(rowid, body) VALUES (new.rowid, new.body);
-                END;
                 "#,
             )
             .unwrap();

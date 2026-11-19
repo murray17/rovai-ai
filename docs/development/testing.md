@@ -599,6 +599,23 @@ ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 own
 以及最小验证命令是什么。使用完整数据库或进程 fixture 时，还必须说明为什么较低层测试不足。无法
 回答时，不新增独立测试函数。
 
+### 消息正文搜索与索引迁移
+
+`db::tests::message_fts_retirement_is_atomic_and_keeps_message_data_across_reopens` 覆盖 Migration 229
+的生产启动、已填充的 schema 178、回执齐全或缺失的 schema 176，以及重复启动。测试校验两个协调步骤的顺序，分别在 228、229 失败后从已提交的 schema 177、178 继续，核对 DDL 和回执回滚。回执齐全的升级还验证原有的 Migration 116 协调逻辑。独立 SQLite 夹具保留主线 228 的投递索引，并验证消息索引和触发器退出。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib message_fts_retirement`。
+
+继任搜索测试在原 `camp_history::slow_tests` 校验两批之外的旧消息、有界排序和完整性，并复用原有的
+正文投影、提及、引用和撤回 owners。当前 reprojection 与 context index 测试保留正文回滚、引用和提及断言，
+移除随旧表退出的 FTS 断言。定向命令为
+`cargo test -p rovai-core --features slow-tests --lib camp_history::`、
+`cargo test -p rovai-core --features slow-tests --lib context_index::` 和
+`cargo test -p rovai-core --bin rovai camp_help_teaches_default_and_explicit_single_camp_targets`。
+除 Migration 229 的重启 owner 外沿用现有测试函数。
+
+`current_history_reads_live_state_without_id_guessing` 在同一 WAL 夹具中固定只读搜索快照，
+通过正常发送入口提交新消息，再验证旧快照和新查询各自的可见结果。同一测试经正式编辑与删除入口验证新旧正文及删除后的搜索结果。
+
 ### 删除、合并或改写测试
 
 删除 active test 必须给出以下一种可审阅证据：生产路径与合同在同一改动中退出；等价合同已有唯一

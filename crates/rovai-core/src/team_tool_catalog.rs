@@ -168,13 +168,30 @@ fn camp_list_success_schema() -> Value {
 }
 
 fn camp_search_success_schema(include_camp_title: bool) -> Value {
-    let mut schema = legacy_camp_search_success_schema(include_camp_title);
+    let mut schema = camp_search_schema_with_author_fields(include_camp_title);
     let item = &mut schema["properties"]["results"]["items"];
     *item = message_sender_schema(item.take());
     schema
 }
 
-pub(crate) fn legacy_camp_search_success_schema(include_camp_title: bool) -> Value {
+pub(crate) fn frozen_camp_search_success_schema(
+    include_camp_title: bool,
+    legacy_authors: bool,
+) -> Value {
+    let mut schema = if legacy_authors {
+        camp_search_schema_with_author_fields(include_camp_title)
+    } else {
+        camp_search_success_schema(include_camp_title)
+    };
+    schema["properties"]["searchIncomplete"] = json!({"type": "boolean"});
+    schema["required"]
+        .as_array_mut()
+        .expect("required fields")
+        .push(json!("searchIncomplete"));
+    schema
+}
+
+fn camp_search_schema_with_author_fields(include_camp_title: bool) -> Value {
     let max_items = if include_camp_title { 30 } else { 20 };
     let mut result_properties = json!({
         "threadId": {"type": "string"},
@@ -204,7 +221,7 @@ pub(crate) fn legacy_camp_search_success_schema(include_camp_title: bool) -> Val
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["results", "truncated", "searchIncomplete"],
+        "required": ["results", "truncated"],
         "properties": {
             "results": {
                 "type": "array", "maxItems": max_items,
@@ -215,8 +232,7 @@ pub(crate) fn legacy_camp_search_success_schema(include_camp_title: bool) -> Val
                     "properties": result_properties
                 }
             },
-            "truncated": {"type": "boolean"},
-            "searchIncomplete": {"type": "boolean"}
+            "truncated": {"type": "boolean"}
         }
     })
 }
@@ -1270,7 +1286,7 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": HISTORY_SEARCH_TOOL_NAME,
             "title": "Search public Thread history",
-            "description": "Discover messages across public historical Threads when the target Thread is unknown. Target-Thread membership is not a read permission. Thread titles are metadata, not hits. Once a Thread is known, prefer thread.search and thread.read with stable IDs. Summaries and attachments are not searched.",
+            "description": "Search public messages in other Threads. Target-Thread membership is not a read permission. Thread titles are metadata, not hits. Once a Thread is known, prefer thread.search and thread.read with stable IDs. Summaries and attachments are not searched.",
             "inputSchema": ThreadHistoryService::history_search_input_schema(),
             "outputSchema": camp_search_success_schema(true)
         }),

@@ -105,11 +105,6 @@ pub fn rebuild_context_index(database: &mut Database) -> Result<ContextIndexRebu
         r#"
         DELETE FROM camp_message_reference;
         DELETE FROM camp_message_mention;
-        INSERT INTO camp_message_fts(camp_message_fts) VALUES('rebuild');
-        INSERT INTO camp_message_fts(camp_message_fts, rowid, body)
-        SELECT 'delete', rowid, body
-        FROM camp_message
-        WHERE tombstoned_at IS NOT NULL;
         "#,
     )?;
     let messages = {
@@ -185,10 +180,11 @@ mod slow_tests {
     }
 
     #[test]
-    fn rebuilt_index_matches_incremental_references_mentions_and_live_fts() {
+    fn rebuilt_index_matches_incremental_references_and_mentions() {
         let directory =
             std::env::temp_dir().join(format!("rovai-context-index-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
+        crate::task_capability::set(database.connection(), true).unwrap();
         let collaboration = CollaborationService::default();
         let created = collaboration
             .create_camp(
@@ -366,33 +362,6 @@ mod slow_tests {
                 ("task".to_string(), task_id.to_string()),
             ]
         );
-        let active_fts: i64 = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM camp_message_fts
-                JOIN camp_message
-                  ON camp_message.rowid = camp_message_fts.rowid
-                WHERE camp_message_fts MATCH '"ADR-49"'
-                  AND camp_message.tombstoned_at IS NULL
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(active_fts, 1);
-        let tombstoned_fts: i64 = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM camp_message_fts
-                WHERE camp_message_fts MATCH '"secret-index-token"'
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(tombstoned_fts, 0);
         assert_eq!(json!(rebuilt.index_version), json!(CONTEXT_INDEX_VERSION));
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

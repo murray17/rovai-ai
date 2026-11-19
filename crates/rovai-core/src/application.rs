@@ -2668,6 +2668,8 @@ struct Core {
     execution_wake: crate::execution_wake::ExecutionWake,
     non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Arc<Mutex<Database>>,
+    // Queue full scans independently of ordinary reads and writes.
+    message_search_slot: Arc<Mutex<()>>,
     // Always acquire before database; pure-text publication bypasses this guard.
     pasted_text_operations: Mutex<()>,
     notification_interruption_reader: Mutex<NotificationInterruptionReader>,
@@ -7635,6 +7637,11 @@ impl Core {
             request.tool_name = rovai_core::thread_compat::canonical_operation(&request.tool_name).to_string();
             request.input = rovai_core::thread_compat::normalize_builtin_input(&request.tool_name, request.input)
                 .map_err(|_| invalid_input_error("Command input does not match the accepted arguments."))?;
+            let search_slot = if matches!(request.tool_name.as_str(), CAMP_SEARCH_TOOL_NAME | HISTORY_SEARCH_TOOL_NAME) {
+                Some(self.message_search_slot.clone().lock_owned().await)
+            } else {
+                None
+            };
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
             let authenticated_run = if request.tool_name == CAMP_MESSAGE_SEND_TOOL_NAME {
@@ -8405,15 +8412,21 @@ impl Core {
                         .map_err(|_| invalid_input_error("camp.list input is invalid"))?;
                     ThreadHistoryService.list_camps(&mut database, &authenticated_run, &input)
                 }
-                CAMP_SEARCH_TOOL_NAME => {
-                    let input = serde_json::from_value::<ThreadSearchInput>(request.input)
-                        .map_err(|_| invalid_input_error("camp.search input is invalid"))?;
-                    ThreadHistoryService.search_camp(&mut database, &authenticated_run, &input)
-                }
-                HISTORY_SEARCH_TOOL_NAME => {
-                    let input = serde_json::from_value::<HistorySearchInput>(request.input)
-                        .map_err(|_| invalid_input_error("history.search input is invalid"))?;
-                    ThreadHistoryService.search_history(&mut database, &authenticated_run, &input)
+                CAMP_SEARCH_TOOL_NAME | HISTORY_SEARCH_TOOL_NAME => {
+                    let snapshot = ThreadHistoryService::open_search_snapshot(&database)?;
+                    drop(database);
+                    tokio::task::spawn_blocking(move || {
+                        let _slot = search_slot;
+                        if request.tool_name == CAMP_SEARCH_TOOL_NAME {
+                            let input = serde_json::from_value::<ThreadSearchInput>(request.input)
+                                .map_err(|_| invalid_input_error("camp.search input is invalid"))?;
+                            ThreadHistoryService::search_camp_in_snapshot(&snapshot, &authenticated_run, &input)
+                        } else {
+                            let input = serde_json::from_value::<HistorySearchInput>(request.input)
+                                .map_err(|_| invalid_input_error("history.search input is invalid"))?;
+                            ThreadHistoryService::search_history_in_snapshot(&snapshot, &authenticated_run, &input)
+                        }
+                    }).await?
                 }
                 crate::thread_runs::THREAD_RUNS_TOOL_NAME => {
                     let input = serde_json::from_value::<crate::thread_runs::ThreadRunsInput>(request.input)?;
@@ -21861,6 +21874,7 @@ async fn run_core(
         notification_interruption_reader: Mutex::new(NotificationInterruptionReader::for_database(
             &database,
         )),
+        message_search_slot: Default::default(),
         database: Arc::new(Mutex::new(database)),
         pasted_text_operations: Mutex::new(()),
         subsystems: CoreSubsystems::new(),
@@ -30730,6 +30744,7 @@ mod tests {
             notification_interruption_reader: Mutex::new(
                 NotificationInterruptionReader::for_database(&database),
             ),
+            message_search_slot: Default::default(),
             database: Arc::new(Mutex::new(database)),
             pasted_text_operations: Mutex::new(()),
             automation_scheduler_control: RwLock::new(None),

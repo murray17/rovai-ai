@@ -57,6 +57,9 @@ Object.defineProperty(document, 'hasFocus', { value: () => true })
 Object.defineProperty(document, 'visibilityState', { value: 'visible' })
 const notificationJournal: NotificationEpisodeChange[] = []
 let notificationSequence = 0
+let nextArchiveFailure: 'transport' | 'rejected' | undefined
+let threadOpenGate: Promise<void> | undefined
+let releaseThreadOpen: (() => void) | undefined
 const snapshots=new Map(),drafts=new Map()
 function snapshot(m:MissionRecord):ThreadOpenProjection {
  if(snapshots.has(m.threadId)) return snapshots.get(m.threadId)
@@ -177,6 +180,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  if(method==='navigation.findCamp')return items.find(m=>m.threadId===p.threadId)?{...snapshot(items.find(m=>m.threadId===p.threadId)!).thread}:null
  if(method==='threads.exists')return !!m
  if(method==='threads.open'||method==='threads.enter'){
+  if (threadOpenGate) await threadOpenGate
   if(typeof p.traceId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(p.traceId))throw new Error('missing field `traceId`')
   return structuredClone(snapshots.get(c.threadId) ?? snapshot(m!))
  }
@@ -246,6 +250,12 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  if(method==='threads.changeDefaultLead'){m!.defaultLeadAgentId=c.successorAgentId;snapshot(m!).thread.defaultLeadAgentId=c.successorAgentId;changed();return applied()}
  if(method==='threads.archive'||method==='threads.unarchive'){
   calls.at(-1).savedDraft = loadLocalThreadComposerDraft(m!.threadId)?.body
+  if (nextArchiveFailure) {
+   const failure = nextArchiveFailure
+   nextArchiveFailure = undefined
+   if (failure === 'transport') throw new Error('fixture connection lost')
+   return {status: 'rejected', code: 'camp.deletion_in_progress', payload: {}}
+  }
   setArchive(m!,method==='threads.archive')
   return applied({threadId:m!.threadId,archivedAt:m!.archivedAt,changed:true})
  }
@@ -260,6 +270,9 @@ let traverse: ((state: any) => Promise<unknown>) | undefined
 const navigationHistory={initial:{entries:[{kind:'missions' as const}],index:0},write:(state:any)=>state,go:async()=>false,listen:(fn: typeof traverse)=>{traverse=fn;return()=>{traverse=undefined}}}
 const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{calls.push({method:"fixture.file.open",p:req});return model.fileApi.open({...req,...(req.threadId?{threadId:initial.thread.id}:{})} as any)}},preferences,navigationHistory,selectWorkspaceDirectory:async()=>({name:'rovai-ai',projectPath:'/workspace/rovai-ai'})}
 ;(window as any).missionQA={items,calls,errors:[],runMentions:runMissionMentionAcceptance,failNextMissionSave:()=>{failNextMissionSave=true},run:runMissionAcceptance,runCheckoutView:runMissionCheckoutViewAcceptance,runDeleteTrace:runMissionDeleteTraceAcceptance,runLargeDiff:runMissionLargeDiffAcceptance,admitMissionNotification,
+ failNextArchive: (failure: 'transport' | 'rejected') => {nextArchiveFailure = failure},
+ holdThreadOpen: () => {threadOpenGate = new Promise<void>(resolve => {releaseThreadOpen = resolve})},
+ releaseThreadOpen: () => {releaseThreadOpen?.(); threadOpenGate = undefined},
  missionTeams, prefs, profiles, storedDraft: loadLocalThreadComposerDraft, setArchive,
  openStoredLink: (threadId: string) => traverse?.({ entries: [{ kind: 'camp', threadId }], index: 0 }),
  archivedChatLink: () => {

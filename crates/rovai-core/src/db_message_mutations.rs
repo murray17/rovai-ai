@@ -86,7 +86,9 @@ pub(super) fn migrate(db: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 177
+                DatabaseContractClassification::Current(ref m)
+                    | DatabaseContractClassification::SupportedMigrationSource(ref m)
+                    if m.projection_schema_version == 177
             ),
             "Message editing schema admission failed"
         );
@@ -140,7 +142,6 @@ pub(super) fn downgrade_for_test(c: &Connection) {
         .unwrap();
     let tx = c.unchecked_transaction().unwrap();
     tx.execute_batch("DROP INDEX IF EXISTS camp_message_delivery_message_idx;
-        DELETE FROM schema_migration WHERE version=228;
         DROP TABLE camp_run_continuation_input;
         DROP INDEX continuation_waiting_authorization; DROP INDEX ordinary_waiting_message_target;
         ALTER TABLE camp_message DROP COLUMN ever_bound_as_steer; ALTER TABLE camp_message DROP COLUMN content_revision;
@@ -155,7 +156,7 @@ pub(super) fn downgrade_for_test(c: &Connection) {
             .unwrap();
     }
     rebuild_delivery(&tx, false).unwrap();
-    tx.execute_batch("DELETE FROM schema_migration WHERE version=227; UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;").unwrap();
+    tx.execute_batch("DELETE FROM schema_migration WHERE version IN (227,228,229); UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;").unwrap();
     tx.commit().unwrap();
     c.execute_batch("PRAGMA legacy_alter_table=OFF; PRAGMA foreign_keys=ON;")
         .unwrap();

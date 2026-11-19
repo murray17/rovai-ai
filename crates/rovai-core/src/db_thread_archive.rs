@@ -16,13 +16,13 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(classify_database_contract(&tx)?,
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
-            if marker.projection_schema_version == 178),
-        "Thread archive requires schema 178"
+            if marker.projection_schema_version == 179),
+        "Thread archive requires schema 179"
     );
     tx.execute_batch(include_str!("db_thread_archive.sql"))?;
     tx.execute_batch(
-        "INSERT INTO schema_migration VALUES(229,datetime('now'));
-         UPDATE rovai_data_contract SET projection_schema_version=179, updated_at=datetime('now')
+        "INSERT INTO schema_migration VALUES(230,datetime('now'));
+         UPDATE rovai_data_contract SET projection_schema_version=180, updated_at=datetime('now')
          WHERE singleton=1;",
     )?;
     anyhow::ensure!(
@@ -40,7 +40,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 pub(super) fn downgrade_for_test(connection: &Connection) {
     if !connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=229)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=230)",
             [],
             |row| row.get::<_, bool>(0),
         )
@@ -52,9 +52,9 @@ pub(super) fn downgrade_for_test(connection: &Connection) {
         .execute_batch(
             "DROP INDEX camp_archive_list_idx;
          ALTER TABLE camp DROP COLUMN archived_at;
-         DELETE FROM schema_migration WHERE version=229;
-         UPDATE rovai_data_contract SET projection_schema_version=178
-         WHERE singleton=1 AND projection_schema_version=179;",
+         DELETE FROM schema_migration WHERE version=230;
+         UPDATE rovai_data_contract SET projection_schema_version=179
+         WHERE singleton=1 AND projection_schema_version=180;",
         )
         .unwrap();
 }
