@@ -40,13 +40,14 @@ Agent 工具目录和两个命令的帮助使用同一份字段说明。既有�
 R3 先去掉查询两端空白。`" 调度 "` 命中“任务调度器”，全空白输入仍报错。许可范围内的扫描完成后，才按排序和预算返回成功。
 当前两个工具的成功结果顶层均为封闭对象，仅要求 `results` 数组和 `truncated` 布尔值；每项字段沿用 R2。
 零命中为 `{"results":[],"truncated":false}`。数量或响应预算裁剪时 `truncated=true`，扫描失败走工具错误。
+内置工具的 Agent Output 从 15 升至 16，配套的 Built-in Tool Transport 与 CLI Command 从 45 升至 46。
 端点、排序和字段见[公开历史合同](../../contracts/camp-history-v18.md)。
 
 ## 明确不变
 
-启动及每轮固定提示词新增 0 字。Bootstrap、Formatter、Manifest、投递及证据版本沿用原版本。
+启动及每轮固定提示词新增 0 字。Native Session Bootstrap、AgentRun Formatter、ContextManifest、上下文投递配置（Context Delivery Profile）及输入投递证据均沿用原版本。
 请求仍使用原工具名、字段及可选规则。省略 `threadId` 搜当前公屏，`history.search` 按冻结边界读取其他公屏。
-稳定消息 ID 与结果项字段沿用 R2。Agent Output 16 与 Transport/CLI 46 配套发布，IPC 3 与 Envelope 2 沿用。
+稳定消息 ID 与结果项字段沿用 R2。工具 IPC 协议和 Envelope 分别沿用 v3 和 v2。
 原有回执及冻结投递按原样读取，包括历史 `searchIncomplete:true`、空结果数组和两种发送者字段格式。现有库中保存的输出无须改写。
 导航里的用户级搜索属于后续阶段。
 
@@ -67,3 +68,4 @@ sequence 13 提交了 R3 的逐字段对照。User 在 sequence 14 回复“一�
 - R3 再次通过默认 workspace（484 项通过、1 项忽略），并通过搜索、迁移、当前会话续做、封闭输出 Schema、CLI 投影与执行证据专项。
   用候选 CLI 和隔离的 IPC 响应样本验证两个搜索命令均可交付新零命中、读取旧的零命中且扫描未完成回执，并拒绝类型非法的旧标志。
 - 正式数据库准入和升级入口已验证两条路径。真实 schema 176 的隔离副本通过两个协调步骤、原有 116 检查、主线 227、228 和搜索 229；主线 `9d1a9c6de` 实际初始化的 schema 178 库仅追加 229。两者均连续重开两次，消息正文与引用摘要一致，SQLite 完整性和外键检查通过。
+- 在另一份升级至 schema 179 的本机副本上，用候选 CLI 各执行一次零命中搜索。`history.search` 实际扫描 12,035 条，省略 `threadId` 的 `thread.search` 扫描 18 条，均返回 `{"results":[],"truncated":false}`。21 条已撤回消息和 1 条缺少跨会话公开发布事件的消息在这两次调用的可见范围以外。对库内全部 12,075 条消息另行执行同一严格解析、校验和可见正文渲染，失败 0 条。
