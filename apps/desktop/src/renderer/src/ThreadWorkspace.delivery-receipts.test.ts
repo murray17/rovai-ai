@@ -124,7 +124,7 @@ describe('user message receipts follow the current execution attempt', () => {
   })
 
   it.each([
-    ['queued', '启动中 1'], ['failed', '执行失败'], ['cancelled', '已停止'], ['succeeded', null]
+    ['queued', '处理中 1'], ['failed', '执行失败'], ['cancelled', '已停止'], ['succeeded', null]
   ] as const)('uses the successor %s state without reviving the original failure', (status, label) => {
     expect(receipts([source, { ...successor, status }], [...originalDeliveries, continuation]))
       .toEqual(label ? [label, label] : [])
@@ -169,11 +169,21 @@ describe('user message receipts follow the current execution attempt', () => {
     })).toEqual(['处理中 1 · 执行失败 1', '处理中 1 · 执行失败 1'])
   })
 
+  it('shows regrouped ordinary messages as pending while the stopped batch remains in history', () => {
+    const stopped: AgentRunView = { ...source, status: 'cancelled', cancelReasonCode: 'message_input_edited' }
+    const replacement = delivery({
+      id: 'replacement', recipientAgentId: stopped.agentId, messageId: inputMessageIds[1],
+      targetAgentRunId: null, status: 'waiting', endedAt: null, createdAt: '2026-09-12T02:31:00Z'
+    })
+    expect(receipts([stopped], [...originalDeliveries.map(item => ({ ...item, status: 'cancelled' as const })), replacement]))
+      .toEqual(['已停止', '待处理 1'])
+  })
+
   it('preserves accepted and unknown Steer receipts across subsequent continuation', () => {
     expect(receipts([source, successor], [
       delivery({ requestedMode: 'steer', inputDeliveryStatus: 'accepted' }),
       delivery({ id: 'unknown-steer', messageId: inputMessageIds[1], requestedMode: 'steer',
         inputDeliveryStatus: 'delivery_unknown' }), continuation
-    ])).toEqual(['已插话', '待核对 1'])
+    ])).toEqual(['已插话', '未确认送达'])
   })
 })

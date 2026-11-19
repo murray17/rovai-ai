@@ -356,6 +356,8 @@ const allowedMethods = new Set<CoreMethod>([
   'messageQuotes.capture',
   'thread.messages.send',
   'thread.messages.withdraw',
+  'thread.messages.edit',
+  'thread.messages.delete',
   'userAutomation.thread.send',
   'action.approvals.resolve',
   'nativeInteractions.respond',
@@ -1240,6 +1242,20 @@ ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unkn
             ? [{ id: source.id, sourcePath: source.sourcePath }]
             : []
         ))
+      }
+    }
+    if (method === 'thread.messages.edit' && params && typeof params === 'object') {
+      const input = (params as { command?: { threadId?: unknown; sourceAttachments?: LocalAttachmentSourceView[] } }).command
+      if (typeof input?.threadId === 'string' && Array.isArray(input.sourceAttachments) && input.sourceAttachments.length) {
+        const registered = await localComposerAttachments.restore(input.threadId, input.sourceAttachments)
+        const sources = input.sourceAttachments.map((source, index) => {
+          const sourcePath = registered[index]?.sourcePath
+          if (!sourcePath || sourcePath !== source.sourcePath) {
+            throw new Error('本地附件来源已不可用，请重新添加。')
+          }
+          return { id: source.id, sourcePath }
+        })
+        await localComposerAttachments.protectForSend(input.threadId, sources)
       }
     }
     const value = await core.request(method, params)

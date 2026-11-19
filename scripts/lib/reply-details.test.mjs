@@ -109,6 +109,21 @@ async function runReplyDetails(t, splittersOnly = false) {
       console.log(JSON.stringify({ result: 'passed', scenarios: results.map(r => r.name) }))
       return
     }
+    if (!process.env.ROVAI_REPLY_CASE || process.env.ROVAI_REPLY_CASE === 'read-only-update') {
+      await open({ loaded: true })
+      const row = '[data-reply-message-id=reply-a]'
+      assert.deepEqual(await b.evaluate(`[...document.querySelectorAll("${row} .reply-detail-actions button")].map(button => button.getAttribute("aria-label"))`),
+        ['复制', '回到原文'])
+      const latest = `document.querySelector("${row} .reply-detail-body")?.textContent.includes("新的回复正文")`
+      await b.evaluate('__presence.editReply("reply-a", "新的回复正文")')
+      await b.wait(latest)
+      assert.equal(await b.evaluate(`document.querySelector("${row} .public-message-edited")?.textContent`), '（已编辑）')
+      await click('.reply-detail-page')
+      await b.wait('!document.querySelector("[data-reply-message-id=reply-a]") && !!document.querySelector("[data-reply-message-id=long-60]")')
+      await click('.reply-detail-page')
+      await b.wait(latest)
+      results.push({ name: 'read-only-update' })
+    }
     for (const scenario of [
       { width: 1920, full: false }, { width: 1440, full: true }, { width: 1040, full: false }
     ].filter(() => !process.env.ROVAI_REPLY_CASE)) {

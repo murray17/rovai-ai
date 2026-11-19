@@ -655,7 +655,12 @@ try {
   // The history action is intentionally repeatable: each deliberate click is
   // a new authorization, even though the inline failure has been handled.
   await scenario('failed',2); await b.evaluate('__presence.controls.holdDispatch=true')
+  await b.evaluate('__presence.setRunCanContinue(false)')
+  await b.wait('!!document.querySelector(".run-presence-open") && !document.querySelector(".run-presence-resume")')
   await b.click('.run-presence-open'); await settle()
+  assert.equal(await b.evaluate('!!document.querySelector(".camp-detail-popover .execution-continue")'), false)
+  await b.evaluate('__presence.setRunCanContinue(true)')
+  await b.wait('!!document.querySelector(".run-presence-resume") && !!document.querySelector(".camp-detail-popover .execution-continue")')
   const historyAttempts = await b.evaluate('__presence.controls.continueAttempts.length')
   for (let i=0;i<2;i++) { await b.click('.camp-detail-popover button[title="继续执行"]'); await settle() }
   const authorized = await b.evaluate(`__presence.controls.continueAttempts.slice(${historyAttempts})`)

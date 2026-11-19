@@ -195,6 +195,8 @@ pub(super) fn reconcile(
             Ok(value)
         }
         "camp.messages.withdraw" => camp!(WithdrawThreadMessageCommand),
+        "camp.messages.edit" => camp!(EditThreadMessageCommand),
+        "camp.messages.delete" => camp!(DeleteThreadMessageCommand),
         "action.approvals.resolve" => {
             let params: ResolveActionApprovalParams = serde_json::from_value(query.params)?;
             receipt(database, params.envelope())
@@ -297,6 +299,8 @@ mod tests {
         for (current, stored) in [
             ("thread.messages.send", "camp.messages.send"),
             ("thread.messages.withdraw", "camp.messages.withdraw"),
+            ("thread.messages.edit", "camp.messages.edit"),
+            ("thread.messages.delete", "camp.messages.delete"),
             ("threads.create", "camps.create"),
             ("threads.fork", "camps.fork"),
             ("threads.rename", "camps.rename"),

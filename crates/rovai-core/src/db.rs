@@ -28,6 +28,8 @@ mod member_routing;
 mod memory_capability;
 #[path = "db_message_mentions.rs"]
 mod message_mentions;
+#[path = "db_message_mutations.rs"]
+mod message_mutations;
 #[path = "db_message_senders.rs"]
 mod message_senders;
 #[path = "db_minimax.rs"]
@@ -523,7 +525,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 176;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 177;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1025,6 +1027,7 @@ struct CurrentMigrationState {
     v224: bool,
     v225: bool,
     v226: bool,
+    v227: bool,
 }
 
 impl CurrentMigrationState {
@@ -1046,6 +1049,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v227 {
+            let mut previous = *self;
+            previous.v227 = false;
+            return schema == 177 && previous.admits(contract, 176, classifier);
+        }
         if self.v226 {
             let mut previous = *self;
             previous.v226 = false;
@@ -3892,6 +3900,7 @@ pub(crate) fn classify_database_contract(
                 | 174
                 | 175
                 | 176
+                | 177
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3901,6 +3910,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 177
+                || message_mutations::schema_matches(connection)?)
             && (marker.projection_schema_version < 176
                 || runcard_usage::schema_matches(connection)?)
             && (marker.projection_schema_version < 174
@@ -6303,7 +6314,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=225),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=226)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=226),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=227)
         "#,
         [],
         |row| {
@@ -6465,6 +6477,7 @@ fn load_current_migration_state(
                 v224: row.get(154)?,
                 v225: row.get(155)?,
                 v226: row.get(156)?,
+                v227: row.get(157)?,
             })
         },
     )
@@ -9780,6 +9793,9 @@ impl Database {
             if !self.schema_migration_applied(226)? {
                 migration_step!("migration_226", runcard_usage::migrate(self));
             }
+            if !self.schema_migration_applied(227)? {
+                migration_step!("migration_227", message_mutations::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10682,6 +10698,9 @@ impl Database {
         }
         if !self.schema_migration_applied(226)? {
             migration_step!("migration_226", runcard_usage::migrate(self));
+        }
+        if !self.schema_migration_applied(227)? {
+            migration_step!("migration_227", message_mutations::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -42486,6 +42505,7 @@ mod tests {
             v224: version >= 224,
             v225: version >= 225,
             v226: version >= 226,
+            v227: version >= 227,
         }
     }
 

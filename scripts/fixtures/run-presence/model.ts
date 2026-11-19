@@ -53,6 +53,7 @@ function delivery(id: string, messageId: string, agentId: string, targetAgentRun
 }
 function makeRun(id: string, agent = 0, status = 'running', inputs = ['request-main'], seconds = 48): any {
   return { ...structuredClone(runTemplate), id, agentId: aid(agent), status, inputMessageIds: inputs,
+    canContinue: (status === 'failed' || status === 'cancelled') && inputs.length > 0,
     anchorMessageId: inputs.at(-1), publicTailSequenceAtStart: 3, inputSummary: '按现在的界面做一版队员占位，保留群聊的消息顺序。',
     purpose: '核对队员占位方案', threadTurnId: null, invocationKind: 'batch',
     a2aRootAgentRunId: id, runtimeModel: { adapterKind: 'codex-cli', modelId: 'frozen-run-model', reasoningEffort: 'high' },
@@ -325,7 +326,7 @@ export const model = {
   showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false, messageCount = 120, largeBody = false) {
     this.setScenario('stream'); halt()
     const messages = [
-      makeMessage('reply-a', 1, '回复详情保持只读，沿用当前会话里的回复锚点。'),
+      { ...makeMessage('reply-a', 1, '回复详情沿用当前会话里的回复锚点。'), canEdit: true, canDelete: true, canWithdraw: true },
       makeMessage('reply-b', 2, '我先核对消息的来源，再把详情接到回复块上。', 0),
       makeMessage('reply-c', 3, '详情用头像、作者和正文排列，复制与回到原文悬浮出现。', 1),
       makeMessage('reply-d', 4, '执行中的消息也要能查看过程。'),
@@ -369,6 +370,15 @@ export const model = {
       makeMessage(`append-${sequence}`, sequence, `新消息 ${sequence}`, 0)] } })
   },
   emitCoreEvent(event: any) { coreEventListeners.forEach(listener => listener(event)) },
+  editReply(id: string, body: string) {
+    const messages = state.snapshot.messages.map((message: any) => message.id === id
+      ? { ...message, body, content: [{ kind: 'text', text: body }], contentRevision: (message.contentRevision ?? 1) + 1, version: message.version + 1 }
+      : message)
+    update({ snapshot: { ...state.snapshot, messages } })
+    model.emitCoreEvent({ method: 'thread.messages.changed', params: {
+      threadId: state.snapshot.thread.id, throughGlobalSequence: state.version, indexChanged: true
+    } })
+  },
   finishReplyRuns() {
     halt()
     update({ snapshot: { ...state.snapshot, agentRuns:state.snapshot.agentRuns.map((run:any)=>({ ...run,status:'succeeded',endedAt:new Date().toISOString() })) } })
@@ -413,7 +423,7 @@ export const model = {
         : kind === 'unknown' ? 'input_outcome_unknown' : kind === 'not-ready' ? 'execution_not_ready' : 'version_incompatible' }
     if (kind === 'not-ready') first.status = 'queued'
     if (kind === 'ended') { first.status = 'succeeded'; first.endedAt = at(60) }
-    const message = { ...makeMessage('steer-example', 4, '请采用这条更正。'), canWithdraw: true,
+    const message = { ...makeMessage('steer-example', 4, '请采用这条更正。'), canWithdraw: kind === 'queued',
       addressedAgentIds: multiple ? [aid(0), aid(1), aid(2)] : [aid(0)] }
     const receipt = { ...delivery('steer-example-delivery', message.id, aid(0), first.id, 'settled'),
       requestedMode: 'steer', inputDeliveryStatus: kind === 'unknown' ? 'delivery_unknown' : 'accepted' }
@@ -488,6 +498,15 @@ export const model = {
       ? { ...e, revision: e.revision + 1, changeSequence: state.version + 10, payload: { ...e.payload, status } }
       : e.id === 'before-2' ? { ...e, eventType: 'activity.completed', phase: 'completed', payload: { item: { ...e.payload.item, status: 'completed' } } } : e) } })
   },
+  deleteSteerTimelineSource() {
+    const id = 'steer-example'
+    controls.hiddenMessages = controls.hiddenMessages.filter(message => message.id !== id)
+    update({ snapshot: { ...state.snapshot, messages: state.snapshot.messages.filter((message: any) => message.id !== id) } })
+    // The old execution page remains in memory until the normal cursor refresh.
+    model.emitCoreEvent({ method: 'thread.messages.changed', params: {
+      threadId: state.snapshot.thread.id, throughGlobalSequence: state.version, indexChanged: true, unavailableMessageIds: [id]
+    } })
+  },
   finishSteerRuns() {
     update({ streamPaused: true, snapshot: { ...state.snapshot, agentRuns: state.snapshot.agentRuns.map((run: any) =>
       ({ ...run, status: 'succeeded', endedAt: at(90), canSteer: false, steerUnavailableReason: null })) } })
@@ -504,6 +523,11 @@ export const model = {
   setRunModel(runtimeModel: any) {
     update({ streamPaused: true, snapshot: { ...state.snapshot,
       agentRuns: state.snapshot.agentRuns.map((run: any) => run.id === 'run-alice' ? { ...run, runtimeModel } : run)
+    } })
+  },
+  setRunCanContinue(canContinue: boolean) {
+    update({ snapshot: { ...state.snapshot,
+      agentRuns: state.snapshot.agentRuns.map((run: any) => run.id === 'run-alice' ? { ...run, canContinue } : run)
     } })
   },
   setMemberAvailability(membershipStatus: string, profilePresence: string) {
@@ -553,13 +577,14 @@ export const model = {
   stop(id: string, cancelReasonCode = 'user_requested_agent_run_stop') {
     const source = state.snapshot.agentRuns.find((r: any) => r.id === id && ['running','waiting'].includes(r.status))
     if (!source) { update({ stopId: null }); return }
-    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode, cancelRequestedAt: new Date().toISOString() },
+    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', canContinue: source.inputMessageIds.length > 0,
+      endedAt: new Date().toISOString(), cancelReasonCode, cancelRequestedAt: new Date().toISOString() },
       publishedIds: state.snapshot.messages.filter((m: any) => m.sourceAgentRunId === id).map((m: any) => m.id) })
     refresh()
   },
   retry(id: string) {
     const source = state.snapshot.agentRuns.find((r: any) => r.id === id)
-    if (!source || !['failed','cancelled'].includes(source.status) || source.failure?.retryable === false) return null
+    if (!source?.canContinue) return null
     halt()
     const runId = `retry-run-${++serial}`, deliveryId = `retry-delivery-${serial}`
     extraDeliveries.push({ ...delivery(deliveryId, source.inputMessageIds[0], source.agentId, null),
@@ -570,7 +595,7 @@ export const model = {
     return deliveryId
   },
   failRun(id: string) {
-    extraRuns = extraRuns.map(r => r.id === id ? { ...r, status: 'failed', endedAt: new Date().toISOString(),
+    extraRuns = extraRuns.map(r => r.id === id ? { ...r, status: 'failed', canContinue: r.inputMessageIds.length > 0, endedAt: new Date().toISOString(),
       failure: { code: 'runtime_disconnected', message: 'Runtime 连接中断。', retryable: true } } : r)
     refresh()
   },

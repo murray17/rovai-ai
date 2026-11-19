@@ -161,6 +161,9 @@ export class MessageReeditStore {
     return this.entries().flatMap(({ record }) => record?.state === 'pending'
       && this.now() < record.pendingExpiresAt ? [record.request] : [])
   }
+  deleteMessage(threadId: string, messageId: string): void {
+    this.remove(this.key(threadId, messageId))
+  }
   deleteThread(threadId: string): void {
     for (const { key, record } of this.entries()) if (record?.request.command.threadId === threadId) this.remove(key)
     this.sweep()

@@ -54,7 +54,8 @@ pub(crate) fn hydrate(c: &Connection, item: &mut AgentRunExecutionEvidenceView) 
     };
     // Match all owners before revealing public content. A rejected input may have
     // returned to the ordinary queue, so the marker's original Run remains the fence.
-    let source = c.query_row(r#"SELECT m.id,m.structured_content_json,m.created_at,
+    let source = c.query_row(r#"SELECT m.id,
+        CASE WHEN m.tombstoned_at IS NULL THEN m.structured_content_json END,m.created_at,
         CASE WHEN i.status='accepted' THEN 'accepted'
           WHEN i.status='delivery_unknown' OR d.failure_code='input_delivery_unknown' THEN 'delivery_unknown'
           WHEN d.requested_mode<>'steer' OR d.claimed_agent_run_id IS NOT r.id OR d.target_execution_epoch IS NOT ?3 THEN 'queued'
@@ -64,14 +65,15 @@ pub(crate) fn hydrate(c: &Connection, item: &mut AgentRunExecutionEvidenceView) 
         JOIN agent_run r ON r.id=?2 AND r.camp_id=m.camp_id
         LEFT JOIN context_manifest cm ON cm.source_delivery_id=d.id AND cm.agent_run_id=r.id
         LEFT JOIN runtime_input_delivery i ON i.context_manifest_id=cm.id AND i.execution_epoch=?3 AND i.input_kind='steer'
-        WHERE d.id=?1 AND m.id=?4 AND m.author_type='user' AND m.tombstoned_at IS NULL AND m.recall_state<>'withdrawn'"#,
+        WHERE d.id=?1 AND m.id=?4 AND m.author_type='user' AND m.recall_state<>'withdrawn'"#,
         params![delivery,item.agent_run_id,item.execution_epoch,item.payload["messageId"].as_str()],
-        |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?))).optional()?;
-    let Some((message, content, created, status)) = source else {
-        item.payload = json!({"deliveryId":delivery,"messageId":item.payload["messageId"],"status":"unavailable","preview":"","sourceAvailable":false});
+        |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?))).optional()?;
+    let Some((message, Some(content), created, status)) = &source else {
+        item.payload = json!({"deliveryId":delivery,"messageId":item.payload["messageId"],"status":"unavailable",
+            "preview":"","sourceAvailable":false,"sourceDeleted":source.is_some()});
         return Ok(());
     };
-    let content = camp_content::normalize_content(serde_json::from_str(&content)?);
+    let content = camp_content::normalize_content(serde_json::from_str(content)?);
     camp_content::validate_content(&content)?;
     let body = camp_content::render_current_plain_text(c, &content)?;
     let preview: String = body.chars().take(240).collect();
