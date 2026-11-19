@@ -9,6 +9,16 @@ last_updated: 2026-11-16
 [`package.json#scripts`](../../package.json)是 JavaScript 命令名和组合的真源。Rust 测试
 目标由 Cargo workspace 和测试代码决定。
 
+## 普通重投与领取顺序
+
+`user_continuation_reuses_waiting_inputs_and_claims_in_message_order` 使用真实命令、迁移与调度验证
+同队员等待项复用、部分重排、领取后再点、冻结历史，以及 231 转换和事务回滚。
+`message_mutations_regroup_ordinary_retries_and_preserve_frozen_inputs` 验证改投、删除、历史附件、
+重排和预算截断。两个场景分别替换原续做独立授权断言与按来源换会话的断言。
+`continuation_checks_original_member_and_uses_ordinary_session` 继续覆盖成员和任务准入。
+运行 `cargo test -p rovai-core --lib --features extended-tests continuation` 以及
+`cargo test -p rovai-core --lib --features extended-tests message_mutations_regroup`。
+
 ## 用户 Steer 的 Runtime 验收
 
 普通队列与运行中插话共用 `scripts/smoke-steer.mjs`。真实模型调用先满足
@@ -912,7 +922,7 @@ Preview/137 缺索引，main/136 有索引但缺 Cline/Command catalog；后者�
 190/schema 140 收敛队列与 ACP catalog。扩展既有
 `db::run_continuation::tests::continuation_migration_rolls_back_and_preserves_frozen_evidence`：
 覆盖主干已具备内部请求但缺 catalog、Preview 139 仍使用消息来源、部分结构拒绝、失败回滚、旧 188
-收据与冻结证据保留及重开。既有 `delivery_queue::tests::user_continuation_preserves_source_and_claims_independent_fifo_batches`
+收据与冻结证据保留及重开。既有 `delivery_queue::tests::user_continuation_reuses_waiting_inputs_and_claims_in_message_order`
 拥有带历史消息/排队数据的转换。该主干来源 fixture 先移除后加的 191/192 层，避免残留新收据伪装旧来源；
 原有失败回滚与冻结证据断言保持。没有新增或退役 Rust owner；最小命令为
 `cargo test -p rovai-core --features extended-tests --lib continuation_`，并复验 Mention 与 catalog migration owner。
@@ -936,7 +946,7 @@ Claude 既有公开文本测试保留 thinking/text/tool 交错与批量终态�
 复用 `managed_process::tests::cancellation_reaps_captured_detached_children_after_parent_exit`，将既有 Linux
 owner 扩展到 macOS，证明捕获后脱离进程组的子进程被回收、无关进程仍存活。Claude 既有初始化失败和
 stdin 中断 owner 增加缺失会话、投递门禁取消；ACP 模型目录 owner 增加恢复成功后的配置 RPC 拒绝。
-`delivery_queue::tests::continuation_rechecks_scope_and_selects_safe_session_at_claim` 增加可信失败终态和
+`delivery_queue::tests::continuation_checks_original_member_and_uses_ordinary_session` 增加可信失败终态和
 binding/epoch/native turn 不匹配矩阵；既有 unknown、取消、Task 关联和整批范围断言保留。
 
 新增 `runtime::tests::failed_session_replacement_retains_reference_without_reviving_old_binding` 拥有替代启动
@@ -2114,7 +2124,7 @@ PR 默认层仍为 `cargo test --workspace`；Renderer 复用 `SingleChatPanel.t
 复用既有 Rust owner，不新增独立 Rust fixture：`lightweight_task_updates_submitted_fields_and_is_terminal`
 扩展默认关闭、旧记录禁读写、精确回执重放、重开、升级数据/冻结证据保留与迁移故障回滚；
 `self_active_tasks_are_compact_bounded_and_frozen_in_input` 与空快照 owner 分别覆盖冻结选择不变、关闭时整节缺席。
-`continuation_rechecks_scope_and_selects_safe_session_at_claim` 保留目标和 Session 栅栏，但 Task 变更不再使等待/续做失败。
+`continuation_checks_original_member_and_uses_ordinary_session` 保留目标和 Session 栅栏，但 Task 变更不再使等待/续做失败。
 原 Task 推导接收者 owner 改名为 `legacy_task_link_is_ignored_without_changing_explicit_recipients`：
 新 Send 的关联和接收者推导已由 Send v28 退役，显式接收者、消息授权与 raw input 幂等身份仍保留。
 原始 requestId/digest 冲突由既有 `lease_rotates_fences_and_replays_exact_request` owner 验证；
@@ -2129,13 +2139,13 @@ Task 升级 owner 同时验证 Migration 206 列与收据的原子回滚；没�
 历史夹具的降级只用于测试，生产迁移不修改旧输入字节。
 Pending invitation owner 将旧 `execution.taskId` 从拒绝分支移到成功发送分支，验证未知旧 Task
 不会阻断首次发布/邀请，且不建立关联；无效回复、权限拒绝和事务回滚断言保留。
-`user_continuation_preserves_source_and_claims_independent_fifo_batches` 在原输入冻结后显式开启 Task，
-继续验证新 claim 选择当前任务、原输入不变、独立 FIFO 与完整历史读取。
+`user_continuation_reuses_waiting_inputs_and_claims_in_message_order` 验证原输入冻结与历史读取，
+以及新 Run 按普通消息顺序领取。任务关联与成员资格由 `continuation_checks_original_member_and_uses_ordinary_session` 覆盖。
 CLI 解析与教学 owner 保留文件输入矩阵并覆盖旧 taskId 兼容；`pnpm test:send-input-file` 的唯一进程 owner
 增加缺失/损坏/旧版/未来版/无 lease 投影、关闭错误和帮助零 IPC。普通 Rust/Renderer 通过不能替代该进程检查。
 
 最小定向命令为 `cargo test -p rovai-core --lib --features slow-tests,extended-tests task`、
-`cargo test -p rovai-core --lib --features slow-tests,extended-tests continuation_rechecks_scope_and_selects_safe_session_at_claim`、
+`cargo test -p rovai-core --lib --features slow-tests,extended-tests continuation_checks_original_member_and_uses_ordinary_session`、
 `cargo test -p rovai-core --bin rovai` 和 `pnpm test:send-input-file`。
 
 ### 当前 Skills 设置的验收归属

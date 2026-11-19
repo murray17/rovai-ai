@@ -4101,17 +4101,11 @@ describe('task event projections', () => {
       agentId: 'agent_2',
       messageIds: ['message-waiting-1', 'message-waiting-2']
     }])
-    expect(executionDeliveryQueueBatches([{
-      ...waitingDelivery, continuationRequest: true,
-      inputMessageIds: ['original-a', 'original-b']
-    }])).toMatchObject([{ messageIds: ['original-a', 'original-b'] }])
-    expect(executionDeliveryQueueBatches([waitingDelivery, { ...secondWaitingDelivery, continuationRequest: true },
-      { ...secondWaitingDelivery, id: 'after', createdAt: '2026-07-28T06:04:00Z' }])).toHaveLength(3)
     expect(executionDeliveryQueueBatches([
-      { ...waitingDelivery, id: 'a-normal' },
-      { ...waitingDelivery, id: 'z-continuation', continuationRequest: true },
-      { ...waitingDelivery, id: 'b-normal' }
-    ])).toHaveLength(3)
+      { ...waitingDelivery, messageSequence: 3 },
+      { ...secondWaitingDelivery, messageSequence: 1 },
+      { ...secondWaitingDelivery, id: 'middle', messageId: 'middle', messageSequence: 2 }
+    ])).toMatchObject([{ messageIds: ['message-waiting-2', 'middle', 'message-waiting-1'] }])
     expect(executionDeliveryQueueBatches([{
       ...waitingDelivery,
       dispatchDisposition: 'gather_captured'
@@ -5302,10 +5296,8 @@ describe('task event projections', () => {
     const continuedMarkup = renderWorkspace({
       ...snapshot,
       messageDeliveries: [...snapshot.messageDeliveries,
-        { ...failedDelivery, id: 'continued-waiting', status: 'waiting', continuationRequest: true,
-          inputMessageIds: [publicMessage.id] },
-        { ...failedDelivery, id: 'continued-terminal', continuationRequest: true,
-          inputMessageIds: [publicMessage.id] }
+        { ...failedDelivery, id: 'another-waiting', status: 'waiting', messageId: 'another-input' },
+        { ...failedDelivery, id: 'another-terminal', messageId: 'another-input' }
       ]
     })
     expect(continuedMarkup.match(/<footer class="message-delivery-footer"[\s\S]*?<\/footer>/)?.[0])

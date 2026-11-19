@@ -179,6 +179,11 @@ try {
       database = new DatabaseSync(join(data, 'rovai.sqlite'), { readOnly: true })
       assert.equal(database.prepare('SELECT cancel_acknowledged_at FROM agent_run WHERE id=?').get(first.id).cancel_acknowledged_at, null)
     }
+    // Stop writes its terminal Git observation asynchronously after cleanup.
+    if (!unexpectedExit && !stopDuringLaunch && !archive && !historicalStartup) {
+      await until(() => database.prepare('SELECT ending_git_observation_json FROM agent_run WHERE id=?')
+        .get(first.id).ending_git_observation_json, 'source terminal Git observation')
+    }
     const oldState = database.prepare('SELECT * FROM agent_run WHERE id=?').get(first.id)
     assert.equal(oldState.status, unexpectedExit ? 'failed' : 'cancelled')
     const oldDelivery = database.prepare('SELECT * FROM runtime_input_delivery WHERE agent_run_id=?').get(first.id)

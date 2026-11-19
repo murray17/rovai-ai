@@ -27,7 +27,7 @@ test('production continuation action preserves source, reconciles lost receipts 
     await browser.wait('document.querySelector(".execution-continue") !== null')
     const button = 'document.querySelector(".execution-continue")'
     const model = 'window.continuationFixture'
-    const original = await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns)`)
+    const original = await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns.map(({hasAcceptedContinuation, ...run})=>run))`)
     const draft = await browser.evaluate('document.querySelector("[contenteditable=true]").textContent')
     assert.deepEqual(await browser.evaluate(`(() => { const b=${button}, r=b.getBoundingClientRect(); return [r.width,r.height,b.textContent,b.getAttribute('aria-label')] })()`), [24, 24, '', '继续执行'])
     if (process.env.ROVAI_CONTINUATION_UI_OUTPUT) {
@@ -45,7 +45,7 @@ test('production continuation action preserves source, reconciles lost receipts 
     assert.equal(await browser.evaluate(`${model}.continuation.attempts.length`), 1)
     await browser.click(button)
     await browser.wait(`${model}.continuation.receipts.size === 2`)
-    assert.equal(await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns)`), original)
+    assert.equal(await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns.map(({hasAcceptedContinuation, ...run})=>run))`), original)
     assert.equal(await browser.evaluate('document.querySelector("[contenteditable=true]").textContent'), draft)
 
     await browser.evaluate(`${model}.continuation.mode='response-lost'`)
@@ -63,7 +63,11 @@ test('production continuation action preserves source, reconciles lost receipts 
     assert.equal(await browser.evaluate(`${model}.continuation.receipts.size`), 4)
     assert.equal(await browser.evaluate(`${model}.continuation.attempts.length`), 5)
     assert.equal(await browser.evaluate(`'useNewSession' in ${model}.continuation.attempts.at(-1).command`), false)
-    assert.equal(await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns)`), original)
+    assert.equal(await browser.evaluate(`JSON.stringify(${model}.get().snapshot.agentRuns.map(({hasAcceptedContinuation, ...run})=>run))`), original)
+    const snapshot = await browser.evaluate(`${model}.get().snapshot`)
+    assert.equal(snapshot.messageDeliveries.filter(item => item.status==='waiting').length,1)
+    assert.equal(snapshot.messages.some(message => message.authorId === 'run-continuation'),false)
+    assert.equal(snapshot.agentRuns[0].hasAcceptedContinuation,true)
     assert.deepEqual(browser.errors, [])
   } catch (error) {
     if (browser) console.error(await browser.evaluate(`({attempts:window.continuationFixture?.continuation.attempts, errors:document.body.innerText.slice(-600)})`), browser.errors)

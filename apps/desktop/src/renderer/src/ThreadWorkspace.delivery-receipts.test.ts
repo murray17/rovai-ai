@@ -56,10 +56,14 @@ function delivery(overrides: Partial<PublicDelivery> = {}): PublicDelivery {
 
 const originalDeliveries = inputMessageIds.map((messageId, index) => delivery({ id: `original-${index}`, messageId }))
 const continuation = delivery({
-  id: 'continuation', continuationRequest: true, inputMessageIds,
+  id: 'retry',
   status: 'claimed', targetAgentRunId: successor.id, dispatchPhase: 'materialized',
   createdAt: '2026-09-12T02:31:00Z', endedAt: null
 })
+
+function redeliveries(template: PublicDelivery) {
+  return inputMessageIds.map((messageId, index) => ({ ...template, id: template.id + index, messageId }))
+}
 
 const initial: ThreadSnapshot = {
   schemaVersion: 36, tasksEnabled: true, throughGlobalSequence: 1,
@@ -100,13 +104,13 @@ describe('user message receipts follow the current execution attempt', () => {
   })
 
   it('replaces the original failed receipt for every continued batch input', () => {
-    expect(receipts([source, successor], [...originalDeliveries, continuation]))
+    expect(receipts([source, successor], [...originalDeliveries, ...redeliveries(continuation)]))
       .toEqual(['处理中 1', '处理中 1'])
   })
 
   it('shows accepted continuation requests as pending before a Run exists', () => {
     expect(receipts([source], [...originalDeliveries,
-      { ...continuation, status: 'waiting', targetAgentRunId: null }]))
+      ...redeliveries({ ...continuation, status: 'waiting', targetAgentRunId: null })]))
       .toEqual(['待处理 1', '待处理 1'])
   })
 
@@ -118,15 +122,15 @@ describe('user message receipts follow the current execution attempt', () => {
     const runs = status === 'waiting' ? [stopped] : [stopped, { ...successor, status }]
     expect(receipts(runs, [
       ...originalDeliveries.map(item => ({ ...item, status: 'cancelled' })),
-      { ...continuation, status: status === 'waiting' ? 'waiting' : 'claimed',
-        targetAgentRunId: status === 'waiting' ? null : successor.id }
+      ...redeliveries({ ...continuation, status: status === 'waiting' ? 'waiting' : 'claimed',
+        targetAgentRunId: status === 'waiting' ? null : successor.id })
     ])).toEqual(labels)
   })
 
   it.each([
     ['queued', '处理中 1'], ['failed', '执行失败'], ['cancelled', '已停止'], ['succeeded', null]
   ] as const)('uses the successor %s state without reviving the original failure', (status, label) => {
-    expect(receipts([source, { ...successor, status }], [...originalDeliveries, continuation]))
+    expect(receipts([source, { ...successor, status }], [...originalDeliveries, ...redeliveries(continuation)]))
       .toEqual(label ? [label, label] : [])
   })
 
@@ -147,14 +151,14 @@ describe('user message receipts follow the current execution attempt', () => {
   it('keeps later queued requests ahead of earlier Run outcomes', () => {
     const later = { ...continuation, id: 'next-continuation', status: 'waiting',
       targetAgentRunId: null, createdAt: '2026-09-12T02:33:00Z' }
-    expect(receipts([successor, source], [later, ...originalDeliveries, continuation]))
+    expect(receipts([successor, source], [...redeliveries(later), ...originalDeliveries, ...redeliveries(continuation)]))
       .toEqual(['待处理 1', '待处理 1'])
   })
 
   it('orders queued requests by acceptance even when an older request is claimed later', () => {
     const later = { ...continuation, id: 'next-continuation', status: 'waiting',
       targetAgentRunId: null, createdAt: '2026-09-12T02:31:30Z' }
-    expect(receipts([source, successor], [...originalDeliveries, continuation, later]))
+    expect(receipts([source, successor], [...originalDeliveries, ...redeliveries(continuation), ...redeliveries(later)]))
       .toEqual(['待处理 1', '待处理 1'])
   })
 
@@ -162,7 +166,7 @@ describe('user message receipts follow the current execution attempt', () => {
     const other = { ...source, id: 'other-agent-run', agentId: agents[1].agentId }
     const unrelated = { ...successor, id: 'unrelated-run', inputMessageIds: ['another-message'],
       createdAt: '2026-09-12T02:34:00Z' }
-    expect(receipts([source, successor, other, unrelated], [...originalDeliveries, continuation,
+    expect(receipts([source, successor, other, unrelated], [...originalDeliveries, ...redeliveries(continuation),
       ...inputMessageIds.map(messageId => delivery({ id: `other-${messageId}`, messageId,
         recipientAgentId: other.agentId, targetAgentRunId: other.id }))], {
       messages: messages.map(message => ({ ...message, addressedAgentIds: [source.agentId, other.agentId] }))
@@ -183,7 +187,7 @@ describe('user message receipts follow the current execution attempt', () => {
     expect(receipts([source, successor], [
       delivery({ requestedMode: 'steer', inputDeliveryStatus: 'accepted' }),
       delivery({ id: 'unknown-steer', messageId: inputMessageIds[1], requestedMode: 'steer',
-        inputDeliveryStatus: 'delivery_unknown' }), continuation
+        inputDeliveryStatus: 'delivery_unknown' })
     ])).toEqual(['已插话', '未确认送达'])
   })
 })

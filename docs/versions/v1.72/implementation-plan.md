@@ -8,6 +8,17 @@ last_updated: 2026-11-19
 
 # v1.72 实施与验收
 
+## 继续执行并入普通队列（2026-11-19）
+
+来源输入按普通消息重新投递。迁移 231 / schema 181 转换旧等待清单并退役续做专用结构。
+同队员按消息顺序领取预算允许的前缀，队首和锚点沿用实际选入输入。
+定向回归覆盖重复点击、部分领取后重投、改投与删除、旧等待清单转换和事务回滚。A′、B、D 可合入同一批，
+预算只容纳 A′、B 时锚点取 B，D 留在普通队列。浏览器已验证执行卡与消息回执，隔离 Core 通过停止后重投的完整流程。
+默认 Rust workspace 486 项通过、1 项忽略。Vitest 3352 项通过、2 项跳过。
+Core 扩展套件首轮 1027 项通过、14 项失败、8 项忽略。修正夹具后，6 项在最终源码上定向通过，
+其余 8 项在干净的基线 `1a9fdda25` 上复现相同断言失败。12 个真实模型对照用例待确定 Judge 与运行预算。
+[继续执行合同](../../contracts/agent-run-continuation-v5.md) · [模型输入前后对照](model-context-change-ordinary-redelivery.md)
+
 ## 会话与使命归档（2026-11-19）
 
 迁移 230 在主线 schema 179 上添加归档字段和部分索引，升级至 schema 180。Core 用 Thread ID 游标分批返回摘要，界面取齐后按项目分组。见 [Thread Archive v1](../../contracts/thread-archive-v1.md)。
@@ -19,13 +30,7 @@ last_updated: 2026-11-19
 本轮在 `rovai/thread-message-mutations` 从 `0461437fdf80a8cd01e5b888ec7c67006dae85d` 实施。
 规则归[消息投递](../../contracts/message-delivery-v19.md#公共消息改删)和[会话界面](../../ui/components/conversation-workspace.md)。
 Migration 227 将投影 schema 从 176 升至 177，等待中的 Continue 初始化独立输入清单，旧消息修订号从 1 开始。
-跨目标编辑保持原队员的主动继续次数，新队员收到一次普通投递。「已编辑」由内容修订号派生。
-
-Rust 验收由 `message_mutations_keep_independent_authorizations_and_frozen_inputs` 拥有。
-该场景同时覆盖已启动和仍在等待的两次主动继续，读取源 Run 或按消息全局去重会分别导致执行旧输入或吞掉一次重试。
-既有继续执行测试验证单次授权和 FIFO，新增场景还需验证消息编辑、取消和等待输入写入在同一个 SQLite 事务里回滚，
-所以使用领域命令、生产调度和读取模型夹具。最小命令为
-`cargo test -p rovai-core --features extended-tests --lib message_mutations_keep_independent_authorizations_and_frozen_inputs`。
+消息改删与续做重投目前共用普通等待项，验收由 `message_mutations_regroup_ordinary_retries_and_preserve_frozen_inputs` 覆盖。原执行保留冻结输入。「已编辑」由内容修订号派生。
 
 隔离 Host 和 390px Chrome 验证了长正文编辑框滚动、只添加两个附件时正文不变、保存后显示「（已编辑）」、
 删除后旧正文从时间线和执行来源消失，以及从子消息继续打开回复详情。此验收使用未配置 Runtime 的队员。

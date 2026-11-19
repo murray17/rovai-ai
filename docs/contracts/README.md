@@ -36,7 +36,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp Message Send v31](camp-message-send-v31.md)
 - [Project File Reference v2](project-file-reference-v2.md)
 - [Thread Reference v3](thread-reference-v3.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
-- [AgentRun Continuation v4](agent-run-continuation-v4.md)
+- [AgentRun Continuation v5](agent-run-continuation-v5.md)
+- [AgentRun Continuation v4（历史）](agent-run-continuation-v4.md)
 - [Camp Open Projection v33](camp-open-projection-v33.md)
 - [Notification Episode v12](notification-episode-v12.md)
 - [Desktop Shortcuts v2](desktop-shortcuts-v2.md)

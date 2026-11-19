@@ -94,9 +94,9 @@ let state: any = { scenario: scenarios[initialScenario] ? initialScenario : 'str
 const update = (patch: any) => { state = { ...state, ...patch, version: state.version + 1 }; listeners.forEach(fn => fn()) }
 let extraMessages: any[] = [], extraRuns: any[] = [], extraDeliveries: any[] = []
 const stopped = new Map<string, any>()
-const retries = new Map<string, { status: 'pending' | 'started'; runId: string; deliveryId: string }>()
+const retries = new Map<string, { status: 'pending' | 'started'; runId: string; deliveryIds: string[] }>()
 // Only this browser fixture persists its simulated server records. Production
-// derives hasAcceptedContinuation from Core's immutable continuation Delivery.
+// derives hasAcceptedContinuation from the source member's waiting messages.
 const persistenceKey = 'run-presence-acceptance-server'
 let stopTrigger: HTMLElement | null = null
 let playTimer: ReturnType<typeof setTimeout> | null = null
@@ -172,7 +172,8 @@ function snapshot() {
   value.messageDeliveries.push(...extraDeliveries)
   value.agentRuns = value.agentRuns.map((r: any) => stopped.has(r.id) ? { ...r, ...stopped.get(r.id).run } : r)
   value.agentRuns = value.agentRuns.map((r: any) => ({ ...r, hasAcceptedContinuation: !controls.holdContinuationProjection
-    && extraDeliveries.some(d => d.continuationRequest && d.sourceAgentRunId === r.id) }))
+    && ['failed','cancelled'].includes(r.status) && r.inputMessageIds.length > 0 && r.inputMessageIds.every((id:string) =>
+      extraDeliveries.some(d => d.messageId === id && d.recipientAgentId === r.agentId && d.status === 'waiting')) }))
   value.messages = value.messages.filter((m: any) => !stopped.has(m.sourceAgentRunId) || stopped.get(m.sourceAgentRunId).publishedIds.includes(m.id))
   value.executionEvidence = value.agentRuns.flatMap((run: any) => evidence(run, value.messages.some((m: any) => m.authorType === 'agent' && m.sourceAgentRunId === run.id)))
   value.agentRuns.forEach((run: any) => { const count = value.executionEvidence.filter((e: any) => e.agentRunId === run.id).length; run.executionEvidenceCount = count; run.executionEvidenceChangeSequence = count })
@@ -586,13 +587,22 @@ export const model = {
     const source = state.snapshot.agentRuns.find((r: any) => r.id === id)
     if (!source?.canContinue) return null
     halt()
-    const runId = `retry-run-${++serial}`, deliveryId = `retry-delivery-${serial}`
-    extraDeliveries.push({ ...delivery(deliveryId, source.inputMessageIds[0], source.agentId, null),
-      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds],
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
-    retries.set(id, { status: 'pending', runId, deliveryId }); refresh()
-    scheduleRetry(source, runId, deliveryId)
-    return deliveryId
+    const runId = `retry-run-${++serial}`
+    const deliveryIds = source.inputMessageIds.map((messageId:string, index:number) => {
+      const existing=extraDeliveries.find(d => d.messageId===messageId && d.recipientAgentId===source.agentId && d.status==='waiting')
+      if (existing) return existing.id
+      const id = `retry-delivery-${serial}-${index}`
+      extraDeliveries.push({ ...delivery(id, messageId, source.agentId, null),
+        messageSequence: state.snapshot.messages.find((m:any) => m.id === messageId)?.sequence,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+      return id
+    })
+    if (retries.get(id)?.status !== 'pending') {
+      retries.set(id, { status: 'pending', runId, deliveryIds })
+      scheduleRetry(source, runId, deliveryIds)
+    }
+    refresh()
+    return deliveryIds
   },
   failRun(id: string) {
     extraRuns = extraRuns.map(r => r.id === id ? { ...r, status: 'failed', canContinue: r.inputMessageIds.length > 0, endedAt: new Date().toISOString(),
@@ -722,7 +732,7 @@ export const model = {
         while (controls.holdContinue) await new Promise(resolve => setTimeout(resolve, 20))
         if (controls.receipts.has(input.commandId)) return controls.receipts.get(input.commandId)
         if (controls.continuationMode === 'reject') return { commandId: input.commandId, status: 'rejected', payload: {} }
-        const result = { commandId: input.commandId, status: 'applied', payload: { threadId: state.snapshot.thread.id, deliveryId: model.retry(input.command?.agentRunId) } }
+        const result = { commandId: input.commandId, status: 'applied', payload: { threadId: state.snapshot.thread.id, agentRunId:input.command?.agentRunId, deliveryIds: model.retry(input.command?.agentRunId) } }
         controls.receipts.set(input.commandId, result)
         if (controls.continuationMode === 'response-lost') throw new Error('Simulated lost receipt')
         return result
@@ -769,7 +779,7 @@ export const model = {
     }
   }
 }
-function scheduleRetry(source: any, runId: string, deliveryId: string) {
+function scheduleRetry(source: any, runId: string, deliveryIds: string[]) {
   const start = () => {
     if (controls.holdDispatch) { later(start, 100); return }
     const agentIndex = profiles.findIndex(p => p.agentId === source.agentId)
@@ -778,15 +788,15 @@ function scheduleRetry(source: any, runId: string, deliveryId: string) {
     Object.assign(run, { inputSummary: source.inputSummary, anchorMessageId: source.anchorMessageId,
       publicTailSequenceAtStart: Math.max(0, ...state.snapshot.messages.map((m: any) => m.sequence)), createdAt: now, startedAt: now, updatedAt: now })
     extraRuns.push(run)
-    extraDeliveries = extraDeliveries.map(d => d.id === deliveryId ? { ...d, status: 'running', targetAgentRunId: runId } : d)
-    retries.set(source.id, { status: 'started', runId, deliveryId }); refresh()
+    extraDeliveries = extraDeliveries.map(d => deliveryIds.includes(d.id) ? { ...d, status: 'running', targetAgentRunId: runId } : d)
+    retries.set(source.id, { status: 'started', runId, deliveryIds }); refresh()
     later(() => {
       if (stopped.has(runId) || extraRuns.find(r => r.id === runId)?.status !== 'running') return
       const endedAt = new Date().toISOString()
       extraMessages.push({ ...makeMessage(`${runId}-reply`, ++liveSequence,
         '已继续检查刚才的请求。占位跟随最新消息，原有回复和复制、回复按钮的显示规则都保留。', agentIndex, runId), createdAt: endedAt })
       extraRuns = extraRuns.map(r => r.id === runId ? { ...r, status: 'succeeded', updatedAt: endedAt, endedAt } : r)
-      extraDeliveries = extraDeliveries.map(d => d.id === deliveryId ? { ...d, status: 'succeeded', endedAt } : d)
+      extraDeliveries = extraDeliveries.map(d => deliveryIds.includes(d.id) ? { ...d, status: 'succeeded', endedAt } : d)
       refresh()
     }, 3500)
   }
@@ -804,7 +814,7 @@ if (savedServer) {
 }
 refresh()
 for (const [sourceId, record] of retries) if (record.status === 'pending')
-  scheduleRetry(state.snapshot.agentRuns.find((r: any) => r.id === sourceId), record.runId, record.deliveryId)
+  scheduleRetry(state.snapshot.agentRuns.find((r: any) => r.id === sourceId), record.runId, record.deliveryIds)
 const streamingTimer = setInterval(streamTick, 90)
 addEventListener('pagehide', () => clearInterval(streamingTimer), { once: true })
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.playing) halt() })

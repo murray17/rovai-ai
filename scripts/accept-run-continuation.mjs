@@ -82,13 +82,15 @@ async function continueRun(source) {
   const receipt = await request('agentRuns.continue', { commandId, command: { threadId, agentRunId: source } })
   assert.equal(receipt.status, 'applied', JSON.stringify(receipt))
   assert.equal(receipt.payload.messageId, undefined)
-  const delivery = one('SELECT source_kind,message_id FROM camp_message_delivery WHERE id=?', receipt.payload.deliveryId)
-  assert.equal(delivery.source_kind, 'continuation')
-  assert.equal(delivery.message_id, null)
+  assert.equal(receipt.payload.agentRunId, source)
+  const inputs = sql('SELECT message_id FROM agent_run_input WHERE agent_run_id=? ORDER BY ordinal', source)
+  assert.deepEqual(receipt.payload.deliveryIds.map(id =>
+    one("SELECT message_id FROM camp_message_delivery WHERE id=? AND source_kind='message'", id).message_id
+  ), inputs.map(input => input.message_id))
   assert.equal(one("SELECT count(*) AS n FROM camp_message WHERE camp_id=? AND author_type='system' AND author_id='run-continuation'", threadId).n, 0)
   assert.equal(one('SELECT last_message_sequence FROM camp WHERE id=?', threadId).last_message_sequence, before.last_message_sequence)
   assert.equal(one("SELECT count(*) AS n FROM event_log WHERE command_id=? AND entity_type='camp_message'", commandId).n, 0)
-  await check('continuation_has_no_message_record', { deliveryId: receipt.payload.deliveryId })
+  await check('continuation_has_no_message_record', { deliveryIds: receipt.payload.deliveryIds })
   return receipt
 }
 async function cancel(id) {
@@ -108,7 +110,7 @@ async function cancel(id) {
 }
 async function claimed(receipt) {
   assert.equal(receipt.status, 'applied', JSON.stringify(receipt))
-  return waitFor(() => one('SELECT claimed_agent_run_id AS id FROM camp_message_delivery WHERE id=?', receipt.payload.deliveryId)?.id, 'continuation claim')
+  return waitFor(() => one('SELECT claimed_agent_run_id AS id FROM camp_message_delivery WHERE id=?', receipt.payload.deliveryIds[0])?.id, 'continuation claim')
 }
 async function payload(id) {
   const blob = one('SELECT b.storage_relative_path FROM context_manifest m JOIN managed_blob b ON b.id=m.rendered_payload_blob_id WHERE m.agent_run_id=? ORDER BY m.created_at DESC LIMIT 1', id)
@@ -181,7 +183,7 @@ try {
   ].join('\n')
   // Cold host startup gives the real cancellation command a window
   // before dispatch. An accepted turn without terminal proof is tested separately
-  // below and must automatically select a fresh session after cleanup.
+  // below using the same session selection as any ordinary input.
   await stop()
   await start()
   const source = await send(taskBody)
@@ -252,10 +254,13 @@ try {
   assert.equal(one("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND status='accepted'", acceptedStop).n, 1)
   const acceptedReplacement = await claimed(await continueRun(acceptedStop))
   await finish(acceptedReplacement)
-  assert.notEqual(session().native_session_id, replacementSession)
+  const sessionAfterStop = session().native_session_id
+  if (sessionAfterStop !== replacementSession) {
+    assert.equal(one("SELECT COUNT(*) AS n FROM event_log WHERE entity_type='agent_run' AND entity_id=? AND event_type='agent_run.native_session_continuity_lost'", acceptedReplacement).n, 1)
+  }
   assert.deepEqual(run(acceptedStop), acceptedStopped)
   assert.equal(await readFile(join(workspace, 'checkpoint.txt'), 'utf8'), 'PRESERVED_CHECKPOINT')
-  await check('accepted_stop_without_native_terminal_automatically_selects_new_session', {
+  await check('accepted_stop_uses_ordinary_session_selection', {
     acceptedStop, acceptedReplacement, replacementSession: session().native_session_id
   })
   report.passed = true

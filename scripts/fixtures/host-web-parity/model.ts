@@ -82,7 +82,7 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
     change({ snapshot, agents: expandedProfiles })
   }
   if (scenario === 'continuation') {
-    state.snapshot.agentRuns = [{ ...run, status: 'failed', invocationKind: 'batch', threadTurnId: null,
+    state.snapshot.agentRuns = [{ ...run, status: 'failed', invocationKind: 'batch', threadTurnId: null, canContinue: true,
       inputMessageIds: [state.snapshot.messages[0].id], anchorMessageId: state.snapshot.messages[0].id,
       executionEvidenceCount: 0, endedAt: now }]
   }
@@ -99,10 +99,28 @@ export function createReviewModel(surface: Surface, scenario: Scenario) {
         await delay()
         const receipt = continuation.receipts.get(p.commandId)
         if (receipt) return receipt
-        const result = { ...applied(), code: 'agent_run.continuation_requested', commandId: p.commandId }
-        continuation.receipts.set(p.commandId, result)
         const snapshot = structuredClone(state.snapshot)
-        snapshot.messages.push({ ...message(snapshot.messages.length + 1, '你继续了执行。', 'user'), authorType: 'system' })
+        const source = snapshot.agentRuns.find(run => run.id === p.command.agentRunId)!
+        const deliveryIds = (source.inputMessageIds ?? []).map(messageId => {
+          const existing = snapshot.messageDeliveries.find(d => d.messageId===messageId && d.recipientAgentId===source.agentId && d.status==='waiting')
+          if (existing) return existing.id
+          const id = `retry-${source.agentId}-${messageId}`
+          snapshot.messageDeliveries.push({
+            id, messageId, messageSequence: snapshot.messages.find(m => m.id === messageId)?.sequence,
+            recipientAgentId: source.agentId, targetAgentRunId: null, requestedMode: 'start', status: 'waiting',
+            threadTurnId: null, taskId: null, recipientMembershipVersionAtAdmission: 1, dispatchPhase: 'never_attempted',
+            waitCondition: null, dispatchAttemptCount: 0, retryGeneration: 0, contextManifestId: null,
+            manualInterventionRequired: false, failureCode: null, version: 1, createdAt: now, updatedAt: now,
+            endedAt: null, deliveryKind: 'public_a2a', dispatchDisposition: 'dispatch', completionRole: 'required',
+            gatherId: null, gatherDispatchDeliveryId: null, recipientCanonicalPosition: 0,
+            edgeKind: 'forward', targetParentAgentRunId: null, returnToAgentRunId: null
+          })
+          return id
+        })
+        source.hasAcceptedContinuation = true
+        const result = { ...applied(), code: 'agent_run.continuation_requested', commandId: p.commandId,
+          payload: { threadId, agentRunId: source.id, deliveryIds } }
+        continuation.receipts.set(p.commandId, result)
         change({ snapshot })
         if (continuation.mode === 'response-lost') throw new Error('Simulated response loss after commit')
         return result

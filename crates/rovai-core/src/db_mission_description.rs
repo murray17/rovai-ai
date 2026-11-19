@@ -98,12 +98,9 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_description_migration")
             .unwrap();
         migrate(&mut database).unwrap();
-        let record = crate::mission::MissionService::default()
-            .get(&database, id)
-            .unwrap()
-            .unwrap();
+        // This fixture stops at schema 137. Read the migrated description at that boundary.
         assert_eq!(
-            record.description_content,
+            crate::mission_description::load(database.connection(), id, "").unwrap(),
             crate::mission_description::text_content("literal @名字\nline")
         );
         assert_eq!(

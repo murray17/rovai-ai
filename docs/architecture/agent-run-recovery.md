@@ -79,7 +79,7 @@ Run 可以先进入失败或取消终态；当前 Core 仍精确持有该 Run/ep
 
 共享 execution root 的保护只在故障窗口生效：当前 Core 仍精确持有的执行未清理时，暂缓同 root 的新 dispatch；正常执行之间不因
 共享 root 建立日常互斥。没有输出、撤销 Core 写权限、用户确认或新 Session 都不是清理证明。cleanup 完成后，Scheduler
-按普通 FIFO 规则继续；unknown 后默认使用新 Native Session，除非 Adapter 已能证明旧 native turn 结束。
+按普通调度继续，旧投递的未知接收证据保留。
 
 这是一条失败后的临时调度门禁，不是 Thread pause、工作区锁管理器或新的暂停/恢复产品。
 
@@ -120,18 +120,11 @@ Fleet 的小型释放结果区分复用、回收、租约不存在和回收未�
 保留受管记录和容量。既有 owner record 记录 Run/epoch 及确认回收回执，数据库 ACK 后清除对应证明。
 这只是原有停止操作的证据，不是独立调度器、Cleanup Coordinator 或持久化 Native Outcome。
 
-可信失败后可精确恢复原生 Thread；普通执行的恢复错误或 ID 不符仍明确失败。用户主动续做按
-[Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)，仅在本次输入尚未投递时允许一次新 Thread
-降级。输入结果未知继续沿用第 3 节的隔离和默认轮换。正常成功不退化为每轮冷启动，也不增加输入重放。
+可信失败后可精确恢复原生 Thread。普通新执行和用户重投使用相同的会话选择。实际恢复失败且本次输入尚未投递时，
+Runtime 可尝试一次新 Thread。旧输入结果未知时，沿用第 3 节的隔离规则。
 
-## 8. 用户授权的独立续做
+## 8. 用户主动重投原输入
 
-[AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md) 是新的 User 授权。
-命令事务持久化内部授权、来源事实和 waiting Delivery；续做来源没有 message 外键，
-不创建消息记录或推进公开消息序号。独立队列序号保持 FIFO，已生成的公开记录保留原样；
-唯一 Scheduler 按第 4 节当前执行所有权与清理判断领取；历史未知状态不持续占住 lane。
-原 Run 的业务输入集合限定范围，现有 Context builder 重建当前平台事实，不追加证据或恢复教学。
-同一来源可以多次主动继续，状态互不关联；幂等只绑定单次请求。会话兼容时复用当前绑定，换会话保留工作区。
-点击继续直接授权新执行，无需单独确认新会话。领取时未知 native turn 自动轮换；后续同一绑定的可信
-成功完成可消除更早未知结果对会话选择的影响。兼容判断复用 Runtime，实际恢复失败仅在本次输入尚未
-投递时允许一次已有路径的新会话降级；替换失败仍结束，普通运输恢复不因本功能扩大。
+[AgentRun Continuation v5](../contracts/agent-run-continuation-v5.md) 在一次命令内校验来源输入，将消息送回原队员的普通队列。
+已有等待项复用。新领取可以与其他普通消息合批，按会话消息顺序选择可容纳的前缀，重建当前上下文。
+领取、会话选择和启动使用第 4 节的普通规则。历史执行保留当时的输入和终态。
