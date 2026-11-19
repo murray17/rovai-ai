@@ -8848,7 +8848,8 @@ impl Database {
         // Only a recognized source with gaps in 1..=226 can skip that historical
         // prefix. Preserve its receipts instead of replaying superseded DDL.
         let sparse: bool = self.connection.query_row(
-            "SELECT count(*) < 226 FROM schema_migration WHERE version BETWEEN 1 AND 226",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version >= 226)
+                AND (SELECT count(*) FROM schema_migration WHERE version BETWEEN 1 AND 226) < 226",
             [],
             |row| row.get(0),
         )?;
@@ -40566,6 +40567,24 @@ mod tests {
             assert!(identity_index);
             assert_eq!(receipt.get_or_insert(applied_at.clone()), &applied_at);
         }
+
+        let mut complete = crate::test_support::fresh_schema_database_fast_owned();
+        message_mutations::downgrade_for_test(complete.connection());
+        assert!(!complete.has_admitted_sparse_migration_prefix().unwrap());
+        let mut full_stages = Vec::new();
+        complete
+            .migrate_with_progress(false, &mut |stage, _| full_stages.push(stage.to_owned()))
+            .unwrap();
+        assert_eq!(
+            &full_stages[..2],
+            [
+                "migration_reconciliation",
+                "migration_main_metrics_convergence"
+            ]
+        );
+        assert!(full_stages.iter().any(|step| step == "migration_116"));
+        assert!(full_stages.ends_with(&["migration_227".into(), "migration_228".into()]));
+        assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
         // A previously admitted RunCard store may also lack old receipts.
         // It must pass the message-edit migration before retiring the index.

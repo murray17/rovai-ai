@@ -602,7 +602,7 @@ ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 own
 ### 消息正文搜索与索引迁移
 
 `db::tests::message_fts_retirement_is_atomic_and_keeps_message_data_across_reopens` 拥有 Migration 228
-的生产启动、已填充 schema 177、缺旧回执的 schema 176、两个协调步骤的顺序、227 已提交但 228 失败后的恢复、DDL 与回执回滚及重复启动。旧 Usage 迁移 owner 无消息索引数据，也不覆盖
+的生产启动、已填充 schema 177、回执齐全或缺失的 schema 176、两个协调步骤的顺序、227 已提交但 228 失败后的恢复、DDL 与回执回滚及重复启动。回执齐全的升级还验证原有的 Migration 116 协调逻辑。旧 Usage 迁移 owner 无消息索引数据，也不覆盖
 228 的表和触发器状态。该验证复用独立 SQLite 夹具，需生产打开链路证明升级和重启持久性。
 最小命令为 `cargo test -p rovai-core --features extended-tests --lib message_fts_retirement`。
 
