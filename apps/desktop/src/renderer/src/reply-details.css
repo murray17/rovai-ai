@@ -28,8 +28,7 @@
 .reply-detail-message:hover .reply-detail-actions, .reply-detail-message:focus-within .reply-detail-actions { opacity: 1; pointer-events: auto; }
 .reply-detail-status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .reply-detail-page { display: block; margin: 0 auto 22px; border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; padding: 6px 10px; }
-.reply-detail-page:disabled { cursor: default; opacity: .55; }
-.reply-detail-scroll[aria-busy="true"] .reply-detail-page:disabled { cursor: wait; }
+.reply-detail-page:disabled { cursor: wait; opacity: .55; }
 .reply-detail-run.is-continuation { margin-top: -18px; }
 .reply-detail-run .run-presence-open { padding-right: 14px; }
 .reply-detail-resize { position: absolute; z-index: 3; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }

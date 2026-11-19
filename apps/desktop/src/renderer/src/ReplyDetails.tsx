@@ -12,11 +12,10 @@ import type { LiveRuntimeEvent } from './ui-model'
 import type { ReplyReaderState, ThreadReplyReader } from './thread-reply-reader'
 import './reply-details.css'
 
-export function ReplyDetails({ state, reader, editingReply, width, full, onWidth, onFull, onClose, onReveal,
-  snapshot, profiles, eventsByRunId, windowedEvidence, onOpenExecution, author, renderBody, renderActions, onCopy, onError }: {
+export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onClose, onReveal,
+  snapshot, profiles, eventsByRunId, windowedEvidence, onOpenExecution, author, renderBody, onCopy, onError }: {
   state: ReplyReaderState
   reader: ThreadReplyReader
-  editingReply: boolean
   width: number
   full: boolean
   onWidth(width: number): void
@@ -30,7 +29,6 @@ export function ReplyDetails({ state, reader, editingReply, width, full, onWidth
   onOpenExecution(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
   author(message: ThreadMessageView): string
   renderBody(message: ThreadMessageView): ReactNode
-  renderActions?(message: ThreadMessageView, copy: {copied: boolean; run(): void}): ReactNode
   onCopy(message: ThreadMessageView): Promise<void>
   onError(error: unknown): void
 }): React.JSX.Element {
@@ -61,7 +59,6 @@ export function ReplyDetails({ state, reader, editingReply, width, full, onWidth
     onPreview: onWidth, onCommit: onWidth, onCancel: onWidth,
     onCollapse: before => { onWidth(before); onClose() } })
   const firstId = state.page?.messages[0]?.id
-  const pagingDisabled = editingReply || state.status === 'loading'
   useEffect(() => { scroll.current?.scrollTo({ top: 0 }) }, [firstId, state.messageId])
   const member = (id: string) => snapshot.members.find(value => value.agentId === id)
   const avatar = (id: string, name: string) => <MemberAvatar agentId={id} displayName={name}
@@ -107,7 +104,7 @@ export function ReplyDetails({ state, reader, editingReply, width, full, onWidth
         <span>{uiAttribute('回复暂时无法加载')}</span><button className="quiet-button compact" type="button" onClick={reader.retry}>{uiAttribute('重试')}</button>
       </div>}
       {state.page && !state.page.sourceAvailable && <div className="reply-detail-status">{uiAttribute('消息当前不可用')}</div>}
-      {state.page?.hasEarlier && <button className="reply-detail-page" type="button" disabled={pagingDisabled} onClick={() => reader.page(true)}>{uiAttribute('查看较早回复')}</button>}
+      {state.page?.hasEarlier && <button className="reply-detail-page" type="button" disabled={state.status === 'loading'} onClick={() => reader.page(true)}>{uiAttribute('查看较早回复')}</button>}
       {timeline.map(item => {
         if (item.kind === 'run_presence') {
           const { run, continuation } = item.slot
@@ -132,8 +129,8 @@ export function ReplyDetails({ state, reader, editingReply, width, full, onWidth
             {message.replyParentDeleted && <p className="reply-detail-deleted-reference">{uiAttribute('原消息已删除')}</p>}
             {message.withdrawn ? <p className="reply-detail-status">{uiAttribute('消息已撤回')}</p> : renderBody(message)}
             <div className="reply-detail-actions">
-              {renderActions?.(message, { copied: copied === message.id, run: () => void copy(message) }) ?? (!message.withdrawn && <button type="button" className="reply-detail-icon" aria-label={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')}
-                title={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')} onClick={() => void copy(message)}><CopyIcon copied={copied === message.id} /></button>)}
+              {!message.withdrawn && <button type="button" className="reply-detail-icon" aria-label={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')}
+                title={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')} onClick={() => void copy(message)}><CopyIcon copied={copied === message.id} /></button>}
               <button type="button" className="reply-detail-icon" aria-label={uiAttribute('回到原文')} title={uiAttribute('回到原文')} onClick={() => onReveal(message.id)}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v12m12-6H7m4-4-4 4 4 4" /></svg>
               </button>
@@ -141,7 +138,7 @@ export function ReplyDetails({ state, reader, editingReply, width, full, onWidth
           </div>
         </article>
       })}
-      {state.page?.hasLater && <button className="reply-detail-page" type="button" disabled={pagingDisabled} onClick={() => reader.page(false)}>{uiAttribute('查看较新回复')}</button>}
+      {state.page?.hasLater && <button className="reply-detail-page" type="button" disabled={state.status === 'loading'} onClick={() => reader.page(false)}>{uiAttribute('查看较新回复')}</button>}
     </div>
   </aside>
 }

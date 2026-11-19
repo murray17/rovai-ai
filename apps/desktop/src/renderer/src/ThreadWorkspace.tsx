@@ -1799,7 +1799,6 @@ export function ThreadWorkspace({
     && Boolean(filePreview?.paneVisible && filePreview.activeTab && filePreview.activeTab.kind !== 'execution')
   const replyReader = useMemo(() => new ThreadReplyReader(snapshot.thread.id, client), [snapshot.thread.id, client])
   const replyDetail = useSyncExternalStore(replyReader.subscribe, replyReader.getSnapshot, replyReader.getSnapshot)
-  const replyRootId = replyDetail.messageId
   const [replyFull, setReplyFull] = useState(false)
   const [replyWidth, setReplyWidth] = useState(466)
   const [replyExecutionVisible, setReplyExecutionVisible] = useState(false)
@@ -1904,9 +1903,7 @@ export function ThreadWorkspace({
   const [messageRemoval, setMessageRemoval] = useState<{
     message: ThreadMessageView; kind: 'withdraw' | 'delete'; commandId: string
   } | null>(null)
-  const [editRequest, setEditingMessage] = useState<{ id: string; surface: 'timeline' } | {
-    id: string; surface: 'reply'; rootId: string
-  } | null>(null)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const deletingMessage = messageRemoval?.kind === 'delete'
   const [deliveryMode, setDeliveryMode] = useState<'start' | 'steer'>('steer')
   useEffect(() => setDeliveryMode('steer'), [snapshot.thread.id])
@@ -1916,7 +1913,7 @@ export function ThreadWorkspace({
   const [reeditError, setReeditError] = useState<string | null>(null)
   useEffect(() => {
     setMessageRemoval(null)
-    setEditingMessage(null)
+    setEditingMessageId(null)
     setWithdrawalError(null)
     setReeditMessageId(null)
     setReeditError(null)
@@ -2693,20 +2690,14 @@ export function ThreadWorkspace({
   activeDeletedMessageIds.current = deletedMessageIds
   const messageBodyUnavailable = (id: string): boolean =>
     activeDeletedMessageIds.current.has(id) || anchorNavigation.navigation.bodyIsUnavailable(id)
-  const editTimelineTarget = editRequest && visibleMessageById.get(editRequest.id)
-  const editReplyTarget = editRequest?.surface === 'reply'
-    ? replyDetail.page?.messages.find(message => message.id === editRequest.id) : undefined
-  const latestEditTarget = editTimelineTarget && (!editReplyTarget || editTimelineTarget.version > editReplyTarget.version)
-    ? editTimelineTarget : editReplyTarget
-  const editUnavailable = !!editRequest && (messageBodyUnavailable(editRequest.id)
-    || latestEditTarget?.withdrawn || latestEditTarget?.canEdit === false
-    || (editRequest.surface === 'reply' && replyRootId !== editRequest.rootId))
-  const editingMessage = editUnavailable ? null : editRequest
-  const showInlineEditor = !!editingMessage && (editingMessage.surface === 'reply'
-    ? !!editReplyTarget : conversationView === 'conversation' && !!editTimelineTarget)
+  const editTarget = editingMessageId ? visibleMessageById.get(editingMessageId) : undefined
+  const editUnavailable = !!editingMessageId && (messageBodyUnavailable(editingMessageId)
+    || editTarget?.withdrawn || editTarget?.canEdit === false)
+  const editingMessage = editUnavailable ? undefined : editTarget
+  const hideComposerForEdit = mobile && conversationView === 'conversation' && !!editingMessage
   useEffect(() => {
-    if (editUnavailable) setEditingMessage(current => current === editRequest ? null : current)
-  }, [editRequest, editUnavailable])
+    if (editUnavailable) setEditingMessageId(current => current === editingMessageId ? null : current)
+  }, [editingMessageId, editUnavailable])
   const activeVisibleMessageById = useRef(visibleMessageById)
   activeVisibleMessageById.current = visibleMessageById
   const replyParentById = useMemo(() => {
@@ -5386,8 +5377,8 @@ export function ThreadWorkspace({
         skills: composerSkills,
         onNeedSkills: () => refreshSkillCatalogRef.current?.()
       }}
-      onCancel={() => setEditingMessage(null)}
-      onSaved={async () => { await messageMutationCommitted(); setEditingMessage(current => current?.id === message.id ? null : current) }} />
+      onCancel={() => setEditingMessageId(null)}
+      onSaved={async () => { await messageMutationCommitted(); setEditingMessageId(current => current === message.id ? null : current) }} />
   }
 
   const messageDeleteAction = (message: ThreadMessageView): (() => void) | undefined =>
@@ -5731,7 +5722,7 @@ export function ThreadWorkspace({
               {missionBoard}
               {!anchorWindowBeforeNormal && historyLoader}
               <TimelineVirtualList items={timelineRows} viewportRef={timelineScrollRef} controllerRef={timelineVirtualRef}
-                editingId={editingMessage?.surface === 'timeline' ? editingMessage.id : undefined}
+                editingId={editingMessage?.id}
                 followingLatest={groupingFollowsLatest} preserveReadingPosition={preserveTimelineReadingPosition}>
               {(row) => {
                 const items: JSX.Element[] = []
@@ -6123,7 +6114,7 @@ export function ThreadWorkspace({
                               )}
                             </div>
                             <div className="public-message-readout">
-                            {editingMessage?.surface === 'timeline' && editingMessage.id === campMessage.id ? <>
+                            {editingMessage?.id === campMessage.id ? <>
                               {replyQuote}
                               {renderMessageEditor(campMessage)}
                             </> : <MessageSurface
@@ -6149,7 +6140,7 @@ export function ThreadWorkspace({
                               onReply={humanAuthored ? undefined : handleReply}
                               onCopy={handleCopy}
                               onWithdraw={campMessage.canWithdraw && onWithdrawMessage ? () => openMessageRemoval(campMessage, 'withdraw') : undefined}
-                              onEdit={campMessage.canEdit ? () => setEditingMessage({ id: campMessage.id, surface: 'timeline' }) : undefined}
+                              onEdit={campMessage.canEdit ? () => setEditingMessageId(campMessage.id) : undefined}
                               onDelete={messageDeleteAction(campMessage)}
                               deleteDisabled={campMessage.canDelete === false}
                               onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
@@ -6508,7 +6499,6 @@ export function ThreadWorkspace({
         </section>
 
         {replyDetail.messageId && <ReplyDetails state={replyDetail} reader={replyReader} width={replyWidth} full={replyFull}
-          editingReply={editingMessage?.surface === 'reply' && showInlineEditor}
           onWidth={setReplyWidth} onFull={() => setReplyFull(value => !value)} onClose={() => closeReplyDetails()}
           snapshot={snapshot} profiles={agents} eventsByRunId={executionEventsByRunId} windowedEvidence={openCoverage !== null}
           author={message => campMessageAuthorLabel(message, memberById, currentUserName)}
@@ -6526,12 +6516,7 @@ export function ThreadWorkspace({
               throw new Error(uiAttribute('复制失败'))
             }
           }}
-          renderActions={(message, copy) => <MessageActions copied={copy.copied} onCopy={copy.run}
-            onWithdraw={message.canWithdraw && onWithdrawMessage ? () => openMessageRemoval(message, 'withdraw') : undefined}
-            onEdit={message.canEdit && replyRootId
-              ? () => setEditingMessage({ id: message.id, surface: 'reply', rootId: replyRootId }) : undefined}
-            onDelete={messageDeleteAction(message)} deleteDisabled={message.canDelete === false} />}
-          renderBody={message => editingMessage?.surface === 'reply' && editingMessage.id === message.id ? renderMessageEditor(message) : <>
+          renderBody={message => <>
             <div className="reply-detail-body">
               {renderPublicMessageBody(message, 'reply')}
             </div>
@@ -6593,8 +6578,8 @@ export function ThreadWorkspace({
           <div className="message-composer-selection-slot">
           <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
           <form
-        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: mobile && showInlineEditor ? 'none' : undefined }}
-        inert={messageExport.selecting || (mobile && showInlineEditor)}
+        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: hideComposerForEdit ? 'none' : undefined }}
+        inert={messageExport.selecting || hideComposerForEdit}
         className={[
           'composer',
           attachmentDragState ? 'is-dragging-attachments' : ''
