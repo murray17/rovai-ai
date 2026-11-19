@@ -239,6 +239,7 @@ pub(crate) fn upgrade_user_projection_fixture(database: &mut Database) {
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ops::ControlFlow,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -8836,7 +8837,10 @@ impl Database {
             })?;
         }
         if fresh_database || !self.has_admitted_sparse_migration_prefix()? {
-            self.migrate_through_226(fresh_database, progress)?;
+            let prefix = self.migrate_through_226(fresh_database, progress)?;
+            if prefix.is_break() {
+                return Ok(());
+            }
         }
         if !self.schema_migration_applied(227)? {
             observe_migration_step(progress, "migration_227", || {
@@ -8880,7 +8884,7 @@ impl Database {
         &mut self,
         fresh_database: bool,
         progress: &mut dyn FnMut(&str, Duration),
-    ) -> Result<()> {
+    ) -> Result<ControlFlow<()>> {
         macro_rules! migration_step {
             ($stage:expr, $operation:expr) => {
                 observe_migration_step(progress, $stage, || $operation)?
@@ -9625,14 +9629,14 @@ impl Database {
             }
             #[cfg(all(test, feature = "extended-tests"))]
             if STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST.with(|flag| flag.get()) {
-                return Ok(());
+                return Ok(ControlFlow::Break(()));
             }
             if !self.schema_migration_applied(171)? {
                 migration_step!("migration_171", self.migrate_task_versionless_v171());
             }
             #[cfg(all(test, feature = "extended-tests"))]
             if STOP_BEFORE_PUBLIC_CONTEXT_MIGRATION_FOR_TEST.with(|flag| flag.get()) {
-                return Ok(());
+                return Ok(ControlFlow::Break(()));
             }
             if !self.schema_migration_applied(172)? {
                 migration_step!("migration_172", self.migrate_public_context_v172());
@@ -9645,7 +9649,7 @@ impl Database {
             }
             #[cfg(all(test, feature = "extended-tests"))]
             if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
-                return Ok(());
+                return Ok(ControlFlow::Break(()));
             }
             if !self.schema_migration_applied(175)? {
                 migration_step!("migration_175", notification_model::migrate(self));
@@ -9812,7 +9816,7 @@ impl Database {
             if !self.schema_migration_applied(226)? {
                 migration_step!("migration_226", runcard_usage::migrate(self));
             }
-            return Ok(());
+            return Ok(ControlFlow::Continue(()));
         }
         self.migrate_direct_workspace_columns()?;
         self.connection.execute(
@@ -10523,14 +10527,14 @@ impl Database {
         }
         #[cfg(all(test, feature = "extended-tests"))]
         if STOP_BEFORE_TASK_VERSIONLESS_MIGRATION_FOR_TEST.with(|flag| flag.get()) {
-            return Ok(());
+            return Ok(ControlFlow::Break(()));
         }
         if !self.schema_migration_applied(171)? {
             migration_step!("migration_171", self.migrate_task_versionless_v171());
         }
         #[cfg(all(test, feature = "extended-tests"))]
         if STOP_BEFORE_PUBLIC_CONTEXT_MIGRATION_FOR_TEST.with(|flag| flag.get()) {
-            return Ok(());
+            return Ok(ControlFlow::Break(()));
         }
         if !self.schema_migration_applied(172)? {
             migration_step!("migration_172", self.migrate_public_context_v172());
@@ -10543,7 +10547,7 @@ impl Database {
         }
         #[cfg(all(test, feature = "extended-tests"))]
         if STOP_BEFORE_NOTIFICATION_MODEL_FOR_TEST.with(|flag| flag.get()) {
-            return Ok(());
+            return Ok(ControlFlow::Break(()));
         }
         if !self.schema_migration_applied(175)? {
             migration_step!("migration_175", notification_model::migrate(self));
@@ -10710,7 +10714,7 @@ impl Database {
         if !self.schema_migration_applied(226)? {
             migration_step!("migration_226", runcard_usage::migrate(self));
         }
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 
     fn retire_message_fts(&mut self) -> Result<()> {
