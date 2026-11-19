@@ -61,7 +61,7 @@ fn eligible(
     delivery_id: Option<&str>,
 ) -> Result<Option<ContinuationSource>> {
     // Initial admission uses the source Run; a queued request owns its current input list.
-    Ok(connection.query_row(
+    let mut statement = connection.prepare_cached(
         "SELECT conversation.id, conversation.agent_id
          FROM agent_run AS run
          JOIN conversation ON conversation.id=run.conversation_id
@@ -93,9 +93,15 @@ fn eligible(
                      OR message.content_revision<>input.content_revision
                      OR (prior.message_content_revision=input.content_revision AND prior.message_content_digest<>message.content_digest))))
            )",
-        params![run_id, camp_id,delivery_id],
-        |row| Ok(ContinuationSource { conversation_id: row.get(0)?, agent_id: row.get(1)? }),
-    ).optional()?)
+    )?;
+    Ok(statement
+        .query_row(params![run_id, camp_id, delivery_id], |row| {
+            Ok(ContinuationSource {
+                conversation_id: row.get(0)?,
+                agent_id: row.get(1)?,
+            })
+        })
+        .optional()?)
 }
 
 /// Only an unresolved dispatched native turn requires preemptive rotation.

@@ -190,6 +190,7 @@ export type RunInputDisplayItem = {
   status: 'pending' | 'sending' | 'accepted' | 'delivery_unknown' | 'not_accepted' | 'queued' | 'unavailable'
   createdAt: string | null
   sourceAvailable: boolean
+  sourceDeleted?: boolean
 }
 
 export type ExecutionProgressItem =
@@ -688,7 +689,8 @@ export function buildLiveExecutionProgress(
           preview: stringField(payload, 'preview') ?? '',
           status: ['pending', 'sending', 'accepted', 'delivery_unknown', 'not_accepted', 'queued'].includes(status ?? '')
             ? status as RunInputDisplayItem['status'] : 'unavailable',
-          createdAt: stringField(payload, 'createdAt'), sourceAvailable: payload?.sourceAvailable === true })
+          createdAt: stringField(payload, 'createdAt'), sourceAvailable: payload?.sourceAvailable === true,
+          ...(payload?.sourceDeleted === true ? { sourceDeleted: true } : {}) })
       }
       finishNarrationStream()
       continue

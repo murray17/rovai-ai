@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type JSX } from 'react'
-import type { ComposerDocument, LocalAttachmentSourceView, StoredCommandResult, ThreadMessageView } from '@contracts'
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
+import type { LocalAttachmentSourceView, StoredCommandResult, ThreadMessageAroundSnapshot, ThreadMessageView } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import { AttachmentCard, ComposerAttachmentStrip } from './AttachmentCard'
 import { useThreadClient } from './camp-client'
@@ -18,6 +18,15 @@ import {
 } from './StructuredMentionComposer'
 
 type EditorContext = Pick<StructuredMentionComposerProps, 'referenceScope' | 'members' | 'skills' | 'onNeedSkills'>
+type EditConflict = { minimumRevision: number } & (
+  { status: 'loading' | 'error' } | { status: 'ready'; latest: ThreadMessageView }
+)
+
+function messageDocument(message: ThreadMessageView) {
+  return message.content.length
+    ? composerDocumentFromLegacyContent(message.content)
+    : composerDocumentFromText(message.body)
+}
 
 export function ThreadMessageEditor({
   message,
@@ -35,9 +44,7 @@ export function ThreadMessageEditor({
   onSaved(): Promise<void>
 }): JSX.Element {
   const client = useThreadClient()
-  const [initial] = useState(() => message.content.length
-    ? composerDocumentFromLegacyContent(message.content)
-    : composerDocumentFromText(message.body))
+  const [initial] = useState(() => messageDocument(message))
   const [retained, setRetained] = useState(() => message.attachments)
   const [added, setAdded] = useState<LocalAttachmentSourceView[]>([])
   const [revision, setRevision] = useState(message.contentRevision ?? 1)
@@ -46,6 +53,7 @@ export function ThreadMessageEditor({
   const [preparing, setPreparing] = useState(false)
   const [pendingInsertion, setPendingInsertion] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<EditConflict | null>(null)
   const editor = useRef<StructuredMentionComposerHandle>(null)
   const picker = useRef<HTMLInputElement>(null)
   const busy = useRef(false)
@@ -55,17 +63,19 @@ export function ThreadMessageEditor({
   const mounted = useRef(true)
   const status = composerDocumentStatus(document, editorContext.members, editorContext.skills ?? [])
   const attachmentCount = retained.length + added.length
-  const canSave = !saving && !preparing && !pendingInsertion && (status.hasContent || attachmentCount > 0)
+  const canSubmit = !saving && !preparing && !pendingInsertion && (status.hasContent || attachmentCount > 0)
 
+  const discardPrepared = useCallback(() => {
+    const ids = preparedRef.current.splice(0)
+    if (ids.length) void client.composerAttachments.discard?.(threadId, ids).catch(() => undefined)
+  }, [client, threadId])
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
-      if (!sentRef.current && preparedRef.current.length) {
-        void client.composerAttachments.discard?.(threadId, preparedRef.current).catch(() => undefined)
-      }
+      if (!sentRef.current) discardPrepared()
     }
-  }, [client, threadId])
+  }, [discardPrepared])
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (busy.current || !files.length) return
@@ -76,29 +86,66 @@ export function ThreadMessageEditor({
     busy.current = true
     setPreparing(true)
     setError(null)
-    const prepared: LocalAttachmentSourceView[] = []
+    const failed: string[] = []
     try {
       for (const file of files) {
-        prepared.push(await client.composerAttachments.prepare(threadId, revision, file))
+        if (!mounted.current) break
+        try {
+          const attachment = await client.composerAttachments.prepare(threadId, revision, file)
+          if (!mounted.current) {
+            void client.composerAttachments.discard?.(threadId, [attachment.id]).catch(() => undefined)
+            break
+          }
+          preparedRef.current.push(attachment.id)
+          setAdded(current => [...current, attachment])
+        } catch {
+          failed.push(file.name)
+        }
       }
-      const ids = prepared.map(attachment => attachment.id)
-      if (!mounted.current) {
-        await client.composerAttachments.discard?.(threadId, ids).catch(() => undefined)
-        return
+      if (mounted.current && failed.length) {
+        setError(uiAttribute('无法添加 {0}，请重新选择。', failed.join('、')))
       }
-      preparedRef.current.push(...ids)
-      setAdded(current => [...current, ...prepared])
-    } catch (failure) {
-      if (prepared.length) void client.composerAttachments.discard?.(threadId, prepared.map(attachment => attachment.id)).catch(() => undefined)
-      setError(readErrorMessage(failure, uiAttribute('添加附件失败，请重试。')))
     } finally {
       busy.current = false
-      setPreparing(false)
+      if (mounted.current) setPreparing(false)
     }
   }
 
-  const save = async (): Promise<void> => {
-    if (busy.current || !canSave) return
+  const readLatest = async (minimumRevision: number): Promise<void> => {
+    setConflict({ status: 'loading', minimumRevision })
+    try {
+      const around = await client.request<ThreadMessageAroundSnapshot>('thread.messages.around', { threadId, messageId: message.id })
+      if (!mounted.current) return
+      if (around.schemaVersion !== 1 || around.threadId !== threadId || around.anchorMessageId !== message.id) {
+        throw new Error('Message edit conflict response does not match the message')
+      }
+      const latest = around.messages.find(item => item.id === message.id)
+      if (!around.sourceAvailable || latest?.withdrawn || latest?.canEdit === false) {
+        onCancel()
+        return
+      }
+      if (!latest || (latest.contentRevision ?? 1) < minimumRevision) throw new Error('Message revision has not caught up')
+      setConflict({ status: 'ready', minimumRevision, latest })
+    } catch {
+      if (mounted.current) setConflict({ status: 'error', minimumRevision })
+    }
+  }
+
+  const loadLatest = (latest: ThreadMessageView): void => {
+    if (busy.current || pendingInsertion) return
+    const content = messageDocument(latest)
+    editor.current?.replaceDocument(content)
+    setDocument(content)
+    setRevision(latest.contentRevision ?? 1)
+    setRetained(latest.attachments)
+    setAdded([])
+    if (!sentRef.current) discardPrepared()
+    setConflict(null)
+    setError(null)
+  }
+
+  const save = async (replacement?: ThreadMessageView): Promise<void> => {
+    if (busy.current || !canSubmit || (conflict && !replacement)) return
     const content = editor.current?.getDocument() ?? document
     const latestStatus = composerDocumentStatus(content, editorContext.members, editorContext.skills ?? [])
     if (!latestStatus.hasContent && !attachmentCount) return
@@ -106,6 +153,11 @@ export function ThreadMessageEditor({
       setError(uiAttribute('有队员无法接收，请修改提及后再保存。'))
       return
     }
+    if (replacement && retained.some(file => !replacement.attachments.some(latest => latest.id === file.id))) {
+      setError(uiAttribute('部分附件已被移除，请先从草稿中移除或重新添加。'))
+      return
+    }
+    const expectedContentRevision = replacement?.contentRevision ?? revision
     busy.current = true
     setSaving(true)
     setError(null)
@@ -113,7 +165,7 @@ export function ThreadMessageEditor({
       const command = {
         threadId,
         messageId: message.id,
-        expectedContentRevision: revision,
+        expectedContentRevision,
         content,
         retainAttachmentIds: retained.map(attachment => attachment.id),
         sourceAttachments: added.map(attachment => ({
@@ -137,10 +189,15 @@ export function ThreadMessageEditor({
       requestRef.current = null
       if (result.status === 'rejected') {
         sentRef.current = false
+        if (!mounted.current) {
+          discardPrepared()
+          return
+        }
         if (result.code === 'message.edit_conflict') {
           const latest = result.payload.currentContentRevision
-          if (typeof latest === 'number') setRevision(latest)
-          setError(uiAttribute('消息已更新。请核对内容后再次保存。'))
+          void readLatest(typeof latest === 'number' ? latest : expectedContentRevision + 1)
+        } else if (result.code === 'message.edit_forbidden' || result.code === 'message.not_found') {
+          onCancel()
         } else if (result.code === 'mention_target_unavailable' || result.code === 'camp.default_lead_invariant'
           || result.code === 'camp_message.invalid_explicit_target') {
           setError(uiAttribute('有队员无法接收，请修改提及后再保存。'))
@@ -150,14 +207,13 @@ export function ThreadMessageEditor({
         }
         return
       }
-      const preparedIds = preparedRef.current.splice(0)
-      if (preparedIds.length) void client.composerAttachments.discard?.(threadId, preparedIds).catch(() => undefined)
+      discardPrepared()
       await onSaved()
     } catch (failure) {
-      setError(readErrorMessage(failure, uiAttribute('保存失败，请重试。')))
+      if (mounted.current) setError(readErrorMessage(failure, uiAttribute('保存失败，请重试。')))
     } finally {
       busy.current = false
-      setSaving(false)
+      if (mounted.current) setSaving(false)
     }
   }
 
@@ -180,7 +236,31 @@ export function ThreadMessageEditor({
       ref={editor} id={`edit-${message.id}`} document={initial} draftIdentity={`${threadId}:${message.id}:edit`}
       ariaLabel={uiAttribute('编辑消息正文')} disabled={saving}
       onEffectiveDocumentChange={setDocument} onFileInsertionPendingChange={setPendingInsertion}
-      onPasteFiles={files => { void addFiles(files) }} onSubmit={save} />
+      onPasteFiles={files => { void addFiles(files) }} onSubmit={() => void save()} />
+    {conflict && <div className="inline-edit-conflict">
+      {conflict.status === 'loading' && <div role="status"><UiText zh="正在读取最新内容…" /></div>}
+      {conflict.status === 'error' && <div role="alert">
+        <UiText zh="最新内容暂时无法读取。" />
+        <button className="quiet-button compact" type="button" onClick={() => void readLatest(conflict.minimumRevision)}>
+          <UiText zh="重试" />
+        </button>
+      </div>}
+      {conflict.status === 'ready' && <>
+        <div role="status"><UiText zh="消息已在别处更新" /></div>
+        <div className="inline-edit-conflict-preview" tabIndex={0} role="region" aria-label={uiAttribute('最新内容')}>
+          {conflict.latest.body && <p>{conflict.latest.body}</p>}
+          {conflict.latest.attachments.length > 0 && <ul>
+            {conflict.latest.attachments.map(file => <li key={file.id}>{file.displayName}</li>)}
+          </ul>}
+        </div>
+        <div className="inline-edit-conflict-actions">
+          <button className="quiet-button compact" type="button" disabled={saving || preparing || pendingInsertion}
+            onClick={() => loadLatest(conflict.latest)}><UiText zh="载入最新内容" /></button>
+          <button className="primary-button conversation-primary-action" type="button" disabled={!canSubmit}
+            onClick={() => void save(conflict.latest)}><UiText zh="用我的修改替换" /></button>
+        </div>
+      </>}
+    </div>}
     {error && <div className="message-withdraw-error" role="alert">{error}</div>}
     <div className="inline-edit-actions">
       <input ref={picker} type="file" hidden multiple onChange={event => {
@@ -198,7 +278,7 @@ export function ThreadMessageEditor({
       <button className="quiet-button" type="button" disabled={saving || preparing} onClick={onCancel}>
         <UiText zh="取消" />
       </button>
-      <button className="primary-button conversation-primary-action" type="submit" disabled={!canSave} aria-busy={saving}>
+      <button className="primary-button conversation-primary-action" type="submit" disabled={!canSubmit || conflict !== null} aria-busy={saving}>
         {saving ? uiAttribute('正在保存…') : uiAttribute('保存')}
       </button>
     </div>

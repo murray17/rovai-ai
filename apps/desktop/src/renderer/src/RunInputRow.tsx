@@ -7,6 +7,7 @@ import { UiText, useUiText } from './interface-language'
 import { messageClockTime } from './ui-model'
 
 export const RunInputSourceContext = createContext<{
+  bodyIsUnavailable(messageId: string): boolean
   body(messageId: string): Promise<string | null>
   reveal(messageId: string): void
 } | null>(null)
@@ -25,20 +26,27 @@ export function RunInputRow({ input, runId, itemKey }: { input: RunInputDisplayI
   const [body, setBody] = useExecutionRetainedState<BodyState>(`input-body:${runId}:${input.deliveryId}`, { status: 'idle' })
   const summaryRef = useRef<HTMLElement>(null)
   const helpId = useId()
-  const status = t(labels[input.status])
-  const shape = shapes[input.status]
-  const preview = input.preview.replace(/\s+/gu, ' ').trim()
-  const title = [t('插话'), input.status !== 'accepted' ? status : '', preview].filter(Boolean).join(' · ')
+  const sourceDeleted = input.sourceDeleted || source?.bodyIsUnavailable(input.messageId)
+  const available = input.sourceAvailable && !sourceDeleted
+  const inputStatus = available ? input.status : 'unavailable'
+  const status = t(sourceDeleted ? '原消息已删除' : labels[inputStatus])
+  const shape = shapes[inputStatus]
+  const preview = available ? input.preview.replace(/\s+/gu, ' ').trim() : ''
+  const title = [t('插话'), inputStatus !== 'accepted' ? status : '', preview].filter(Boolean).join(' · ')
 
   useEffect(() => {
-    if (!expanded || !input.sourceAvailable || body.status === 'ready') return
+    if (!available) {
+      if (body.status !== 'idle') setBody({ status: 'idle' })
+      return
+    }
+    if (!expanded || body.status === 'ready') return
     let cancelled = false
     setBody({ status: 'loading' })
     void (sourceRef.current?.body(input.messageId) ?? Promise.resolve(null)).catch(() => null).then(text => {
       if (!cancelled) setBody(text === null ? { status: 'unavailable' } : { status: 'ready', text })
     })
     return () => { cancelled = true }
-  }, [expanded, input.messageId, input.sourceAvailable])
+  }, [expanded, input.messageId, available])
 
   return <details className={`process-action tool-call-disclosure run-input-row status-${shape}`}
     data-execution-item-key={itemKey} data-activity-domain="input" open={expanded}
@@ -52,15 +60,16 @@ export function RunInputRow({ input, runId, itemKey }: { input: RunInputDisplayI
       <span className={`tool-call-state status-${shape}`} role="img" aria-label={status} title={status}><ExecutionStatusGlyph status={shape} /></span>
     </summary>
     {expanded && <div className="tool-call-detail">
-      {input.sourceAvailable && body.status === 'ready' ? <>
+      {available && body.status === 'ready' ? <>
         <span className="sr-only" id={helpId}><UiText zh="正文区域可用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回插话行。" /></span>
         <pre className="tool-call-result-scroll" tabIndex={0} role="region" aria-label={t('插话正文，可滚动')} aria-describedby={helpId}
           onKeyDown={event => handleToolResultKeyDown(event, summaryRef.current)}>{body.text || t('此消息没有文本。')}</pre>
-      </> : <div className="tool-result-state" role="status">{t(!input.sourceAvailable || body.status === 'unavailable' ? '原消息不可用' : '正在读取原消息…')}</div>}
-      <button className="tool-file-link run-input-source" type="button" disabled={!source || !input.sourceAvailable}
+      </> : <div className="tool-result-state" role="status">{!available ? status
+        : t(body.status === 'unavailable' ? '原消息不可用' : '正在读取原消息…')}</div>}
+      {available && <button className="tool-file-link run-input-source" type="button" disabled={!source}
         aria-label={t('查看原消息')} onClick={() => source?.reveal(input.messageId)}>
         <UiText zh="原消息" />{input.createdAt && ` · ${messageClockTime(input.createdAt)}`}
-      </button>
+      </button>}
     </div>}
   </details>
 }

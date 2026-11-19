@@ -1828,6 +1828,7 @@ mod tests {
         assert_eq!(projected.agent_runs[0].id, source);
         assert_eq!(projected.agent_runs[0].status, "failed");
         assert!(projected.agent_runs[0].has_accepted_continuation);
+        assert!(projected.agent_runs[0].can_continue);
         assert_eq!(
             serde_json::to_value(&projected.agent_runs[0]).unwrap()["hasAcceptedContinuation"],
             true
@@ -2370,6 +2371,25 @@ mod tests {
                 .unwrap()
                 .replayed
         );
+        let after_edit = crate::read_model::ReadModelService
+            .camp_snapshot(&mut fixture.database, &thread)
+            .unwrap();
+        assert!(
+            !after_edit
+                .agent_runs
+                .iter()
+                .find(|run| run.id == source)
+                .unwrap()
+                .can_continue
+        );
+        let stale_request = fixture.user_command(request());
+        assert_eq!(
+            continue_agent_run(&mut fixture.database, &stale_request)
+                .unwrap()
+                .result
+                .code,
+            "agent_run.continuation_unavailable"
+        );
         let current_waits = |fixture: &mut Fixture| {
             let projection = crate::read_model::ReadModelService
                 .camp_snapshot(&mut fixture.database, &thread)
@@ -2445,6 +2465,7 @@ mod tests {
             .find(|run| run.id == source)
             .unwrap();
         assert_eq!(old.input_message_ids, vec![a.clone(), b.clone(), c.clone()]);
+        assert!(!old.can_continue);
         assert!(old.input_previews[&a].deleted);
         assert_eq!(old.input_summary.as_deref(), Some("原消息已删除"));
         let frozen: String = fixture.database.connection().query_row(
@@ -4015,6 +4036,62 @@ mod tests {
         assert_eq!(
             fixture.materialize_run(&run).rendered_payload,
             initial.rendered_payload
+        );
+        let other_marker = restored
+            .blocks
+            .iter()
+            .flat_map(|block| &block.evidence)
+            .find(|item| item.payload["messageId"] == "steer-two")
+            .unwrap();
+        let deletion = fixture.user_command(
+            crate::collaboration::message_mutation::DeleteThreadMessageCommand {
+                camp_id: fixture.camp_id.clone(),
+                message_id: "steer-two".into(),
+            },
+        );
+        assert_eq!(
+            CollaborationService::default()
+                .delete_camp_message(&mut fixture.database, &deletion)
+                .unwrap()
+                .result
+                .code,
+            "message.deleted"
+        );
+        let changed = crate::execution_window::read_block_changes(
+            &mut fixture.database,
+            &fixture.camp_id,
+            &run,
+            restored.through_change_sequence,
+            &[],
+            24,
+        )
+        .unwrap();
+        let item = changed
+            .blocks
+            .iter()
+            .flat_map(|block| &block.evidence)
+            .find(|item| item.id == other_marker.id)
+            .unwrap();
+        assert_eq!(item.sequence, other_marker.sequence);
+        assert_eq!(item.payload["preview"], "");
+        assert_eq!(item.payload["sourceAvailable"], false);
+        assert_eq!(item.payload["sourceDeleted"], true);
+        assert_eq!(
+            ContextService
+                .runtime_input_delivery_status(&fixture.database, &two_input.id)
+                .unwrap()
+                .as_deref(),
+            Some("accepted")
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row("SELECT status FROM agent_run WHERE id=?1", [&run], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "running"
         );
         let unsent = fixture.enqueue("steer-unsent", "must survive completion");
         {

@@ -9743,8 +9743,27 @@ html[data-mobile-web="true"] .approval-dock.pending-dock { width: calc(100% - 24
   overflow-wrap: anywhere;
 }
 .inline-message-edit .structured-mention-editor:focus { outline: none; }
+.inline-message-edit .message-withdraw-error { overflow-wrap: anywhere; }
 .inline-edit-route { color: var(--muted); font-size: .9em; }
 .inline-edit-route span { color: var(--conversation-action-ink); }
+.inline-edit-conflict {
+  min-inline-size: 0;
+  padding-block-start: 8px;
+  border-block-start: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .9em;
+}
+.inline-edit-conflict-preview {
+  max-block-size: min(12rem, 28dvh);
+  margin-block: 4px 8px;
+  overflow-y: auto;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inline-edit-conflict-preview p { margin: 0; }
+.inline-edit-conflict-preview ul { margin-block: 4px 0; padding-inline-start: 20px; }
+.inline-edit-conflict-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .inline-edit-actions {
   display: flex;
   align-items: center;

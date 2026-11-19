@@ -214,6 +214,12 @@ impl CollaborationService {
             if let Some(publication) = publication {
                 crate::command::erase_deleted_message_receipt(tx,&publication,thread,id)?;
             }
+            let deliveries = tx.prepare("SELECT id FROM camp_message_delivery WHERE message_id=?1")?
+                .query_map([id], |row| row.get::<_,String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for delivery in deliveries {
+                crate::execution_input::changed(tx, &delivery)?;
+            }
             reschedule(tx,thread,id,None,&envelope.actor,&now)?;
             finish_mutation(tx,thread,id,"deleted",&envelope.actor,&now)?;
             message_result(tx,id,"deleted")

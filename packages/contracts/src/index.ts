@@ -2056,6 +2056,8 @@ export type AgentRunCancelReasonCode =
 
 export interface AgentRunView {
   canSteer?: boolean
+  /** Core allows a new manual continuation of this public Run's original inputs. */
+  canContinue?: boolean
   /** Core's decision for this Run's frozen installation and active input binding. */
   steerUnavailableReason?: 'runtime_unsupported' | 'execution_not_ready' | 'execution_changed'
     | 'input_outcome_unknown' | 'runtime_identity_unknown' | 'protocol_incompatible'

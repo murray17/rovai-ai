@@ -1799,6 +1799,7 @@ export function ThreadWorkspace({
     && Boolean(filePreview?.paneVisible && filePreview.activeTab && filePreview.activeTab.kind !== 'execution')
   const replyReader = useMemo(() => new ThreadReplyReader(snapshot.thread.id, client), [snapshot.thread.id, client])
   const replyDetail = useSyncExternalStore(replyReader.subscribe, replyReader.getSnapshot, replyReader.getSnapshot)
+  const replyRootId = replyDetail.messageId
   const [replyFull, setReplyFull] = useState(false)
   const [replyWidth, setReplyWidth] = useState(466)
   const [replyExecutionVisible, setReplyExecutionVisible] = useState(false)
@@ -1903,7 +1904,9 @@ export function ThreadWorkspace({
   const [messageRemoval, setMessageRemoval] = useState<{
     message: ThreadMessageView; kind: 'withdraw' | 'delete'; commandId: string
   } | null>(null)
-  const [editingMessage, setEditingMessage] = useState<{ id: string; surface: 'timeline' | 'reply' } | null>(null)
+  const [editRequest, setEditingMessage] = useState<{ id: string; surface: 'timeline' } | {
+    id: string; surface: 'reply'; rootId: string
+  } | null>(null)
   const deletingMessage = messageRemoval?.kind === 'delete'
   const [deliveryMode, setDeliveryMode] = useState<'start' | 'steer'>('steer')
   useEffect(() => setDeliveryMode('steer'), [snapshot.thread.id])
@@ -2686,6 +2689,24 @@ export function ThreadWorkspace({
     () => new Map(visibleThreadMessages.map((message) => [message.id, message])),
     [visibleThreadMessages]
   )
+  const activeDeletedMessageIds = useRef(deletedMessageIds)
+  activeDeletedMessageIds.current = deletedMessageIds
+  const messageBodyUnavailable = (id: string): boolean =>
+    activeDeletedMessageIds.current.has(id) || anchorNavigation.navigation.bodyIsUnavailable(id)
+  const editTimelineTarget = editRequest && visibleMessageById.get(editRequest.id)
+  const editReplyTarget = editRequest?.surface === 'reply'
+    ? replyDetail.page?.messages.find(message => message.id === editRequest.id) : undefined
+  const latestEditTarget = editTimelineTarget && (!editReplyTarget || editTimelineTarget.version > editReplyTarget.version)
+    ? editTimelineTarget : editReplyTarget
+  const editUnavailable = !!editRequest && (messageBodyUnavailable(editRequest.id)
+    || latestEditTarget?.withdrawn || latestEditTarget?.canEdit === false
+    || (editRequest.surface === 'reply' && replyRootId !== editRequest.rootId))
+  const editingMessage = editUnavailable ? null : editRequest
+  const showInlineEditor = !!editingMessage && (editingMessage.surface === 'reply'
+    ? !!editReplyTarget : conversationView === 'conversation' && !!editTimelineTarget)
+  useEffect(() => {
+    if (editUnavailable) setEditingMessage(current => current === editRequest ? null : current)
+  }, [editRequest, editUnavailable])
   const activeVisibleMessageById = useRef(visibleMessageById)
   activeVisibleMessageById.current = visibleMessageById
   const replyParentById = useMemo(() => {
@@ -5495,11 +5516,14 @@ export function ThreadWorkspace({
 
   return (
     <RunInputSourceContext.Provider value={{
+      bodyIsUnavailable: messageBodyUnavailable,
       body: async messageId => {
+        if (messageBodyUnavailable(messageId)) return null
         const threadId = snapshot.thread.id
-        const message = visibleMessageById.get(messageId)
+        const message = activeVisibleMessageById.current.get(messageId)
           ?? (replyAnchorWindows.get(messageId) ?? await loadReplyAnchorWindow(messageId))?.find(item => item.id === messageId)
-        return activeThreadIdRef.current === threadId && message && !message.withdrawn ? anchorText(message) : null
+        return activeThreadIdRef.current === threadId && message && !message.withdrawn && !messageBodyUnavailable(messageId)
+          ? anchorText(message) : null
       },
       reveal: messageId => {
         setConversationView('conversation')
@@ -6484,10 +6508,7 @@ export function ThreadWorkspace({
         </section>
 
         {replyDetail.messageId && <ReplyDetails state={replyDetail} reader={replyReader} width={replyWidth} full={replyFull}
-          onWidth={setReplyWidth} onFull={() => setReplyFull(value => !value)} onClose={() => {
-            if (editingMessage?.surface === 'reply') setEditingMessage(null)
-            closeReplyDetails()
-          }}
+          onWidth={setReplyWidth} onFull={() => setReplyFull(value => !value)} onClose={() => closeReplyDetails()}
           snapshot={snapshot} profiles={agents} eventsByRunId={executionEventsByRunId} windowedEvidence={openCoverage !== null}
           author={message => campMessageAuthorLabel(message, memberById, currentUserName)}
           onReveal={messageId => void revealReplyParent(messageId, true)}
@@ -6506,7 +6527,8 @@ export function ThreadWorkspace({
           }}
           renderActions={(message, copy) => <MessageActions copied={copy.copied} onCopy={copy.run}
             onWithdraw={message.canWithdraw && onWithdrawMessage ? () => openMessageRemoval(message, 'withdraw') : undefined}
-            onEdit={message.canEdit ? () => setEditingMessage({ id: message.id, surface: 'reply' }) : undefined}
+            onEdit={message.canEdit && replyRootId
+              ? () => setEditingMessage({ id: message.id, surface: 'reply', rootId: replyRootId }) : undefined}
             onDelete={messageDeleteAction(message)} deleteDisabled={message.canDelete === false} />}
           renderBody={message => editingMessage?.surface === 'reply' && editingMessage.id === message.id ? renderMessageEditor(message) : <>
             <div className="reply-detail-body">
@@ -6570,7 +6592,8 @@ export function ThreadWorkspace({
           <div className="message-composer-selection-slot">
           <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
           <form
-        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: mobile && editingMessage ? 'none' : undefined }} inert={messageExport.selecting || (mobile && editingMessage !== null)}
+        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: mobile && showInlineEditor ? 'none' : undefined }}
+        inert={messageExport.selecting || (mobile && showInlineEditor)}
         className={[
           'composer',
           attachmentDragState ? 'is-dragging-attachments' : ''
@@ -8309,8 +8332,7 @@ function ExecutionDrawer({
                   aria-controls={contentId} onClick={() => toggleRun(run.id)}>
                   <ExecutionCardChevron expanded={expanded} />
                 </button>)}
-                {run.invocationKind === 'batch' && run.failure?.code !== 'context_payload_too_large'
-                  && (run.status === 'failed' || run.status === 'cancelled') && inputMessageIds.length > 0 && (
+                {run.canContinue && (
                   <ContinueAgentRunButton threadId={threadId} agentRunId={run.id} onError={onFileOpenError} />
                 )}
                 {(stopState === 'available' || stopState === 'confirming') && (

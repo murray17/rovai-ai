@@ -376,6 +376,7 @@ pub struct RunInputPreview {
 pub struct AgentRunView {
     pub can_steer: bool,
     pub steer_unavailable_reason: Option<crate::steer::SteerUnavailableReason>,
+    pub can_continue: bool,
     pub id: String,
     #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
@@ -3366,6 +3367,13 @@ fn load_agent_runs(
                 } else {
                     crate::steer::ActiveInputAvailability::default()
                 };
+                let can_continue = matches!(status.as_str(), "failed" | "cancelled")
+                    && invocation_kind == "batch"
+                    && failure
+                        .as_ref()
+                        .is_none_or(|failure| failure.code != "context_payload_too_large")
+                    && crate::run_continuation::eligible_source(transaction, camp_id, &id)?
+                        .is_some();
                 let previews = input_previews.remove(&id).unwrap_or_default();
                 let summary = summary_message_id.as_ref().and_then(|message_id| {
                     match previews.get(message_id) {
@@ -3376,6 +3384,7 @@ fn load_agent_runs(
                 Ok(AgentRunView {
                     can_steer: steer.can_steer,
                     steer_unavailable_reason: steer.unavailable_reason,
+                    can_continue,
                     id,
                     camp_turn_id,
                     input_message_ids: serde_json::from_str(&input_message_ids_json)
