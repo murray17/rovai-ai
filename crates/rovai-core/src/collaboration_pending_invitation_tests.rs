@@ -430,7 +430,6 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
                         expected_version: source_version,
                         force: false,
                         workspace_disposition: MissionWorkspaceDisposition::Retain,
-                        archive_guard: None,
                     },
                 ),
             )

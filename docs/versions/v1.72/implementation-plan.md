@@ -3,10 +3,32 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-16
+last_updated: 2026-11-19
 ---
 
 # v1.72 实施与验收
+
+## 会话与使命归档（2026-11-19）
+
+Migration 228 从正式消息编辑库或归档预览库升级到 schema 178，保留已有归档时间。Core 用 Thread ID 游标分批返回摘要，界面取齐后按项目分组。见 [Thread Archive v2](../../contracts/thread-archive-v2.md)。
+
+`cargo test -p rovai-core --lib thread_archive` 覆盖归档事务回滚、当前 Thread 全部执行的取消、幂等和按 ID 分页。`node scripts/smoke-stop-continue.mjs --archive` 通过真实 Core 与测试运行时验证进程退出和恢复后的执行终态。设置页与使命板的 Electron 验收覆盖跨页归组、错误保留、草稿离开和旧链接跳转。
+
+## 公共消息编辑、删除与撤回（2026-11-19）
+
+本轮在 `rovai/thread-message-mutations` 从 `0461437fdf80a8cd01e5b888ec7c67006dae85d` 实施。
+规则归[消息投递](../../contracts/message-delivery-v19.md#公共消息改删)和[会话界面](../../ui/components/conversation-workspace.md)。
+Migration 227 将投影 schema 从 176 升至 177，等待中的 Continue 初始化独立输入清单，旧消息修订号从 1 开始。
+跨目标编辑保持原队员的主动继续次数，新队员收到一次普通投递。「已编辑」由内容修订号派生。
+
+Rust 验收由 `message_mutations_keep_independent_authorizations_and_frozen_inputs` 拥有。
+该场景同时覆盖已启动和仍在等待的两次主动继续，读取源 Run 或按消息全局去重会分别导致执行旧输入或吞掉一次重试。
+既有继续执行测试验证单次授权和 FIFO，新增场景还需验证消息编辑、取消和等待输入写入在同一个 SQLite 事务里回滚，
+所以使用领域命令、生产调度和读取模型夹具。最小命令为
+`cargo test -p rovai-core --features extended-tests --lib message_mutations_keep_independent_authorizations_and_frozen_inputs`。
+
+隔离 Host 和 390px Chrome 验证了长正文编辑框滚动、只添加两个附件时正文不变、保存后显示「（已编辑）」、
+删除后旧正文从时间线和执行来源消失，以及从子消息继续打开回复详情。此验收使用未配置 Runtime 的队员。
 
 ## 会话文件下载合入（2026-11-16）
 

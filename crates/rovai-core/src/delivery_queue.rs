@@ -64,6 +64,11 @@ pub(crate) fn enqueue_message_deliveries(
     recipient_agent_ids: &[String],
     now: &str,
 ) -> Result<Vec<EnqueuedDelivery>> {
+    // Inbound messages can still be recorded while archived. They carry no new work.
+    if !recipient_agent_ids.is_empty() && crate::thread_archive::is_archived(transaction, camp_id)?
+    {
+        return Ok(Vec::new());
+    }
     enqueue_deliveries(
         transaction,
         camp_id,
@@ -71,6 +76,32 @@ pub(crate) fn enqueue_message_deliveries(
         recipient_agent_ids,
         now,
     )
+}
+
+/// An existing ordinary wait retains its queue position when a batch is rescheduled.
+pub(crate) fn enqueue_message_if_absent(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    message_id: &str,
+    recipient: &str,
+    now: &str,
+) -> Result<()> {
+    let waiting: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM camp_message_delivery WHERE message_id=?1
+          AND recipient_agent_id=?2 AND source_kind='message' AND status='waiting')",
+        params![message_id, recipient],
+        |r| r.get(0),
+    )?;
+    if !waiting {
+        enqueue_message_deliveries(
+            transaction,
+            camp_id,
+            message_id,
+            &[recipient.to_owned()],
+            now,
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn enqueue_continuation_delivery(
@@ -135,9 +166,10 @@ fn enqueue_deliveries(
                 id, camp_id, message_id, source_kind, recipient_agent_id,
                 recipient_membership_version_at_admission, queue_sequence,
                 status, claimed_agent_run_id, failure_code, version,
-                created_at, claimed_at, ended_at, updated_at
+                created_at, claimed_at, ended_at, updated_at, message_content_revision, continuation_authorization_id
             ) VALUES (?1, ?2, ?3, ?8, ?4, ?5, ?6, 'waiting', NULL, NULL, 1,
-                      ?7, NULL, NULL, ?7)
+                      ?7, NULL, NULL, ?7, COALESCE((SELECT content_revision FROM camp_message WHERE id=?3),1),
+                      CASE WHEN ?8='continuation' THEN ?1 END)
             "#,
             params![
                 delivery_id,
@@ -566,9 +598,13 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
                 continue;
             }
             if let Some(source_id) = waiting[0].continuation_source_run_id.as_deref() {
-                let source =
-                    crate::run_continuation::eligible_source(&transaction, &camp_id, source_id)?
-                        .context("Continuation scope changed inside the claim transaction")?;
+                let source = crate::run_continuation::eligible_waiting(
+                    &transaction,
+                    &camp_id,
+                    source_id,
+                    &waiting[0].id,
+                )?
+                .context("Continuation scope changed inside the claim transaction")?;
                 // The User authorized continuation, including a fresh session when
                 // the current binding cannot safely resume. Choose only after the
                 // cleanup gates, using the latest state rather than a preflight choice.
@@ -756,7 +792,7 @@ fn load_waiting_prefix(
           AND delivery.recipient_agent_id = ?2
           AND delivery.status = 'waiting'
           AND ((delivery.source_kind='message' AND message.tombstoned_at IS NULL
-                AND message.recall_state <> 'withdrawn')
+                AND message.recall_state <> 'withdrawn' AND message.content_revision=delivery.message_content_revision)
             OR (delivery.source_kind='continuation' AND continuation.delivery_id IS NOT NULL))
         ORDER BY delivery.queue_sequence
         "#,
@@ -793,7 +829,9 @@ fn load_waiting_prefix(
         else {
             break;
         };
-        if crate::run_continuation::eligible_source(transaction, camp_id, source_id)?.is_some() {
+        if crate::run_continuation::eligible_waiting(transaction, camp_id, source_id, delivery_id)?
+            .is_some()
+        {
             break;
         }
         // Admission can expire while waiting; never turn its system operation into business input.
@@ -823,12 +861,19 @@ fn load_waiting_prefix(
         use_new_session,
     } = first
     {
-        let mut statement=transaction.prepare("SELECT input.message_id,input.message_sequence,message.structured_content_json,
-            input.message_content_digest,input.default_recipient_display_name
-            FROM agent_run_input AS input JOIN camp_message AS message ON message.id=input.message_id
-            WHERE input.agent_run_id=?1 ORDER BY input.ordinal")?;
+        let mut statement = transaction.prepare("SELECT input.message_id,message.sequence,message.structured_content_json,
+            message.content_digest,CASE WHEN historical.message_content_revision=message.content_revision
+                THEN historical.default_recipient_display_name
+                WHEN message.address_mode='default' AND json_array_length(message.addressed_agent_ids_json)=1
+                THEN recipient.display_name END
+            FROM camp_run_continuation_input AS input
+            JOIN camp_message AS message ON message.id=input.message_id
+            JOIN camp_message_delivery AS delivery ON delivery.id=input.delivery_id
+            JOIN agent_profile AS recipient ON recipient.id=delivery.recipient_agent_id
+            LEFT JOIN agent_run_input AS historical ON historical.agent_run_id=?2 AND historical.message_id=input.message_id
+            WHERE input.delivery_id=?1 ORDER BY input.ordinal")?;
         return Ok(statement
-            .query_map([source_id], |row| {
+            .query_map(params![delivery_id, source_id], |row| {
                 Ok(WaitingDelivery {
                     id: delivery_id.clone(),
                     message_id: row.get(0)?,
@@ -1110,8 +1155,10 @@ fn insert_batch_run(
             INSERT INTO agent_run_input(
                 agent_run_id, ordinal, delivery_id, message_id,
                 message_sequence, message_content_digest,
-                context_manifest_version, default_recipient_display_name
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                context_manifest_version, default_recipient_display_name,
+                message_content_revision, input_snapshot_json
+            ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, content_revision, ?9
+              FROM camp_message WHERE id=?4
             "#,
             params![
                 agent_run_id,
@@ -1122,6 +1169,10 @@ fn insert_batch_run(
                 delivery.content_digest,
                 PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION,
                 delivery.default_recipient_display_name,
+                crate::collaboration::message_mutation::input_snapshot(
+                    transaction,
+                    &delivery.message_id
+                )?,
             ],
         )?;
         let terminal_status = if error_code.is_some() {
@@ -1782,6 +1833,7 @@ mod tests {
         assert_eq!(projected.agent_runs[0].id, source);
         assert_eq!(projected.agent_runs[0].status, "failed");
         assert!(projected.agent_runs[0].has_accepted_continuation);
+        assert!(projected.agent_runs[0].can_continue);
         assert_eq!(
             serde_json::to_value(&projected.agent_runs[0]).unwrap()["hasAcceptedContinuation"],
             true
@@ -2150,6 +2202,378 @@ mod tests {
 
     // Keep Task scope in the existing admission owner, but exercise production
     // send, batch claim, Stop and Task update instead of filling run.task_id.
+    // Owns the mutation transaction across active input, waiting input, the
+    // published revision and the read model. A SQL- or UI-only fixture cannot
+    // catch a lost authorization or cancellation committed before a failed edit.
+    #[test]
+    #[cfg(feature = "extended-tests")]
+    fn message_mutations_keep_independent_authorizations_and_frozen_inputs() {
+        use crate::collaboration::WithdrawThreadMessageCommand;
+        use crate::collaboration::message_mutation::{
+            DeleteThreadMessageCommand, EditThreadMessageCommand, capabilities,
+        };
+        use crate::command::CommandResultStatus;
+        use crate::run_continuation::{ContinueAgentRunCommand, continue_agent_run};
+
+        let mut fixture = Fixture::with_members(&["agent_1", "agent_2"]);
+        let thread = fixture.camp_id.clone();
+        let service = CollaborationService::default();
+        let edit = |id: &str, revision, agent: &str, text: &str| EditThreadMessageCommand {
+            camp_id: thread.clone(),
+            message_id: id.into(),
+            expected_content_revision: revision,
+            retain_attachment_ids: vec![],
+            source_attachments: vec![],
+            content: crate::camp_content::composer_document_from_content(&[
+                StructuredThreadMessageSegment::MemberMention {
+                    agent_id: agent.into(),
+                },
+                StructuredThreadMessageSegment::Text {
+                    text: format!(" {text}"),
+                },
+            ])
+            .unwrap(),
+        };
+        let waiting = fixture.send_user_input("agent_1", "waiting for recall", None);
+        let change = fixture.user_command(edit(&waiting, 1, "agent_2", "waiting for recall"));
+        assert_eq!(
+            service
+                .edit_camp_message(&mut fixture.database, &change, None)
+                .unwrap()
+                .result
+                .payload["contentRevision"],
+            2
+        );
+        assert!(
+            capabilities(fixture.database.connection(), &waiting)
+                .unwrap()
+                .can_withdraw
+        );
+        let version = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM camp_message WHERE id=?1",
+                [&waiting],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let withdraw = fixture.user_command(WithdrawThreadMessageCommand {
+            camp_id: thread.clone(),
+            message_id: waiting,
+            expected_version: version,
+        });
+        assert_eq!(
+            service
+                .withdraw_camp_message(&mut fixture.database, &withdraw)
+                .unwrap()
+                .result
+                .status,
+            CommandResultStatus::Applied
+        );
+
+        let a = fixture.send_user_input("agent_1", "input A", None);
+        let b = fixture.send_user_input("agent_1", "input B", None);
+        let c = fixture.send_user_input("agent_1", "input C", None);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET reply_to_camp_message_id=?1 WHERE id=?2",
+                params![a, b],
+            )
+            .unwrap();
+        let source = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .remove(0);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='failed',ended_at=datetime('now') WHERE id=?1",
+                [&source],
+            )
+            .unwrap();
+        let request = || ContinueAgentRunCommand {
+            camp_id: thread.clone(),
+            agent_run_id: source.clone(),
+            use_new_session: false,
+        };
+        let first = fixture.user_command(request());
+        let first = continue_agent_run(&mut fixture.database, &first)
+            .unwrap()
+            .result
+            .payload["deliveryId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let next = fixture.user_command(request());
+        let next = continue_agent_run(&mut fixture.database, &next)
+            .unwrap()
+            .result
+            .payload["deliveryId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let active = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .remove(0);
+
+        let original = fixture.user_command(edit(&a, 1, "agent_1", "input A"));
+        let unchanged = service
+            .edit_camp_message(&mut fixture.database, &original, None)
+            .unwrap();
+        assert_eq!(unchanged.result.code, "message.unchanged");
+        assert!(
+            !capabilities(fixture.database.connection(), &a)
+                .unwrap()
+                .can_withdraw
+        );
+
+        let edited = fixture.user_command(edit(
+            &a,
+            1,
+            "agent_1",
+            "input A revision 2 with @media and @types/node",
+        ));
+        fixture.database.connection().execute_batch("CREATE TEMP TRIGGER edit_failure BEFORE UPDATE OF content_revision ON camp_run_continuation_input BEGIN SELECT RAISE(ABORT,'fixture rollback'); END;").unwrap();
+        assert!(
+            service
+                .edit_camp_message(&mut fixture.database, &edited, None)
+                .is_err()
+        );
+        assert_eq!(
+            capabilities(fixture.database.connection(), &a)
+                .unwrap()
+                .revision,
+            1
+        );
+        let status = fixture
+            .database
+            .connection()
+            .query_row("SELECT status FROM agent_run WHERE id=?1", [&active], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap();
+        assert_eq!(status, "queued");
+        fixture
+            .database
+            .connection()
+            .execute_batch("DROP TRIGGER edit_failure;")
+            .unwrap();
+
+        assert_eq!(
+            service
+                .edit_camp_message(&mut fixture.database, &edited, None)
+                .unwrap()
+                .result
+                .payload["contentRevision"],
+            2
+        );
+        assert!(
+            service
+                .edit_camp_message(&mut fixture.database, &edited, None)
+                .unwrap()
+                .replayed
+        );
+        let after_edit = crate::read_model::ReadModelService
+            .camp_snapshot(&mut fixture.database, &thread)
+            .unwrap();
+        assert!(
+            !after_edit
+                .agent_runs
+                .iter()
+                .find(|run| run.id == source)
+                .unwrap()
+                .can_continue
+        );
+        let stale_request = fixture.user_command(request());
+        assert_eq!(
+            continue_agent_run(&mut fixture.database, &stale_request)
+                .unwrap()
+                .result
+                .code,
+            "agent_run.continuation_unavailable"
+        );
+        let current_waits = |fixture: &mut Fixture| {
+            let projection = crate::read_model::ReadModelService
+                .camp_snapshot(&mut fixture.database, &thread)
+                .unwrap();
+            projection
+                .message_deliveries
+                .into_iter()
+                .filter(|delivery| {
+                    delivery.status == "waiting" && delivery.continuation_request == Some(true)
+                })
+                .map(|delivery| {
+                    (
+                        delivery.id,
+                        delivery.recipient_agent_id,
+                        delivery.input_message_ids,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let waits = current_waits(&mut fixture);
+        assert_eq!(waits.len(), 2);
+        assert!(
+            waits.iter().all(|(_, agent, ids)| agent == "agent_1"
+                && ids == &vec![a.clone(), b.clone(), c.clone()])
+        );
+        assert!(waits.iter().any(|(id, _, _)| id == &next));
+        let replacement: String = fixture.database.connection().query_row(
+            "SELECT id FROM camp_message_delivery WHERE continuation_authorization_id=?1 AND status='waiting'",[&first],|r|r.get(0),
+        ).unwrap();
+        assert_ne!(replacement, first);
+
+        let rerouted = fixture.user_command(edit(&a, 2, "agent_2", "input A revision 3"));
+        service
+            .edit_camp_message(&mut fixture.database, &rerouted, None)
+            .unwrap();
+        let waits = current_waits(&mut fixture);
+        assert_eq!(waits.len(), 2);
+        assert!(
+            waits
+                .iter()
+                .all(|(_, agent, ids)| agent == "agent_1" && ids == &vec![b.clone(), c.clone()])
+        );
+        let new_lane: (i64,String) = fixture.database.connection().query_row(
+            "SELECT count(*),recipient_agent_id FROM camp_message_delivery WHERE message_id=?1 AND status='waiting'",[&a],|r|Ok((r.get(0)?,r.get(1)?)),
+        ).unwrap();
+        assert_eq!(new_lane, (1, "agent_2".into()));
+
+        let delete = fixture.user_command(DeleteThreadMessageCommand {
+            camp_id: thread.clone(),
+            message_id: a.clone(),
+        });
+        assert_eq!(
+            service
+                .delete_camp_message(&mut fixture.database, &delete)
+                .unwrap()
+                .result
+                .code,
+            "message.deleted"
+        );
+        let projection = crate::read_model::ReadModelService
+            .camp_snapshot(&mut fixture.database, &thread)
+            .unwrap();
+        assert!(!projection.messages.iter().any(|message| message.id == a));
+        let reply = projection
+            .messages
+            .iter()
+            .find(|message| message.id == b)
+            .unwrap();
+        assert!(reply.reply_parent_deleted);
+        let old = projection
+            .agent_runs
+            .iter()
+            .find(|run| run.id == source)
+            .unwrap();
+        assert_eq!(old.input_message_ids, vec![a.clone(), b.clone(), c.clone()]);
+        assert!(!old.can_continue);
+        assert!(old.input_previews[&a].deleted);
+        assert_eq!(old.input_summary.as_deref(), Some("原消息已删除"));
+        let frozen: String = fixture.database.connection().query_row(
+            "SELECT json_extract(input_snapshot_json,'$.body') FROM agent_run_input WHERE agent_run_id=?1 AND message_id=?2",
+            params![source,a], |r|r.get(0)).unwrap();
+        assert!(frozen.ends_with("input A"));
+        let claimed = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .remove(0);
+        let projection = crate::read_model::ReadModelService
+            .camp_snapshot(&mut fixture.database, &thread)
+            .unwrap();
+        let new_run = projection
+            .agent_runs
+            .iter()
+            .find(|run| run.id == claimed)
+            .unwrap();
+        assert_eq!(new_run.input_message_ids, vec![b, c]);
+
+        // An attachment-only edit cancels an ordinary batch. Later edits replace
+        // its still-waiting revision, and deleting every remaining input leaves no batch.
+        let mut ordinary = Fixture::new();
+        let thread = ordinary.camp_id.clone();
+        let a = ordinary.send_user_input("agent_1", "ordinary A", None);
+        let b = ordinary.send_user_input("agent_1", "ordinary B", None);
+        let c = ordinary.send_user_input("agent_1", "ordinary C", None);
+        let old = claim_waiting_delivery_batches(&mut ordinary.database, 1)
+            .unwrap()
+            .remove(0);
+        let file = ordinary._directory.join("edit-attachment.txt");
+        std::fs::write(&file, "attachment only").unwrap();
+        let attachment = crate::local_attachment_source::observe_source_attachment(
+            &file,
+            "edit-attachment.txt",
+            Some("text/plain"),
+        )
+        .unwrap();
+        let attachment_id = attachment.id.clone();
+        let mut command = edit(&a, 1, "agent_1", "ordinary A");
+        command.camp_id = thread.clone();
+        command.source_attachments = vec![attachment];
+        let command = ordinary.user_command(command);
+        assert_eq!(
+            service
+                .edit_camp_message(&mut ordinary.database, &command, None)
+                .unwrap()
+                .result
+                .payload["contentRevision"],
+            2
+        );
+        let mut command = edit(&a, 2, "agent_1", "ordinary A latest");
+        command.camp_id = thread.clone();
+        command.retain_attachment_ids = vec![attachment_id];
+        let command = ordinary.user_command(command);
+        assert_eq!(
+            service
+                .edit_camp_message(&mut ordinary.database, &command, None)
+                .unwrap()
+                .result
+                .payload["contentRevision"],
+            3
+        );
+        let database = ordinary.database.connection();
+        assert_eq!(
+            database
+                .query_row("SELECT status FROM agent_run WHERE id=?1", [&old], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+            "cancelled"
+        );
+        let active_inputs = database
+            .prepare(
+                "SELECT message_id,message_content_revision FROM camp_message_delivery
+            WHERE camp_id=?1 AND status='waiting' ORDER BY queue_sequence",
+            )
+            .unwrap()
+            .query_map([&thread], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            active_inputs,
+            vec![(a.clone(), 3), (b.clone(), 1), (c.clone(), 1)]
+        );
+        for id in [a, b, c] {
+            let deletion = ordinary.user_command(DeleteThreadMessageCommand {
+                camp_id: thread.clone(),
+                message_id: id,
+            });
+            service
+                .delete_camp_message(&mut ordinary.database, &deletion)
+                .unwrap();
+        }
+        assert!(
+            claim_waiting_delivery_batches(&mut ordinary.database, 1)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[cfg(feature = "extended-tests")]
     fn assert_continuation_task_links() {
         use crate::{
@@ -2980,6 +3404,7 @@ mod tests {
                         | crate::agent_profile::AdapterKind::TraeCnCli
                         | crate::agent_profile::AdapterKind::OpencodeCli
                         | crate::agent_profile::AdapterKind::KiloCli
+                        | crate::agent_profile::AdapterKind::GooseCli
                 )
             );
         }
@@ -3616,6 +4041,62 @@ mod tests {
         assert_eq!(
             fixture.materialize_run(&run).rendered_payload,
             initial.rendered_payload
+        );
+        let other_marker = restored
+            .blocks
+            .iter()
+            .flat_map(|block| &block.evidence)
+            .find(|item| item.payload["messageId"] == "steer-two")
+            .unwrap();
+        let deletion = fixture.user_command(
+            crate::collaboration::message_mutation::DeleteThreadMessageCommand {
+                camp_id: fixture.camp_id.clone(),
+                message_id: "steer-two".into(),
+            },
+        );
+        assert_eq!(
+            CollaborationService::default()
+                .delete_camp_message(&mut fixture.database, &deletion)
+                .unwrap()
+                .result
+                .code,
+            "message.deleted"
+        );
+        let changed = crate::execution_window::read_block_changes(
+            &mut fixture.database,
+            &fixture.camp_id,
+            &run,
+            restored.through_change_sequence,
+            &[],
+            24,
+        )
+        .unwrap();
+        let item = changed
+            .blocks
+            .iter()
+            .flat_map(|block| &block.evidence)
+            .find(|item| item.id == other_marker.id)
+            .unwrap();
+        assert_eq!(item.sequence, other_marker.sequence);
+        assert_eq!(item.payload["preview"], "");
+        assert_eq!(item.payload["sourceAvailable"], false);
+        assert_eq!(item.payload["sourceDeleted"], true);
+        assert_eq!(
+            ContextService
+                .runtime_input_delivery_status(&fixture.database, &two_input.id)
+                .unwrap()
+                .as_deref(),
+            Some("accepted")
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row("SELECT status FROM agent_run WHERE id=?1", [&run], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "running"
         );
         let unsent = fixture.enqueue("steer-unsent", "must survive completion");
         {
@@ -4370,6 +4851,19 @@ mod tests {
             .unwrap();
         let projected = snapshot.messages.iter().find(|m| m.id == message).unwrap();
         assert!(!projected.can_withdraw);
+        assert!(projected.submitted_as_steer);
+        assert!(!projected.can_edit);
+        assert!(!projected.can_delete);
+        use crate::collaboration::message_mutation::{DeleteThreadMessageCommand, capabilities};
+        let deletion = || DeleteThreadMessageCommand {
+            camp_id: command.payload.camp_id.clone(),
+            message_id: message.to_owned(),
+        };
+        let in_flight_delete = multi.user_command(deletion());
+        let rejected = CollaborationService::default()
+            .delete_camp_message(&mut multi.database, &in_flight_delete)
+            .unwrap();
+        assert_eq!(rejected.result.code, "message.delete_unavailable");
         let withdraw = multi.user_command(crate::collaboration::WithdrawThreadMessageCommand {
             camp_id: multi.camp_id.clone(),
             message_id: message.to_string(),
@@ -4399,6 +4893,45 @@ mod tests {
             "only the idle target starts; old Pi remains an ordinary busy lane"
         );
         assert_eq!(multi.database.connection().query_row("SELECT c.agent_id FROM agent_run r JOIN conversation c ON c.id=r.conversation_id WHERE r.id=?1",[&starts[0]],|r|r.get::<_,String>(0)).unwrap(),"agent_3");
+        let steer_delivery: String = multi.database.connection().query_row(
+            "SELECT id FROM camp_message_delivery WHERE message_id=?1 AND requested_mode='steer'",[message],|r|r.get(0),
+        ).unwrap();
+        let tx = multi.database.connection_mut().transaction().unwrap();
+        crate::steer::return_to_queue(&tx, &steer_delivery, &chrono::Utc::now().to_rfc3339())
+            .unwrap();
+        tx.commit().unwrap();
+        let facts = capabilities(multi.database.connection(), message).unwrap();
+        assert!(facts.can_delete);
+        assert!(!facts.can_edit && !facts.can_withdraw);
+        let settled_delete = multi.user_command(deletion());
+        assert_eq!(
+            CollaborationService::default()
+                .delete_camp_message(&mut multi.database, &settled_delete)
+                .unwrap()
+                .result
+                .code,
+            "message.deleted"
+        );
+        for run in originals {
+            let status: String = multi
+                .database
+                .connection()
+                .query_row("SELECT status FROM agent_run WHERE id=?1", [run], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(status, "running");
+        }
+        let stopped: String = multi
+            .database
+            .connection()
+            .query_row(
+                "SELECT status FROM agent_run WHERE id=?1",
+                [&starts[0]],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stopped, "cancelled");
     }
 
     // Owns crash windows at the durable send boundary, including late receipts after a successor starts.

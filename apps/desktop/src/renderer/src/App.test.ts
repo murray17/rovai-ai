@@ -4306,7 +4306,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
     expect(markup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"/)
     expect(markup).toContain('处理中 1')
-    expect(queuedMarkup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"[\s\S]*启动中 1/)
+    expect(queuedMarkup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"[\s\S]*处理中 1/)
     expect(waitingQueueMarkup).toContain('data-delivery-queue-agent-id="agent_2"')
     expect(waitingQueueMarkup).toContain('aria-label="查看排队消息的 2 条输入"')
     expect(waitingQueueMarkup).toContain('d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 17l10 5 10-5"')

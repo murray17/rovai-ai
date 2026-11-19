@@ -637,35 +637,12 @@ app.whenReady().then(async () => {
       value = await localDraftState()
       assert.equal(value.body, '当前已有草稿', 'remount restores the Camp-local draft')
       assert.equal(value.editable, 'true')
-      const editorVisible = "document.querySelector('#camp-message').getClientRects().length > 0"
-      const editorFocused = "document.activeElement.id === 'camp-message'"
-      await run('window.campOpenTest.setArchived(true)')
-      await waitFor(`!(${editorVisible})`)
-      assert.ok(await run("document.querySelector('.archived-composer-notice').textContent.includes('有新消息时会重新显示')"))
-      await run("document.querySelector('.archived-composer-notice button').focus(); document.activeElement.click()")
-      await waitFor("document.querySelector('.archived-composer-notice button').disabled")
-      await run('window.campOpenTest.acknowledgeUnarchive()')
-      await settle()
-      assert.equal(await run(editorVisible), false, 'a receipt alone keeps the composer hidden')
-      await run('window.campOpenTest.setArchived(false)')
-      await waitFor(`(${editorVisible}) && (${editorFocused})`)
-      assert.equal((await localDraftState()).text, '当前已有草稿', 'manual restore focuses the existing draft')
-
-      await run('window.campOpenTest.setArchived(true)')
-      await waitFor(`!(${editorVisible})`)
-      const sidebarButton = "document.querySelector('.unified-sidebar button:not([disabled])')"
-      await run(`${sidebarButton}.focus()`)
-      assert.ok(await run(`document.activeElement === ${sidebarButton}`))
-      await run('window.campOpenTest.setArchived(false)')
-      await waitFor(editorVisible)
-      assert.ok(await run(`document.activeElement === ${sidebarButton}`), 'external restore keeps the current focus')
       for (const theme of ['day', 'night']) {
         await run('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
         await settle()
         await capture(`camp-local-draft-${theme}`)
       }
-      console.log(JSON.stringify({ ok: true, mode, checks: ['local-persistence', 'projection-refresh', 'remount',
-        'no-private-pending-queue', 'manual-archive-focus', 'external-archive-focus'] }))
+      console.log(JSON.stringify({ ok: true, mode, checks: ['local-persistence', 'projection-refresh', 'remount', 'no-private-pending-queue'] }))
       window.destroy(); app.quit()
       return
     }

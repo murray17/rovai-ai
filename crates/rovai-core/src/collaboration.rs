@@ -1,3 +1,5 @@
+#[path = "message_mutation.rs"]
+pub mod message_mutation;
 use crate::draft_client::DraftClient;
 use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes, store_quotes};
 use std::{
@@ -231,8 +233,6 @@ pub struct DeleteThreadCommand {
     pub force: bool,
     #[serde(default)]
     pub workspace_disposition: MissionWorkspaceDisposition,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archive_guard: Option<crate::thread_archive::ArchiveGuard>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,19 +765,9 @@ impl CollaborationService {
             let source_command_id = source_command_id
                 .filter(|value| !value.trim().is_empty())
                 .context("recallable Composer message has no publication command identity")?;
-            let unsafe_delivery_exists: bool = transaction.query_row(
-                r#"
-                SELECT EXISTS(
-                    SELECT 1 FROM camp_message_delivery
-                    WHERE message_id = ?1 AND status <> 'waiting'
-                ) OR EXISTS(
-                    SELECT 1 FROM agent_run_input WHERE message_id = ?1
-                )
-                "#,
-                [&envelope.payload.message_id],
-                |row| row.get(0),
-            )?;
-            if unsafe_delivery_exists {
+            if !message_mutation::capabilities(transaction, &envelope.payload.message_id)?
+                .can_withdraw
+            {
                 return Ok(rejected(
                     "message.withdraw_too_late",
                     "The message has crossed an Agent recognition boundary",
@@ -3076,6 +3066,12 @@ impl CollaborationService {
         Self::validate_send_message_input(command)?;
         let camp_message_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
+            if crate::thread_archive::is_archived(transaction, &command.camp_id)? {
+                return Ok(rejected(
+                    "camp.archived",
+                    "Unarchive this Thread before sending",
+                ));
+            }
             // A rejected command receipt is committed by the gateway. Roll back
             // tentative first-send membership even on a normal business rejection.
             let pending_submission = matches!(
@@ -3251,6 +3247,7 @@ impl CollaborationService {
                     )?;
                     let result_payload = json!({
                         "threadMessageId": camp_message_id,
+                        "contentRevision": 1,
                         "sequence": queued.camp_sequence,
                         "deliveryIds": queued.delivery_ids,
                     });
@@ -9343,7 +9340,6 @@ mod slow_tests {
                 expected_version: delete_version,
                 force: false,
                 workspace_disposition: MissionWorkspaceDisposition::Cleanup,
-                archive_guard: None,
             },
         );
         let delete = service
@@ -9455,7 +9451,6 @@ mod slow_tests {
                         expected_version: delete_version,
                         force: false,
                         workspace_disposition: Default::default(),
-                        archive_guard: None,
                     },
                 ),
             )
@@ -9564,7 +9559,6 @@ mod slow_tests {
                         expected_version: delete_version,
                         force: true,
                         workspace_disposition: Default::default(),
-                        archive_guard: None,
                     },
                 ),
                 &prior_blockers,
@@ -9582,7 +9576,6 @@ mod slow_tests {
                         expected_version: delete_version,
                         force: true,
                         workspace_disposition: Default::default(),
-                        archive_guard: None,
                     },
                 ),
             )

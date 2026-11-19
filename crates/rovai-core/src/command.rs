@@ -690,6 +690,23 @@ pub(crate) fn erase_command_result_receipt(
     Ok(())
 }
 
+pub(crate) fn erase_deleted_message_receipt(
+    transaction: &Transaction<'_>,
+    command_id: &str,
+    camp_id: &str,
+    message_id: &str,
+) -> Result<()> {
+    let payload = serde_json::to_string(&json!({"messageId": message_id, "status": "deleted"}))?;
+    transaction.execute(
+        "UPDATE event_log SET request_digest=NULL, request_digest_version=NULL,
+            result_code='message.deleted', result_payload_json=?4
+         WHERE event_type='command.result' AND command_id=?1 AND camp_id=?2
+           AND result_entity_type='camp_message' AND result_entity_id=?3",
+        params![command_id, camp_id, message_id, payload],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{cell::Cell, path::Path};

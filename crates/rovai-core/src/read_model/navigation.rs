@@ -31,7 +31,7 @@ fn load_rows(
              OR EXISTS(SELECT 1 FROM camp_turn t JOIN agent_run r ON r.camp_turn_id = t.id
                        WHERE t.camp_id = camp.id AND r.camp_id IS NULL AND r.status IN ('queued', 'running', 'waiting'))),
             camp.version, camp.activation_state, channel.provider, channel.conversation_kind,
-            camp.archived_at, camp.archive_revision
+            camp.archived_at
         FROM camp
         LEFT JOIN agent_profile lead ON lead.id = camp.default_lead_agent_id
         LEFT JOIN camp_view_state v ON v.camp_id = camp.id
@@ -83,7 +83,6 @@ fn load_rows(
                 last_seen_global_sequence: seen,
                 version: row.get(11)?,
                 archived_at: row.get(15)?,
-                archive_revision: row.get(16)?,
             })
         },
     )?;
@@ -124,7 +123,14 @@ pub(super) fn load_navigation_group(
     offset: usize,
     limit: usize,
 ) -> Result<Vec<NavigationThreadItem>> {
-    load_rows(tx, client, &format!("{GROUP_KEY} = ?2 AND camp.archived_at IS NULL"), key, offset, limit)
+    load_rows(
+        tx,
+        client,
+        &format!("{GROUP_KEY} = ?2 AND camp.archived_at IS NULL"),
+        key,
+        offset,
+        limit,
+    )
 }
 
 pub(super) fn load_navigation_groups(

@@ -2,13 +2,15 @@
 document_type: protocol-contract
 contract: thread-archive-v1
 authority: thread-archive
-status: accepted
+status: superseded
 version: 1
 source_version: v1.72
 last_updated: 2026-11-19
 ---
 
-# Thread Archive v1
+# Thread Archive v1（历史）
+
+当前合同见 [Thread Archive v2](thread-archive-v2.md)。
 
 用户可归档任何 Active Thread。存在 Mission 关联的 Thread 按使命管理，其余按会话管理。归档保留
 Thread 与 Mission 的身份、成员、消息、附件、项目和执行状态。使命业务状态沿用 [Mission 合同](mission-v14.md)。

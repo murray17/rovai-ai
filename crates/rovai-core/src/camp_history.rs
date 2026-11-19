@@ -1864,13 +1864,13 @@ fn read_thread(
     limit: usize,
 ) -> Result<Value> {
     let anchor = load_anchor_message(transaction, target, message_id)?;
-    let root = resolve_thread_root(transaction, target, anchor.clone())?;
+    let root = resolve_thread_root(transaction, target, &anchor)?;
     let boundary = cursor.unwrap_or(anchor.sequence);
     let inclusive = cursor.is_none();
     let mut rows = load_thread_page(
         transaction,
         target,
-        &root.id,
+        &root,
         direction,
         boundary,
         inclusive,
@@ -1896,7 +1896,7 @@ fn read_thread(
             "threadId": target.camp_id,
             "mode": "reply_chain",
             "anchorMessageId": message_id,
-            "replyChainRootMessageId": root.id,
+            "replyChainRootMessageId": root,
             "direction": direction.as_str(),
             "items": [],
             "nextCursor": next_cursor,
@@ -2079,7 +2079,9 @@ fn load_ordered_messages(
             "thread(id) AS (\
              SELECT '{escaped}' UNION ALL \
              SELECT child.id FROM camp_message AS child \
-             JOIN thread ON child.reply_to_camp_message_id = thread.id)"
+             JOIN thread ON child.reply_to_camp_message_id = thread.id \
+             JOIN camp_message AS parent ON parent.id=thread.id \
+             WHERE child.camp_id=?1 AND child.sequence>parent.sequence)"
         )
     });
     let thread_join = thread_root_id.map_or("", |_| "JOIN thread ON thread.id = message.id");
@@ -2144,20 +2146,35 @@ fn load_ordered_messages(
 fn resolve_thread_root(
     transaction: &Transaction<'_>,
     target: &ThreadTarget,
-    mut message: MessageRow,
-) -> Result<MessageRow> {
-    let mut seen = HashSet::new();
-    while let Some(parent_id) = message.reply_to_message_id.clone() {
-        if !seen.insert(message.id.clone()) {
-            return Err(read_unavailable());
-        }
-        message =
-            load_visible_message(transaction, target, &parent_id)?.ok_or_else(read_unavailable)?;
-        if message.withdrawn {
-            return Err(read_unavailable());
-        }
-    }
-    Ok(message)
+    anchor: &MessageRow,
+) -> Result<String> {
+    let (fence, boundary) = match target.fence {
+        MessageFence::Current { boundary } => ("m.sequence <= ?3", boundary),
+        MessageFence::History { global_boundary } => (
+            "EXISTS(SELECT 1 FROM public_camp_message_publication p
+              WHERE p.message_id=m.id AND p.global_sequence<=?3)",
+            global_boundary,
+        ),
+    };
+    let ctes = if matches!(target.fence, MessageFence::History { .. }) {
+        format!("{},", public_camp_message_publication_cte())
+    } else {
+        String::new()
+    };
+    // Only traverse identities in the original read fence. Content is fetched by load_thread_page.
+    let sql = format!("WITH RECURSIVE {ctes} parents(id,seq,parent) AS (
+        SELECT id,sequence,reply_to_camp_message_id FROM camp_message WHERE id=?1 AND camp_id=?2
+        UNION ALL
+        SELECT m.id,m.sequence,m.reply_to_camp_message_id FROM camp_message m
+        JOIN parents p ON m.id=p.parent AND m.sequence<p.seq
+        WHERE m.camp_id=?2 AND {fence} AND (m.tombstoned_at IS NOT NULL OR m.recall_state<>'withdrawn')
+    ) SELECT id FROM parents WHERE parent IS NULL");
+    transaction
+        .query_row(&sql, params![anchor.id, target.camp_id, boundary], |r| {
+            r.get(0)
+        })
+        .optional()?
+        .ok_or_else(read_unavailable)
 }
 
 fn load_thread_page(
@@ -3263,6 +3280,35 @@ mod slow_tests {
             fence: MessageFence::Current { boundary: 230 },
             viewer_agent_id: target.viewer_agent_id.clone(),
         };
+        transaction.execute(
+            "UPDATE camp_message SET reply_to_camp_message_id='message-101' WHERE id='message-102'",
+            [],
+        ).unwrap();
+        let through_deleted_parent = read_thread(
+            &transaction,
+            &paged_target,
+            "message-102",
+            ReadDirection::Before,
+            None,
+            20,
+        )
+        .unwrap();
+        assert_eq!(
+            through_deleted_parent["replyChainRootMessageId"],
+            "message-101"
+        );
+        assert_eq!(through_deleted_parent["items"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            through_deleted_parent["items"][0]["messageId"],
+            "message-102"
+        );
+        assert!(
+            !through_deleted_parent
+                .to_string()
+                .contains("Complete body 101")
+        );
+        assert!(read_item(&transaction, &paged_target, &run, "message-101").is_err());
+
         let default_page = read_timeline(
             &transaction,
             &paged_target,

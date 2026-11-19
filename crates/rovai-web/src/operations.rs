@@ -333,6 +333,10 @@ pub enum Operation {
     Send,
     #[serde(rename = "thread.messages.withdraw", alias = "camp.messages.withdraw")]
     WithdrawMessage,
+    #[serde(rename = "thread.messages.edit", alias = "camp.messages.edit")]
+    EditMessage,
+    #[serde(rename = "thread.messages.delete", alias = "camp.messages.delete")]
+    DeleteMessage,
     #[serde(rename = "action.approvals.resolve")]
     Approval,
     #[serde(rename = "nativeInteractions.respond")]
@@ -595,6 +599,8 @@ impl Operation {
             Self::CaptureQuote => "messageQuotes.capture",
             Self::Send => "camp.messages.send",
             Self::WithdrawMessage => "camp.messages.withdraw",
+            Self::EditMessage => "camp.messages.edit",
+            Self::DeleteMessage => "camp.messages.delete",
             Self::Approval => "action.approvals.resolve",
             Self::NativeInteraction => "nativeInteractions.respond",
             Self::CancelRun => "agentRuns.cancel",

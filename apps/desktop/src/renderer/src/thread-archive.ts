@@ -1,7 +1,6 @@
-import type { ArchiveCommand, ArchiveCommandPayload, CoreEvent, DeleteThreadCommand, StoredCommandResult } from '@contracts'
+import type { ArchiveCommand, ArchiveCommandPayload, ArchiveItem, ArchiveKind, CoreEvent, DeleteThreadCommand, StoredCommandResult } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import type { ThreadClient } from './camp-client'
-import { desktopThreadClient } from './desktop-camp-client'
 import { uiAttribute } from './interface-language'
 import { isReferenceDirectoryEvent } from './useReferenceAvailability'
 
@@ -14,20 +13,47 @@ export function isArchiveChangeEvent(event: CoreEvent): boolean {
 
 export function invalidatesArchiveRecords(event: CoreEvent): boolean {
   return isArchiveChangeEvent(event) || isReferenceDirectoryEvent(event)
-    || (event.method === 'thread.messages.changed'
-      && Boolean((event.params as { unavailableMessageIds?: string[] } | undefined)?.unavailableMessageIds?.length))
 }
 
 export function normalizeArchiveText(value: string): string {
   return Array.from(value.normalize('NFKC'), char => char.toLowerCase()).join('')
 }
 
+function compareIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+function messageTime(item: ArchiveItem): number {
+  return item.lastMessageAt ? Date.parse(item.lastMessageAt) : -Infinity
+}
+
+export function archiveView(items: ArchiveItem[], kind: ArchiveKind, query: string, selectedProjects: string[]) {
+  const totals = { chat: 0, mission: 0 }
+  const matchingCounts = { chat: 0, mission: 0 }
+  const projects = new Map(selectedProjects.map(key => [key, 0]))
+  const groups = new Map<string, ArchiveItem[]>()
+  for (const item of items) {
+    const type = item.missionId === null ? 'chat' : 'mission'
+    totals[type]++
+    projects.set(item.projectKey, (projects.get(item.projectKey) ?? 0) + Number(type === kind))
+    if (selectedProjects.length && !selectedProjects.includes(item.projectKey)) continue
+    if (query && !normalizeArchiveText(item.title).includes(query) && !normalizeArchiveText(item.threadId).includes(query)) continue
+    matchingCounts[type]++
+    if (type !== kind) continue
+    const group = groups.get(item.projectKey)
+    if (group) group.push(item)
+    else groups.set(item.projectKey, [item])
+  }
+  for (const rows of groups.values()) rows.sort((a, b) => messageTime(b) - messageTime(a) || compareIds(a.threadId, b.threadId))
+  const sortedGroups = [...groups].sort(([ka, a], [kb, b]) => messageTime(b[0]) - messageTime(a[0]) || compareIds(ka, kb))
+  return { totals, matchingCounts, projects, groups: sortedGroups }
+}
+
 export class ArchiveCommandRejected extends Error {
   constructor(readonly code: string) {
     const messages: Record<string, string> = {
       'camp.not_found': uiAttribute('目标已移除'),
-      'camp.archive_conflict': uiAttribute('归档状态已变化，请刷新后重试。'),
-      'command.version_conflict': uiAttribute('记录已变化，请重新确认。'),
+      'command.version_conflict': uiAttribute('记录已变化，请关闭并重新打开删除确认。'),
       'camp.workspace_cleanup_pending': uiAttribute('工作区正在清理，请稍后重试。'),
       'camp.deletion_in_progress': uiAttribute('记录正在删除。')
     }
@@ -40,23 +66,12 @@ export function archiveTargetIsRemoved(error: unknown): boolean {
     && (error.code === 'camp.not_found' || error.code === 'camp.deletion_in_progress')
 }
 
-const desktopAttempts = new Map<string, { identity: string; commandId: string }>()
-
 export async function requestArchiveCommand(
   client: Pick<ThreadClient, 'request'>,
   method: 'threads.archive' | 'threads.unarchive' | 'threads.delete',
   command: ArchiveCommand | DeleteThreadCommand
 ): Promise<StoredCommandResult> {
-  // Web keeps the original request active through its own recovery UI. Desktop
-  // IPC can reject after dispatch, so a repeat of the same action reuses its ID.
-  const key = `${method}:${command.threadId}`
-  const identity = JSON.stringify(command)
-  const desktop = client === desktopThreadClient
-  const previous = desktop ? desktopAttempts.get(key) : undefined
-  const attempt = previous?.identity === identity ? previous : { identity, commandId: newCommandId() }
-  if (desktop) desktopAttempts.set(key, attempt)
-  const result = await client.request<StoredCommandResult>(method, { commandId: attempt.commandId, command })
-  if (desktop && desktopAttempts.get(key) === attempt) desktopAttempts.delete(key)
+  const result = await client.request<StoredCommandResult>(method, { commandId: newCommandId(), command })
   if (result.status === 'rejected') throw new ArchiveCommandRejected(result.code)
   return result
 }

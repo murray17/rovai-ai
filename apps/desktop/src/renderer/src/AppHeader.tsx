@@ -89,7 +89,6 @@ export function AppHeader({
           {contextLabel && (browser?.store ? <button type="button" className="context-project project-files-project" title={uiAttribute('显示／隐藏文件目录')} aria-expanded={browser.visible} aria-controls="project-files-pane" onClick={event => browser.toggle(event.currentTarget)}><ProjectFolderIcon /><span>{contextLabel}</span></button> : <span className="context-project">{contextLabel}</span>)}
           {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
           <h1 title={title}>{title}</h1>
-          {thread?.thread.archivedAt && <span className="thread-archive-badge"><UiText zh="已归档" /></span>}
         </div>
         <div className="topbar-context-status" aria-live="polite">
           {pendingApprovals > 0 && (

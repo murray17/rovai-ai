@@ -80,39 +80,39 @@ const memoryClient = {
   },
   onEvent(listener) { memoryListeners.add(listener); return () => memoryListeners.delete(listener) }
 }
-const archiveRows = Array.from({ length: 52 }, (_, index) => ({
-  threadId: `archive-fixture-${index}`, missionId: null, kind: 'chat',
-  title: `归档样例 ${index + 1}`, projectKey: 'directory:/fixture', projectName: 'fixture',
-  lastMessageAt: '2026-11-18T14:32:00.000Z', archiveRevision: 3, threadVersion: 9
+const archiveRows = Array.from({ length: 205 }, (_, index) => ({
+  threadId: `archive-fixture-${index}`, missionId: null,
+  title: `归档样例 ${index + 1}`, projectKey: 'directory:/fixture',
+  lastMessageAt: '2026-11-18T14:32:00.000Z', threadVersion: 9
 }))
 const archivedMission = {
   missionId: 'archive-mission', title: '归档使命样例', workspaceEverCreated: true, workspaceResourcesPresent: true
 }
 archiveRows.push({
-  ...archiveRows[0], kind: 'mission', threadId: 'archive-mission-thread',
+  ...archiveRows[0], threadId: 'archive-mission-thread',
   missionId: archivedMission.missionId, title: archivedMission.title
 })
 const archiveNotices = []
+const archiveListeners = new Set()
+const invalidateArchive = (threadId, reason) => {
+  for (const listener of archiveListeners) listener({ method: 'navigation.invalidated', params: { threadId, reason } })
+}
 const archiveClient = {
+  onEvent(listener) { archiveListeners.add(listener); return () => archiveListeners.delete(listener) },
   async request(method, params) {
     await request(method, params)
     if (method === 'threads.archive.list') {
-      const matching = archiveRows.filter(item => !params.query || item.title.includes(params.query) || item.threadId.includes(params.query))
-      const selected = matching.filter(item => item.kind === params.kind)
-      const totals = archiveCounts(archiveRows)
-      return {
-        schemaVersion: 1, throughGlobalSequence: 12,
-        items: clone(selected.slice(0, params.limit)),
-        totals, matchingCounts: archiveCounts(matching),
-        projects: [{ projectKey: 'directory:/fixture', projectName: 'fixture', count: totals[params.kind] }],
-        groups: selected.length ? [{ projectKey: 'directory:/fixture', totalCount: selected.length }] : [],
-        hasMore: selected.length > params.limit
-      }
+      if (state.loopArchiveCursor) return { items: [], nextCursor: 'repeated' }
+      const remaining = archiveRows.filter(item => !params.cursor || item.threadId > params.cursor)
+        .sort((a, b) => a.threadId < b.threadId ? -1 : 1)
+      const items = remaining.slice(0, params.limit ?? 200)
+      return { items: clone(items), nextCursor: remaining.length > items.length ? items.at(-1).threadId : null }
     }
     if (method === 'threads.unarchive') {
       const { threadId } = params.command
       archiveRows.splice(archiveRows.findIndex(row => row.threadId === threadId), 1)
-      return { status: 'applied', payload: { threadId, archivedAt: null, archiveRevision: 4, changed: true } }
+      invalidateArchive(threadId, 'threads.archive_changed')
+      return { status: 'applied', payload: { threadId, archivedAt: null, changed: true } }
     }
     if (method === 'missions.get') return archivedMission
     if (method === 'missions.delivery') return { workspace: null }
@@ -122,12 +122,10 @@ const archiveClient = {
       state.archiveDeleteRejection = null
       if (code === 'command.version_conflict') archiveRows[index].threadVersion += 1
       if (!code || code === 'camp.not_found') archiveRows.splice(index, 1)
+      if (code !== 'camp.not_found') invalidateArchive(params.command.threadId, code === 'command.version_conflict' ? 'camps.rename' : 'camps.delete_accepted')
       return code ? { status: 'rejected', code } : { status: 'accepted', code: 'camp.delete_accepted' }
     }
   }
-}
-function archiveCounts(items) {
-  return { chat: items.filter(item => item.kind === 'chat').length, mission: items.filter(item => item.kind === 'mission').length }
 }
 const savePreference = key => async value => {
   await request(key, value)

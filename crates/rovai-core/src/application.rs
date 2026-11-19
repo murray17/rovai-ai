@@ -147,6 +147,7 @@ use rovai_core::{
         RenameThreadCommand, SendUserAutomationThreadMessageCommand, SendUserThreadMessageCommand,
         TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus, ThreadActivationState,
         ThreadCollaborationMode, UpdateTaskCommand, WithdrawThreadMessageCommand,
+        message_mutation::{DeleteThreadMessageCommand, EditThreadMessageCommand},
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandHandlerResult,
@@ -861,6 +862,8 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "camp.messages.send"
             | "host.upload.removePastedText"
             | "camp.messages.withdraw"
+            | "camp.messages.edit"
+            | "camp.messages.delete"
             | "userAutomation.camp.send"
             | "automations.schedulerControl"
             | "automations.run"
@@ -1166,6 +1169,8 @@ fn request_invalidates_navigation(method: &str) -> bool {
             | "messageQuotes.mutateDraft"
             | "camp.messages.send"
             | "camp.messages.withdraw"
+            | "camp.messages.edit"
+            | "camp.messages.delete"
             | "userAutomation.camp.send"
             | "agentRuns.cancel"
             | "agentRuns.continue"
@@ -1182,6 +1187,8 @@ fn navigation_invalidation_emitted_at_commit_boundary(method: &str) -> bool {
             | "camps.discardPending"
             | "camp.messages.send"
             | "camp.messages.withdraw"
+            | "camp.messages.edit"
+            | "camp.messages.delete"
             | "agentRuns.cancel"
             | "agentRuns.continue"
             | "channels.executionConsole.agentRun.cancel"
@@ -12079,25 +12086,35 @@ impl Core {
             "camps.archive.list" => {
                 let params = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(rovai_core::read_model::archive::list(&mut database, params)?)?)
+                Ok(serde_json::to_value(
+                    rovai_core::read_model::archive::list(&mut database, params)?,
+                )?)
             }
             "camps.archive" => {
                 let params: UserCommandParams<rovai_core::thread_archive::ArchiveThreadCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let envelope = user_camp_command_envelope(
-                    params.command_id, params.command.camp_id.clone(), params.command,
+                    params.command_id,
+                    params.command.camp_id.clone(),
+                    params.command,
                 );
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(rovai_core::thread_archive::change(&mut database, &envelope)?.result)?)
+                Ok(serde_json::to_value(
+                    rovai_core::thread_archive::change(&mut database, &envelope)?.result,
+                )?)
             }
             "camps.unarchive" => {
                 let params: UserCommandParams<rovai_core::thread_archive::UnarchiveThreadCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let envelope = user_camp_command_envelope(
-                    params.command_id, params.command.camp_id.clone(), params.command,
+                    params.command_id,
+                    params.command.camp_id.clone(),
+                    params.command,
                 );
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(rovai_core::thread_archive::change(&mut database, &envelope)?.result)?)
+                Ok(serde_json::to_value(
+                    rovai_core::thread_archive::change(&mut database, &envelope)?.result,
+                )?)
             }
             "camps.delete" => {
                 let started_at = Instant::now();
@@ -13053,6 +13070,84 @@ impl Core {
                     .context("deliveryId is required")?;
                 self.reconcile_active_input(delivery_id).await
             }
+            "camp.messages.edit" => {
+                let params: UserCommandParams<EditThreadMessageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let thread = params.command.camp_id.clone();
+                let envelope =
+                    user_camp_command_envelope(params.command_id, thread.clone(), params.command);
+                let binding = {
+                    let database = self.database.lock().await;
+                    if let Some(replay) =
+                        DomainCommandGateway.replay_if_recorded(&database, &envelope)?
+                    {
+                        return Ok(serde_json::to_value(replay.result)?);
+                    }
+                    if !request.client.is_desktop() {
+                        for source in &envelope.payload.source_attachments {
+                            let registered = rovai_core::web_upload::load_composer_source(
+                                &database,
+                                &request.client,
+                                &thread,
+                                &source.id,
+                            )?;
+                            anyhow::ensure!(
+                                registered
+                                    .as_ref()
+                                    .is_some_and(|original| original.source_path
+                                        == source.source_path
+                                        && original.display_name == source.display_name
+                                        && original.kind == source.kind),
+                                "The attachment was not prepared for this Thread"
+                            );
+                        }
+                    }
+                    crate::project_files::binding(&database, &thread).ok()
+                };
+                let document = envelope.payload.content.clone();
+                let preflight_thread = thread.clone();
+                let files = tokio::task::spawn_blocking(move || {
+                    crate::project_file_reference::Preflight::prepare(
+                        preflight_thread,
+                        &document,
+                        binding,
+                    )
+                })
+                .await?;
+                let execution = {
+                    let _attachments = self.pasted_text_operations.lock().await;
+                    let mut database = self.database.lock().await;
+                    CollaborationService::default().edit_camp_message(
+                        &mut database,
+                        &envelope,
+                        Some(&files),
+                    )?
+                };
+                if execution.result.code == "message.updated" && !execution.replayed {
+                    self.message_mutation_committed(&thread, "camp.messages.edit");
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camp.messages.delete" => {
+                let params: UserCommandParams<DeleteThreadMessageCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let thread = params.command.camp_id.clone();
+                let execution = {
+                    let mut database = self.database.lock().await;
+                    CollaborationService::default().delete_camp_message(
+                        &mut database,
+                        &user_camp_command_envelope(
+                            params.command_id,
+                            thread.clone(),
+                            params.command,
+                        ),
+                    )?
+                };
+                if execution.result.status == CommandResultStatus::Applied && !execution.replayed {
+                    self.message_mutation_committed(&thread, "camp.messages.delete");
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "camp.messages.withdraw" => {
                 let params: UserCommandParams<WithdrawThreadMessageCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -13491,6 +13586,14 @@ impl Core {
             }
             method => anyhow::bail!("unsupported core method: {method}"),
         }
+    }
+
+    fn message_mutation_committed(&self, thread: &str, method: &str) {
+        self.request_camp_attachment_projection(thread);
+        emit_navigation_invalidated(&self.output, method, Some(thread));
+        self.agent_run_cancellation_notify.notify_one();
+        self.delivery_batch_scheduler_notify.notify_one();
+        self.execution_wake.runs.notify_one();
     }
 
     async fn send_test_camp_message_request(
@@ -21720,7 +21823,6 @@ async fn run_core(
     let (pi_tx, pi_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
-    rovai_core::message_changes::observe_archive_changes(database.connection())?;
     database.message_changes = Some(output_tx.clone());
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
     let (runtime_check_tx, runtime_check_rx) = mpsc::unbounded_channel();
@@ -36999,6 +37101,8 @@ done
             "camps.rename",
             "camp.messages.send",
             "camp.messages.withdraw",
+            "camp.messages.edit",
+            "camp.messages.delete",
             "userAutomation.camp.send",
             "agentRuns.cancel",
             "agentRuns.continue",
@@ -37024,6 +37128,8 @@ done
             "camps.discardPending",
             "camp.messages.send",
             "camp.messages.withdraw",
+            "camp.messages.edit",
+            "camp.messages.delete",
             "agentRuns.continue",
         ] {
             assert!(
@@ -37534,7 +37640,6 @@ done
                             force: true,
                             workspace_disposition:
                                 rovai_core::collaboration::MissionWorkspaceDisposition::Cleanup,
-                            archive_guard: None,
                         },
                     },
                 )

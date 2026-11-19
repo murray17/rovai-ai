@@ -214,7 +214,6 @@ let updateSnapshot: (snapshot: typeof current) => void
 let updateCurrentUserProfile: (profile: CurrentUserProfile) => void
 let updateMessageHistory: (coverage: ThreadOpenMessageCoverage | null) => void
 let completeEntrySnapshot: () => void
-let completeUnarchive: (revision: number) => void
 let closeTask: () => void
 type FixtureImageResult = { displayName: string; mediaType: string; data: string }
 const mockImageResult = (
@@ -538,7 +537,6 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
       detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
       <ThreadWorkspace snapshot={snapshot} projectName="rovai-ai" agents={agents} busy={false} stopping={false}
-        onUnarchive={() => new Promise<number>(resolve => { completeUnarchive = resolve })}
         initialComposerDraft={steerFixture || draft.attachments.length > 0 ? draft : null}
         messageHistory={messageHistory}
         onLoadEarlierMessages={async () => {
@@ -864,12 +862,6 @@ Object.assign(window, { campOpenTest: {
   failExecutionRead: (fail: boolean) => { executionReadFailure = fail },
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   remount: () => reactRoot.render(<Fixture key="local-draft-remount" />),
-  setArchived: (archived: boolean) => {
-    current = { ...current, thread: { ...current.thread, archivedAt: archived ? now : null,
-      archiveRevision: (current.thread.archiveRevision ?? 0) + 1 } }
-    updateSnapshot(current)
-  },
-  acknowledgeUnarchive: () => completeUnarchive((current.thread.archiveRevision ?? 0) + 1),
   localDraftState: () => ({
     body: loadLocalThreadComposerDraft(threadId)?.body ?? null,
     text: element('#camp-message')?.textContent ?? null,

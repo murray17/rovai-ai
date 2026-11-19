@@ -112,7 +112,6 @@ pub struct NavigationThreadItem {
     pub last_seen_global_sequence: i64,
     pub version: i64,
     pub archived_at: Option<String>,
-    pub archive_revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -206,7 +205,7 @@ pub struct ThreadView {
     pub membership_generation: i64,
     pub version: i64,
     pub archived_at: Option<String>,
-    pub archive_revision: i64,
+
     pub created_at: String,
     pub updated_at: String,
 }
@@ -322,6 +321,11 @@ pub struct ThreadMessageView {
     pub created_at: String,
     pub withdrawn: bool,
     pub can_withdraw: bool,
+    pub can_edit: bool,
+    pub can_delete: bool,
+    pub content_revision: i64,
+    pub submitted_as_steer: bool,
+    pub reply_parent_deleted: bool,
     pub version: i64,
 }
 
@@ -367,9 +371,17 @@ pub struct RunWorkspaceView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RunInputPreview {
+    pub summary: Option<String>,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRunView {
     pub can_steer: bool,
     pub steer_unavailable_reason: Option<crate::steer::SteerUnavailableReason>,
+    pub can_continue: bool,
     pub id: String,
     #[serde(rename = "threadTurnId", alias = "campTurnId")]
     pub camp_turn_id: Option<String>,
@@ -377,6 +389,8 @@ pub struct AgentRunView {
     pub anchor_message_id: Option<String>,
     pub public_tail_sequence_at_start: Option<i64>,
     pub input_summary: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_previews: BTreeMap<String, RunInputPreview>,
     pub has_accepted_continuation: bool,
     pub conversation_id: String,
     pub agent_id: String,
@@ -2015,7 +2029,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Thre
                    camp.version, camp.created_at, camp.updated_at,
                    channel_conversation.provider, channel_conversation.conversation_kind,
                    (SELECT id FROM mission WHERE mission.camp_id=camp.id),
-                   camp.archived_at, camp.archive_revision
+                   camp.archived_at
             FROM camp
             LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
             LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
@@ -2036,7 +2050,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Thre
                     membership_generation: row.get(6)?,
                     version: row.get(7)?,
                     archived_at: row.get(13)?,
-                    archive_revision: row.get(14)?,
+
                     created_at: row.get(8)?,
                     updated_at: row.get(9)?,
                 })
@@ -2581,14 +2595,7 @@ fn hydrate_message_views(
                 None
             };
             let mission_start=transaction.query_row("SELECT s.mission_id,m.title,m.description FROM mission_start s JOIN mission m ON m.id=s.mission_id WHERE s.message_id=?1",[&row.id],|r|Ok(serde_json::json!({"missionId":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"description":r.get::<_,String>(2)?}))).optional()?;
-            // Older Steer deliveries did not close the stored recall window.
-            // Read them using the same recognition boundary as withdrawal.
-            let can_withdraw = row.recall_state == "recallable"
-                && !transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM camp_message_delivery WHERE message_id=?1 AND status<>'waiting')
-                     OR EXISTS(SELECT 1 FROM agent_run_input WHERE message_id=?1)",
-                    [&row.id], |r| r.get::<_, bool>(0),
-                )?;
+            let capabilities = crate::collaboration::message_mutation::capabilities(transaction, &row.id)?;
             Ok(ThreadMessageView {
                 mission_start,
                 runtime_model: models_by_message_id.remove(&row.id),
@@ -2614,7 +2621,12 @@ fn hydrate_message_views(
                     .context("ThreadMessage presentation is invalid")?,
                 created_at: row.created_at,
                 withdrawn: row.recall_state == "withdrawn",
-                can_withdraw,
+                can_withdraw: capabilities.can_withdraw,
+                can_edit: capabilities.can_edit,
+                can_delete: capabilities.can_delete,
+                content_revision: capabilities.revision,
+                submitted_as_steer: capabilities.bound,
+                reply_parent_deleted: capabilities.reply_parent_deleted,
                 version: row.version,
             })
         })
@@ -2813,7 +2825,16 @@ fn load_message_deliveries(
 ) -> Result<Vec<MessageDeliveryView>> {
     let mut statement = transaction.prepare(
         r#"
-        WITH projected_delivery AS (
+        WITH continuation_inputs AS (
+          SELECT i.delivery_id,i.message_id,i.ordinal
+          FROM camp_run_continuation_input i
+          JOIN camp_message_delivery d ON d.id=i.delivery_id AND d.camp_id=?1 AND d.status='waiting'
+          UNION ALL
+          SELECT i.delivery_id,i.message_id,i.ordinal
+          FROM agent_run_input i
+          JOIN camp_message_delivery d ON d.id=i.delivery_id AND d.camp_id=?1 AND d.status<>'waiting'
+          JOIN camp_run_continuation c ON c.delivery_id=i.delivery_id
+        ), projected_delivery AS (
           SELECT current_delivery.id,
                  message.id AS message_id,
                  message.camp_turn_id,
@@ -2865,15 +2886,15 @@ fn load_message_deliveries(
                  current_delivery.queue_sequence,
                  CASE WHEN continuation.delivery_id IS NOT NULL THEN 1 END AS continuation_request,
                  (SELECT json_group_array(message_id) FROM (
-                   SELECT message_id FROM agent_run_input
-                   WHERE agent_run_id = continuation.source_agent_run_id ORDER BY ordinal
+                   SELECT message_id FROM continuation_inputs
+                   WHERE delivery_id=current_delivery.id ORDER BY ordinal
                  )) AS input_message_ids
           FROM camp_message_delivery AS current_delivery
           LEFT JOIN camp_run_continuation AS continuation ON continuation.delivery_id = current_delivery.id
           JOIN camp_message AS message
             ON message.id = COALESCE(current_delivery.message_id, (
-              SELECT message_id FROM agent_run_input
-              WHERE agent_run_id = continuation.source_agent_run_id ORDER BY ordinal LIMIT 1
+              SELECT message_id FROM continuation_inputs
+              WHERE delivery_id=current_delivery.id ORDER BY ordinal LIMIT 1
             ))
           LEFT JOIN agent_run AS source_run
             ON source_run.id = message.source_agent_run_id
@@ -3278,6 +3299,8 @@ fn load_agent_runs(
         .filter_map(|row| row.40.as_deref())
         .collect::<BTreeSet<_>>();
     let summaries = load_run_input_summaries(transaction, camp_id, &message_ids)?;
+    let run_ids = rows.iter().map(|row| row.0.as_str()).collect::<Vec<_>>();
+    let mut input_previews = load_run_input_previews(transaction, camp_id, &run_ids)?;
     rows.into_iter()
         .map(
             |(
@@ -3352,17 +3375,32 @@ fn load_agent_runs(
                 } else {
                     crate::steer::ActiveInputAvailability::default()
                 };
+                let can_continue = matches!(status.as_str(), "failed" | "cancelled")
+                    && invocation_kind == "batch"
+                    && failure
+                        .as_ref()
+                        .is_none_or(|failure| failure.code != "context_payload_too_large")
+                    && crate::run_continuation::eligible_source(transaction, camp_id, &id)?
+                        .is_some();
+                let previews = input_previews.remove(&id).unwrap_or_default();
+                let summary = summary_message_id.as_ref().and_then(|message_id| {
+                    match previews.get(message_id) {
+                        Some(preview) => preview.summary.clone(),
+                        None => summaries.get(message_id).cloned().flatten(),
+                    }
+                });
                 Ok(AgentRunView {
                     can_steer: steer.can_steer,
                     steer_unavailable_reason: steer.unavailable_reason,
+                    can_continue,
                     id,
                     camp_turn_id,
                     input_message_ids: serde_json::from_str(&input_message_ids_json)
                         .context("AgentRun input Message IDs are invalid")?,
                     anchor_message_id,
                     public_tail_sequence_at_start,
-                    input_summary: summary_message_id
-                        .and_then(|id| summaries.get(&id).cloned().flatten()),
+                    input_summary: summary,
+                    input_previews: previews,
                     has_accepted_continuation,
                     conversation_id,
                     agent_id,
@@ -3425,6 +3463,50 @@ fn load_agent_runs(
             },
         )
         .collect()
+}
+
+fn load_run_input_previews(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    run_ids: &[&str],
+) -> Result<BTreeMap<String, BTreeMap<String, RunInputPreview>>> {
+    if run_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut statement = transaction.prepare(
+        "SELECT i.agent_run_id,i.message_id,m.tombstoned_at IS NOT NULL,
+            CASE WHEN m.tombstoned_at IS NULL THEN i.input_snapshot_json END
+         FROM json_each(?2) runs JOIN agent_run_input i ON i.agent_run_id=runs.value
+         JOIN camp_message m ON m.id=i.message_id AND m.camp_id=?1
+         WHERE m.tombstoned_at IS NOT NULL OR i.input_snapshot_json IS NOT NULL
+            OR m.content_revision<>i.message_content_revision",
+    )?;
+    let rows = statement.query_map(params![camp_id, serde_json::to_string(run_ids)?], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, bool>(2)?,
+            r.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    let mut result = BTreeMap::<String, BTreeMap<String, RunInputPreview>>::new();
+    for row in rows {
+        let (run, id, deleted, snapshot) = row?;
+        let summary = if deleted {
+            Some("原消息已删除".into())
+        } else {
+            snapshot
+                .as_deref()
+                .map(crate::collaboration::message_mutation::snapshot_summary)
+                .transpose()?
+                .flatten()
+        };
+        result
+            .entry(run)
+            .or_default()
+            .insert(id, RunInputPreview { summary, deleted });
+    }
+    Ok(result)
 }
 
 // Title sources are loaded by exact ID for the selected Runs, independently of
@@ -4525,7 +4607,8 @@ mod tests {
             );
             CREATE TABLE agent_run (id TEXT, task_id TEXT);
             CREATE TABLE camp_run_continuation (delivery_id TEXT, source_agent_run_id TEXT);
-            CREATE TABLE agent_run_input (agent_run_id TEXT, message_id TEXT, ordinal INTEGER);
+            CREATE TABLE agent_run_input (agent_run_id TEXT, message_id TEXT, ordinal INTEGER, delivery_id TEXT);
+            CREATE TABLE camp_run_continuation_input (delivery_id TEXT, message_id TEXT, ordinal INTEGER, content_revision INTEGER);
             CREATE TABLE camp_message_delivery (
                 id TEXT PRIMARY KEY, camp_id TEXT, message_id TEXT,
                 recipient_agent_id TEXT,

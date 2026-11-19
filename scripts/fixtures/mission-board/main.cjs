@@ -44,6 +44,35 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 1000 })
   }
   const settle = () => window.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 250))', true)
+  if (mode === 'archive') {
+    const run = code => window.webContents.executeJavaScript(code, true)
+    const card = '.mission-board-card[data-mission-id="mission-1"]'
+    const editor = '.mission-drawer #camp-message'
+    const qa = 'window.missionQA'
+    const m = qa + '.items.find(m => m.missionId === "mission-1")'
+    await waitFor('!!document.querySelector(' + JSON.stringify(card) + ')', 'Mission board did not load')
+    await click(card)
+    await waitFor('!!document.querySelector(' + JSON.stringify(editor) + ')', 'Mission editor did not open')
+    await run("document.getElementById('camp-message').focus(); document.execCommand('insertText', false, '保留的使命草稿')")
+    await click('.mission-drawer .mission-header-action[aria-label^="归档"]')
+    await waitFor("!document.getElementById('camp-message') && !document.querySelector(" + JSON.stringify(card) + ")", 'Archive did not return to board')
+    assert.equal(await run(qa + ".calls.find(c => c.method === 'threads.archive').savedDraft"), '保留的使命草稿')
+    await run("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === '撤销').click()")
+    await waitFor('!!document.querySelector(' + JSON.stringify(card) + ')', 'Undo did not restore the Mission card')
+    await click(card)
+    await waitFor("document.getElementById('camp-message')?.textContent.includes('保留的使命草稿')", 'Restored mission lost draft')
+    await run("document.getElementById('camp-message').focus(); document.execCommand('insertText',false,'跨窗口'); " + qa + '.setArchive(' + m + ', true)')
+    await waitFor("!document.getElementById('camp-message') && document.body.textContent.includes('该使命已归档')", 'External archive did not leave the open Mission')
+    assert((await run(qa + '.storedDraft(' + m + '.threadId).body')).includes('跨窗口'))
+    await run(qa + '.openStoredLink(' + m + '.threadId)')
+    assert.equal(await run("!!document.getElementById('camp-message') || !!document.querySelector('.mission-drawer')"), false)
+    await run(qa + '.openStoredLink(' + qa + '.archivedChatLink())')
+    await waitFor("!!document.querySelector('.compose-content') && document.body.textContent.includes('该会话已归档')", 'Archived chat link did not go to new conversation')
+    assert.equal(await run("!!document.getElementById('camp-message')"), false)
+    console.log(JSON.stringify({ ok: true, cases: ['save before archive and undo', 'external archive saves draft', 'archived mission and chat links'] }))
+    app.exit(0)
+    return
+  }
   if (mode === 'execution-auto-open') {
     stage = 'Mission execution auto-open'
     const run = code => window.webContents.executeJavaScript(code, true)

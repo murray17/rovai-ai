@@ -72,7 +72,7 @@ test('production composer uses Core per-target eligibility and honest receipt la
         await pause(100)
         assert.equal(await browser.evaluate('document.querySelector(".composer:not(.single-chat-composer) .composer-actions .composer-primary-action").getAttribute("aria-label")'), '发送消息', 'live mention immediately replaces the busy default lead')
         await browser.capture(join(root, 'live-mention.png'))
-        await browser.send('Input.insertText', { text: ' @' })
+        await browser.send('Input.insertText', { text: '请核对。 @' })
         await browser.wait('[...document.querySelectorAll("button[role=option]")].some(e => e.textContent.includes("所有队员"))')
         await browser.click('[...document.querySelectorAll("button[role=option]")].find(e => e.textContent.includes("所有队员"))')
         await pause(100)
@@ -85,13 +85,13 @@ test('production composer uses Core per-target eligibility and honest receipt la
       if (['empty', 'attachment', 'idle', 'other-member', 'ready', 'not-ready'].includes(kind)) { report.push({ kind, actionLabel }); continue }
       const selector = '[data-message-id="steer-example"] .user-message-receipt'
       const summary = await browser.evaluate(`document.querySelector('${selector}').innerText`)
-      assert.match(summary, kind === 'unknown' ? /待核对/ : kind === 'queued' ? /待处理/ : /已插话/)
-      if (kind === 'mixed') assert.equal(summary, '已插话 1 · 待处理 1 · 待核对 1')
-      assert.equal(await browser.evaluate('!!document.querySelector("[data-message-id=steer-example] .user-message-withdraw")'), kind === 'queued')
+      assert.match(summary, kind === 'unknown' ? /未确认送达/ : kind === 'queued' ? /待处理/ : /已插话/)
+      if (kind === 'mixed') assert.equal(summary, '已插话 1 · 待处理 1 · 未确认送达 1')
+      assert.equal(await browser.evaluate('!!document.querySelector("[data-message-id=steer-example] .message-withdraw-button")'), kind === 'queued')
       await click(selector); await pause(100)
       const receipt = await browser.evaluate('document.querySelector(".user-message-receipt-menu").innerText')
-      if (kind !== 'queued') assert.match(receipt, kind === 'unknown' ? /是否送达待核对/ : /运行时已接收/)
-      assert.equal(receipt.includes('撤回消息'), kind === 'queued', 'accepted and unknown input cannot be withdrawn, even with a stale message flag')
+      if (kind !== 'queued') assert.match(receipt, kind === 'unknown' ? /未确认送达/ : /运行时已接收/)
+      assert.equal(receipt.includes('撤回消息'), false, 'withdrawal belongs to the message actions')
       assert.doesNotMatch(receipt, /已消费|已加入当前执行/)
       await browser.capture(join(root, `${kind}-receipt.png`))
       report.push({ kind, actionLabel, rows, summary, receipt })
@@ -99,9 +99,9 @@ test('production composer uses Core per-target eligibility and honest receipt la
     }
     const receiptCases = [
       { routes: ['steer'], label: '已插话', appearance: 'is-confirmed' },
-      { routes: ['steer-pending'], label: '待插话', appearance: 'is-queued' },
-      { routes: ['steer-sending'], label: '发送中', appearance: 'is-sending' },
-      { routes: ['steer', 'steer-pending', 'steer-sending'], label: '已插话 1 · 待插话 1 · 发送中 1', appearance: 'is-sending' },
+      { routes: ['steer-pending'], label: '插话中', appearance: 'is-sending' },
+      { routes: ['steer-sending'], label: '插话中', appearance: 'is-sending' },
+      { routes: ['steer', 'steer-pending', 'steer-sending'], label: '已插话 1 · 插话中 2', appearance: 'is-sending' },
       { routes: ['running', 'running'], label: '处理中 2', appearance: 'is-progress' },
       { routes: ['steer', 'running'], label: '已插话 1 · 处理中 1', appearance: 'is-progress' },
       { routes: ['failed'], label: '执行失败', appearance: 'is-failed' },
@@ -112,13 +112,13 @@ test('production composer uses Core per-target eligibility and honest receipt la
       { routes: ['cancelled', 'running'], label: '处理中 1 · 已停止 1', appearance: 'is-progress' },
       { routes: ['cancelled', 'succeeded'], label: '已停止 1', appearance: 'is-stopped' },
       { routes: ['steer-cancelled'], label: '已插话', appearance: 'is-confirmed' },
-      { routes: ['unknown-cancelled'], label: '待核对 1', appearance: 'is-unknown' },
+      { routes: ['unknown-cancelled'], label: '未确认送达', appearance: 'is-unknown' },
       { routes: ['steer', 'failed'], label: '已插话 1 · 执行失败 1', appearance: 'is-failed' },
       { routes: ['steer', 'cancelled'], label: '已插话 1 · 已停止 1', appearance: 'is-stopped' },
-      { routes: ['steer-failed', 'failed-before-run', 'cancelled-before-run', 'unknown'], label: '已插话 1 · 待核对 1 · 已停止 1 · 执行失败 1', appearance: 'is-unknown' },
+      { routes: ['steer-failed', 'failed-before-run', 'cancelled-before-run', 'unknown'], label: '已插话 1 · 未确认送达 1 · 已停止 1 · 执行失败 1', appearance: 'is-unknown' },
       { routes: ['steer', 'running', 'waiting', 'failed'], label: '已插话 1 · 处理中 1 · 待处理 1 · 执行失败 1', appearance: 'is-failed' },
       { routes: ['running', 'waiting'], label: '处理中 1 · 待处理 1', appearance: 'is-progress' },
-      { routes: ['steer', 'running', 'waiting', 'unknown'], label: '已插话 1 · 处理中 1 · 待处理 1 · 待核对 1', appearance: 'is-unknown' },
+      { routes: ['steer', 'running', 'waiting', 'unknown'], label: '已插话 1 · 处理中 1 · 待处理 1 · 未确认送达 1', appearance: 'is-unknown' },
       { routes: ['waiting', 'waiting'], label: '待处理 2', appearance: 'is-queued' }
     ]
     const receiptSelector = '[data-message-id="receipt-example"] .user-message-receipt'
@@ -163,13 +163,12 @@ test('production composer uses Core per-target eligibility and honest receipt la
           await click(receiptSelector); await pause(60)
           const detail = await browser.evaluate('document.querySelector(".user-message-receipt-menu").innerText')
           if (routes.some(route => ['steer', 'steer-failed', 'steer-cancelled'].includes(route))) assert.match(detail, /运行时已接收/)
-          if (routes.includes('steer-pending')) assert.match(detail, /待插话/)
-          if (routes.includes('steer-sending')) assert.match(detail, /发送中/)
+          if (routes.some(route => route === 'steer-pending' || route === 'steer-sending')) assert.match(detail, /插话中/)
           if (routes.includes('running')) assert.match(detail, /处理中/)
-          if (routes.some(route => route.startsWith('unknown'))) assert.match(detail, /是否送达待核对/)
+          if (routes.some(route => route.startsWith('unknown'))) assert.match(detail, /未确认送达/)
           if (routes.some(route => route.startsWith('failed'))) assert.match(detail, /执行失败/)
           if (routes.some(route => route.startsWith('cancelled'))) assert.match(detail, /已停止/)
-          assert.equal(detail.includes('撤回消息'), routes.every(route => route === 'waiting'))
+          assert.equal(detail.includes('撤回消息'), false)
           assert.equal(await browser.evaluate('document.querySelectorAll(".user-message-receipt-recipient").length'), routes.length)
           await closeMenu(); await pause(60)
           report.push({ kind: 'receipt', theme, width, routes, label, before, hovered, detail })
@@ -238,7 +237,17 @@ test('production composer uses Core per-target eligibility and honest receipt la
     await click('.run-input-source')
     await browser.wait('document.activeElement?.getAttribute("data-message-id") === "steer-example"')
     assert.equal(await browser.evaluate('document.querySelector(".run-input-row")?.getClientRects().length ?? 0'), 0, 'source navigation closes the covering execution inspector')
-    report.push({ kind: 'run-input', rowHeight: 28, retainedAfterReceipt: true, historySource: true, onlyOriginalMessageLink: true, keyboard: true })
+    await click('.run-presence-open')
+    await browser.wait('!!document.querySelector(".run-input-row")')
+    if (!await browser.evaluate('document.querySelector(".run-input-row").open')) await click('.run-input-row > summary')
+    await browser.wait('!!document.querySelector(".run-input-row [role=region]")')
+    await browser.evaluate('window.savedInputRow = document.querySelector(".run-input-row"); __presence.deleteSteerTimelineSource()')
+    await browser.wait('document.querySelector(".run-input-row > summary")?.textContent.includes("原消息已删除")')
+    assert.equal(await browser.evaluate('document.querySelector(".run-input-row") === window.savedInputRow'), true)
+    assert.equal(await browser.evaluate('!!document.querySelector(".run-input-row [role=region], .run-input-source")'), false)
+    assert.equal(await browser.evaluate('document.querySelector(".run-input-row").textContent.includes("采用这条更正")'), false)
+    assert.equal(await browser.evaluate('__presence.getState().snapshot.agentRuns[0].status'), 'running')
+    report.push({ kind: 'run-input', rowHeight: 28, retainedAfterReceipt: true, historySource: true, onlyOriginalMessageLink: true, keyboard: true, redactedWhileOpen: true })
     assert.deepEqual(browser.errors, [])
     await writeFile(join(root, 'report.json'), JSON.stringify(report, null, 2))
     console.log(`Steer UI evidence: ${root}`)

@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ArchiveItem, ArchiveKind, DeleteThreadCommand, MissionRecord } from '@contracts'
+import { projectDirectoryName } from '../../shared/project-display-name'
 import { DialogControlIcon } from './AppDialog'
 import { useThreadClient } from './camp-client'
 import { readErrorMessage } from './error-message'
@@ -9,12 +10,11 @@ import { MissionDelete } from './MissionBoard'
 import { CompactDialog, MissionFilter } from './MissionControls'
 import { MissionIcon } from './MissionIcon'
 import { NavigationIcon } from './NavigationIcon'
-import { ArchiveCommandRejected, archiveTargetIsRemoved, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
+import { archiveTargetIsRemoved, archiveView, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
 import { useArchiveRecords } from './useArchiveRecords'
 import './archive-settings.css'
 
 const kinds: ArchiveKind[] = ['chat', 'mission']
-const PAGE_SIZE = 50
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 function highlight(title: string, query: string): ReactNode {
@@ -41,15 +41,6 @@ function highlight(title: string, query: string): ReactNode {
   return runs.map(({ match, text }, index) => match ? <mark key={index}>{text}</mark> : text)
 }
 
-function scrollContainer(element: HTMLElement): HTMLElement {
-  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
-    if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent
-  }
-  return document.scrollingElement as HTMLElement
-}
-
-type ScrollAnchor = { scroller: HTMLElement; rows: Array<{ id: string; top: number }> }
-
 export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   projectNames: Readonly<Record<string, string>>
   onDeleted(threadId: string): void
@@ -63,7 +54,6 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   const [searchQuery, setSearchQuery] = useState('')
   const [composing, setComposing] = useState(false)
   const [projectKeys, setProjectKeys] = useState<string[]>([])
-  const [expanded, setExpanded] = useState<{ key: string; limit: number } | null>(null)
   const [confirm, setConfirm] = useState<ArchiveItem | null>(null)
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set())
   const [actionError, setActionError] = useState<string | null>(null)
@@ -72,38 +62,12 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   const search = useRef<HTMLInputElement>(null)
   const filters = useRef<HTMLDivElement>(null)
   const tabs = useRef(new Map<ArchiveKind, HTMLButtonElement>())
-  const anchor = useRef<ScrollAnchor | null>(null)
   const focusAfter = useRef<{ id: string; neighbors: string[]; kind: ArchiveKind } | null>(null)
   const query = normalizeArchiveText(searchQuery)
-  const key = JSON.stringify([kind, query, projectKeys])
-  const limit = expanded?.key === key ? expanded.limit : PAGE_SIZE
   const rows = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[data-archive-thread]') ?? [])
 
-  const captureAnchor = (): void => {
-    if (!list.current) return
-    const scroller = scrollContainer(list.current)
-    const top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top
-    const entries = rows()
-    const firstVisible = entries.findIndex(row => row.getBoundingClientRect().bottom > top)
-    if (firstVisible < 0 || scroller.scrollTop === 0) return
-    anchor.current = {
-      scroller,
-      rows: [...entries.slice(firstVisible), ...entries.slice(0, firstVisible).reverse()]
-        .map(row => ({ id: row.dataset.archiveThread!, top: row.getBoundingClientRect().top }))
-    }
-  }
-  const { result, error, loading, refresh } = useArchiveRecords(client, { kind, query: searchQuery, projectKeys, limit }, captureAnchor)
-  const availableProjects = useRef<{ client: typeof client; projects: NonNullable<typeof result>['projects'] } | null>(null)
-  if (result) availableProjects.current = { client, projects: result.projects }
-  useEffect(() => {
-    if (composing) return
-    const timer = setTimeout(() => {
-      const trimmed = text.trim()
-      if (normalizeArchiveText(trimmed) !== query) { setExpanded(null); setSearchQuery(trimmed) }
-    }, 150)
-    return () => clearTimeout(timer)
-  }, [composing, text, query])
-
+  const { items, error, refresh, discardStaleItem } = useArchiveRecords(client)
+  const result = useMemo(() => items && archiveView(items, kind, query, projectKeys), [items, kind, query, projectKeys])
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent): void => {
       if (confirm || event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey
@@ -119,12 +83,6 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
 
   useLayoutEffect(() => {
     const visible = new Map(rows().map(element => [element.dataset.archiveThread!, element]))
-    if (anchor.current) {
-      const saved = anchor.current
-      anchor.current = null
-      const match = saved.rows.find(row => visible.has(row.id))
-      if (match) saved.scroller.scrollTop += visible.get(match.id)!.getBoundingClientRect().top - match.top
-    }
     const target = focusAfter.current
     if (!target || target.kind !== kind || confirm || visible.has(target.id)) return
     focusAfter.current = null
@@ -138,26 +96,23 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
 
   function selectKind(next: ArchiveKind): void {
     if (next === kind) return
-    setExpanded(null)
     setKind(next)
   }
 
   function changeProjects(next: string[]): void {
-    setExpanded(null)
     setProjectKeys([...new Set(next)].sort())
   }
 
   function clearSearch(): void {
     setText('')
     setSearchQuery('')
-    setExpanded(null)
     search.current?.focus()
   }
 
-  function name(projectKey: string, fallback: string): string {
+  function name(projectKey: string): string {
     if (projectKey === 'quick-chat') return uiAttribute('快速对话')
     if (projectKey === 'unavailable') return uiAttribute('项目不可用')
-    return projectNames[projectKey] ?? fallback
+    return projectNames[projectKey] ?? projectDirectoryName(projectKey.slice('directory:'.length))
   }
 
   function rememberFocus(item: ArchiveItem): void {
@@ -177,27 +132,28 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
     } finally {
       locks.current.delete(item.threadId)
       setPending(new Set(locks.current))
-      refresh()
     }
   }
 
   async function unarchive(item: ArchiveItem): Promise<void> {
     try {
       await operate(item, async () => {
-        await writeArchive(client, false, { threadId: item.threadId, expectedArchiveRevision: item.archiveRevision })
+        const result = await writeArchive(client, false, { threadId: item.threadId })
+        if (!result.changed) discardStaleItem(item)
         onNotify(uiAttribute('已取消归档'))
       })
     } catch (error) {
-      if (archiveTargetIsRemoved(error)) onNotify(readErrorMessage(error))
-      else setActionError(readErrorMessage(error))
+      if (archiveTargetIsRemoved(error)) {
+        discardStaleItem(item)
+        onNotify(readErrorMessage(error))
+      } else setActionError(readErrorMessage(error))
     }
   }
 
   async function remove(item: ArchiveItem, workspaceDisposition: 'retain' | 'cleanup' = 'retain'): Promise<void> {
     await operate(item, async () => {
       const command: DeleteThreadCommand = {
-        threadId: item.threadId, expectedVersion: item.threadVersion, workspaceDisposition,
-        archiveGuard: { expectedArchiveRevision: item.archiveRevision }
+        threadId: item.threadId, expectedVersion: item.threadVersion, workspaceDisposition
       }
       try {
         await requestArchiveCommand(client, 'threads.delete', command)
@@ -205,23 +161,17 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
         onNotify(uiAttribute('已提交删除'))
       } catch (error) {
         if (!archiveTargetIsRemoved(error)) throw error
+        discardStaleItem(item)
         onNotify(readErrorMessage(error))
       }
       setConfirm(null)
     })
   }
 
-  const groups = new Map<string, ArchiveItem[]>()
-  for (const item of result?.items ?? []) {
-    const group = groups.get(item.projectKey)
-    if (group) group.push(item)
-    else groups.set(item.projectKey, [item])
-  }
-  const counts = new Map(result?.groups.map(group => [group.projectKey, group.totalCount]))
-  const projects = availableProjects.current?.client === client ? availableProjects.current.projects : []
+  const projects = [...(result?.projects ?? [])].map(([id, count]) => ({ id, label: name(id), keywords: id, count }))
+    .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
   const otherKind = kind === 'chat' ? 'mission' : 'chat'
-  const selectedProjects = projects.filter(project => projectKeys.includes(project.projectKey))
-    .map(project => name(project.projectKey, project.projectName))
+  const selectedProjects = projectKeys.map(name)
   return <section className="archive-settings">
     <header className="archive-heading">
       <h1><UiText zh="归档" /></h1>
@@ -248,8 +198,7 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
       <div className="archive-filters" ref={filters}>
         <MissionFilter label={uiAttribute('项目')} icon={<NavigationIcon name="folder-open" />}
           values={projectKeys} onChange={changeProjects}
-          options={projects
-            .map(project => ({ id: project.projectKey, label: name(project.projectKey, project.projectName), keywords: project.projectKey, count: project.count }))} />
+          options={projects} />
         {projectKeys.length > 0 && <button type="button" className="mission-clear-filters" aria-label={uiAttribute('清除筛选')}
           title={uiAttribute('清除筛选')} onClick={() => {
             changeProjects([])
@@ -260,25 +209,28 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
           <NavigationIcon name="search" />
           <input ref={search} type="search" autoComplete="off" spellCheck={false} aria-label={uiAttribute('搜索标题或会话 ID')}
             placeholder={uiAttribute(kind === 'chat' ? '搜索已归档会话…' : '搜索已归档使命…')}
-            value={text} onChange={event => setText(event.currentTarget.value)}
+            value={text} onChange={event => {
+              setText(event.currentTarget.value)
+              if (!composing) setSearchQuery(event.currentTarget.value.trim())
+            }}
             onKeyDown={event => {
               if (event.key === 'Escape' && !event.nativeEvent.isComposing && !composing && text) {
                 event.preventDefault(); event.stopPropagation(); clearSearch()
               }
             }}
             onCompositionStart={() => setComposing(true)}
-            onCompositionEnd={event => { setText(event.currentTarget.value); setComposing(false) }} />
+            onCompositionEnd={event => { setSearchQuery(event.currentTarget.value.trim()); setComposing(false) }} />
           {text && <button type="button" aria-label={uiAttribute('清除搜索')}
             onClick={clearSearch}><DialogControlIcon name="close" /></button>}
         </div>
       </div>
     </div>
     <div className="archive-results" id="archive-results" role="tabpanel" aria-labelledby={`archive-tab-${kind}`} ref={list}
-      aria-busy={loading}>
+      aria-busy={!items && !error}>
       {actionError && <p className="compact-inline-error" role="alert">{actionError}</p>}
       {error && <div className="archive-status" role="alert"><p>{error}</p><button type="button" className="quiet-button" onClick={refresh}><UiText zh="重试" /></button></div>}
       {!result && !error && <p className="archive-status" role="status"><UiText zh="正在读取归档…" /></p>}
-      {result && !result.items.length && <div className="archive-empty" role="status">
+      {result && !result.groups.length && <div className="archive-empty" role="status">
         {!result.totals[kind] ? <p><UiText zh={kind === 'chat' ? '暂无已归档会话' : '暂无已归档使命'} /></p>
           : <><h2><UiText zh={kind === 'chat' ? '没有匹配的已归档会话' : '没有匹配的已归档使命'} /></h2>
             <p>{[searchQuery && uiAttribute('搜索「{0}」', searchQuery),
@@ -292,9 +244,9 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
               <button type="button" onClick={() => { clearSearch(); changeProjects([]) }}><UiText zh="清除搜索和筛选" /></button>
             </div></>}
       </div>}
-      {[...groups.entries()].map(([projectKey, items]) => <section className="archive-project" key={projectKey}>
+      {result?.groups.map(([projectKey, items]) => <section className="archive-project" key={projectKey}>
         <h2><NavigationIcon name="folder-open" /><span title={projectKey.startsWith('directory:') ? projectKey.slice(10) : undefined}>
-          {name(projectKey, items[0].projectName)}</span><span className="archive-count">{counts.get(projectKey)}</span></h2>
+          {name(projectKey)}</span><span className="archive-count">{items.length}</span></h2>
         <ul className="archive-list">
           {items.map(item => {
             const time = item.lastMessageAt && messageTimeParts(item.lastMessageAt, language, today)
@@ -315,8 +267,7 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
           })}
         </ul>
       </section>)}
-      {result?.hasMore && <button type="button" className="quiet-button archive-more" disabled={loading}
-        onClick={() => setExpanded({ key, limit: limit + PAGE_SIZE })}><UiText zh="加载更多" /></button>}
+
     </div>
     {confirm && <ArchiveDeleteDialog key={confirm.threadId} item={confirm} busy={pending.has(confirm.threadId)}
       onClose={() => setConfirm(null)} onDelete={disposition => remove(confirm, disposition)} />}
@@ -333,7 +284,6 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
   const [mission, setMission] = useState<MissionRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
-  const [confirmationStale, setConfirmationStale] = useState(false)
   useEffect(() => {
     if (!item.missionId) return
     let current = true
@@ -343,29 +293,16 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
       .catch(error => { if (current) setError(readErrorMessage(error)) })
     return () => { current = false }
   }, [client, item.missionId, retry])
-  async function submitDelete(disposition?: 'retain' | 'cleanup'): Promise<void> {
-    try {
-      await onDelete(disposition)
-    } catch (error) {
-      if (error instanceof ArchiveCommandRejected
-        && (error.code === 'command.version_conflict' || error.code === 'camp.archive_conflict')) {
-        setConfirmationStale(true)
-        throw new Error(uiAttribute('记录已变化，请关闭并重新打开删除确认。'))
-      }
-      throw error
-    }
-  }
-
-  if (mission) return <MissionDelete mission={mission} recordTitle={item.title} confirmationStale={confirmationStale}
-    onClose={onClose} onDelete={submitDelete} />
+  if (mission) return <MissionDelete mission={mission} recordTitle={item.title}
+    onClose={onClose} onDelete={onDelete} />
   return <CompactDialog title={uiAttribute(item.missionId ? '删除使命' : '删除会话')} onClose={() => { if (!busy) onClose() }}
     footer={<>
       <button type="button" className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh="取消" /></button>
       <button type="button" className="compact-primary archive-delete-confirm"
-        disabled={busy || Boolean(item.missionId) || confirmationStale}
+        disabled={busy || Boolean(item.missionId)}
         onClick={() => {
           setError(null)
-          void submitDelete().catch(error => setError(readErrorMessage(error)))
+          void onDelete().catch(error => setError(readErrorMessage(error)))
         }}><UiText zh={busy ? '正在删除…' : '删除'} /></button>
     </>}>
     <p>{item.title}</p>

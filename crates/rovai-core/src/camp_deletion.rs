@@ -84,25 +84,16 @@ impl ThreadDeletionService {
                 ));
             }
 
-            let row = transaction
+            let version = transaction
                 .query_row(
-                    "SELECT version, archived_at, archive_revision FROM camp WHERE id = ?1",
+                    "SELECT version FROM camp WHERE id = ?1",
                     [&envelope.payload.camp_id],
-                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, i64>(2)?)),
+                    |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
-            let Some((version, archived_at, archive_revision)) = row else {
+            let Some(version) = version else {
                 return Ok(rejected("camp.not_found", "Thread does not exist"));
             };
-            if let Some(guard) = &envelope.payload.archive_guard
-                && (archived_at.is_none() || guard.expected_archive_revision != archive_revision)
-            {
-                return Ok(crate::thread_archive::conflict(
-                    &envelope.payload.camp_id,
-                    archived_at.as_deref(),
-                    archive_revision,
-                ));
-            }
             if version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
                     "command.version_conflict",
@@ -663,7 +654,6 @@ mod tests {
                 expected_version,
                 force: true,
                 workspace_disposition: MissionWorkspaceDisposition::Retain,
-                archive_guard: None,
             },
         }
     }

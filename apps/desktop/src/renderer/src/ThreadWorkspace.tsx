@@ -1,3 +1,4 @@
+import { ThreadMessageEditor } from './ThreadMessageEditor'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import { ForkIcon } from './ForkIcon'
 import { InlineProjectFileReference } from './InlineProjectFileReference'
@@ -1668,6 +1669,7 @@ export function ThreadWorkspace({
   busy,
   onSend,
   onWithdrawMessage,
+  onMessageMutation,
   onForkMessage,
   forkBusy = false,
   reeditStore,
@@ -1675,8 +1677,6 @@ export function ThreadWorkspace({
   onPendingDraftPersisted,
   onPendingThreadLeave,
   onThreadLeaveGuardChange,
-  onArchivePreparationChange,
-  onUnarchive,
   onChangeLead,
   onAddMembers,
   onPreviewMemberRemoval,
@@ -1737,6 +1737,7 @@ export function ThreadWorkspace({
   busy: boolean
   onSend(draft: ThreadComposerDraftView, deliveryMode?: 'start' | 'steer', steerTargets?: Array<{agentRunId: string; executionEpoch: number}>): Promise<ThreadMessageSendReceipt | void>
   onWithdrawMessage?(message: ThreadMessageView): Promise<void>
+  onMessageMutation?(threadId: string): Promise<void>
   onForkMessage?(message: ThreadMessageView): void
   forkBusy?: boolean
   reeditStore?: MessageReeditStore
@@ -1744,8 +1745,6 @@ export function ThreadWorkspace({
   onPendingDraftPersisted?(): void
   onPendingThreadLeave?(draft: ThreadComposerDraftView): Promise<void>
   onThreadLeaveGuardChange?(threadId: string, guard: ThreadLeaveGuard | null): void
-  onArchivePreparationChange?(threadId: string, save: (() => Promise<void>) | null): void
-  onUnarchive?(): Promise<number | undefined>
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<ThreadMemberAddOutcome>
   onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
@@ -1868,14 +1867,6 @@ export function ThreadWorkspace({
   const [, setComposerDraftProjectionVersion] = useState(0)
   const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
   const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
-  const [composerArchived, setComposerArchived] = useState(Boolean(snapshot.thread.archivedAt))
-  const [archiveDraftError, setArchiveDraftError] = useState<string | null>(null)
-  const [archiveDraftRetry, setArchiveDraftRetry] = useState(0)
-  const [restoringArchive, setRestoringArchive] = useState(false)
-  const [unarchiveFocusRevision, setUnarchiveFocusRevision] = useState<number>()
-  const archiveDraftSave = useRef<{ controller: AbortController; promise: Promise<void> } | null>(null)
-  const locallySavedDraft = useRef<ThreadComposerDraftView | null>(null)
-  const failedLocalDraft = useRef<ThreadComposerDraftView | null>(null)
   // Routing observes live atoms (including previews). Text stays in the editor,
   // so ordinary typing does not rerender the entire workspace on each character.
   const [liveComposerAtoms, setLiveComposerAtoms] = useState<{
@@ -1909,7 +1900,11 @@ export function ThreadWorkspace({
   const composerLockAwaitingDisabledCommitRef = useRef(false)
   const [replyInteractionError, setReplyInteractionError] = useState<string | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
-  const [withdrawalMessage, setWithdrawalMessage] = useState<ThreadMessageView | null>(null)
+  const [messageRemoval, setMessageRemoval] = useState<{
+    message: ThreadMessageView; kind: 'withdraw' | 'delete'; commandId: string
+  } | null>(null)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const deletingMessage = messageRemoval?.kind === 'delete'
   const [deliveryMode, setDeliveryMode] = useState<'start' | 'steer'>('steer')
   useEffect(() => setDeliveryMode('steer'), [snapshot.thread.id])
   const [withdrawingMessageId, setWithdrawingMessageId] = useState<string | null>(null)
@@ -1917,7 +1912,8 @@ export function ThreadWorkspace({
   const [reeditMessageId, setReeditMessageId] = useState<string | null>(null)
   const [reeditError, setReeditError] = useState<string | null>(null)
   useEffect(() => {
-    setWithdrawalMessage(null)
+    setMessageRemoval(null)
+    setEditingMessageId(null)
     setWithdrawalError(null)
     setReeditMessageId(null)
     setReeditError(null)
@@ -1962,6 +1958,7 @@ export function ThreadWorkspace({
   if (!draftCoordinatorRef.current) {
     // Only this exact already-written snapshot can skip the onChange write.
     // Record it after success so a failed save never suppresses a later retry.
+    let locallySavedDraft: ThreadComposerDraftView | null = null
     draftCoordinatorRef.current = new DraftMutationCoordinator({
       load: async (threadId) => {
         const initial = initialComposerDraftRef.current?.threadId === threadId
@@ -2029,8 +2026,7 @@ export function ThreadWorkspace({
         const pastedTextMutation = (mutation.kind === 'add_source_attachment'
           || mutation.kind === 'remove_source_attachment') && mutation.pastedText
         const onSaved = (): void => {
-          locallySavedDraft.current = next
-          failedLocalDraft.current = null
+          locallySavedDraft = next
           if (pastedTextMutation) mutation.onAccepted?.(next)
         }
         if (activationStateRef.current === 'pending' && !memberCreationRef.current) {
@@ -2047,20 +2043,14 @@ export function ThreadWorkspace({
       },
       onChange: (draft, _epoch, kind) => {
         if (draft && activationStateRef.current === 'pending') pendingDraftChangeRef.current?.(draft)
-        if (kind === 'begin_epoch') failedLocalDraft.current = null
-        const loaded = kind === 'load' || kind === 'begin_epoch'
-        if (draft && activationStateRef.current === 'active' && !(loaded && activeSnapshotRef.current.thread.archivedAt)) {
+        if (draft && activationStateRef.current === 'active') {
           try {
-            if (draft !== locallySavedDraft.current) {
-              const storage = window.localStorage
-              if (!storage) throw new Error('Local draft storage is unavailable')
-              saveLocalThreadComposerDraft(draft, storage)
-              locallySavedDraft.current = draft
+            if (draft !== locallySavedDraft) {
+              saveLocalThreadComposerDraft(draft)
+              locallySavedDraft = draft
             }
-            failedLocalDraft.current = null
             setComposerPersistenceError(null)
           } catch (error) {
-            if (!loaded) failedLocalDraft.current = draft
             setComposerPersistenceError(
               error instanceof Error ? error : new Error(readErrorMessage(error))
             )
@@ -2669,10 +2659,22 @@ export function ThreadWorkspace({
   }), [currentUserName, messageMentionNames, profileById])
   const anchorNavigation = useThreadUserAnchors(snapshot.thread.id, client, snapshot.messages, optimisticMessages,
     anchorIdentityKeys, anchorText, userAnchorNavigation, workspaceEntrySnapshotReady)
+  const deletedMessageIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const message of snapshot.messages) {
+      if (message.replyParentDeleted && message.replyToThreadMessageId) ids.add(message.replyToThreadMessageId)
+    }
+    for (const run of snapshot.agentRuns) {
+      for (const [id, preview] of Object.entries(run.inputPreviews ?? {})) if (preview.deleted) ids.add(id)
+    }
+    return ids
+  }, [snapshot.messages, snapshot.agentRuns])
   const visibleThreadMessages = useMemo(() => mergeNavigationMessages(
     runSourceNavigation.messages, anchoredMessages, anchorNavigation.navigation.windowMessages(), optimisticMessages, snapshot.messages
-  ).filter(message => !message.missionStart),
-  [runSourceNavigation.messages, anchoredMessages, anchorNavigation.window, anchorNavigation.anchors, anchorNavigation.navigation, optimisticMessages, snapshot.messages])
+  ).filter(message => !message.missionStart && !deletedMessageIds.has(message.id)
+    && (message.withdrawn || !anchorNavigation.navigation.bodyIsUnavailable(message.id))),
+  [runSourceNavigation.messages, anchoredMessages, anchorNavigation.window, anchorNavigation.anchors,
+    anchorNavigation.navigation, optimisticMessages, snapshot.messages, deletedMessageIds])
   const messageExport = useMessageExport(snapshot.thread.id, visibleThreadMessages)
   const normalStart = messageHistory?.oldestLoadedSequence ?? snapshot.messages[0]?.sequence ?? null
   const anchorWindowEnd = anchorNavigation.window?.messages.at(-1)?.sequence ?? null
@@ -2684,15 +2686,30 @@ export function ThreadWorkspace({
     () => new Map(visibleThreadMessages.map((message) => [message.id, message])),
     [visibleThreadMessages]
   )
+  const activeDeletedMessageIds = useRef(deletedMessageIds)
+  activeDeletedMessageIds.current = deletedMessageIds
+  const messageBodyUnavailable = (id: string): boolean =>
+    activeDeletedMessageIds.current.has(id) || anchorNavigation.navigation.bodyIsUnavailable(id)
+  const editTarget = editingMessageId ? visibleMessageById.get(editingMessageId) : undefined
+  const editUnavailable = !!editingMessageId && (messageBodyUnavailable(editingMessageId)
+    || editTarget?.withdrawn || editTarget?.canEdit === false)
+  const editingMessage = editUnavailable ? undefined : editTarget
+  const hideComposerForEdit = mobile && conversationView === 'conversation' && !!editingMessage
+  useEffect(() => {
+    if (editUnavailable) setEditingMessageId(current => current === editingMessageId ? null : current)
+  }, [editingMessageId, editUnavailable])
   const activeVisibleMessageById = useRef(visibleMessageById)
   activeVisibleMessageById.current = visibleMessageById
   const replyParentById = useMemo(() => {
     const messages = new Map(visibleMessageById)
     for (const windowMessages of replyAnchorWindows.values()) {
-      for (const message of windowMessages ?? []) messages.set(message.id, message)
+      for (const message of windowMessages ?? []) {
+        if (!deletedMessageIds.has(message.id) && (message.withdrawn || !anchorNavigation.navigation.bodyIsUnavailable(message.id))
+          && (messages.get(message.id)?.version ?? 0) <= message.version) messages.set(message.id, message)
+      }
     }
     return messages
-  }, [replyAnchorWindows, visibleMessageById])
+  }, [replyAnchorWindows, visibleMessageById, deletedMessageIds, anchorNavigation.navigation, anchorNavigation.anchors])
   const conversationTimeline = useMemo(
     () => campConversationTimeline(
       visibleThreadMessages,
@@ -2847,7 +2864,7 @@ export function ThreadWorkspace({
   const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
-  const composerSendDisabled = Boolean(snapshot.thread.archivedAt) || fileInsertionPending || composerSendIsDisabled({
+  const composerSendDisabled = fileInsertionPending || composerSendIsDisabled({
     hasSendablePayload,
     hasAvailableRecipient,
     hasUnavailableMention,
@@ -2975,73 +2992,7 @@ export function ThreadWorkspace({
     }
   }
 
-  const prepareForArchive = useCallback((): Promise<void> => {
-    if (archiveDraftSave.current) return archiveDraftSave.current.promise
-    const controller = new AbortController()
-    const threadId = snapshot.thread.id
-    const save = async () => {
-      const handle = composerHandleRef.current
-      await handle?.waitForComposition(controller.signal)
-      await handle?.waitForFileInsertions()
-      await handle?.waitForComposition(controller.signal)
-      controller.signal.throwIfAborted()
-      if (composerSubmittingRef.current || routingMutatingRef.current) {
-        throw new Error(uiAttribute('输入框正在提交变更，请稍后重试。'))
-      }
-      handle?.cancelHistoryPreview()
-      handle?.setInteractionLocked(true)
-      try {
-        await attachmentPreparationQueue.current
-        controller.signal.throwIfAborted()
-        await handle?.flush()
-        await draftCoordinator.waitForIdle()
-        controller.signal.throwIfAborted()
-        const unsaved = failedLocalDraft.current
-        if (unsaved?.threadId === threadId) {
-          const storage = window.localStorage
-          if (!storage) throw new Error('Local draft storage is unavailable')
-          saveLocalThreadComposerDraft(unsaved, storage)
-          locallySavedDraft.current = unsaved
-          failedLocalDraft.current = null
-          setComposerPersistenceError(null)
-        }
-      } finally {
-        handle?.setInteractionLocked(false)
-      }
-    }
-    const promise = save().finally(() => { if (archiveDraftSave.current?.controller === controller) archiveDraftSave.current = null })
-    archiveDraftSave.current = { controller, promise }
-    return promise
-  }, [draftCoordinator, snapshot.thread.id])
-
-  useLayoutEffect(() => {
-    const threadId = snapshot.thread.id
-    onArchivePreparationChange?.(threadId, prepareForArchive)
-    return () => {
-      archiveDraftSave.current?.controller.abort()
-      archiveDraftSave.current = null
-      onArchivePreparationChange?.(threadId, null)
-    }
-  }, [onArchivePreparationChange, prepareForArchive, snapshot.thread.id])
-
-  useEffect(() => {
-    if (!snapshot.thread.archivedAt) {
-      setComposerArchived(false)
-      setArchiveDraftError(null)
-      return
-    }
-    if (composerArchived) return
-    let current = true
-    setArchiveDraftError(null)
-    const revision = snapshot.thread.archiveRevision
-    void prepareForArchive().then(() => {
-      if (current && activeSnapshotRef.current.thread.archiveRevision === revision) setComposerArchived(true)
-    }).catch(error => { if (current) setArchiveDraftError(readErrorMessage(error)) })
-    return () => { current = false }
-  }, [prepareForArchive, composerArchived, archiveDraftRetry, snapshot.thread.archivedAt, snapshot.thread.archiveRevision])
-
   const prepareForThreadLeave = useCallback(async (): Promise<ThreadLeavePreparation> => {
-    if (activeSnapshotRef.current.thread.archivedAt) await prepareForArchive()
     if (composerSubmittingRef.current || routingMutatingRef.current) {
       throw new Error(uiAttribute('Composer 正在提交变更，请稍后再离开当前会话。'))
     }
@@ -3061,7 +3012,7 @@ export function ThreadWorkspace({
       await attachmentPreparationQueue.current
       const flushed = await composerHandle?.flush()
       const draft = flushed?.draft ?? await draftCoordinator.waitForIdle()
-      if (activationStateRef.current === 'active' && !memberCreationRef.current && !activeSnapshotRef.current.thread.archivedAt) {
+      if (activationStateRef.current === 'active' && !memberCreationRef.current) {
         // Autosave reports errors without rejecting the edit. Leaving must retry
         // that same snapshot and fail before unmounting if storage is still full.
         const storage = window.localStorage
@@ -3096,7 +3047,7 @@ export function ThreadWorkspace({
       setComposerPersistenceError(normalized)
       throw normalized
     }
-  }, [draftCoordinator, draftLoadState.state, prepareForArchive, snapshot.thread.id])
+  }, [draftCoordinator, draftLoadState.state, snapshot.thread.id])
 
   useLayoutEffect(() => {
     const threadId = snapshot.thread.id
@@ -3932,16 +3883,6 @@ export function ThreadWorkspace({
   ])
 
   useEffect(() => {
-    const revision = snapshot.thread.archiveRevision
-    if (unarchiveFocusRevision === undefined || revision === undefined || revision < unarchiveFocusRevision) return
-    if (revision === unarchiveFocusRevision && !snapshot.thread.archivedAt) {
-      if (composerInteractionDisabled) return
-      composerHandleRef.current?.focus()
-    }
-    setUnarchiveFocusRevision(undefined)
-  }, [unarchiveFocusRevision, snapshot.thread.archiveRevision, snapshot.thread.archivedAt, composerInteractionDisabled])
-
-  useEffect(() => {
     const threadId = snapshot.thread.id
     if (!memberCreation || snapshot.thread.activationState !== 'pending' || busy
       || draftLoadState.state !== 'ready' || focusedMemberCreationDraftRef.current === threadId) return
@@ -4643,8 +4584,7 @@ export function ThreadWorkspace({
     pastedText?: { text: string; editor: StructuredMentionComposerHandle; epoch: number }
   ): Promise<void> => {
     if (
-      snapshot.thread.archivedAt
-      || draftLoadState.state !== 'ready'
+      draftLoadState.state !== 'ready'
       || composerSubmittingRef.current
       || routingMutatingRef.current
     ) return
@@ -4899,16 +4839,41 @@ export function ThreadWorkspace({
     })
   }
 
-  const confirmMessageWithdrawal = async (): Promise<void> => {
-    if (!withdrawalMessage || withdrawingMessageId || !onWithdrawMessage) return
-    const message = withdrawalMessage
+  const openMessageRemoval = (message: ThreadMessageView, kind: 'withdraw' | 'delete'): void => {
+    setWithdrawalError(null)
+    setMessageRemoval({ message, kind, commandId: newCommandId() })
+  }
+
+  const messageMutationCommitted = async (): Promise<void> => {
+    try { await onMessageMutation?.(snapshot.thread.id) }
+    catch { notifyError(uiAttribute('消息已更新，刷新失败。')) }
+  }
+
+  const confirmMessageRemoval = async (): Promise<void> => {
+    if (!messageRemoval || withdrawingMessageId) return
+    const { message, kind, commandId } = messageRemoval
+    const threadId = snapshot.thread.id
     setWithdrawingMessageId(message.id)
     setWithdrawalError(null)
     try {
-      await onWithdrawMessage(message)
-      setWithdrawalMessage(null)
+      if (kind === 'withdraw') {
+        await onWithdrawMessage?.(message)
+      } else {
+        const result = await client.request<StoredCommandResult>('thread.messages.delete', {
+          commandId, command: { threadId, messageId: message.id }
+        })
+        if (result.status === 'rejected') {
+          setMessageRemoval(current => current?.commandId === commandId
+            ? { ...current, commandId: newCommandId() } : current)
+          throw new Error(uiAttribute('删除失败，请重试。'))
+        }
+        reeditStore?.deleteMessage(threadId, message.id)
+        await messageMutationCommitted()
+      }
+      setMessageRemoval(current => current?.commandId === commandId ? null : current)
     } catch (error) {
-      setWithdrawalError(readErrorMessage(error, uiAttribute('撤回失败，请重试。')))
+      setWithdrawalError(readErrorMessage(error, kind === 'delete'
+        ? uiAttribute('删除失败，请重试。') : uiAttribute('撤回失败，请重试。')))
     } finally {
       setWithdrawingMessageId(null)
     }
@@ -5394,12 +5359,31 @@ export function ThreadWorkspace({
     }
     return <TruncatedStructuredMessageBody body={message.body} content={message.content} members={snapshot.members}
       pendingMemberProfiles={pendingMemberProfiles} leadingRecipientAgentId={context === 'export' ? null : defaultRecipientMentionAgentId(message)}
+      edited={context !== 'export' && (message.contentRevision ?? 1) > 1}
       truncate={context === 'timeline' && (message.authorType === 'user' || message.authorType === 'external_principal')}
       forceExpanded={forceExpanded} renderLeadingCurrentUserMarkdown={message.authorType === 'agent'}
       onActivateCurrentUserMention={openCurrentUserProfilePopover} onActivateMemberMention={openMemberProfilePopover}
       onActivateAllMembersMention={(trigger, focusPanel) => openAllMembersMentionPopover('history', message.addressedAgentIds, trigger, focusPanel)}
       onActivateSkillMention={openSkillPreview} onFileReference={onFileReference} />
   }
+
+  const renderMessageEditor = (message: ThreadMessageView): JSX.Element => {
+    const defaultLead = snapshot.members.find(member => member.agentId === snapshot.thread.defaultLeadAgentId)
+    return <ThreadMessageEditor key={message.id} message={message} threadId={snapshot.thread.id}
+      defaultLead={defaultLead?.displayName ?? null}
+      editorContext={{
+        referenceScope: { threadId: snapshot.thread.id, client, projectBound: snapshot.thread.projectBindingKind === 'directory' },
+        members: composerMentionCandidates.filter(member => snapshot.members.some(current => current.agentId === member.agentId)),
+        skills: composerSkills,
+        onNeedSkills: () => refreshSkillCatalogRef.current?.()
+      }}
+      onCancel={() => setEditingMessageId(null)}
+      onSaved={async () => { await messageMutationCommitted(); setEditingMessageId(current => current === message.id ? null : current) }} />
+  }
+
+  const messageDeleteAction = (message: ThreadMessageView): (() => void) | undefined =>
+    message.canDelete || (message.submittedAsSteer && message.authorType === 'user')
+      ? () => openMessageRemoval(message, 'delete') : undefined
 
   const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
     ...message,
@@ -5523,11 +5507,14 @@ export function ThreadWorkspace({
 
   return (
     <RunInputSourceContext.Provider value={{
+      bodyIsUnavailable: messageBodyUnavailable,
       body: async messageId => {
+        if (messageBodyUnavailable(messageId)) return null
         const threadId = snapshot.thread.id
-        const message = visibleMessageById.get(messageId)
+        const message = activeVisibleMessageById.current.get(messageId)
           ?? (replyAnchorWindows.get(messageId) ?? await loadReplyAnchorWindow(messageId))?.find(item => item.id === messageId)
-        return activeThreadIdRef.current === threadId && message && !message.withdrawn ? anchorText(message) : null
+        return activeThreadIdRef.current === threadId && message && !message.withdrawn && !messageBodyUnavailable(messageId)
+          ? anchorText(message) : null
       },
       reveal: messageId => {
         setConversationView('conversation')
@@ -5735,6 +5722,7 @@ export function ThreadWorkspace({
               {missionBoard}
               {!anchorWindowBeforeNormal && historyLoader}
               <TimelineVirtualList items={timelineRows} viewportRef={timelineScrollRef} controllerRef={timelineVirtualRef}
+                editingId={editingMessage?.id}
                 followingLatest={groupingFollowsLatest} preserveReadingPosition={preserveTimelineReadingPosition}>
               {(row) => {
                 const items: JSX.Element[] = []
@@ -5927,6 +5915,12 @@ export function ThreadWorkspace({
                         messageId={campMessage.id} disabled={composerInteractionDisabled || busy}
                         onSelect={() => requestReedit(campMessage.id)} />}
                       <time>{messageClockTime(campMessage.createdAt)}</time>
+                      {campMessage.canDelete && <DropdownMenu.Root modal={false}>
+                        <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
+                        <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu">
+                          <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => openMessageRemoval(campMessage, 'delete')}><UiText zh="删除" /></DropdownMenu.Item>
+                        </DropdownMenu.Content></DropdownMenu.Portal>
+                      </DropdownMenu.Root>}
                     </div>
                   )
                   return items
@@ -5998,6 +5992,7 @@ export function ThreadWorkspace({
                                     ? campMessageAuthorLabel(replyParent, memberById, currentUserName)
                                     : null}
                                   unavailable={replyParentUnavailable}
+                                  deleted={campMessage.replyParentDeleted === true}
                                   loading={!replyParent && !replyParentUnavailable}
                                   onReveal={() => openReplyDetails(campMessage.id)}
                                 />
@@ -6119,7 +6114,10 @@ export function ThreadWorkspace({
                               )}
                             </div>
                             <div className="public-message-readout">
-                            <MessageSurface
+                            {editingMessage?.id === campMessage.id ? <>
+                              {replyQuote}
+                              {renderMessageEditor(campMessage)}
+                            </> : <MessageSurface
                               timestamp={messageTimestamp}
                               copied={copied}
                               hasDelivery={campMessage.authorType === 'agent' && campMessageDeliveries.length > 0}
@@ -6137,16 +6135,14 @@ export function ThreadWorkspace({
                                     trigger,
                                     { runId: run.id }
                                   )}
-                                  onWithdraw={campMessage.canWithdraw && onWithdrawMessage
-                                    ? () => {
-                                        setWithdrawalError(null)
-                                        setWithdrawalMessage(campMessage)
-                                      }
-                                    : undefined}
                                 />
                               ) : undefined}
                               onReply={humanAuthored ? undefined : handleReply}
                               onCopy={handleCopy}
+                              onWithdraw={campMessage.canWithdraw && onWithdrawMessage ? () => openMessageRemoval(campMessage, 'withdraw') : undefined}
+                              onEdit={campMessage.canEdit ? () => setEditingMessageId(campMessage.id) : undefined}
+                              onDelete={messageDeleteAction(campMessage)}
+                              deleteDisabled={campMessage.canDelete === false}
                               onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                             >
                               <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
@@ -6200,7 +6196,7 @@ export function ThreadWorkspace({
                                   onNotify={onNotify}
                                 />
                               )}
-                            </MessageSurface>
+                            </MessageSurface>}
                             {campMessage.authorType === 'agent' && (
                               <ThreadMessageDeliveryFooter
                                 deliveries={campMessageDeliveries}
@@ -6220,6 +6216,8 @@ export function ThreadWorkspace({
                                   onCopy={handleCopy}
                                   onFork={!snapshot.thread.missionId && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
                                   forkBusy={forkBusy}
+                                  onDelete={messageDeleteAction(campMessage)}
+                                  deleteDisabled={campMessage.canDelete === false}
                                   onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                                 />
                               )}
@@ -6283,6 +6281,8 @@ export function ThreadWorkspace({
                         onCopy={handleCopy}
                         onFork={!snapshot.thread.missionId && campMessage.authorType === 'agent' && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
                         forkBusy={forkBusy}
+                        onDelete={messageDeleteAction(campMessage)}
+                        deleteDisabled={campMessage.canDelete === false}
                         onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                       />
                     </div>
@@ -6577,24 +6577,9 @@ export function ThreadWorkspace({
 
           <div className="message-composer-selection-slot">
           <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
-          {snapshot.thread.archivedAt && <div className="archived-composer-notice">
-            <div className="archived-composer-copy" role="status"><NavigationIcon name="archive" />
-              <div><strong><UiText zh={snapshot.thread.missionId ? '使命已归档' : '会话已归档'} /></strong>
-                <p><UiText zh={activeRuns.length ? '执行会继续，有新消息时会重新显示。' : '有新消息时会重新显示。'} /></p>
-              </div>
-            </div>
-            {archiveDraftError && <span role="alert">{archiveDraftError}
-              <button type="button" className="quiet-button" onClick={() => setArchiveDraftRetry(value => value + 1)}><UiText zh="重试保存" /></button>
-            </span>}
-            {onUnarchive && <button type="button" className="primary-button" disabled={restoringArchive} onClick={() => {
-              setRestoringArchive(true)
-              void onUnarchive().then(setUnarchiveFocusRevision)
-                .catch(error => onNotifyError?.(readErrorMessage(error))).finally(() => setRestoringArchive(false))
-            }}><UiText zh="取消归档" /></button>}
-          </div>}
           <form
-        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: snapshot.thread.archivedAt && composerArchived ? 'none' : undefined }}
-        inert={messageExport.selecting || Boolean(snapshot.thread.archivedAt && composerArchived)}
+        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: hideComposerForEdit ? 'none' : undefined }}
+        inert={messageExport.selecting || hideComposerForEdit}
         className={[
           'composer',
           attachmentDragState ? 'is-dragging-attachments' : ''
@@ -7072,10 +7057,10 @@ export function ThreadWorkspace({
         </Dialog.Portal>
       </Dialog.Root>
       <Dialog.Root
-        open={withdrawalMessage !== null}
+        open={messageRemoval !== null}
         onOpenChange={(open) => {
           if (!open && !withdrawingMessageId) {
-            setWithdrawalMessage(null)
+            setMessageRemoval(null)
             setWithdrawalError(null)
           }
         }}
@@ -7085,8 +7070,8 @@ export function ThreadWorkspace({
           <AppDialogContent className="message-withdraw-dialog" tone="danger" width="compact">
             <AppDialogHeader
               icon="warning"
-              title={uiAttribute("撤回这条消息？")}
-              description={uiAttribute("所有接收队员尚未领取，可直接撤回。")}
+              title={deletingMessage ? uiAttribute('删除这条消息？') : uiAttribute('撤回这条消息？')}
+              description={deletingMessage ? uiAttribute('这条消息将被永久删除。') : uiAttribute('所有接收队员尚未领取，可直接撤回。')}
               closeDisabled={withdrawingMessageId !== null}
             />
             {withdrawalError && <AppDialogBody>
@@ -7096,20 +7081,22 @@ export function ThreadWorkspace({
               <button
                 className="quiet-button"
                 type="button"
-                aria-label={uiAttribute("取消撤回")}
+                aria-label={uiAttribute("取消")}
                 disabled={withdrawingMessageId !== null}
                 onClick={() => {
-                  setWithdrawalMessage(null)
+                  setMessageRemoval(null)
                   setWithdrawalError(null)
                 }}
               ><UiText zh={"取消"} /></button>
               <button
                 className="danger-button"
                 type="button"
-                aria-label={uiAttribute("确认撤回消息")}
+                aria-label={deletingMessage ? uiAttribute("确认删除消息") : uiAttribute("确认撤回消息")}
                 disabled={withdrawingMessageId !== null}
-                onClick={() => void confirmMessageWithdrawal()}
-              >{withdrawingMessageId ? uiAttribute("正在撤回…") : uiAttribute("撤回")}</button>
+                onClick={() => void confirmMessageRemoval()}
+              >{deletingMessage
+                ? withdrawingMessageId ? uiAttribute('正在删除…') : uiAttribute('删除')
+                : withdrawingMessageId ? uiAttribute('正在撤回…') : uiAttribute('撤回')}</button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -7503,29 +7490,21 @@ export function executionRunInputMessageIds(
   return sourceIds
 }
 
-function executionSourceMessages(
-  run: AgentRunView,
-  turns: ThreadSnapshot['turns'],
-  messageById: ReadonlyMap<string, ThreadMessageView>
-): ThreadMessageView[] {
-  return executionRunInputMessageIds(run, turns).flatMap((messageId) => {
-    const message = messageById.get(messageId)
-    return message ? [message] : []
-  })
-}
-
 function executionTriggerMessage(
   run: AgentRunView,
   turns: ThreadSnapshot['turns'],
   messageById: ReadonlyMap<string, ThreadMessageView>
 ): ThreadMessageView | null {
-  return executionSourceMessages(run, turns, messageById)[0] ?? null
+  const first = executionRunInputMessageIds(run, turns)[0]
+  return first && !run.inputPreviews?.[first]?.deleted ? messageById.get(first) ?? null : null
 }
 
 export function executionMessageSummary(
   message: Pick<ThreadMessageView, 'body' | 'attachments'> | null,
-  run: Pick<AgentRunView, 'inputSummary' | 'purpose'>
+  run: Pick<AgentRunView, 'inputSummary' | 'purpose' | 'inputMessageIds' | 'inputPreviews'>
 ): string {
+  const first = run.inputMessageIds?.[0]
+  if (first && run.inputPreviews?.[first]?.deleted) return uiAttribute('原消息已删除')
   if (run.inputSummary !== undefined) {
     return run.inputSummary || run.purpose.trim().replace(/\s+/gu, ' ') || uiAttribute('执行记录')
   }
@@ -7728,10 +7707,12 @@ function ExecutionLocateIcon(): JSX.Element {
 function ExecutionInputList({
   messageIds,
   messageById,
+  previews,
   memberById,
   onRevealMessage
 }: {
   messageIds: readonly string[]
+  previews?: AgentRunView['inputPreviews']
   messageById: ReadonlyMap<string, ThreadMessageView>
   memberById: Map<string, ThreadSnapshot['members'][number]>
   onRevealMessage(messageId: string): void
@@ -7739,7 +7720,8 @@ function ExecutionInputList({
   const { profile: currentUserProfile } = useCurrentUserProfile()
   return <ol className="execution-input-list">
     {messageIds.map((messageId) => {
-      const message = messageById.get(messageId)
+      const preview = previews?.[messageId]
+      const message = preview?.deleted ? undefined : messageById.get(messageId)
       const authorMember = message?.authorType === 'agent'
         ? memberById.get(message.authorId)
         : null
@@ -7748,9 +7730,10 @@ function ExecutionInputList({
           ? authorMember?.displayName ?? message.authorId
           : currentUserDisplayName(currentUserProfile)
         : uiAttribute('消息')
-      const summary = message
-        ? message.body || message.attachments.map((item) => item.displayName).join('、')
-        : uiAttribute('消息内容尚未载入')
+      const summary = preview?.deleted ? uiAttribute('原消息已删除')
+        : preview ? preview.summary ?? uiAttribute('消息内容尚未载入')
+          : message ? message.body || message.attachments.map((item) => item.displayName).join('、')
+            : uiAttribute('消息内容尚未载入')
       return <li key={messageId}>
         {message?.authorType === 'agent'
           ? <MemberAvatar agentId={message.authorId} avatarRef={authorMember?.avatarRef ?? null}
@@ -7759,8 +7742,8 @@ function ExecutionInputList({
             ? <CurrentUserAvatar profile={currentUserProfile} className="execution-input-user" />
             : <span className="execution-input-placeholder" aria-hidden="true"><ExecutionBatchIcon /></span>}
         <div>
-          <div><strong>{author}</strong><button type="button" onClick={() => onRevealMessage(messageId)}>
-            <ExecutionLocateIcon /><UiText zh={"定位原消息"} /></button></div>
+          <div><strong>{author}</strong>{!preview?.deleted && <button type="button" onClick={() => onRevealMessage(messageId)}>
+            <ExecutionLocateIcon /><UiText zh={"定位原消息"} /></button>}</div>
           <p title={summary}>{summary}</p>
         </div>
       </li>
@@ -7771,11 +7754,13 @@ function ExecutionInputList({
 function ExecutionInputCountPopover({
   messageIds,
   messageById,
+  previews,
   memberById,
   onRevealMessage,
   subject
 }: {
   messageIds: readonly string[]
+  previews?: AgentRunView['inputPreviews']
   messageById: ReadonlyMap<string, ThreadMessageView>
   memberById: Map<string, ThreadSnapshot['members'][number]>
   onRevealMessage(messageId: string): void
@@ -7805,6 +7790,7 @@ function ExecutionInputCountPopover({
         <ExecutionInputList
           messageIds={messageIds}
           messageById={messageById}
+          previews={previews}
           memberById={memberById}
           onRevealMessage={onRevealMessage}
         />
@@ -8317,6 +8303,7 @@ function ExecutionDrawer({
             <ExecutionInputCountPopover
               messageIds={inputMessageIds}
               messageById={messageById}
+              previews={run.inputPreviews}
               memberById={memberById}
               onRevealMessage={onRevealMessage}
               subject={uiAttribute("本次执行")}
@@ -8331,8 +8318,7 @@ function ExecutionDrawer({
                   aria-controls={contentId} onClick={() => toggleRun(run.id)}>
                   <ExecutionCardChevron expanded={expanded} />
                 </button>)}
-                {run.invocationKind === 'batch' && run.failure?.code !== 'context_payload_too_large'
-                  && (run.status === 'failed' || run.status === 'cancelled') && inputMessageIds.length > 0 && (
+                {run.canContinue && (
                   <ContinueAgentRunButton threadId={threadId} agentRunId={run.id} onError={onFileOpenError} />
                 )}
                 {(stopState === 'available' || stopState === 'confirming') && (
@@ -8684,8 +8670,7 @@ function UserMessageDeliveryReceipt({
   message,
   runs,
   memberById,
-  onOpenExecution,
-  onWithdraw
+  onOpenExecution
 }: {
   message: ThreadMessageView
   runs: AgentRunView[]
@@ -8694,7 +8679,6 @@ function UserMessageDeliveryReceipt({
   onReconcile?(deliveryId: string): Promise<string>
   memberById: Map<string, ThreadSnapshot['members'][number]>
   onOpenExecution(run: AgentRunView, trigger: HTMLButtonElement): void
-  onWithdraw?(): void
 }): JSX.Element | null {
   const [checking, setChecking] = useState<string | null>(null)
   const [checkResult, setCheckResult] = useState<string | null>(null)
@@ -8704,21 +8688,24 @@ function UserMessageDeliveryReceipt({
     if (!runByAgentId.has(run.agentId)) runByAgentId.set(run.agentId, run)
   }
   const ordered = message.addressedAgentIds.map((agentId) => {
-    let delivery = deliveries.find(d => d.recipientAgentId === agentId && !d.continuationRequest)
+    const candidates = deliveries.filter(item => item.recipientAgentId === agentId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    let delivery = candidates.find(item => !item.continuationRequest)
     const boundRun = allRuns.find(r => r.id === delivery?.targetAgentRunId)
     const latestRun = runByAgentId.get(agentId)
     let run = delivery?.requestedMode === 'steer' ? boundRun ?? latestRun ?? null
       : latestRun && (!boundRun || latestRun.createdAt >= boundRun.createdAt) ? latestRun : boundRun ?? null
     if (delivery?.requestedMode !== 'steer') {
-      const continuation = deliveries.filter(d => d.recipientAgentId === agentId && d.continuationRequest)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      const continuation = candidates.find(item => item.continuationRequest)
+      const ordinaryWaiting = delivery?.status === 'waiting' ? delivery : undefined
+      const queued = ordinaryWaiting && (!continuation || ordinaryWaiting.createdAt >= continuation.createdAt)
+        ? ordinaryWaiting : continuation
       const runDelivery = deliveries.find(d => d.targetAgentRunId === run?.id)
-      // A queued continuation has no Run yet. Once claimed, its own Run or a
-      // newer input Run owns the receipt; the original Delivery stays historical.
-      if (continuation && (!run || continuation.targetAgentRunId === run.id
-        || continuation.createdAt >= (runDelivery?.createdAt ?? run.createdAt))) {
-        delivery = continuation
-        run = allRuns.find(r => r.id === continuation.targetAgentRunId) ?? null
+      // An accepted replacement may be waiting when the older Run finishes.
+      if (queued && (!run || queued.targetAgentRunId === run.id
+        || queued.createdAt >= (runDelivery?.createdAt ?? run.createdAt))) {
+        delivery = queued
+        run = allRuns.find(r => r.id === queued.targetAgentRunId) ?? null
       }
     }
     const deliveryOwnsStatus = delivery?.requestedMode === 'steer' || !run || delivery?.targetAgentRunId === run.id
@@ -8728,7 +8715,7 @@ function UserMessageDeliveryReceipt({
       : deliveryOwnsStatus && delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
       : (deliveryOwnsStatus && delivery?.status === 'failed') || run?.status === 'failed' ? 'failed'
       : (deliveryOwnsStatus && delivery?.status === 'cancelled') || run?.status === 'cancelled' ? 'stopped'
-      : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? delivery.dispatchPhase === 'attempting' ? 'steerSending' : 'steerPending'
+      : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? 'steerSending'
       : run?.status === 'succeeded' || (!run && delivery?.status === 'settled') ? 'completed'
       : run && agentRunIsStarting(run) ? 'starting'
       : (deliveryOwnsStatus && delivery?.status === 'waiting') || !run ? 'pending'
@@ -8737,38 +8724,29 @@ function UserMessageDeliveryReceipt({
   }).filter(item => item.run !== null || item.delivery !== undefined)
   const steered = ordered.filter(item => item.status === 'steered')
   const unknown = ordered.filter(item => item.status === 'unknown')
-  const steerPending = ordered.filter(item => item.status === 'steerPending')
   const steerSending = ordered.filter(item => item.status === 'steerSending')
-  const starting = ordered.filter(item => item.status === 'starting')
   const pending = ordered.filter(item => item.status === 'pending')
-  const inProgress = ordered.filter(item => item.status === 'inProgress')
+  const inProgress = ordered.filter(item => item.status === 'inProgress' || item.status === 'starting')
   const stopped = ordered.filter(item => item.status === 'stopped')
   const failed = ordered.filter(item => item.status === 'failed')
-  const canWithdraw = message.canWithdraw && Boolean(onWithdraw)
-    && deliveries.every(delivery => delivery.status === 'waiting')
   const ordinaryLabels = [
     steered.length ? (ordered.length === 1 ? uiAttribute('已插话') : uiAttribute('已插话 {0}', String(steered.length))) : '',
-    steerPending.length ? (ordered.length === 1 ? uiAttribute('待插话') : uiAttribute('待插话 {0}', String(steerPending.length))) : '',
-    steerSending.length ? (ordered.length === 1 ? uiAttribute('发送中') : uiAttribute('发送中 {0}', String(steerSending.length))) : '',
-    starting.length ? uiAttribute('启动中 {0}', String(starting.length)) : '',
+    steerSending.length ? (ordered.length === 1 ? uiAttribute('插话中') : uiAttribute('插话中 {0}', String(steerSending.length))) : '',
     inProgress.length ? uiAttribute('处理中 {0}', String(inProgress.length)) : '',
     pending.length ? uiAttribute('待处理 {0}', String(pending.length)) : '',
-    unknown.length ? uiAttribute('待核对 {0}', String(unknown.length)) : '',
+    unknown.length ? (ordered.length === 1 ? uiAttribute('未确认送达') : uiAttribute('未确认送达 {0}', String(unknown.length))) : '',
     stopped.length ? (ordered.length === 1 ? uiAttribute('已停止') : uiAttribute('已停止 {0}', String(stopped.length))) : ''
   ].filter(Boolean)
   const failureLabel = failed.length ? (ordered.length === 1 ? uiAttribute('执行失败') : uiAttribute('执行失败 {0}', String(failed.length))) : ''
   const receiptLabel = [...ordinaryLabels, failureLabel].filter(Boolean).join(' · ')
   if (!receiptLabel) return null
   const presentation = {
-    className: unknown.length ? 'is-unknown' : failed.length ? 'is-failed' : steerSending.length ? 'is-sending' : inProgress.length || starting.length ? 'is-progress' : pending.length || steerPending.length ? 'is-queued' : stopped.length ? 'is-stopped' : 'is-confirmed',
+    className: unknown.length ? 'is-unknown' : failed.length ? 'is-failed' : steerSending.length ? 'is-sending' : inProgress.length ? 'is-progress' : pending.length ? 'is-queued' : stopped.length ? 'is-stopped' : 'is-confirmed',
     label: receiptLabel
   }
   const hasMixedStatus = ordinaryLabels.length + Number(Boolean(failureLabel)) > 1
   return (
     <div className="user-message-receipt-row">
-      {canWithdraw && <button className="user-message-withdraw" type="button" aria-label={uiAttribute("撤回尚未领取的消息")} title={uiAttribute("撤回消息")} onClick={onWithdraw}>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 4H2.5v2.5M2.8 6.2A5.4 5.4 0 1 1 3 10" /></svg>
-      </button>}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
@@ -8802,8 +8780,8 @@ function UserMessageDeliveryReceipt({
                 : status === 'pending' ? uiAttribute('待处理')
                 : delivery?.requestedMode === 'steer'
                   ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收')
-                    : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('是否送达待核对')
-                    : status === 'steerPending' ? uiAttribute('待插话') : uiAttribute('发送中')
+                    : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('未确认送达')
+                    : uiAttribute('插话中')
                   : userMessageRunStatusLabel(run)
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
@@ -8821,11 +8799,6 @@ function UserMessageDeliveryReceipt({
               </div>
             })}
             {checkResult && <p role="status">{checkResult}</p>}
-            {canWithdraw && <div className="user-message-receipt-actions">
-              <DropdownMenu.Item asChild>
-                <button type="button" onClick={onWithdraw}><UiText zh={"撤回消息"} /></button>
-              </DropdownMenu.Item>
-            </div>}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -10367,6 +10340,7 @@ function ReplyParentQuote({
   projectedBody,
   authorLabel,
   unavailable,
+  deleted,
   loading,
   onReveal
 }: {
@@ -10374,14 +10348,15 @@ function ReplyParentQuote({
   projectedBody: string
   authorLabel: string | null
   unavailable: boolean
+  deleted?: boolean
   loading: boolean
   onReveal(): void
 }): JSX.Element {
-  if (!parent) {
+  if (!parent || deleted) {
     return (
       <button type="button" onClick={onReveal} className={`reply-parent-quote${unavailable ? ' is-unavailable' : ''}`}>
         <span className="reply-quote-prefix">{uiAttribute('回复')}</span>
-        <span>{unavailable ? uiAttribute("引用的消息当前不可用") : loading ? uiAttribute("正在载入引用…") : uiAttribute("引用消息")}</span>
+        <span>{deleted ? uiAttribute("原消息已删除") : unavailable ? uiAttribute("引用的消息当前不可用") : loading ? uiAttribute("正在载入引用…") : uiAttribute("引用消息")}</span>
       </button>
     )
   }
@@ -10404,6 +10379,9 @@ function MessageSurface({
   onCopy,
   onSelect,
   onWithdraw,
+  onEdit,
+  onDelete,
+  deleteDisabled = false,
   withdrawing = false,
   children
 }: {
@@ -10416,6 +10394,9 @@ function MessageSurface({
   onCopy(): void
   onSelect?(): void
   onWithdraw?(): void
+  onEdit?(): void
+  onDelete?(): void
+  deleteDisabled?: boolean
   withdrawing?: boolean
   children: React.ReactNode
 }): JSX.Element {
@@ -10431,6 +10412,9 @@ function MessageSurface({
             onCopy={onCopy}
             onSelect={onSelect}
             onWithdraw={onWithdraw}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            deleteDisabled={deleteDisabled}
             withdrawing={withdrawing}
           />
           {actionAfter}
@@ -10449,6 +10433,9 @@ export function MessageActions({
   onCopy,
   onSelect,
   onWithdraw,
+  onEdit,
+  onDelete,
+  deleteDisabled = false,
   onFork,
   forkBusy = false,
   withdrawing = false
@@ -10461,6 +10448,9 @@ export function MessageActions({
   onCopy(): void
   onSelect?(): void
   onWithdraw?(): void
+  onEdit?(): void
+  onDelete?(): void
+  deleteDisabled?: boolean
   onFork?(): void
   forkBusy?: boolean
   withdrawing?: boolean
@@ -10502,11 +10492,13 @@ export function MessageActions({
           <MessageReplyIcon />
         </button>
       )}
-      {onFork ? <DropdownMenu.Root modal={false}>
+      {(onFork || onEdit || onDelete) ? <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" title={uiAttribute('更多消息操作')} aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu" align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()} loop>
-          <DropdownMenu.Item className="sidebar-action-menu-item" disabled={forkBusy} onSelect={onFork}><ForkIcon /><span>{uiAttribute('从此处分叉')}</span></DropdownMenu.Item>
+          {onEdit && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onEdit}><UiText zh="编辑" /></DropdownMenu.Item>}
+          {onFork && <DropdownMenu.Item className="sidebar-action-menu-item" disabled={forkBusy} onSelect={onFork}><ForkIcon /><span>{uiAttribute('从此处分叉')}</span></DropdownMenu.Item>}
           {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><MessageSelectGlyph /><span>{uiAttribute('多选')}</span></DropdownMenu.Item>}
+          {onDelete && <DropdownMenu.Item className="sidebar-action-menu-item" disabled={deleteDisabled} onSelect={onDelete}><UiText zh="删除" /></DropdownMenu.Item>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root> : onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}
@@ -10534,6 +10526,7 @@ export function TruncatedStructuredMessageBody({
   pendingMemberProfiles = EMPTY_PENDING_MEMBER_PROFILES,
   leadingRecipientAgentId,
   truncate,
+  edited = false,
   forceExpanded,
   renderLeadingCurrentUserMarkdown = false,
   onActivateCurrentUserMention,
@@ -10548,6 +10541,7 @@ export function TruncatedStructuredMessageBody({
   pendingMemberProfiles?: readonly PendingMemberMentionProfile[]
   leadingRecipientAgentId?: string | null
   truncate: boolean
+  edited?: boolean
   forceExpanded: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateCurrentUserMention?(trigger: HTMLElement, focusPanel: boolean): void
@@ -10574,6 +10568,7 @@ export function TruncatedStructuredMessageBody({
     <StructuredMessageBody
       body={displayBody}
       contentComplete={displayFullMessage}
+      edited={edited}
       content={displayContent}
       members={members}
       pendingMemberProfiles={pendingMemberProfiles}
@@ -10669,6 +10664,7 @@ export function AgentMessageMarkdownBody({
 
 export function StructuredMessageBody({
   body,
+  edited = false,
   content,
   members,
   pendingMemberProfiles = EMPTY_PENDING_MEMBER_PROFILES,
@@ -10683,6 +10679,7 @@ export function StructuredMessageBody({
   onFileReference
 }: {
   body: string
+  edited?: boolean
   content: StructuredThreadMessageContent | null
   members: ThreadSnapshot['members']
   pendingMemberProfiles?: readonly PendingMemberMentionProfile[]
@@ -10718,8 +10715,9 @@ export function StructuredMessageBody({
   const markdownBody = renderLeadingCurrentUserMarkdown && content !== null
     ? projectLeadingCurrentUserMentionMarkdownBody(content, mentionNames)
     : null
+  const editedMark = edited ? <span className="public-message-edited" data-quote-exclude=""><UiText zh="（已编辑）" /></span> : null
   if (content === null) {
-    return <p>{leadingRecipientPrefix}<FileReferenceText text={body} onActivate={onFileReference} /></p>
+    return <p>{leadingRecipientPrefix}<FileReferenceText text={body} onActivate={onFileReference} />{editedMark}</p>
   }
   if (markdownBody !== null) {
     return (
@@ -10840,6 +10838,7 @@ export function StructuredMessageBody({
           />
         )
       })}
+      {editedMark}
     </Tag>
   )
 }

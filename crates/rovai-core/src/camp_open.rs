@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::OptionalExtension;
 
 use crate::{
@@ -86,19 +86,17 @@ impl ThreadOpenService {
         envelope: &CommandEnvelope<ReconcileDefaultLeadCommand>,
     ) -> Result<EnterDisposition> {
         let camp_id = &envelope.payload.camp_id;
-        let activation_state = database
+        let read_only: bool = database
             .connection()
             .query_row(
-                "SELECT activation_state FROM camp WHERE id = ?1 AND deletion_operation_id IS NULL",
+                "SELECT activation_state = 'pending' OR archived_at IS NOT NULL
+                 FROM camp WHERE id = ?1 AND deletion_operation_id IS NULL",
                 [camp_id],
-                |row| row.get::<_, String>(0),
+                |row| row.get(0),
             )
-            .optional()?;
-        if activation_state.is_none() {
-            anyhow::bail!("Thread does not exist or is being deleted");
-        }
-        let pending = activation_state.as_deref() == Some("pending");
-        if pending {
+            .optional()?
+            .context("Thread does not exist or is being deleted")?;
+        if read_only {
             return Ok(EnterDisposition::ReadOnly);
         }
         // Enter may be a pure read. A real, previously submitted reconciliation still

@@ -4,7 +4,7 @@
 use std::{cell::RefCell, collections::BTreeMap, marker::PhantomData, rc::Rc};
 
 use anyhow::Result;
-use rusqlite::{Connection, Transaction, functions::FunctionFlags};
+use rusqlite::{Connection, Transaction};
 use serde_json::json;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -26,38 +26,24 @@ fn connection_key(connection: &Connection) -> usize {
     unsafe { connection.handle() as usize }
 }
 
-/// Observation is connection-local. The persistent SQLite triggers own the
-/// transition and continue working on connections without a Host subscriber.
-pub(crate) fn observe_archive_changes(connection: &Connection) -> Result<()> {
-    let owner = connection_key(connection);
-    connection.create_scalar_function(
-        "rovai_archive_changed",
-        2,
-        FunctionFlags::SQLITE_UTF8,
-        move |context| {
-            let thread_id = context.get::<String>(0)?;
-            let mission = context.get::<bool>(1)?;
-            CURRENT.with(|current| {
-                if let Some(batch) = current
-                    .borrow_mut()
-                    .as_mut()
-                    .filter(|batch| batch.connection == owner)
-                {
-                    batch.archives.insert(thread_id, mission);
-                }
-            });
-            Ok(0_i64)
-        },
-    )?;
-    connection.execute_batch(
-        "CREATE TEMP TRIGGER observe_thread_archive AFTER UPDATE OF archived_at ON main.camp
-         WHEN OLD.archived_at IS NOT NEW.archived_at
-         BEGIN
-            SELECT rovai_archive_changed(NEW.id, EXISTS(SELECT 1 FROM mission WHERE camp_id = NEW.id));
-         END;",
-    )?;
-    Ok(())
+pub(crate) fn record_archive(connection: &Connection, thread_id: &str) -> Result<()> {
+    CURRENT.with(|current| {
+        if let Some(batch) = current
+            .borrow_mut()
+            .as_mut()
+            .filter(|batch| batch.connection == connection_key(connection))
+        {
+            let mission = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM mission WHERE camp_id=?1)",
+                [thread_id],
+                |row| row.get(0),
+            )?;
+            batch.archives.insert(thread_id.into(), mission);
+        }
+        Ok(())
+    })
 }
+
 thread_local! {
     static CURRENT: RefCell<Option<Batch>> = const { RefCell::new(None) };
 }

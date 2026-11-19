@@ -282,7 +282,12 @@ pub fn invalidates_directory(method: &str, params: &serde_json::Value) -> bool {
         ),
         "navigation.invalidated" => matches!(
             params["reason"].as_str(),
-            Some("camps.rename" | "camps.delete_accepted" | "camp.deleted" | "threads.archive_changed")
+            Some(
+                "camps.rename"
+                    | "camps.delete_accepted"
+                    | "camp.deleted"
+                    | "threads.archive_changed"
+            )
         ),
         _ => false,
     }

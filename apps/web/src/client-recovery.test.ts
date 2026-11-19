@@ -120,7 +120,7 @@ describe('global Web connection recovery', () => {
     const client = new ConsoleClient(origin, fetcher, saved)
     await client.login('test')
     const params = operation === 'threads.archive' || operation === 'threads.unarchive'
-      ? { commandId: newCommandId(), command: { threadId: 'original', expectedArchiveRevision: 1 } }
+      ? { commandId: newCommandId(), command: { threadId: 'original' } }
       : command()
     const pending = client.request(operation, params)
     await vi.waitFor(() => expect(client.connectionState).toBe('offline'))
@@ -135,7 +135,7 @@ describe('global Web connection recovery', () => {
 
   it('ends a restored archive wait on a definitive business rejection after explicit retry', async () => {
     const saved = storage()
-    const params = { commandId: newCommandId(), command: { threadId: 'original', expectedArchiveRevision: 1 } }
+    const params = { commandId: newCommandId(), command: { threadId: 'original' } }
     const sent: unknown[] = []
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
       if (String(url).endsWith('/login') || String(url).endsWith('/session')) return Response.json(identity)
@@ -163,7 +163,7 @@ describe('global Web connection recovery', () => {
     expect(sent).toEqual([params, params])
     expect(client.pendingCommandCount).toBe(0)
     expect(client.connectionState).toBe('live')
-    expect(notice).toHaveBeenCalledWith('目标已移除')
+    expect(notice).toHaveBeenCalled()
     beforeReload.clear()
     client.clear()
   })

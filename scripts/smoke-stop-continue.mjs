@@ -17,6 +17,7 @@ const root = resolve(import.meta.dirname, '..')
 const fixture = await realpath(process.env.ROVAI_STOP_CONTINUE_FIXTURE_ROOT ?? await mkdtemp(join(tmpdir(), 'rovai-stop-continue-')))
 const data = join(fixture, 'core'), home = join(fixture, 'home'), workspace = join(fixture, 'workspace')
 const journal = join(fixture, 'prompts.jsonl'), executable = join(fixture, 'copilot-fixture')
+const archive = process.argv.includes('--archive')
 const shutdownText = process.argv.includes('--shutdown-text')
 const historicalStartup = process.argv.includes('--historical-startup')
 const historicalMission = process.argv.includes('--historical-mission')
@@ -48,9 +49,11 @@ try {
   await core.request('runtime.startup.save', { runtimeKind: adapterKind, expectedRevision: startup.revision,
     configuration: { programPath: executable, environment: [] } })
   await core.request('runtime.discovery.rescan', { interactiveShell: false })
-  await core.request('runtime.product.check', { runtimeKind: adapterKind })
-  const installation = await until(async () => (await core.request('runtime.installations.list'))
-    .find(item => item.adapterKind === adapterKind && item.snapshot?.probeStatus === 'ready'), 'synthetic capability check')
+  const checked = await core.request('runtime.product.check', { runtimeKind: adapterKind })
+  assert.equal(checked.ready, true, 'the synthetic Runtime must pass its product check')
+  const installation = (await core.request('runtime.installations.list')).find(item =>
+    item.adapterKind === adapterKind && item.installationClass === 'managed_default' && item.authScope === 'default' && item.memberRuntimeDefaults)
+  assert.ok(installation, 'the checked Runtime must supply member defaults')
   assert.equal(await realpath(installation.executablePath), await realpath(executable), 'the fixture must not fall back to an installed Runtime')
   const profile = await core.request('members.get', { agentId: 'agent_1' })
   const configured = await core.request('members.runtime.set', { commandId: crypto.randomUUID(), command: {
@@ -136,9 +139,11 @@ try {
       await until(async () => (await snapshot()).agentRuns.find(run => run.id === first.id)?.status === 'failed',
         'failed source after unexpected Runtime exit')
     } else {
-      const stopped = await core.request('agentRuns.cancel', {
-        commandId: crypto.randomUUID(), command: { threadId, agentRunId: first.id, expectedVersion: first.version }
-      })
+      const stopped = archive
+        ? await core.request('threads.archive', { commandId: crypto.randomUUID(), command: { threadId } })
+        : await core.request('agentRuns.cancel', {
+          commandId: crypto.randomUUID(), command: { threadId, agentRunId: first.id, expectedVersion: first.version }
+        })
       assert.equal(stopped.status, 'applied')
       if (stopDuringLaunch) {
         await rm(`${journal}.launch-gate`)
@@ -176,6 +181,17 @@ try {
     assert.equal(oldState.status, unexpectedExit ? 'failed' : 'cancelled')
     const oldDelivery = database.prepare('SELECT * FROM runtime_input_delivery WHERE agent_run_id=?').get(first.id)
     if (!stopDuringLaunch) assert.equal(oldDelivery.status, pi ? 'accepted' : 'delivery_unknown')
+    if (archive) {
+      assert((await snapshot()).thread.archivedAt)
+      assert.equal((await core.request('threads.archive.list', {})).items[0].threadId, threadId)
+      const sent = await core.request('thread.messages.send', { commandId: crypto.randomUUID(), threadId,
+        content: composerDocumentForAddress({ mode: 'default' }, 'Should stay archived'), sourceAttachments: [], quotes: [],
+        replyToThreadMessageId: null, execution: { taskId: null, purpose: 'Archive guard', completionRole: 'required' } })
+      assert.equal(sent.commandResult.code, 'camp.archived')
+      const restored = await core.request('threads.unarchive', { commandId: crypto.randomUUID(), command: { threadId } })
+      assert.equal(restored.payload.changed, true)
+      assert.deepEqual((await snapshot()).agentRuns.map(run => [run.id, run.status]), [[first.id, 'cancelled']])
+    }
     const continued = await core.request('agentRuns.continue', {
       commandId: crypto.randomUUID(), command: { threadId, agentRunId: first.id }
     })
@@ -248,7 +264,7 @@ try {
       await until(() => database.prepare("SELECT 1 FROM camp_attachment_view_operation WHERE command_id=? AND kind='camp_delete_cleanup' AND status='completed'").get(deletionId), 'historical Thread managed-resource cleanup')
       historicalResourceCleanup = { missionEntryAvailable: true, worktreeRemoved: true, branchRemoved: true, oldAckMissingBeforeDeletion: true, threadDeletionCompleted: true }
     }
-    const report = { passed: true, adapterKind, unexpectedExit, stopDuringLaunch, optionalFaults, historicalResourceCleanup, sourceStatus: oldState.status, successorStatus: second.status,
+    const report = { passed: true, adapterKind, archive, unexpectedExit, stopDuringLaunch, optionalFaults, historicalResourceCleanup, sourceStatus: oldState.status, successorStatus: second.status,
       cleanupAcknowledged: !historicalStartup, cleanupMs, appRestarted: historicalStartup,
       databaseModifiedByTest: historicalStartup, historicalFaultFilesRetained: retainedHistoricalFiles.length,
       historicalOpenMs, cleanup: historicalStartup ? core.stderr().split('\n').find(line => line.includes('stage=historical_process_cleanup')) : null }

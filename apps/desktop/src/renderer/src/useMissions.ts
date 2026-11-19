@@ -77,7 +77,7 @@ export function shouldRefreshMissionsForEvent(event: CoreEvent, threadIds: Reado
   })
 }
 
-/** One list owner drives the board and navigation badge. */
+/** One list owner drives the board, navigation badge, and the current Mission card. */
 export function useMissions(client: ThreadClient, enabled: boolean) {
   const [missions, setMissions] = useState<MissionRecord[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -113,54 +113,4 @@ export function useMissions(client: ThreadClient, enabled: boolean) {
     return () => { ++generation.current; coordinator.dispose(); clearInterval(poll); event?.(); authorized?.(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus) }
   }, [client, enabled, refresh, coordinator])
   return { missions, error, loading, refresh, refreshOrThrow }
-}
-
-export function useMissionDetails(client: ThreadClient, missionId: string | null, threadId: string | null, boardRecord?: MissionRecord) {
-  const boardFallback = useRef<{ client: ThreadClient; mission: MissionRecord } | null>(null)
-  if (boardRecord) boardFallback.current = { client, mission: boardRecord }
-  const [state, setState] = useState<{ client: ThreadClient; missionId: string; mission?: MissionRecord; error?: string } | null>(null)
-  const refreshRef = useRef<() => void>(() => undefined)
-  useEffect(() => {
-    if (!missionId || !threadId) return
-    let live = true
-    let generation = 0
-    const coordinator = createNavigationRefreshCoordinator(async () => {
-      const started = generation
-      try {
-        const mission = await client.request<MissionRecord>('missions.get', { missionId })
-        if (live && started === generation) setState({ client, missionId, mission })
-      } catch (error) {
-        if (live && started === generation) {
-          setState(previous => ({
-            client, missionId, error: missionError(error),
-            mission: previous?.client === client && previous.missionId === missionId ? previous.mission : undefined
-          }))
-          throw error
-        }
-      }
-    })
-    const invalidate = (explicit = false): void => {
-      generation += 1
-      void coordinator.refresh(explicit ? 'explicit' : 'invalidation').catch(() => undefined)
-    }
-    refreshRef.current = () => invalidate(true)
-    const ids = new Set([threadId])
-    const stopEvent = client.onEvent?.(event => {
-      const target = (event.params as { threadId?: string } | undefined)?.threadId
-      if ((!target || target === threadId) && shouldRefreshMissionsForEvent(event, ids)) invalidate()
-    })
-    const stopInvalidated = client.onInvalidated?.(() => invalidate())
-    invalidate(true)
-    return () => {
-      live = false
-      stopEvent?.()
-      stopInvalidated?.()
-      coordinator.dispose()
-    }
-  }, [client, missionId, threadId])
-  const current = state?.client === client && state.missionId === missionId ? state : null
-  const fallback = boardFallback.current?.client === client && boardFallback.current.mission.missionId === missionId
-    ? boardFallback.current.mission : undefined
-  const refresh = useCallback(() => refreshRef.current(), [])
-  return { mission: current?.mission ?? fallback, error: current?.error, loading: !!missionId && !current, refresh }
 }

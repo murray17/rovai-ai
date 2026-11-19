@@ -56,9 +56,10 @@ export function useMissionActions(): MissionActions {
 
 export function MissionArchiveButton({ mission, header = false }: { mission: MissionRecord; header?: boolean }) {
   const archive = useContext(Actions)?.archive
-  if (!archive || mission.archivedAt || mission.archiveRevision === undefined) return null
+  if (!archive || mission.archivedAt) return null
   return <button type="button" className={header ? 'mission-header-action' : 'mission-card-archive'}
-    aria-label={uiAttribute('归档 {0}', mission.title)} onClick={() => archive(mission)}>
+    title={uiAttribute(mission.runningAgentIds?.length ? '归档并停止执行' : '归档')}
+    aria-label={uiAttribute(mission.runningAgentIds?.length ? '归档 {0} 并停止执行' : '归档 {0}', mission.title)} onClick={() => archive(mission)}>
     {header && <NavigationIcon name="archive" />}<span><UiText zh="归档" /></span>
   </button>
 }
@@ -351,18 +352,17 @@ function MissionWorkspaceCleanup({ mission, onRequested, onClose }: { mission: M
   </CompactDialog>
 }
 
-export function MissionDelete({ mission, recordTitle, onDelete, onClose, confirmationStale = false }: {
+export function MissionDelete({ mission, recordTitle, onDelete, onClose }: {
   mission: MissionRecord
   recordTitle?: string
   onDelete(workspaceDisposition: 'retain' | 'cleanup'): Promise<void>
   onClose(): void
-  confirmationStale?: boolean
 }) {
   const client = useThreadClient(), [delivery, setDelivery] = useState<MissionDelivery | null>(null), [retry, setRetry] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [cleanupWorkspace, setCleanupWorkspace] = useState(false)
   useEffect(() => { let current = true; setError(''); void client.request<MissionDelivery>('missions.delivery', { missionId: mission.missionId }).then(data => { if (current) setDelivery(data) }).catch(error => { if (current) setError(missionError(error)) }); return () => { current = false } }, [client, mission.missionId, retry])
   async function remove() { setBusy(true); setError(''); try { await onDelete(cleanupWorkspace ? 'cleanup' : 'retain') } catch (error) { setError(missionError(error)) } finally { setBusy(false) } }
-  return <CompactDialog title={uiAttribute("删除使命")} className="mission-delete-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary mission-delete-confirm" onClick={() => void remove()} disabled={busy || !delivery || confirmationStale}>{busy ? uiAttribute("正在删除…") : uiAttribute("删除使命")}</button></>}>
+  return <CompactDialog title={uiAttribute("删除使命")} className="mission-delete-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary mission-delete-confirm" onClick={() => void remove()} disabled={busy || !delivery}>{busy ? uiAttribute("正在删除…") : uiAttribute("删除使命")}</button></>}>
     {recordTitle && <p><strong>{recordTitle}</strong></p>}
     <p className="mission-delete-summary"><UiText zh={"删除后，使命、会话和交付文件将被一并删除，正在执行的队员会停止。此操作无法撤销。"} /></p>
     {mission.workspaceEverCreated && <label className="mission-delete-workspace-option"><input type="checkbox" checked={cleanupWorkspace} disabled={busy || !mission.workspaceResourcesPresent} onChange={event => setCleanupWorkspace(event.target.checked)}/><span>{mission.workspaceResourcesPresent ? uiAttribute("同时清理 Worktree 及本地分支") : uiAttribute("同时清理 Worktree 及本地分支（已清理）")}</span><span className="mission-inline-help" tabIndex={0} aria-label={uiAttribute("未勾选时，Worktree 和本地分支保留在原位置。")} data-tooltip={uiAttribute("未勾选时，Worktree 和本地分支保留在原位置。")}>?</span></label>}

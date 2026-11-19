@@ -6,10 +6,19 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-16
+last_updated: 2026-11-19
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 会话与使命归档（2026-11-19）
+
+会话与使命通过原 Thread 归档。归档会取消其中的执行，保存本机草稿并离开工作区。用户在「设置 → 归档」中恢复或删除记录。归档状态和分页读取遵循 [Thread Archive v2](../../contracts/thread-archive-v2.md)。
+
+## 公共消息编辑与删除（2026-11-19）
+
+正文与附件可原地修改。旧批次的有效普通输入自动重排，主动继续授权留在原队员。
+撤回判断统一使用实际领取和插话绑定事实。范围与验收见[本版实施记录](implementation-plan.md#公共消息编辑删除与撤回2026-11-19)。
 
 ## 会话文件下载（2026-11-15）
 
