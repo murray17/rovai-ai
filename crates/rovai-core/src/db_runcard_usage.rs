@@ -56,7 +56,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 176
         ),
         "RunCard Usage failed schema admission"
     );
@@ -66,6 +67,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::thread_archive::downgrade_for_test(c);
     for (table, column) in [
         ("runtime_usage_run_summary", "display_total_tokens"),
         ("runtime_usage_checkpoint", "native_total_baseline"),
@@ -172,6 +174,7 @@ pub(super) fn assert_optional_upgrade(database: &mut Database) {
         .execute_batch("DROP TABLE runtime_usage_run_summary;")
         .unwrap();
     migrate(database).unwrap();
+    super::thread_archive::migrate(database).unwrap();
     assert!(!projection_exists(database.connection(), "runtime_usage_run_summary").unwrap());
     assert!(connection_has_current_data_contract(database.connection()).unwrap());
 }

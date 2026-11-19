@@ -31,6 +31,7 @@ use crate::{
 
 mod navigation;
 use navigation::*;
+pub(crate) mod archive;
 mod replies;
 mod user_anchors;
 pub use replies::{ReplyPage, ReplyPageParams};
@@ -38,13 +39,13 @@ pub use user_anchors::{ThreadUserAnchorIndex, ThreadUserAnchorPreview};
 mod message_model;
 pub use message_model::ThreadMessageRuntimeModelView;
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 36;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 37;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
-pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
+pub const NAVIGATION_SCHEMA_VERSION: i64 = 4;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 9;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 10;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
@@ -67,6 +68,7 @@ const FIND_NAVIGATION_CAMP_SQL: &str = r#"
     LEFT JOIN camp_composer_draft ON camp_composer_draft.camp_id = camp.id
     WHERE camp.id = ?1
       AND camp.deletion_operation_id IS NULL
+      AND camp.archived_at IS NULL
       AND (camp.activation_state = 'active'
         OR EXISTS(SELECT 1 FROM pending_camp_draft_presence d WHERE d.camp_id = camp.id AND d.client_id = 'desktop')
         OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
@@ -109,6 +111,8 @@ pub struct NavigationThreadItem {
     pub latest_completion_global_sequence: i64,
     pub last_seen_global_sequence: i64,
     pub version: i64,
+    pub archived_at: Option<String>,
+    pub archive_revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -201,6 +205,8 @@ pub struct ThreadView {
     pub default_lead_agent_id: Option<String>,
     pub membership_generation: i64,
     pub version: i64,
+    pub archived_at: Option<String>,
+    pub archive_revision: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -2008,7 +2014,8 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Thre
                    camp.default_lead_agent_id, camp.membership_generation,
                    camp.version, camp.created_at, camp.updated_at,
                    channel_conversation.provider, channel_conversation.conversation_kind,
-                   (SELECT id FROM mission WHERE mission.camp_id=camp.id)
+                   (SELECT id FROM mission WHERE mission.camp_id=camp.id),
+                   camp.archived_at, camp.archive_revision
             FROM camp
             LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
             LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
@@ -2028,6 +2035,8 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Thre
                     default_lead_agent_id: row.get(5)?,
                     membership_generation: row.get(6)?,
                     version: row.get(7)?,
+                    archived_at: row.get(13)?,
+                    archive_revision: row.get(14)?,
                     created_at: row.get(8)?,
                     updated_at: row.get(9)?,
                 })

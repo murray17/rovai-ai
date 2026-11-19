@@ -14,6 +14,7 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
   'appearance',
   'shortcuts',
   'notifications',
+  'archive',
   'monitoring',
   'diagnostics',
   'about'

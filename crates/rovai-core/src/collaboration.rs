@@ -231,6 +231,8 @@ pub struct DeleteThreadCommand {
     pub force: bool,
     #[serde(default)]
     pub workspace_disposition: MissionWorkspaceDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_guard: Option<crate::thread_archive::ArchiveGuard>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -9341,6 +9343,7 @@ mod slow_tests {
                 expected_version: delete_version,
                 force: false,
                 workspace_disposition: MissionWorkspaceDisposition::Cleanup,
+                archive_guard: None,
             },
         );
         let delete = service
@@ -9452,6 +9455,7 @@ mod slow_tests {
                         expected_version: delete_version,
                         force: false,
                         workspace_disposition: Default::default(),
+                        archive_guard: None,
                     },
                 ),
             )
@@ -9560,6 +9564,7 @@ mod slow_tests {
                         expected_version: delete_version,
                         force: true,
                         workspace_disposition: Default::default(),
+                        archive_guard: None,
                     },
                 ),
                 &prior_blockers,
@@ -9577,6 +9582,7 @@ mod slow_tests {
                         expected_version: delete_version,
                         force: true,
                         workspace_disposition: Default::default(),
+                        archive_guard: None,
                     },
                 ),
             )

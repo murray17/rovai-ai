@@ -898,6 +898,7 @@ fn request_uses_independent_read_queue(method: &str) -> bool {
             | "navigation.camps"
             | "navigation.groupCamps"
             | "navigation.findCamp"
+            | "camps.archive.list"
             | "notifications.threadInterruptions"
     )
 }
@@ -12075,6 +12076,29 @@ impl Core {
                 );
                 Ok(value)
             }
+            "camps.archive.list" => {
+                let params = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(rovai_core::read_model::archive::list(&mut database, params)?)?)
+            }
+            "camps.archive" => {
+                let params: UserCommandParams<rovai_core::thread_archive::ArchiveThreadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_camp_command_envelope(
+                    params.command_id, params.command.camp_id.clone(), params.command,
+                );
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(rovai_core::thread_archive::change(&mut database, &envelope)?.result)?)
+            }
+            "camps.unarchive" => {
+                let params: UserCommandParams<rovai_core::thread_archive::UnarchiveThreadCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_camp_command_envelope(
+                    params.command_id, params.command.camp_id.clone(), params.command,
+                );
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(rovai_core::thread_archive::change(&mut database, &envelope)?.result)?)
+            }
             "camps.delete" => {
                 let started_at = Instant::now();
                 let params: UserCommandParams<DeleteThreadCommand> =
@@ -21696,6 +21720,7 @@ async fn run_core(
     let (pi_tx, pi_rx) = mpsc::unbounded_channel();
     let (acp_tx, acp_rx) = mpsc::unbounded_channel();
     let (output_tx, output_rx) = mpsc::unbounded_channel();
+    rovai_core::message_changes::observe_archive_changes(database.connection())?;
     database.message_changes = Some(output_tx.clone());
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
     let (runtime_check_tx, runtime_check_rx) = mpsc::unbounded_channel();
@@ -37509,6 +37534,7 @@ done
                             force: true,
                             workspace_disposition:
                                 rovai_core::collaboration::MissionWorkspaceDisposition::Cleanup,
+                            archive_guard: None,
                         },
                     },
                 )

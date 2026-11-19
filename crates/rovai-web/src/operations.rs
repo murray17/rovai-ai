@@ -69,6 +69,12 @@ pub enum Operation {
     CampRename,
     #[serde(rename = "threads.delete", alias = "camps.delete")]
     CampDelete,
+    #[serde(rename = "threads.archive")]
+    CampArchive,
+    #[serde(rename = "threads.unarchive")]
+    CampUnarchive,
+    #[serde(rename = "threads.archive.list")]
+    CampArchiveList,
     #[serde(rename = "threads.deletionIssues", alias = "camps.deletionIssues")]
     CampDeletionIssues,
     #[serde(rename = "threads.retryDeletion", alias = "camps.retryDeletion")]
@@ -494,6 +500,9 @@ impl Operation {
             Self::MissionLinkPr => "missions.linkPr",
             Self::CampRename => "camps.rename",
             Self::CampDelete => "camps.delete",
+            Self::CampArchive => "camps.archive",
+            Self::CampUnarchive => "camps.unarchive",
+            Self::CampArchiveList => "camps.archive.list",
             Self::CampDeletionIssues => "camps.deletionIssues",
             Self::CampRetryDeletion => "camps.retryDeletion",
             Self::CampDiscardPending => "camps.discardPending",

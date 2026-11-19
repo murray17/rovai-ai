@@ -7512,6 +7512,7 @@ mod tests {
                         expected_version: version,
                         force: true,
                         workspace_disposition: Default::default(),
+                        archive_guard: None,
                     },
                 },
             )

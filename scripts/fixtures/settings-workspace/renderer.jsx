@@ -1,3 +1,5 @@
+import { ArchiveSettings } from '@renderer/ArchiveSettings'
+import { ThreadClientProvider } from '@renderer/camp-client'
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThreadNavigation } from '@renderer/ThreadNavigation'
@@ -77,6 +79,33 @@ const memoryClient = {
     return clone(state.memory)
   },
   onEvent(listener) { memoryListeners.add(listener); return () => memoryListeners.delete(listener) }
+}
+const archiveRows = Array.from({ length: 52 }, (_, index) => ({
+  threadId: `archive-fixture-${index}`, missionId: null, kind: 'chat',
+  title: `归档样例 ${index + 1}`, projectKey: 'directory:/fixture', projectName: 'fixture',
+  lastMessageAt: '2026-11-18T14:32:00.000Z', archiveRevision: 3, threadVersion: 9
+}))
+const archiveClient = {
+  async request(method, params) {
+    await request(method, params)
+    if (method === 'threads.archive.list') {
+      const matching = archiveRows.filter(item => !params.query || item.title.includes(params.query) || item.threadId.includes(params.query))
+      const selected = params.kind === 'chat' ? matching : []
+      return {
+        schemaVersion: 1, throughGlobalSequence: 12,
+        items: selected.slice(0, params.limit),
+        totals: { chat: archiveRows.length, mission: 0 }, matchingCounts: { chat: matching.length, mission: 0 },
+        projects: [{ projectKey: 'directory:/fixture', projectName: 'fixture', count: params.kind === 'chat' ? archiveRows.length : 0 }],
+        groups: selected.length ? [{ projectKey: 'directory:/fixture', totalCount: selected.length }] : [],
+        hasMore: selected.length > params.limit
+      }
+    }
+    if (method === 'threads.unarchive') {
+      const { threadId } = params.command
+      archiveRows.splice(archiveRows.findIndex(row => row.threadId === threadId), 1)
+      return { status: 'applied', payload: { threadId, archivedAt: null, archiveRevision: 4, changed: true } }
+    }
+  }
 }
 const savePreference = key => async value => {
   await request(key, value)
@@ -220,6 +249,9 @@ function Fixture() {
         {page === 'remote' && <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
+        {page === 'archive' && <ThreadClientProvider client={archiveClient}>
+          <ArchiveSettings projectNames={{ 'directory:/fixture': '本机项目名称' }} onDeleted={ignore} onNotify={ignore} />
+        </ThreadClientProvider>}
         {page === 'runtime' && <RuntimeInstallationsPanel health={runtimeHealth} installations={[]} onReload={async () => { await request('runtime.reload') }} />}
         {page === 'channels' && <ChannelSettings agents={fixture.agents} />}
         {page === 'monitoring' && <RuntimeMonitoring />}

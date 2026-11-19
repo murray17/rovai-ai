@@ -3505,6 +3505,7 @@ mod tests {
                     expected_version: version,
                     force: false,
                     workspace_disposition: MissionWorkspaceDisposition::Retain,
+                    archive_guard: None,
                 },
             );
             envelope.camp_id = Some(target.camp_id.clone());

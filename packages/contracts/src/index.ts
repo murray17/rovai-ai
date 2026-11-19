@@ -914,6 +914,7 @@ export interface DeleteThreadCommand {
   expectedVersion: number
   force?: boolean
   workspaceDisposition?: 'retain' | 'cleanup'
+  archiveGuard?: { expectedArchiveRevision: number }
 }
 
 export interface DiscardPendingThreadCommand {
@@ -1051,11 +1052,60 @@ export interface EditSingleChatPendingInputCommand {
 
 export type NavigationThreadMarker = 'loading' | 'unread_completed' | 'none'
 
+export type ArchiveKind = 'chat' | 'mission'
+
+export interface ArchiveMetadata {
+  archivedAt?: string | null
+  archiveRevision?: number
+}
+
+export interface ArchiveCommand {
+  threadId: string
+  expectedArchiveRevision: number
+}
+
+export interface ArchiveCommandPayload {
+  threadId: string
+  archivedAt: string | null
+  archiveRevision: number
+  changed: boolean
+}
+
+export interface ArchiveListQuery {
+  kind: ArchiveKind
+  query?: string
+  projectKeys?: string[]
+  limit?: number
+}
+
+export interface ArchiveItem {
+  threadId: string
+  missionId: string | null
+  kind: ArchiveKind
+  title: string
+  projectKey: string
+  projectName: string
+  lastMessageAt: string | null
+  archiveRevision: number
+  threadVersion: number
+}
+
+export interface ArchiveList {
+  schemaVersion: 1
+  items: ArchiveItem[]
+  totals: Record<ArchiveKind, number>
+  matchingCounts: Record<ArchiveKind, number>
+  projects: Array<{ projectKey: string; projectName: string; count: number }>
+  groups: Array<{ projectKey: string; totalCount: number }>
+  hasMore: boolean
+  throughGlobalSequence: number
+}
+
 export type ThreadChannelSource =
   | { provider: 'feishu' | 'lark'; conversationKind: 'p2p' | 'group' | 'topic' }
   | { provider: 'dingtalk'; conversationKind: 'p2p' | 'group' }
 
-export interface NavigationThreadItem {
+export interface NavigationThreadItem extends ArchiveMetadata {
   id: string
   title: string
   channelSource?: ThreadChannelSource | null
@@ -1098,14 +1148,14 @@ export interface NavigationSnapshotRequest {
 }
 
 export interface NavigationSnapshot {
-  schemaVersion: 3
+  schemaVersion: 3 | 4
   throughGlobalSequence: number
   quickChat: NavigationThreadGroup
   projects: ProjectNavigationGroup[]
 }
 
 export interface NavigationThreadPage {
-  schemaVersion: 3
+  schemaVersion: 3 | 4
   throughGlobalSequence: number
   projectPath: string | null
   totalCount: number
@@ -2662,12 +2712,12 @@ export interface AgentRunImageContent {
   data: string
 }
 
-export const THREAD_SNAPSHOT_SCHEMA_VERSION = 36
+export const THREAD_SNAPSHOT_SCHEMA_VERSION = 37
 
 export interface ThreadSnapshot {
-  schemaVersion: typeof THREAD_SNAPSHOT_SCHEMA_VERSION
+  schemaVersion: 36 | typeof THREAD_SNAPSHOT_SCHEMA_VERSION
   throughGlobalSequence: number
-  thread: {
+  thread: ArchiveMetadata & {
     id: string
     title: string
     missionId?: string | null
@@ -2714,7 +2764,7 @@ export interface ThreadOpenMessageCoverage extends ThreadOpenCollectionCoverage 
 }
 
 export interface ThreadOpenProjection {
-  schemaVersion: 9
+  schemaVersion: 9 | 10
   throughGlobalSequence: number
   thread: ThreadSnapshot['thread']
   members: ThreadMemberView[]
@@ -3340,6 +3390,7 @@ export type SettingsSection =
   | 'appearance'
   | 'shortcuts'
   | 'notifications'
+  | 'archive'
   | 'monitoring'
   | 'diagnostics'
   | 'about'
@@ -4666,6 +4717,9 @@ export type CoreMethod =
   | 'threads.enter'
   | 'threads.open'
   | 'threads.delete'
+  | 'threads.archive'
+  | 'threads.unarchive'
+  | 'threads.archive.list'
   | 'threads.deletionIssues'
   | 'threads.retryDeletion'
   | 'singleChat.list'
@@ -4832,7 +4886,7 @@ export type MissionDescriptionContent = Array<
 export type MissionStatus = 'needs_you' | 'not_started' | 'in_progress' | 'completed'
 export interface MissionInfo { missionId: string; title: string; description: string; status: MissionStatus; sourceMessageId: string | null }
 export interface MissionWorkspaceCleanupView { state: 'cleaning' | 'failed' | 'cleaned'; worktreeRemoved: boolean; branchRemoved: boolean; diagnostic: string | null }
-export interface MissionRecord extends MissionInfo { descriptionContent?: MissionDescriptionContent; number: number; hasUnread: boolean; threadId: string; projectPath: string; projectBindingKind: ProjectBindingKind; detailsVersion: number; tags: string[]; attachments: LocalAttachmentSourceView[]; createdAt: string; updatedAt: string; memberAgentIds: string[]; defaultLeadAgentId: string | null; runningAgentIds: string[]; startAvailable: boolean; workspaceEverCreated: boolean; workspaceResourcesPresent: boolean; cleanupAvailable: boolean; workspaceCleanup?: MissionWorkspaceCleanupView }
+export interface MissionRecord extends MissionInfo, ArchiveMetadata { descriptionContent?: MissionDescriptionContent; number: number; hasUnread: boolean; threadId: string; projectPath: string; projectBindingKind: ProjectBindingKind; detailsVersion: number; tags: string[]; attachments: LocalAttachmentSourceView[]; createdAt: string; updatedAt: string; memberAgentIds: string[]; defaultLeadAgentId: string | null; runningAgentIds: string[]; startAvailable: boolean; workspaceEverCreated: boolean; workspaceResourcesPresent: boolean; cleanupAvailable: boolean; workspaceCleanup?: MissionWorkspaceCleanupView }
 export interface MissionCreate { team?: TeamSelection; descriptionContent?: MissionDescriptionContent; title: string; description: string; projectPath: string; projectBindingKind: ProjectBindingKind; memberAgentIds: string[]; defaultLeadAgentId: string; tags: string[] }
 export interface MissionUpdate { descriptionContent?: MissionDescriptionContent; missionId: string; title?: string; description?: string; tags?: string[]; expectedDetailsVersion?: number }
 export interface MissionAttachmentDraft { id: string; file: File; kindHint: 'file' | 'directory' }

@@ -165,6 +165,10 @@ pub struct MissionRecord {
     pub project_path: String,
     pub project_binding_kind: ProjectBindingKind,
     pub details_version: i64,
+    #[serde(default)]
+    pub archived_at: Option<String>,
+    #[serde(default)]
+    pub archive_revision: i64,
     pub tags: Vec<String>,
     pub attachments: Vec<LocalAttachmentSourceView>,
     #[serde(skip)]
@@ -728,7 +732,7 @@ impl MissionService {
     pub fn list(&self, database: &Database) -> Result<Vec<MissionRecord>> {
         let mut statement = database
             .connection()
-            .prepare("SELECT mission.id FROM mission JOIN camp ON camp.id=mission.camp_id WHERE camp.deletion_operation_id IS NULL ORDER BY mission.updated_at DESC,mission.id DESC")?;
+            .prepare("SELECT mission.id FROM mission JOIN camp ON camp.id=mission.camp_id WHERE camp.deletion_operation_id IS NULL AND camp.archived_at IS NULL ORDER BY mission.updated_at DESC,mission.id DESC")?;
         let ids = statement
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -954,8 +958,8 @@ fn load_record(
     id: &str,
     active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
 ) -> Result<Option<MissionRecord>> {
-    let row = connection.query_row("SELECT m.id,m.number,m.camp_id,m.title,m.description,m.status,m.source_message_id,m.tags_json,m.source_attachments_json,m.details_version,m.created_at,m.updated_at,c.project_path,c.project_binding_kind,c.default_lead_agent_id FROM mission m JOIN camp c ON c.id=m.camp_id WHERE m.id=?1 AND c.deletion_operation_id IS NULL", [id], |r| Ok((
-        r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?,r.get::<_,i64>(9)?,r.get::<_,String>(10)?,r.get::<_,String>(11)?,r.get::<_,String>(12)?,r.get::<_,String>(13)?,r.get::<_,Option<String>>(14)?))).optional()?;
+    let row = connection.query_row("SELECT m.id,m.number,m.camp_id,m.title,m.description,m.status,m.source_message_id,m.tags_json,m.source_attachments_json,m.details_version,m.created_at,m.updated_at,c.project_path,c.project_binding_kind,c.default_lead_agent_id,c.archived_at,c.archive_revision FROM mission m JOIN camp c ON c.id=m.camp_id WHERE m.id=?1 AND c.deletion_operation_id IS NULL", [id], |r| Ok((
+        r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?,r.get::<_,i64>(9)?,r.get::<_,String>(10)?,r.get::<_,String>(11)?,r.get::<_,String>(12)?,r.get::<_,String>(13)?,r.get::<_,Option<String>>(14)?,r.get::<_,Option<String>>(15)?,r.get::<_,i64>(16)?))).optional()?;
     let Some((
         mission_id,
         number,
@@ -972,6 +976,8 @@ fn load_record(
         project_path,
         binding,
         default_lead_agent_id,
+        archived_at,
+        archive_revision,
     )) = row
     else {
         return Ok(None);
@@ -1024,6 +1030,8 @@ fn load_record(
         project_path,
         project_binding_kind: serde_json::from_value(json!(binding))?,
         details_version,
+        archived_at,
+        archive_revision,
         tags: serde_json::from_str(&tags)?,
         attachments,
         source_attachments,

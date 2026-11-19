@@ -1675,6 +1675,8 @@ export function ThreadWorkspace({
   onPendingDraftPersisted,
   onPendingThreadLeave,
   onThreadLeaveGuardChange,
+  onArchivePreparationChange,
+  onUnarchive,
   onChangeLead,
   onAddMembers,
   onPreviewMemberRemoval,
@@ -1742,6 +1744,8 @@ export function ThreadWorkspace({
   onPendingDraftPersisted?(): void
   onPendingThreadLeave?(draft: ThreadComposerDraftView): Promise<void>
   onThreadLeaveGuardChange?(threadId: string, guard: ThreadLeaveGuard | null): void
+  onArchivePreparationChange?(threadId: string, save: (() => Promise<void>) | null): void
+  onUnarchive?(): Promise<void>
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<ThreadMemberAddOutcome>
   onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
@@ -1864,6 +1868,13 @@ export function ThreadWorkspace({
   const [, setComposerDraftProjectionVersion] = useState(0)
   const [draftLoadState, setDraftLoadState] = useState<DraftLoadState>({ state: 'loading' })
   const [composerPersistenceError, setComposerPersistenceError] = useState<Error | null>(null)
+  const [composerArchived, setComposerArchived] = useState(Boolean(snapshot.thread.archivedAt))
+  const [archiveDraftError, setArchiveDraftError] = useState<string | null>(null)
+  const [archiveDraftRetry, setArchiveDraftRetry] = useState(0)
+  const [restoringArchive, setRestoringArchive] = useState(false)
+  const archiveDraftSave = useRef<{ controller: AbortController; promise: Promise<void> } | null>(null)
+  const locallySavedDraft = useRef<ThreadComposerDraftView | null>(null)
+  const failedLocalDraft = useRef<ThreadComposerDraftView | null>(null)
   // Routing observes live atoms (including previews). Text stays in the editor,
   // so ordinary typing does not rerender the entire workspace on each character.
   const [liveComposerAtoms, setLiveComposerAtoms] = useState<{
@@ -1950,7 +1961,6 @@ export function ThreadWorkspace({
   if (!draftCoordinatorRef.current) {
     // Only this exact already-written snapshot can skip the onChange write.
     // Record it after success so a failed save never suppresses a later retry.
-    let locallySavedDraft: ThreadComposerDraftView | null = null
     draftCoordinatorRef.current = new DraftMutationCoordinator({
       load: async (threadId) => {
         const initial = initialComposerDraftRef.current?.threadId === threadId
@@ -2018,7 +2028,8 @@ export function ThreadWorkspace({
         const pastedTextMutation = (mutation.kind === 'add_source_attachment'
           || mutation.kind === 'remove_source_attachment') && mutation.pastedText
         const onSaved = (): void => {
-          locallySavedDraft = next
+          locallySavedDraft.current = next
+          failedLocalDraft.current = null
           if (pastedTextMutation) mutation.onAccepted?.(next)
         }
         if (activationStateRef.current === 'pending' && !memberCreationRef.current) {
@@ -2035,14 +2046,20 @@ export function ThreadWorkspace({
       },
       onChange: (draft, _epoch, kind) => {
         if (draft && activationStateRef.current === 'pending') pendingDraftChangeRef.current?.(draft)
-        if (draft && activationStateRef.current === 'active') {
+        if (kind === 'begin_epoch') failedLocalDraft.current = null
+        const loaded = kind === 'load' || kind === 'begin_epoch'
+        if (draft && activationStateRef.current === 'active' && !(loaded && activeSnapshotRef.current.thread.archivedAt)) {
           try {
-            if (draft !== locallySavedDraft) {
-              saveLocalThreadComposerDraft(draft)
-              locallySavedDraft = draft
+            if (draft !== locallySavedDraft.current) {
+              const storage = window.localStorage
+              if (!storage) throw new Error('Local draft storage is unavailable')
+              saveLocalThreadComposerDraft(draft, storage)
+              locallySavedDraft.current = draft
             }
+            failedLocalDraft.current = null
             setComposerPersistenceError(null)
           } catch (error) {
+            if (!loaded) failedLocalDraft.current = draft
             setComposerPersistenceError(
               error instanceof Error ? error : new Error(readErrorMessage(error))
             )
@@ -2829,7 +2846,7 @@ export function ThreadWorkspace({
   const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
-  const composerSendDisabled = fileInsertionPending || composerSendIsDisabled({
+  const composerSendDisabled = Boolean(snapshot.thread.archivedAt) || fileInsertionPending || composerSendIsDisabled({
     hasSendablePayload,
     hasAvailableRecipient,
     hasUnavailableMention,
@@ -2957,7 +2974,73 @@ export function ThreadWorkspace({
     }
   }
 
+  const prepareForArchive = useCallback((): Promise<void> => {
+    if (archiveDraftSave.current) return archiveDraftSave.current.promise
+    const controller = new AbortController()
+    const threadId = snapshot.thread.id
+    const save = async () => {
+      const handle = composerHandleRef.current
+      await handle?.waitForComposition(controller.signal)
+      await handle?.waitForFileInsertions()
+      await handle?.waitForComposition(controller.signal)
+      controller.signal.throwIfAborted()
+      if (composerSubmittingRef.current || routingMutatingRef.current) {
+        throw new Error(uiAttribute('输入框正在提交变更，请稍后重试。'))
+      }
+      handle?.cancelHistoryPreview()
+      handle?.setInteractionLocked(true)
+      try {
+        await attachmentPreparationQueue.current
+        controller.signal.throwIfAborted()
+        await handle?.flush()
+        await draftCoordinator.waitForIdle()
+        controller.signal.throwIfAborted()
+        const unsaved = failedLocalDraft.current
+        if (unsaved?.threadId === threadId) {
+          const storage = window.localStorage
+          if (!storage) throw new Error('Local draft storage is unavailable')
+          saveLocalThreadComposerDraft(unsaved, storage)
+          locallySavedDraft.current = unsaved
+          failedLocalDraft.current = null
+          setComposerPersistenceError(null)
+        }
+      } finally {
+        handle?.setInteractionLocked(false)
+      }
+    }
+    const promise = save().finally(() => { if (archiveDraftSave.current?.controller === controller) archiveDraftSave.current = null })
+    archiveDraftSave.current = { controller, promise }
+    return promise
+  }, [draftCoordinator, snapshot.thread.id])
+
+  useLayoutEffect(() => {
+    const threadId = snapshot.thread.id
+    onArchivePreparationChange?.(threadId, prepareForArchive)
+    return () => {
+      archiveDraftSave.current?.controller.abort()
+      archiveDraftSave.current = null
+      onArchivePreparationChange?.(threadId, null)
+    }
+  }, [onArchivePreparationChange, prepareForArchive, snapshot.thread.id])
+
+  useEffect(() => {
+    if (!snapshot.thread.archivedAt) {
+      setComposerArchived(false)
+      setArchiveDraftError(null)
+      return
+    }
+    if (composerArchived) return
+    let current = true
+    setArchiveDraftError(null)
+    const revision = snapshot.thread.archiveRevision
+    void prepareForArchive().then(() => {
+      if (current && activeSnapshotRef.current.thread.archiveRevision === revision) setComposerArchived(true)
+    }).catch(error => { if (current) setArchiveDraftError(readErrorMessage(error)) })
+    return () => { current = false }
+  }, [prepareForArchive, composerArchived, archiveDraftRetry, snapshot.thread.archivedAt, snapshot.thread.archiveRevision])
+
   const prepareForThreadLeave = useCallback(async (): Promise<ThreadLeavePreparation> => {
+    if (activeSnapshotRef.current.thread.archivedAt) await prepareForArchive()
     if (composerSubmittingRef.current || routingMutatingRef.current) {
       throw new Error(uiAttribute('Composer 正在提交变更，请稍后再离开当前会话。'))
     }
@@ -2977,7 +3060,7 @@ export function ThreadWorkspace({
       await attachmentPreparationQueue.current
       const flushed = await composerHandle?.flush()
       const draft = flushed?.draft ?? await draftCoordinator.waitForIdle()
-      if (activationStateRef.current === 'active' && !memberCreationRef.current) {
+      if (activationStateRef.current === 'active' && !memberCreationRef.current && !activeSnapshotRef.current.thread.archivedAt) {
         // Autosave reports errors without rejecting the edit. Leaving must retry
         // that same snapshot and fail before unmounting if storage is still full.
         const storage = window.localStorage
@@ -3012,7 +3095,7 @@ export function ThreadWorkspace({
       setComposerPersistenceError(normalized)
       throw normalized
     }
-  }, [draftCoordinator, draftLoadState.state, snapshot.thread.id])
+  }, [draftCoordinator, draftLoadState.state, prepareForArchive, snapshot.thread.id])
 
   useLayoutEffect(() => {
     const threadId = snapshot.thread.id
@@ -4549,7 +4632,8 @@ export function ThreadWorkspace({
     pastedText?: { text: string; editor: StructuredMentionComposerHandle; epoch: number }
   ): Promise<void> => {
     if (
-      draftLoadState.state !== 'ready'
+      snapshot.thread.archivedAt
+      || draftLoadState.state !== 'ready'
       || composerSubmittingRef.current
       || routingMutatingRef.current
     ) return
@@ -6482,8 +6566,19 @@ export function ThreadWorkspace({
 
           <div className="message-composer-selection-slot">
           <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
+          {snapshot.thread.archivedAt && <div className="archived-composer-notice">
+            <span role="status"><NavigationIcon name="archive" /><UiText zh="已归档" /></span>
+            {archiveDraftError && <span role="alert">{archiveDraftError}
+              <button type="button" className="quiet-button" onClick={() => setArchiveDraftRetry(value => value + 1)}><UiText zh="重试保存" /></button>
+            </span>}
+            {onUnarchive && <button type="button" className="quiet-button" disabled={restoringArchive} onClick={() => {
+              setRestoringArchive(true)
+              void onUnarchive().catch(error => onNotifyError?.(readErrorMessage(error))).finally(() => setRestoringArchive(false))
+            }}><UiText zh="取消归档" /></button>}
+          </div>}
           <form
-        style={{ visibility: messageExport.selecting ? 'hidden' : undefined }} inert={messageExport.selecting}
+        style={{ visibility: messageExport.selecting ? 'hidden' : undefined, display: snapshot.thread.archivedAt && composerArchived ? 'none' : undefined }}
+        inert={messageExport.selecting || Boolean(snapshot.thread.archivedAt && composerArchived)}
         className={[
           'composer',
           attachmentDragState ? 'is-dragging-attachments' : ''

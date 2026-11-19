@@ -4,7 +4,7 @@
 use std::{cell::RefCell, collections::BTreeMap, marker::PhantomData, rc::Rc};
 
 use anyhow::Result;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, Transaction, functions::FunctionFlags};
 use serde_json::json;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -17,6 +17,46 @@ struct Batch {
     connection: usize,
     output: UnboundedSender<String>,
     threads: BTreeMap<String, Change>,
+    archives: BTreeMap<String, bool>,
+}
+
+fn connection_key(connection: &Connection) -> usize {
+    // Compare the SQLite handle's identity only. The Rust Connection may move
+    // between startup and the first transaction.
+    unsafe { connection.handle() as usize }
+}
+
+/// Observation is connection-local. The persistent SQLite triggers own the
+/// transition and continue working on connections without a Host subscriber.
+pub(crate) fn observe_archive_changes(connection: &Connection) -> Result<()> {
+    let owner = connection_key(connection);
+    connection.create_scalar_function(
+        "rovai_archive_changed",
+        2,
+        FunctionFlags::SQLITE_UTF8,
+        move |context| {
+            let thread_id = context.get::<String>(0)?;
+            let mission = context.get::<bool>(1)?;
+            CURRENT.with(|current| {
+                if let Some(batch) = current
+                    .borrow_mut()
+                    .as_mut()
+                    .filter(|batch| batch.connection == owner)
+                {
+                    batch.archives.insert(thread_id, mission);
+                }
+            });
+            Ok(0_i64)
+        },
+    )?;
+    connection.execute_batch(
+        "CREATE TEMP TRIGGER observe_thread_archive AFTER UPDATE OF archived_at ON main.camp
+         WHEN OLD.archived_at IS NOT NEW.archived_at
+         BEGIN
+            SELECT rovai_archive_changed(NEW.id, EXISTS(SELECT 1 FROM mission WHERE camp_id = NEW.id));
+         END;",
+    )?;
+    Ok(())
 }
 thread_local! {
     static CURRENT: RefCell<Option<Batch>> = const { RefCell::new(None) };
@@ -30,9 +70,10 @@ pub(crate) struct MessageChanges {
 impl MessageChanges {
     pub(crate) fn begin(connection: &Connection, output: Option<UnboundedSender<String>>) -> Self {
         let batch = output.map(|output| Batch {
-            connection: connection as *const Connection as usize,
+            connection: connection_key(connection),
             output,
             threads: BTreeMap::new(),
+            archives: BTreeMap::new(),
         });
         Self {
             previous: CURRENT.with(|current| current.replace(batch)),
@@ -42,13 +83,16 @@ impl MessageChanges {
 
     pub(crate) fn commit(self, transaction: Transaction<'_>) -> Result<()> {
         let batch = CURRENT.with(|current| current.take());
-        anyhow::ensure!(batch.as_ref().is_none_or(|batch|
-            batch.connection == &*transaction as *const Connection as usize),
-            "Message hints must commit with their owning connection");
+        anyhow::ensure!(
+            batch
+                .as_ref()
+                .is_none_or(|batch| batch.connection == connection_key(&transaction)),
+            "Message hints must commit with their owning connection"
+        );
         // Only actual message writes need a read watermark, captured before commit.
         let through: i64 = if batch
             .as_ref()
-            .is_some_and(|batch| !batch.threads.is_empty())
+            .is_some_and(|batch| !batch.threads.is_empty() || !batch.archives.is_empty())
         {
             transaction.query_row(
                 "SELECT last_sequence FROM event_sequence WHERE singleton=1",
@@ -60,6 +104,20 @@ impl MessageChanges {
         };
         transaction.commit()?;
         if let Some(batch) = batch {
+            for (thread_id, mission) in batch.archives {
+                let _ = batch.output.send(json!({ "method": "navigation.invalidated", "params": {
+                    "threadId": thread_id, "scope": "group", "reason": "threads.archive_changed",
+                    "throughGlobalSequence": through,
+                }}).to_string());
+                if mission {
+                    let _ = batch.output.send(
+                        json!({ "method": "missions.invalidated", "params": {
+                            "threadId": thread_id, "reason": "threads.archive_changed",
+                        }})
+                        .to_string(),
+                    );
+                }
+            }
             for (thread_id, change) in batch.threads {
                 let _ = batch.output.send(json!({ "method": "thread.messages.changed", "params": {
                     "threadId": thread_id, "indexChanged": change.index_changed,
@@ -89,7 +147,7 @@ pub(crate) fn record(
         let mut current = current.borrow_mut();
         let Some(batch) = current
             .as_mut()
-            .filter(|batch| batch.connection == connection as *const Connection as usize)
+            .filter(|batch| batch.connection == connection_key(connection))
         else {
             return;
         };
@@ -108,7 +166,7 @@ pub(crate) fn record_deleted_thread(connection: &Connection, thread_id: &str) ->
         current
             .borrow()
             .as_ref()
-            .is_some_and(|batch| batch.connection == connection as *const Connection as usize)
+            .is_some_and(|batch| batch.connection == connection_key(connection))
     }) {
         return Ok(());
     }

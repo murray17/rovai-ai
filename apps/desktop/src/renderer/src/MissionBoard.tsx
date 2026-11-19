@@ -69,8 +69,9 @@ function openMissionThread(client: Pick<ThreadClient, 'request'>, threadId: stri
 }
 
 /** Shared overlays keep card actions identical in the board, drawer and full conversation. */
-export function MissionInteractionProvider({ missions, projects, agents, installations, onChanged, onWorkspaceCleaned, onDeleted, onOpen, onError, children }: {
+export function MissionInteractionProvider({ missions, projects, agents, installations, onChanged, onWorkspaceCleaned, onDeleted, onArchive, onOpen, onError, children }: {
   missions: MissionRecord[]; projects: ProjectNavigationGroup[]; agents: AgentProfile[]; installations?: AdapterInstallation[]; onChanged(threadId: string): Promise<void>; onWorkspaceCleaned(threadId: string): Promise<void>; onDeleted(threadId: string): Promise<void>; onOpen(mission: MissionRecord): void; onError(message: string, action?: { label: string; onSelect(): void }): void; children: ReactNode
+  onArchive?(mission: MissionRecord): Promise<void>
 }) {
   const client = useThreadClient()
   const [position, setPosition] = useState<(ContextPosition & { kind: 'menu' | 'tags' | 'members' }) | null>(null)
@@ -195,6 +196,7 @@ export function MissionInteractionProvider({ missions, projects, agents, install
       })()) }}
       onSaveTags={tags => selected ? change(selected, 'update', { tags }) : Promise.resolve()}
       onCleanup={() => { if (selected) setCleaning(selected); setPosition(null) }}
+      onArchive={onArchive ? () => { if (selected) report(onArchive(selected)); setPosition(null) } : undefined}
       onDelete={() => { if (selected) setDeleting(selected); setPosition(null) }} />
     {position && position.kind !== 'menu' && selected && <MissionPopover position={position} title={position.kind === 'tags' ? uiAttribute("编辑标签") : uiAttribute("使命队员")} onClose={() => setPosition(null)} className={position.kind === 'tags' ? 'mission-label-popover' : 'mission-members-popover'}>
       {position.kind === 'tags' ? <LabelsEditor key={selected.missionId} m={selected} catalog={catalog} onSave={tags => change(selected, 'update', { tags })}/> : <MissionRoster m={selected}/>}
@@ -338,12 +340,13 @@ function MissionWorkspaceCleanup({ mission, onRequested, onClose }: { mission: M
   </CompactDialog>
 }
 
-function MissionDelete({ mission, onDelete, onClose }: { mission: MissionRecord; onDelete(workspaceDisposition: 'retain' | 'cleanup'): Promise<void>; onClose(): void }) {
+export function MissionDelete({ mission, onDelete, onClose }: { mission: MissionRecord; onDelete(workspaceDisposition: 'retain' | 'cleanup'): Promise<void>; onClose(): void }) {
   const client = useThreadClient(), [delivery, setDelivery] = useState<MissionDelivery | null>(null), [retry, setRetry] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [cleanupWorkspace, setCleanupWorkspace] = useState(false)
   useEffect(() => { let current = true; setError(''); void client.request<MissionDelivery>('missions.delivery', { missionId: mission.missionId }).then(data => { if (current) setDelivery(data) }).catch(error => { if (current) setError(missionError(error)) }); return () => { current = false } }, [client, mission.missionId, retry])
   async function remove() { setBusy(true); setError(''); try { await onDelete(cleanupWorkspace ? 'cleanup' : 'retain') } catch (error) { setError(missionError(error)) } finally { setBusy(false) } }
   return <CompactDialog title={uiAttribute("删除使命")} className="mission-delete-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary mission-delete-confirm" onClick={() => void remove()} disabled={busy || !delivery}>{busy ? uiAttribute("正在删除…") : uiAttribute("删除使命")}</button></>}>
+    <p><strong>{mission.title}</strong></p>
     <p className="mission-delete-summary"><UiText zh={"删除后，使命、会话和交付文件将被一并删除，正在执行的队员会停止。此操作无法撤销。"} /></p>
     {mission.workspaceEverCreated && <label className="mission-delete-workspace-option"><input type="checkbox" checked={cleanupWorkspace} disabled={busy || !mission.workspaceResourcesPresent} onChange={event => setCleanupWorkspace(event.target.checked)}/><span>{mission.workspaceResourcesPresent ? uiAttribute("同时清理 Worktree 及本地分支") : uiAttribute("同时清理 Worktree 及本地分支（已清理）")}</span><span className="mission-inline-help" tabIndex={0} aria-label={uiAttribute("未勾选时，Worktree 和本地分支保留在原位置。")} data-tooltip={uiAttribute("未勾选时，Worktree 和本地分支保留在原位置。")}>?</span></label>}
     {!delivery && !error && <p role="status"><UiText zh={"正在读取关联工作区…"} /></p>}{error && <p className="compact-inline-error" role="alert">{error}{!delivery && <button className="mission-source-link" onClick={() => setRetry(v => v + 1)}><UiText zh={"重试"} /></button>}</p>}

@@ -100,6 +100,7 @@ pub mod memory_retrieval;
 pub mod memory_secret;
 pub mod memory_tool;
 mod message_changes;
+mod thread_archive;
 pub mod message_delivery;
 mod message_sender;
 pub mod mission;

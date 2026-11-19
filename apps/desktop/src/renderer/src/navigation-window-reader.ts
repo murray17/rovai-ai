@@ -70,7 +70,7 @@ export function createNavigationWindowReader(
       for (const key of keys ?? ['quick-chat', ...(snapshot?.projects.map(group => group.projectKey) ?? [])]) pad(key)
     }
     const next = await read({ groupLimits: limits, ...(keys ? { groupKeys: keys } : {}) })
-    if (next.schemaVersion !== 3) throw new Error('会话列表数据版本不兼容。')
+    if (next.schemaVersion !== 3 && next.schemaVersion !== 4) throw new Error('会话列表数据版本不兼容。')
     if (padding === 0) return next
     // A full snapshot can discover new project keys. Repeat the same scope with
     // their padded limits so every committed row still shares one Core read watermark.
@@ -80,7 +80,7 @@ export function createNavigationWindowReader(
     if (refill.length === 0) return next
     refill.forEach(group => pad(group.projectKey))
     const filled = await read({ groupLimits: limits, ...(keys ? { groupKeys: keys } : {}) })
-    if (filled.schemaVersion !== 3) throw new Error('会话列表数据版本不兼容。')
+    if (filled.schemaVersion !== 3 && filled.schemaVersion !== 4) throw new Error('会话列表数据版本不兼容。')
     return filled
   }
   const rememberRows = (threads: NavigationThreadItem[], sequence: number): void => {
@@ -153,7 +153,7 @@ export function createNavigationWindowReader(
         return
       }
       if (next) {
-        if (next.schemaVersion !== 3) throw new Error('会话列表数据版本不兼容。')
+        if (next.schemaVersion !== 3 && next.schemaVersion !== 4) throw new Error('会话列表数据版本不兼容。')
         if (scope.all || !snapshot) {
           snapshot = next
           appliedRows.clear()

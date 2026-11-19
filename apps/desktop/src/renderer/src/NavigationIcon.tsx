@@ -3,6 +3,8 @@ export type NavigationIconName =
   | 'circle-plus'
   | 'search'
   | 'folder-open'
+  | 'archive'
+  | 'trash'
   | 'arrow-left'
   | 'bell-ring'
   | 'blocks'
@@ -53,6 +55,10 @@ function navigationIconPaths(name: NavigationIconName): React.JSX.Element {
       return <><path d="M3 10V6a2 2 0 0 1 2-2h4l2 3h7a2 2 0 0 1 2 2v2" /><path d="M5 11h15a1 1 0 0 1 1 1.3l-2 7A1 1 0 0 1 18 20H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z" /></>
     case 'arrow-left':
       return <><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></>
+    case 'archive':
+      return <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v12h14V8m-9 4h4" /></>
+    case 'trash':
+      return <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v6M14 10v6" /></>
     case 'square-pen':
       return <><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z" /></>
     case 'users':

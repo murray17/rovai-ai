@@ -40,6 +40,19 @@ All categories implement Loading, Empty, Partial, Error, Disabled, Submitting an
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
 scroll and focus.
 
+## 归档
+
+会话与使命标签共用标题或 Thread ID 搜索和项目多选。列表按项目分组，使用文件夹图标和圆角列表，
+每行显示标题、最后可见消息时间、取消归档和删除。至 760px 时，时间换到标题下方。
+结果查询、计数、恢复和首次删除受理遵循 [Thread Archive v1](../../contracts/thread-archive-v1.md)。
+
+列表后台刷新保留输入、筛选、已展开数量与滚动锚点。取消归档后继续留在页面。
+本次操作移除当前焦点所在条目后，焦点移到下一条操作或当前类型标签。删除确认沿用现有使命工作树选项。
+
+已打开的 Thread 保留时间线与当前打开的详情。归档界面等待本窗口的组合输入、附件准备和待保存草稿。
+只提交本窗口尚未保存的正文、附件、引用、回复、续发或主动清空。保存失败时保留当前输入并支持重试。
+界面切换以保存完成后的最新归档版本为准。取消归档后恢复同一输入框及草稿。
+
 ## 通用
 
 General owns stable startup location, world-map availability and window reset. Windows Desktop also owns the local

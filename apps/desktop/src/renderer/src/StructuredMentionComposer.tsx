@@ -119,6 +119,8 @@ export type StructuredMentionOption =
 
 export interface StructuredMentionComposerHandle {
   getDocument(): ComposerDocument
+  waitForComposition(signal: AbortSignal): Promise<void>
+  waitForFileInsertions(): Promise<void>
   flush(options?: { forSubmission?: boolean }): Promise<ComposerFlushResult<ThreadComposerDraftView>>
   hasPendingFileInsertion(): boolean
   adoptHistoryPreview(): void
@@ -355,24 +357,27 @@ function ComposerBridge({
   const fileSelectionBeforePointer = useRef<ReturnType<typeof $getSelection>>(null)
   const [fileActions, setFileActions] = useState<{ edit(replace: boolean): void; nodeKey: string; trigger: HTMLElement; atom: Extract<ComposerAtom, { type: 'project_file_reference' }>; restore(): void } | null>(null)
   const insertionTicket = useRef(0)
-  const fileInsertions = useRef(new Set<object>())
+  const fileInsertions = useRef(new Map<() => void, Promise<void>>())
   const pendingChange = useRef(onFileInsertionPendingChange)
   pendingChange.current = onFileInsertionPendingChange
   const insertionsMounted = useRef(true)
   const pickerInsertion = useRef<(() => void) | null>(null)
   const beginFileInsertion = useCallback(() => {
-    const token = {}
-    fileInsertions.current.add(token)
-    pendingChange.current?.(true)
-    return () => {
-      if (fileInsertions.current.delete(token) && insertionsMounted.current) pendingChange.current?.(fileInsertions.current.size > 0)
+    let settle!: () => void
+    const completed = new Promise<void>(resolve => { settle = resolve })
+    const finish = () => {
+      settle()
+      if (fileInsertions.current.delete(finish) && insertionsMounted.current) pendingChange.current?.(fileInsertions.current.size > 0)
     }
+    fileInsertions.current.set(finish, completed)
+    pendingChange.current?.(true)
+    return finish
   }, [])
   useEffect(() => {
     insertionsMounted.current = true
     return () => {
       insertionsMounted.current = false
-      fileInsertions.current.clear()
+      for (const finish of fileInsertions.current.keys()) finish()
       pendingChange.current?.(false)
     }
   }, [])
@@ -772,6 +777,29 @@ function ComposerBridge({
 
   useImperativeHandle(forwardedRef, () => ({
     getDocument: () => editor.getEditorState().read($rootToComposerDocument),
+    async waitForComposition(signal) {
+      signal.throwIfAborted()
+      const root = editor.getRootElement()
+      if (!root || !editor.isComposing()) return
+      await new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const cleanup = () => {
+          clearTimeout(timer)
+          root.removeEventListener('compositionend', onEnd)
+          signal.removeEventListener('abort', onAbort)
+        }
+        const onEnd = () => {
+          // Lexical reads the final composition text as the DOM event settles.
+          timer = setTimeout(() => { cleanup(); resolve() }, 0)
+        }
+        const onAbort = () => { cleanup(); reject(signal.reason) }
+        root.addEventListener('compositionend', onEnd, { once: true })
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    },
+    async waitForFileInsertions() {
+      while (fileInsertions.current.size) await Promise.all(fileInsertions.current.values())
+    },
     adoptHistoryPreview() {
       historyNavigationRef.current?.adopt()
       syncRef.current?.adoptHistoryPreview()

@@ -54,6 +54,22 @@ function interactionId(params: unknown): unknown {
   return params && typeof params === 'object' && 'interactionId' in params ? params.interactionId : undefined
 }
 
+function archiveThreadId(operation: WebOperation, params: unknown): string | undefined {
+  const command = (params as { command?: { threadId?: unknown; archiveGuard?: unknown } } | undefined)?.command
+  if (typeof command?.threadId !== 'string') return
+  if (operation === 'threads.archive' || operation === 'threads.unarchive'
+    || (operation === 'threads.delete' && command.archiveGuard)) {
+    return command.threadId
+  }
+}
+
+function commandConcurrencyKey(operation: WebOperation, params: unknown): string {
+  const archiveThread = archiveThreadId(operation, params)
+  if (archiveThread) return `archive:${archiveThread}`
+  if (operation === 'nativeInteractions.respond') return `${operation}:${String(interactionId(params))}`
+  return operation
+}
+
 export type WorkspaceListing = { name: string; projectPath: string; parentPath: string | null; roots: string[]; directories: { name: string; projectPath: string }[]; nextOffset: number | null }
 
 export const WEB_OPERATIONS = [
@@ -61,6 +77,9 @@ export const WEB_OPERATIONS = [
   'projectFileReferences.resolve',
   'threads.rename',
   'threads.delete',
+  'threads.archive',
+  'threads.unarchive',
+  'threads.archive.list',
   'threads.deletionIssues',
   'threads.retryDeletion',
   'threads.discardPending',
@@ -247,6 +266,8 @@ const RECONCILABLE_COMMANDS = new Set<WebOperation>([
   'teams.delete',
   'threads.rename',
   'threads.delete',
+  'threads.archive',
+  'threads.unarchive',
   'threads.retryDeletion',
   'threads.discardPending',
   'threads.members.fast.set',
@@ -415,9 +436,9 @@ export class ConsoleClient {
   #restored = false
   #storage?: RecoveryStorage
   #assertTab?: () => Promise<void>
-  #recoveryListeners = new Set<() => void>()
-  onRecovered(listener: () => void): () => void { this.#recoveryListeners.add(listener); return () => { this.#recoveryListeners.delete(listener) } }
-  #notifyRecovered(): void { for (const listener of this.#recoveryListeners) listener() }
+  #recoveryListeners = new Set<(notice?: '目标已移除') => void>()
+  onRecovered(listener: (notice?: '目标已移除') => void): () => void { this.#recoveryListeners.add(listener); return () => { this.#recoveryListeners.delete(listener) } }
+  #notifyRecovered(notice?: '目标已移除'): void { for (const listener of this.#recoveryListeners) listener(notice) }
   #pendingListeners = new Set<() => void>()
   get pendingCommandCount(): number { return this.#pending.size + this.#pendingUploads.size }
   onPendingCommandsChanged(listener: () => void): () => void {
@@ -532,6 +553,11 @@ export class ConsoleClient {
   }
 
   #settleRecovered(operation: WebOperation, params: unknown, result: unknown): void {
+    const outcome = result as { status?: string; code?: string } | null
+    if (archiveThreadId(operation, params) && outcome?.status === 'rejected' && outcome.code === 'camp.not_found') {
+      this.#notifyRecovered('目标已移除')
+      return
+    }
     if (operation === 'thread.messages.send') recoverLocalThreadSend(params, result)
     if (operation === 'singleChat.send' && this.#storage && this.editingScope && (result as { status?: string })?.status !== 'rejected') {
       const command = (params as { command?: { threadId?: string; conversationId?: string; body?: string } })?.command
@@ -707,8 +733,8 @@ export class ConsoleClient {
     try {
       if (!this.authenticated) throw new SessionRequired()
       this.#assertConnected()
-      if ([...this.#pending.values()].some(entry => entry.operation === operation
-        && (operation !== 'nativeInteractions.respond' || interactionId(entry.params) === interactionId(params)))) {
+      const key = commandConcurrencyKey(operation, params)
+      if ([...this.#pending.values()].some(entry => commandConcurrencyKey(entry.operation, entry.params) === key)) {
         throw new Error('同类操作的原提交仍待核对，请先核对原提交结果。')
       }
       if (this.#pending.has(commandId)) throw new Error('原命令仍在核对中，请等待其结果。')

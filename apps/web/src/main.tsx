@@ -141,7 +141,10 @@ function WebEntry() {
     window.addEventListener('online', online)
     return () => { active = false; clearInterval(timer); window.removeEventListener('online', online) }
   }, [restoring, authenticated])
-  useEffect(() => transport.onRecovered(() => adapter?.invalidate()), [adapter])
+  useEffect(() => transport.onRecovered(notice => {
+    adapter?.invalidate()
+    if (notice) setError(notice)
+  }), [adapter])
   useEffect(() => {
     if (!authenticated) return
     const renew = (): void => {
