@@ -86,7 +86,7 @@ pub(super) fn migrate(db: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::Current(_)
+                DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 177
             ),
             "Message editing schema admission failed"
         );
@@ -101,6 +101,35 @@ pub(super) fn migrate(db: &mut Database) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn indexed_inputs_schema_matches(c: &Connection) -> rusqlite::Result<bool> {
+    c.query_row(
+        r#"SELECT EXISTS(SELECT 1 FROM pragma_index_list('camp_message_delivery')
+            WHERE name='camp_message_delivery_message_idx' AND "unique"=0 AND partial=0)
+          AND (SELECT group_concat(name, ',' ORDER BY seqno)
+               FROM pragma_index_info('camp_message_delivery_message_idx')) IS 'message_id,recipient_agent_id'
+          AND EXISTS(SELECT 1 FROM pragma_table_info('agent_run_input') WHERE name='uses_published_body')"#,
+        [], |row| row.get(0),
+    )
+}
+
+pub(super) fn migrate_input_storage(db: &mut Database) -> Result<()> {
+    let tx = db
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    anyhow::ensure!(
+        matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version == 177),
+        "Delivery message index requires schema 177"
+    );
+    tx.execute_batch(
+        "CREATE INDEX camp_message_delivery_message_idx ON camp_message_delivery(message_id,recipient_agent_id);
+         ALTER TABLE agent_run_input ADD COLUMN uses_published_body INTEGER NOT NULL DEFAULT 0 CHECK(uses_published_body IN (0,1));
+         INSERT INTO schema_migration VALUES(228,datetime('now'));
+         UPDATE rovai_data_contract SET projection_schema_version=178,updated_at=datetime('now') WHERE singleton=1;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
     if !schema_matches(c).unwrap() {
@@ -109,12 +138,21 @@ pub(super) fn downgrade_for_test(c: &Connection) {
     c.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;")
         .unwrap();
     let tx = c.unchecked_transaction().unwrap();
-    tx.execute_batch("DROP TABLE camp_run_continuation_input;
+    tx.execute_batch("DROP INDEX IF EXISTS camp_message_delivery_message_idx;
+        DELETE FROM schema_migration WHERE version=228;
+        DROP TABLE camp_run_continuation_input;
         DROP INDEX continuation_waiting_authorization; DROP INDEX ordinary_waiting_message_target;
         ALTER TABLE camp_message DROP COLUMN ever_bound_as_steer; ALTER TABLE camp_message DROP COLUMN content_revision;
         ALTER TABLE agent_run_input DROP COLUMN message_content_revision; ALTER TABLE agent_run_input DROP COLUMN input_snapshot_json;
         ALTER TABLE camp_message_delivery DROP COLUMN message_content_revision;
         ALTER TABLE camp_message_delivery DROP COLUMN continuation_authorization_id;").unwrap();
+    if table_columns(&tx, "agent_run_input")
+        .unwrap()
+        .contains(&"uses_published_body".into())
+    {
+        tx.execute_batch("ALTER TABLE agent_run_input DROP COLUMN uses_published_body")
+            .unwrap();
+    }
     rebuild_delivery(&tx, false).unwrap();
     tx.execute_batch("DELETE FROM schema_migration WHERE version=227; UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;").unwrap();
     tx.commit().unwrap();

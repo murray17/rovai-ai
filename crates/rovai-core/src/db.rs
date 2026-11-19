@@ -525,7 +525,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 177;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 178;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1028,6 +1028,7 @@ struct CurrentMigrationState {
     v225: bool,
     v226: bool,
     v227: bool,
+    v228: bool,
 }
 
 impl CurrentMigrationState {
@@ -1049,6 +1050,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v228 {
+            let mut previous = *self;
+            previous.v228 = false;
+            return schema == 178 && previous.admits(contract, 177, classifier);
+        }
         if self.v227 {
             let mut previous = *self;
             previous.v227 = false;
@@ -3901,6 +3907,7 @@ pub(crate) fn classify_database_contract(
                 | 175
                 | 176
                 | 177
+                | 178
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3910,6 +3917,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 178
+                || message_mutations::indexed_inputs_schema_matches(connection)?)
             && (marker.projection_schema_version < 177
                 || message_mutations::schema_matches(connection)?)
             && (marker.projection_schema_version < 176
@@ -6315,7 +6324,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=225),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=226),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=227)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=227),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=228)
         "#,
         [],
         |row| {
@@ -6478,6 +6488,7 @@ fn load_current_migration_state(
                 v225: row.get(155)?,
                 v226: row.get(156)?,
                 v227: row.get(157)?,
+                v228: row.get(158)?,
             })
         },
     )
@@ -9796,6 +9807,12 @@ impl Database {
             if !self.schema_migration_applied(227)? {
                 migration_step!("migration_227", message_mutations::migrate(self));
             }
+            if !self.schema_migration_applied(228)? {
+                migration_step!(
+                    "migration_228",
+                    message_mutations::migrate_input_storage(self)
+                );
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10701,6 +10718,12 @@ impl Database {
         }
         if !self.schema_migration_applied(227)? {
             migration_step!("migration_227", message_mutations::migrate(self));
+        }
+        if !self.schema_migration_applied(228)? {
+            migration_step!(
+                "migration_228",
+                message_mutations::migrate_input_storage(self)
+            );
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -42506,6 +42529,7 @@ mod tests {
             v225: version >= 225,
             v226: version >= 226,
             v227: version >= 227,
+            v228: version >= 228,
         }
     }
 
@@ -44116,6 +44140,18 @@ mod tests {
         // Current opening tolerates equivalent SQL and missing optional Usage,
         // but still requires the current completion record and business columns.
         let connection = database.connection();
+        let delivery_lookup: String = connection
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT id FROM camp_message_delivery WHERE message_id=?1",
+                ["message"],
+                |row| row.get(3),
+            )
+            .unwrap();
+        assert!(
+            delivery_lookup
+                .contains("USING INDEX camp_message_delivery_message_idx (message_id=?)"),
+            "{delivery_lookup}"
+        );
         for change in [
             "equivalent_sql",
             "old_receipts",
