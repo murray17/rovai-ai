@@ -99,7 +99,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp History v12（历史）](camp-history-v12.md)：mentions 统一，作者字段保留原始身份。
 - [ContextManifest v34（历史）](context-manifest-evidence-v34.md)：路由投影精简，public 34/11/9、non-batch 35/12/6，旧输入原格式恢复。
 - [ContextManifest v33（历史）](context-manifest-evidence-v33.md)：新 Run Mention 字段、原版本恢复和现有预算/摘要。
-- [Camp History v17（当前）](camp-history-v17.md)：引用直接读取保存的文字，不过滤来源；继承 [v16（历史）](camp-history-v16.md) 的分页、消息可见性和读取预算。
+- [Camp History v17（当前）](camp-history-v17.md)：公开正文使用字面子串搜索，引用读取保存的文字。继承 [v16（历史）](camp-history-v16.md) 的分页、可见性和读取预算。
 - [Camp History v13（历史）](camp-history-v13.md)：read/search 统一发送者，Agent Output 12；历史回执保持。
 
 ## 生命周期

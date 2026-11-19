@@ -11347,22 +11347,6 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(task_update_events, 3);
-        let indexed_system_events: i64 = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*)
-                FROM camp_message_fts AS indexed
-                JOIN camp_message ON camp_message.rowid = indexed.rowid
-                WHERE camp_message.camp_id = ?1
-                  AND camp_message.author_type = 'system'
-                "#,
-                [&camp_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(indexed_system_events, 0);
-
         let terminal = service
             .update_task(
                 &mut database,

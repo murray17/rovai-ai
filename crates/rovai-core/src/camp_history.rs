@@ -17,7 +17,9 @@ use crate::{
         render_agent_search_projection, validate_content,
     },
     camp_id::{CAMP_ID_PATTERN, ThreadId},
-    camp_message_publication::public_camp_message_publication_cte,
+    camp_message_publication::{
+        public_camp_message_event_predicate, public_camp_message_publication_cte,
+    },
     db::Database,
     local_attachment_snapshot::DIRECTORY_MEDIA_TYPE,
     local_attachment_source::parse_source_attachments,
@@ -38,7 +40,9 @@ const CAMP_SEARCH_DEFAULT_LIMIT: usize = 10;
 const CAMP_SEARCH_MAX_LIMIT: usize = 20;
 const HISTORY_SEARCH_DEFAULT_LIMIT: usize = 15;
 const HISTORY_SEARCH_MAX_LIMIT: usize = 30;
-const SEARCH_CANDIDATE_MULTIPLIER: usize = 8;
+const MESSAGE_SEARCH_BATCH_SIZE: i64 = 128;
+const MESSAGE_QUERY_DESCRIPTION: &str =
+    "Case-insensitive literal substring to find in message text.";
 const MAX_QUERY_CHARS: usize = 512;
 const MAX_CAMP_QUERY_CHARS: usize = 200;
 const MAX_HISTORY_CAMP_IDS: usize = 20;
@@ -158,11 +162,77 @@ struct RankedMessage {
     body_length: usize,
 }
 
-type CandidateKey = (String, String);
-type CandidateMap = HashMap<CandidateKey, RankedMessage>;
-type CandidatePage = (CandidateMap, bool);
+struct MessageSearch {
+    folded_query: String,
+    legacy_mention_query: Option<Vec<char>>,
+    reference_pairs: Option<String>,
+    limit: usize,
+    ranked: Vec<RankedMessage>,
+    truncated: bool,
+}
 
-#[derive(Debug, Clone, Copy)]
+impl MessageSearch {
+    fn new(query: &str, limit: usize) -> Result<Self> {
+        let references = extract_query_references(query);
+        let folded_query = fold_text(query);
+        let legacy_mention_query = folded_query
+            .contains("@principal")
+            .then(|| folded_query.chars().collect());
+        Ok(Self {
+            folded_query,
+            legacy_mention_query,
+            reference_pairs: (!references.is_empty())
+                .then(|| serde_json::to_string(&references))
+                .transpose()?,
+            limit,
+            ranked: Vec::with_capacity(limit),
+            truncated: false,
+        })
+    }
+
+    fn match_rank(&self, body: &str, user_offsets: &[usize]) -> (usize, usize) {
+        let folded = fold_text(body);
+        match &self.legacy_mention_query {
+            Some(query) if !user_offsets.is_empty() => {
+                user_mention_match_rank(&folded, query, user_offsets)
+            }
+            _ => literal_match_rank(&folded, &self.folded_query),
+        }
+    }
+
+    fn rank(&mut self, message: MessageRow, exact_reference: bool, user_offsets: &[usize]) {
+        let (occurrence_count, first_match_offset) = self.match_rank(&message.body, user_offsets);
+        if !exact_reference && occurrence_count == 0 {
+            return;
+        }
+        let body_length = message.body.chars().count();
+        let mut candidate = RankedMessage {
+            message,
+            exact_reference,
+            occurrence_count,
+            first_match_offset,
+            body_length,
+        };
+        let index = self
+            .ranked
+            .partition_point(|other| compare_ranked(other, &candidate).is_lt());
+        if self.ranked.len() == self.limit {
+            self.truncated = true;
+            if index == self.limit {
+                return;
+            }
+            self.ranked.pop();
+        }
+        let body = &mut candidate.message.body;
+        *body = snippet(
+            body,
+            (first_match_offset != usize::MAX).then_some(first_match_offset),
+        );
+        self.ranked.insert(index, candidate);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 struct ParsedDateRange {
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
@@ -176,13 +246,6 @@ impl ParsedDateRange {
     fn upper_bound_parameter(self) -> Option<String> {
         self.to.map(|value| value.to_rfc3339())
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct HistorySearchScope<'a> {
-    fence: &'a RunFence,
-    camp_ids: &'a [String],
-    dates: ParsedDateRange,
 }
 
 #[derive(Debug, Default)]
@@ -206,9 +269,10 @@ impl ThreadHistoryService {
             "additionalProperties": false,
             "required": ["query"],
             "properties": {
-                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS, "description": MESSAGE_QUERY_DESCRIPTION},
                 "threadId": {"type": "string", "pattern": CAMP_ID_PATTERN},
-                "limit": {"type": "integer", "minimum": 1, "maximum": CAMP_SEARCH_MAX_LIMIT}
+                "limit": {"type": "integer", "minimum": 1, "maximum": CAMP_SEARCH_MAX_LIMIT,
+                          "description": format!("Maximum {CAMP_SEARCH_MAX_LIMIT}.")}
             }
         })
     }
@@ -219,15 +283,16 @@ impl ThreadHistoryService {
             "additionalProperties": false,
             "required": ["query"],
             "properties": {
-                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS, "description": MESSAGE_QUERY_DESCRIPTION},
                 "threadIds": {
                     "type": "array", "minItems": 1, "maxItems": MAX_HISTORY_CAMP_IDS,
                     "uniqueItems": true,
                     "items": {"type": "string", "pattern": CAMP_ID_PATTERN}
                 },
-                "dateFrom": {"type": "string", "format": "date-time"},
-                "dateTo": {"type": "string", "format": "date-time"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": HISTORY_SEARCH_MAX_LIMIT}
+                "dateFrom": {"type": "string", "format": "date-time", "description": "Inclusive RFC 3339 timestamp."},
+                "dateTo": {"type": "string", "format": "date-time", "description": "Exclusive RFC 3339 timestamp."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": HISTORY_SEARCH_MAX_LIMIT,
+                          "description": format!("Maximum {HISTORY_SEARCH_MAX_LIMIT}.")}
             }
         })
     }
@@ -370,29 +435,16 @@ impl ThreadHistoryService {
         };
         let target = resolve_camp_target(&transaction, run, &fence, requested_camp_id.as_deref())?
             .ok_or_else(search_unavailable)?;
-        let budget = limit * SEARCH_CANDIDATE_MULTIPLIER;
-        let (mut candidates, search_incomplete) =
-            load_target_body_candidates(&transaction, &fence, &target, &query, budget)?;
-        merge_target_reference_candidates(
+        let mut search = MessageSearch::new(query, limit)?;
+        scan_thread_messages(
             &transaction,
-            &fence,
-            &target,
-            &query,
-            limit,
-            &mut candidates,
+            &target.camp_id,
+            target.fence,
+            None,
+            ParsedDateRange::default(),
+            &mut search,
         )?;
-        reproject_search_candidates(&transaction, &query, &mut candidates)?;
-        let result = attach_search_quotes(
-            &transaction,
-            ranked_search_response(
-                &transaction,
-                candidates,
-                &query,
-                limit,
-                false,
-                search_incomplete,
-            )?,
-        )?;
+        let result = ranked_search_response(&transaction, search, false)?;
         transaction.commit()?;
         Ok(result)
     }
@@ -415,55 +467,21 @@ impl ThreadHistoryService {
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Deferred)?;
         let fence = load_run_fence(&transaction, run)?;
-        let available = load_history_camps(&transaction, &fence)?;
-        let available_ids = available
-            .iter()
-            .map(|camp| camp.camp_id.as_str())
-            .collect::<HashSet<_>>();
-        let scope = requested_camps.map_or_else(
-            || available.iter().map(|camp| camp.camp_id.clone()).collect(),
-            |requested| {
-                requested
-                    .into_iter()
-                    .filter(|camp_id| available_ids.contains(camp_id.as_str()))
-                    .collect::<Vec<_>>()
-            },
-        );
-        if scope.is_empty() {
-            transaction.commit()?;
-            return Ok(json!({
-                "results": [],
-                "truncated": false,
-                "searchIncomplete": false,
-            }));
-        }
-        let budget = limit * SEARCH_CANDIDATE_MULTIPLIER;
-        let history_scope = HistorySearchScope {
-            fence: &fence,
-            camp_ids: &scope,
-            dates,
-        };
-        let (mut candidates, search_incomplete) =
-            load_history_body_candidates(&transaction, &history_scope, &query, budget)?;
-        merge_history_reference_candidates(
-            &transaction,
-            &history_scope,
-            &query,
-            limit,
-            &mut candidates,
-        )?;
-        reproject_search_candidates(&transaction, &query, &mut candidates)?;
-        let result = attach_search_quotes(
-            &transaction,
-            ranked_search_response(
+        let threads = history_search_threads(&transaction, &fence, requested_camps.as_deref())?;
+        let mut search = MessageSearch::new(query, limit)?;
+        for (camp_id, title) in &threads {
+            scan_thread_messages(
                 &transaction,
-                candidates,
-                &query,
-                limit,
-                true,
-                search_incomplete,
-            )?,
-        )?;
+                camp_id,
+                MessageFence::History {
+                    global_boundary: fence.global_boundary,
+                },
+                Some(title),
+                dates,
+                &mut search,
+            )?;
+        }
+        let result = ranked_search_response(&transaction, search, true)?;
         transaction.commit()?;
         Ok(result)
     }
@@ -566,14 +584,13 @@ fn effective_limit(value: Option<usize>, default: usize, maximum: usize) -> Resu
     Ok(value)
 }
 
-fn required_query(value: &str) -> Result<String> {
-    let query = value.trim();
-    if query.is_empty() || query.chars().count() > MAX_QUERY_CHARS {
+fn required_query(query: &str) -> Result<&str> {
+    if query.trim().is_empty() || query.chars().count() > MAX_QUERY_CHARS {
         return Err(invalid_argument(
             "query must contain between 1 and 512 Unicode scalars",
         ));
     }
-    Ok(query.to_string())
+    Ok(query)
 }
 
 fn optional_trimmed_query(value: Option<&str>, maximum: usize) -> Result<Option<String>> {
@@ -901,520 +918,110 @@ fn fold_char(value: char) -> char {
     value.to_lowercase().next().unwrap_or(value)
 }
 
-fn literal_fts_query(query: &str) -> String {
-    format!("\"{}\"", query.replace('"', "\"\""))
-}
-
-fn target_history_scope<'a>(
-    fence: &'a RunFence,
-    target: &'a ThreadTarget,
-) -> Option<HistorySearchScope<'a>> {
-    matches!(target.fence, MessageFence::History { .. }).then(|| HistorySearchScope {
-        fence,
-        camp_ids: std::slice::from_ref(&target.camp_id),
-        dates: ParsedDateRange {
-            from: None,
-            to: None,
-        },
-    })
-}
-
-fn load_target_body_candidates(
+fn history_search_threads(
     transaction: &Transaction<'_>,
     fence: &RunFence,
-    target: &ThreadTarget,
-    query: &str,
-    budget: usize,
-) -> Result<CandidatePage> {
-    if let Some(scope) = target_history_scope(fence, target) {
-        load_history_body_candidates(transaction, &scope, query, budget)
-    } else {
-        load_current_body_candidates(transaction, fence, query, budget)
-    }
-}
-
-fn load_current_body_candidates(
-    transaction: &Transaction<'_>,
-    fence: &RunFence,
-    query: &str,
-    budget: usize,
-) -> Result<CandidatePage> {
-    let short = query.chars().count() < 3;
-    let sql = if short {
-        r#"
-        SELECT message.id, message.camp_id, message.sequence,
-               message.author_type, message.author_id,
-               message.reply_to_camp_message_id, message.body,
-               message.created_at, message.sequence, NULL
-        FROM camp_message AS message
-        WHERE message.camp_id = ?1
-          AND message.sequence <= ?2
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
-        ORDER BY message.sequence DESC, message.id
-        LIMIT ?3
-        "#
-    } else {
-        r#"
-        SELECT message.id, message.camp_id, message.sequence,
-               message.author_type, message.author_id,
-               message.reply_to_camp_message_id, message.body,
-               message.created_at, message.sequence, NULL
-        FROM camp_message_fts
-        JOIN camp_message AS message ON message.rowid = camp_message_fts.rowid
-        WHERE camp_message_fts MATCH ?4
-          AND message.camp_id = ?1
-          AND message.sequence <= ?2
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
-        ORDER BY message.sequence DESC, message.id
-        LIMIT ?3
-        "#
-    };
-    let mut statement = transaction.prepare(sql)?;
-    let rows = if short {
-        statement
-            .query_map(
-                params![
-                    fence.current_camp_id,
-                    fence.current_boundary,
-                    (budget + 1) as i64,
-                ],
-                message_search_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        statement
-            .query_map(
-                params![
-                    fence.current_camp_id,
-                    fence.current_boundary,
-                    (budget + 1) as i64,
-                    literal_fts_query(query),
-                ],
-                message_search_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let (mut candidates, mut incomplete) = body_candidates(rows, query, budget, short)?;
-    if query_matches_user_mention(query) {
-        incomplete |= merge_current_user_mention_candidates(
-            transaction,
-            fence,
-            query,
-            budget,
-            &mut candidates,
-        )?;
-    }
-    Ok((candidates, incomplete))
-}
-
-fn load_history_body_candidates(
-    transaction: &Transaction<'_>,
-    scope: &HistorySearchScope<'_>,
-    query: &str,
-    budget: usize,
-) -> Result<CandidatePage> {
-    let short = query.chars().count() < 3;
-    let publication_cte = public_camp_message_publication_cte();
-    let sql = if short {
-        format!(
-            r#"
-        WITH {publication_cte}
-        SELECT message.id, message.camp_id, message.sequence,
-               message.author_type, message.author_id,
-               message.reply_to_camp_message_id, message.body,
-               message.created_at, publication.global_sequence,
-               COALESCE(snapshot.camp_title, camp.title)
-        FROM camp
-        LEFT JOIN context_manifest_history_camp AS snapshot
-          ON snapshot.context_manifest_id = ?1
-         AND snapshot.camp_id = camp.id
-        JOIN camp_message AS message ON message.camp_id = camp.id
-        JOIN public_camp_message_publication AS publication
-          ON publication.message_id = message.id
-        WHERE camp.deletion_operation_id IS NULL
-          AND publication.global_sequence <= ?2
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
-          AND message.camp_id IN (SELECT value FROM json_each(?3))
-          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
-          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
-        ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-        LIMIT ?6
-        "#
-        )
-    } else {
-        format!(
-            r#"
-        WITH {publication_cte}
-        SELECT message.id, message.camp_id, message.sequence,
-               message.author_type, message.author_id,
-               message.reply_to_camp_message_id, message.body,
-               message.created_at, publication.global_sequence,
-               COALESCE(snapshot.camp_title, camp.title)
-        FROM camp
-        LEFT JOIN context_manifest_history_camp AS snapshot
-          ON snapshot.context_manifest_id = ?1
-         AND snapshot.camp_id = camp.id
-        JOIN camp_message AS message ON message.camp_id = camp.id
-        JOIN camp_message_fts ON camp_message_fts.rowid = message.rowid
-        JOIN public_camp_message_publication AS publication
-          ON publication.message_id = message.id
-        WHERE camp.deletion_operation_id IS NULL
-          AND publication.global_sequence <= ?2
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
-          AND message.camp_id IN (SELECT value FROM json_each(?3))
-          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
-          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
-          AND camp_message_fts MATCH ?7
-        ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-        LIMIT ?6
-        "#
-        )
-    };
-    let camp_ids = serde_json::to_string(scope.camp_ids)?;
-    let from = scope.dates.lower_bound_parameter();
-    let to = scope.dates.upper_bound_parameter();
-    let mut statement = transaction.prepare(&sql)?;
-    let rows = if short {
-        statement
-            .query_map(
-                params![
-                    scope.fence.manifest_id,
-                    scope.fence.global_boundary,
-                    camp_ids,
-                    from,
-                    to,
-                    (budget + 1) as i64,
-                ],
-                message_search_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        statement
-            .query_map(
-                params![
-                    scope.fence.manifest_id,
-                    scope.fence.global_boundary,
-                    camp_ids,
-                    from,
-                    to,
-                    (budget + 1) as i64,
-                    literal_fts_query(query),
-                ],
-                message_search_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let (mut candidates, mut incomplete) = body_candidates(rows, query, budget, short)?;
-    if query_matches_user_mention(query) {
-        incomplete |= merge_history_user_mention_candidates(
-            transaction,
-            scope,
-            query,
-            budget,
-            &mut candidates,
-        )?;
-    }
-    Ok((candidates, incomplete))
-}
-
-fn query_matches_user_mention(query: &str) -> bool {
-    let query = fold_text(query);
-    query.contains("@user") || query.contains("@principal")
-}
-
-fn merge_current_user_mention_candidates(
-    transaction: &Transaction<'_>,
-    fence: &RunFence,
-    query: &str,
-    budget: usize,
-    candidates: &mut CandidateMap,
-) -> Result<bool> {
-    let remaining = budget.saturating_sub(candidates.len());
-    if remaining == 0 {
-        return Ok(true);
-    }
+    requested: Option<&[String]>,
+) -> Result<Vec<(String, String)>> {
+    // Same eligible Threads as load_history_camps. Search does not need the directory's
+    // activity projection, and result titles still prefer the calling Run's snapshot.
+    let requested = requested.map(serde_json::to_string).transpose()?;
     let mut statement = transaction.prepare(
         r#"
-        SELECT message.id, message.camp_id, message.sequence,
-               message.author_type, message.author_id,
-               message.reply_to_camp_message_id, message.body,
-               message.created_at, message.sequence, NULL
-        FROM camp_message AS message
-        WHERE message.camp_id = ?1
-          AND message.sequence <= ?2
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
-          AND EXISTS (
-              SELECT 1 FROM json_each(message.structured_content_json) AS segment
-              WHERE json_extract(segment.value, '$.kind') = 'current_user_mention'
-                AND json_extract(segment.value, '$.userId') = 'local_user'
-          )
-        ORDER BY message.sequence DESC, message.id
-        LIMIT ?3
-        "#,
-    )?;
-    let mut rows = statement
-        .query_map(
-            params![
-                fence.current_camp_id,
-                fence.current_boundary,
-                (remaining + 1) as i64,
-            ],
-            message_search_row,
-        )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let incomplete = rows.len() > remaining;
-    rows.truncate(remaining);
-    merge_body_rows(candidates, rows, query);
-    Ok(incomplete)
-}
-
-fn merge_history_user_mention_candidates(
-    transaction: &Transaction<'_>,
-    scope: &HistorySearchScope<'_>,
-    query: &str,
-    budget: usize,
-    candidates: &mut CandidateMap,
-) -> Result<bool> {
-    let remaining = budget.saturating_sub(candidates.len());
-    if remaining == 0 {
-        return Ok(true);
-    }
-    let publication_cte = public_camp_message_publication_cte();
-    let sql = format!(
-        r#"
-        WITH {publication_cte}
-        SELECT message.id, message.camp_id, message.sequence,
-               message.author_type, message.author_id,
-               message.reply_to_camp_message_id, message.body,
-               message.created_at, publication.global_sequence,
-               COALESCE(snapshot.camp_title, camp.title)
+        SELECT camp.id, COALESCE(snapshot.camp_title, camp.title)
         FROM camp
         LEFT JOIN context_manifest_history_camp AS snapshot
-          ON snapshot.context_manifest_id = ?1
-         AND snapshot.camp_id = camp.id
-        JOIN camp_message AS message ON message.camp_id = camp.id
-        JOIN public_camp_message_publication AS publication
-          ON publication.message_id = message.id
-        WHERE camp.deletion_operation_id IS NULL
-          AND publication.global_sequence <= ?2
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
-          AND message.camp_id IN (SELECT value FROM json_each(?3))
-          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
-          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
-          AND EXISTS (
-              SELECT 1 FROM json_each(message.structured_content_json) AS segment
-              WHERE json_extract(segment.value, '$.kind') = 'current_user_mention'
-                AND json_extract(segment.value, '$.userId') = 'local_user'
-          )
-        ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-        LIMIT ?6
+          ON snapshot.context_manifest_id = ?1 AND snapshot.camp_id = camp.id
+        WHERE camp.id <> ?2 AND camp.deletion_operation_id IS NULL
+          AND (?3 IS NULL OR camp.id IN (SELECT value FROM json_each(?3)))
         "#,
-    );
-    let mut statement = transaction.prepare(&sql)?;
-    let camp_ids = serde_json::to_string(scope.camp_ids)?;
-    let from = scope.dates.lower_bound_parameter();
-    let to = scope.dates.upper_bound_parameter();
-    let mut rows = statement
+    )?;
+    let threads = statement
         .query_map(
-            params![
-                scope.fence.manifest_id,
-                scope.fence.global_boundary,
-                camp_ids,
-                from,
-                to,
-                (remaining + 1) as i64,
-            ],
-            message_search_row,
+            params![fence.manifest_id, fence.current_camp_id, requested],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let incomplete = rows.len() > remaining;
-    rows.truncate(remaining);
-    merge_body_rows(candidates, rows, query);
-    Ok(incomplete)
+    Ok(threads)
 }
 
-fn body_candidates(
-    mut rows: Vec<MessageRow>,
-    query: &str,
-    budget: usize,
-    require_local_match: bool,
-) -> Result<CandidatePage> {
-    let incomplete = rows.len() > budget;
-    rows.truncate(budget);
-    let mut candidates = HashMap::new();
-    for row in rows {
-        let ranked = rank_message(row, query, false);
-        if require_local_match && ranked.occurrence_count == 0 {
-            continue;
+fn scan_thread_messages(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    fence: MessageFence,
+    title: Option<&str>,
+    dates: ParsedDateRange,
+    search: &mut MessageSearch,
+) -> Result<()> {
+    let (sequence_boundary, publication_boundary) = match fence {
+        MessageFence::Current { boundary } => (boundary, i64::MAX),
+        MessageFence::History { global_boundary } => (i64::MAX, global_boundary),
+    };
+    // Seek by the per-Thread sequence, with a covering lookup for the first
+    // public event. Joining all publication events could rank one message twice.
+    let publication_predicate = public_camp_message_event_predicate("event.event_type");
+    let sql = format!(
+        r#"
+        SELECT message.id, message.camp_id, message.sequence,
+               message.author_type, message.author_id,
+               message.reply_to_camp_message_id, message.structured_content_json,
+               message.created_at, publication.global_sequence, ?7,
+               CASE WHEN ?8 IS NULL THEN 0 ELSE EXISTS (
+                   SELECT 1
+                   FROM camp_message_reference AS reference
+                   JOIN json_each(?8) AS requested
+                     ON reference.kind = json_extract(requested.value, '$[0]')
+                    AND reference.value = json_extract(requested.value, '$[1]')
+                   WHERE reference.camp_message_id = message.id
+               ) END
+        FROM camp_message AS message
+        JOIN event_log AS publication ON publication.global_sequence = (
+            SELECT MIN(event.global_sequence)
+            FROM event_log AS event
+            WHERE event.entity_type = 'camp_message' AND event.entity_id = message.id
+              AND {publication_predicate} AND event.global_sequence IS NOT NULL
+        )
+        WHERE message.camp_id = ?1 AND message.sequence > ?2 AND message.sequence <= ?3
+          AND publication.global_sequence <= ?4
+          AND message.tombstoned_at IS NULL AND message.recall_state <> 'withdrawn'
+          AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
+          AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
+        ORDER BY message.sequence
+        LIMIT {MESSAGE_SEARCH_BATCH_SIZE}
+        "#,
+    );
+    let from = dates.lower_bound_parameter();
+    let to = dates.upper_bound_parameter();
+    let mut statement = transaction.prepare_cached(&sql)?;
+    let mut after = 0;
+    loop {
+        let mut rows = statement.query(params![
+            camp_id,
+            after,
+            sequence_boundary,
+            publication_boundary,
+            from,
+            to,
+            title,
+            search.reference_pairs,
+        ])?;
+        let mut processed = 0;
+        while let Some(row) = rows.next()? {
+            let mut message = message_row(row, String::new())?;
+            after = message.sequence;
+            if matches!(fence, MessageFence::Current { .. }) {
+                message.recency = message.sequence;
+            }
+            let content = parse_message_content(row.get_ref(6)?.as_str()?)?;
+            let (body, user_offsets) = render_agent_search_projection(transaction, &content)?;
+            message.body = body;
+            search.rank(message, row.get(10)?, &user_offsets);
+            processed += 1;
         }
-        candidates.insert(
-            (ranked.message.camp_id.clone(), ranked.message.id.clone()),
-            ranked,
-        );
+        if processed < MESSAGE_SEARCH_BATCH_SIZE {
+            return Ok(());
+        }
     }
-    Ok((candidates, incomplete))
-}
-
-fn merge_current_reference_candidates(
-    transaction: &Transaction<'_>,
-    fence: &RunFence,
-    query: &str,
-    limit: usize,
-    candidates: &mut CandidateMap,
-) -> Result<()> {
-    for (kind, value) in extract_query_references(query).into_iter().take(20) {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT message.id, message.camp_id, message.sequence,
-                   message.author_type, message.author_id,
-                   message.reply_to_camp_message_id, message.body,
-                   message.created_at, message.sequence, NULL
-            FROM camp_message_reference AS reference
-            JOIN camp_message AS message ON message.id = reference.camp_message_id
-            WHERE reference.kind = ?1 AND reference.value = ?2
-              AND message.camp_id = ?3
-              AND message.sequence <= ?4
-              AND message.tombstoned_at IS NULL
-              AND message.recall_state <> 'withdrawn'
-            ORDER BY message.sequence DESC, message.id
-            LIMIT ?5
-            "#,
-        )?;
-        let rows = statement
-            .query_map(
-                params![
-                    kind,
-                    value,
-                    fence.current_camp_id,
-                    fence.current_boundary,
-                    (limit + 1) as i64,
-                ],
-                message_search_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        merge_reference_rows(candidates, rows, query);
-    }
-    Ok(())
-}
-
-fn merge_target_reference_candidates(
-    transaction: &Transaction<'_>,
-    fence: &RunFence,
-    target: &ThreadTarget,
-    query: &str,
-    limit: usize,
-    candidates: &mut CandidateMap,
-) -> Result<()> {
-    if let Some(scope) = target_history_scope(fence, target) {
-        merge_history_reference_candidates(transaction, &scope, query, limit, candidates)
-    } else {
-        merge_current_reference_candidates(transaction, fence, query, limit, candidates)
-    }
-}
-
-fn merge_history_reference_candidates(
-    transaction: &Transaction<'_>,
-    scope: &HistorySearchScope<'_>,
-    query: &str,
-    limit: usize,
-    candidates: &mut CandidateMap,
-) -> Result<()> {
-    let camp_ids = serde_json::to_string(scope.camp_ids)?;
-    let from = scope.dates.lower_bound_parameter();
-    let to = scope.dates.upper_bound_parameter();
-    let publication_cte = public_camp_message_publication_cte();
-    for (kind, value) in extract_query_references(query).into_iter().take(20) {
-        let sql = format!(
-            r#"
-            WITH {publication_cte}
-            SELECT message.id, message.camp_id, message.sequence,
-                   message.author_type, message.author_id,
-                   message.reply_to_camp_message_id, message.body,
-                   message.created_at, publication.global_sequence,
-                   COALESCE(snapshot.camp_title, camp.title)
-            FROM camp_message_reference AS reference
-            JOIN camp_message AS message ON message.id = reference.camp_message_id
-            JOIN camp ON camp.id = message.camp_id
-            LEFT JOIN context_manifest_history_camp AS snapshot
-              ON snapshot.context_manifest_id = ?1
-             AND snapshot.camp_id = camp.id
-            JOIN public_camp_message_publication AS publication
-              ON publication.message_id = message.id
-            WHERE reference.kind = ?2 AND reference.value = ?3
-              AND camp.deletion_operation_id IS NULL
-              AND publication.global_sequence <= ?4
-              AND message.tombstoned_at IS NULL
-              AND message.recall_state <> 'withdrawn'
-              AND message.camp_id IN (SELECT value FROM json_each(?5))
-              AND (?6 IS NULL OR julianday(message.created_at) >= julianday(?6))
-              AND (?7 IS NULL OR julianday(message.created_at) < julianday(?7))
-            ORDER BY publication.global_sequence DESC, message.camp_id, message.id
-            LIMIT ?8
-            "#
-        );
-        let mut statement = transaction.prepare(&sql)?;
-        let rows = statement
-            .query_map(
-                params![
-                    scope.fence.manifest_id,
-                    kind,
-                    value,
-                    scope.fence.global_boundary,
-                    camp_ids,
-                    from,
-                    to,
-                    (limit + 1) as i64,
-                ],
-                message_search_row,
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        merge_reference_rows(candidates, rows, query);
-    }
-    Ok(())
-}
-
-fn merge_reference_rows(candidates: &mut CandidateMap, rows: Vec<MessageRow>, query: &str) {
-    for row in rows {
-        let key = (row.camp_id.clone(), row.id.clone());
-        candidates
-            .entry(key)
-            .and_modify(|candidate| candidate.exact_reference = true)
-            .or_insert_with(|| rank_message(row, query, true));
-    }
-}
-
-fn merge_body_rows(candidates: &mut CandidateMap, rows: Vec<MessageRow>, query: &str) {
-    for row in rows {
-        let key = (row.camp_id.clone(), row.id.clone());
-        candidates
-            .entry(key)
-            .or_insert_with(|| rank_message(row, query, false));
-    }
-}
-
-fn reproject_search_candidates(
-    transaction: &Transaction<'_>,
-    query: &str,
-    candidates: &mut CandidateMap,
-) -> Result<()> {
-    for candidate in candidates.values_mut() {
-        let content = load_message_content(transaction, &candidate.message.id)?;
-        let (body, user_offsets) = render_agent_search_projection(transaction, &content)?;
-        candidate.message.body = body;
-        let (occurrence_count, first_match_offset) =
-            user_mention_match_rank(&candidate.message.body, query, &user_offsets);
-        candidate.occurrence_count = occurrence_count;
-        candidate.first_match_offset = first_match_offset;
-        candidate.body_length = candidate.message.body.chars().count();
-    }
-    candidates.retain(|_, candidate| candidate.exact_reference || candidate.occurrence_count > 0);
-    Ok(())
 }
 
 fn extract_query_references(query: &str) -> Vec<(String, String)> {
@@ -1448,12 +1055,15 @@ fn extract_query_references(query: &str) -> Vec<(String, String)> {
             && seen.insert(reference.clone())
         {
             references.push(reference);
+            if references.len() == 20 {
+                break;
+            }
         }
     }
     references
 }
 
-fn message_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
+fn message_row(row: &rusqlite::Row<'_>, body: String) -> rusqlite::Result<MessageRow> {
     Ok(MessageRow {
         member_names: BTreeMap::new(),
         id: row.get(0)?,
@@ -1462,7 +1072,7 @@ fn message_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
         author_type: row.get(3)?,
         author_id: row.get(4)?,
         reply_to_message_id: row.get(5)?,
-        body: row.get(6)?,
+        body,
         created_at: row.get(7)?,
         recency: row.get(8)?,
         camp_title: row.get(9)?,
@@ -1471,52 +1081,42 @@ fn message_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
 }
 
 fn message_read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
-    let mut message = message_search_row(row)?;
+    let mut message = message_row(row, row.get(6)?)?;
     message.withdrawn = row.get(10)?;
     Ok(message)
 }
 
-fn rank_message(message: MessageRow, query: &str, exact_reference: bool) -> RankedMessage {
-    let (occurrence_count, first_match_offset) = literal_match_rank(&message.body, query);
-    let body_length = message.body.chars().count();
-    RankedMessage {
-        message,
-        exact_reference,
-        occurrence_count,
-        first_match_offset,
-        body_length,
-    }
-}
-
 fn literal_match_rank(body: &str, query: &str) -> (usize, usize) {
-    let body = body.chars().map(fold_char).collect::<Vec<_>>();
-    let query = query.chars().map(fold_char).collect::<Vec<_>>();
-    if query.is_empty() || body.len() < query.len() {
+    let Some(first) = body.find(query) else {
         return (0, usize::MAX);
+    };
+    // Advance a single scalar so overlapping occurrences keep their old rank.
+    let step = query
+        .chars()
+        .next()
+        .expect("validated search query")
+        .len_utf8();
+    let mut count = 1;
+    let mut tail = &body[first + step..];
+    while count < 32 {
+        let Some(offset) = tail.find(query) else {
+            break;
+        };
+        count += 1;
+        tail = &tail[offset + step..];
     }
-    let mut count = 0;
-    let mut first = usize::MAX;
-    for offset in 0..=body.len() - query.len() {
-        if body[offset..offset + query.len()] == query {
-            count = (count + 1).min(32);
-            first = first.min(offset);
-            if count == 32 {
-                break;
-            }
-        }
-    }
-    (count, first)
+    (count, body[..first].chars().count())
 }
 
-// Keep query text literal except when it matches a structured current-user atom.
-// All ranks and snippets use offsets in the returned @User projection.
-fn user_mention_match_rank(body: &str, query: &str, user_offsets: &[usize]) -> (usize, usize) {
-    if user_offsets.is_empty() || !fold_text(query).contains("@principal") {
-        return literal_match_rank(body, query);
-    }
-    let body = body.chars().map(fold_char).collect::<Vec<_>>();
-    let query = query.chars().map(fold_char).collect::<Vec<_>>();
-    let legacy = "@principal".chars().collect::<Vec<_>>();
+// Legacy @Principal only aliases the structured current-user atom. Ranking
+// and snippets both use the visible @User projection's character offsets.
+fn user_mention_match_rank(
+    folded_body: &str,
+    query: &[char],
+    user_offsets: &[usize],
+) -> (usize, usize) {
+    let body = folded_body.chars().collect::<Vec<_>>();
+    let legacy = ['@', 'p', 'r', 'i', 'n', 'c', 'i', 'p', 'a', 'l'];
     let mut count = 0;
     let mut first = usize::MAX;
     for start in 0..body.len() {
@@ -1557,19 +1157,13 @@ fn compare_ranked(left: &RankedMessage, right: &RankedMessage) -> Ordering {
 }
 
 fn ranked_search_response(
-    connection: &rusqlite::Connection,
-    candidates: CandidateMap,
-    _query: &str,
-    limit: usize,
+    transaction: &Transaction<'_>,
+    search: MessageSearch,
     include_camp_title: bool,
-    search_incomplete: bool,
 ) -> Result<Value> {
-    let mut candidates = candidates.into_values().collect::<Vec<_>>();
-    candidates.sort_by(compare_ranked);
-    let truncated = candidates.len() > limit;
-    candidates.truncate(limit);
     let mut sender_names = SenderNames::default();
-    let results = candidates
+    let results = search
+        .ranked
         .into_iter()
         .map(|candidate| {
             let mut value = json!({
@@ -1578,15 +1172,11 @@ fn ranked_search_response(
                 "sequence": candidate.message.sequence,
                 "anchorMessageId": candidate.message.reply_to_message_id,
                 "createdAt": candidate.message.created_at,
-                "snippet": snippet(
-                    &candidate.message.body,
-                    (candidate.first_match_offset != usize::MAX)
-                        .then_some(candidate.first_match_offset),
-                ),
+                "snippet": candidate.message.body,
             });
             sender_names
                 .project(
-                    connection,
+                    transaction,
                     &candidate.message.author_type,
                     &candidate.message.author_id,
                 )?
@@ -1594,14 +1184,15 @@ fn ranked_search_response(
             if include_camp_title {
                 value["threadTitle"] = json!(candidate.message.camp_title);
             }
+            attach_message_quotes(transaction, &candidate.message.id, &mut value)?;
             Ok(value)
         })
         .collect::<Result<Vec<_>>>()?;
     cap_top_k_response(
         json!({
             "results": results,
-            "truncated": truncated,
-            "searchIncomplete": search_incomplete,
+            "truncated": search.truncated,
+            "searchIncomplete": false,
         }),
         "results",
     )
@@ -1645,20 +1236,6 @@ fn attach_message_quotes(
         value["quotes"] = json!(crate::message_quote::model_quotes(&quotes));
     }
     Ok(())
-}
-
-fn attach_search_quotes(transaction: &Transaction<'_>, mut response: Value) -> Result<Value> {
-    for value in response["results"]
-        .as_array_mut()
-        .context("invalid search result")?
-    {
-        let message_id = value["messageId"]
-            .as_str()
-            .context("search result has no message")?
-            .to_owned();
-        attach_message_quotes(transaction, &message_id, value)?;
-    }
-    cap_top_k_response(response, "results")
 }
 
 fn cap_top_k_response(mut response: Value, key: &str) -> Result<Value> {
@@ -1798,7 +1375,7 @@ fn load_committed_self_written_message(
                 CAMP_MESSAGE_SEND_TOOL_NAME,
                 run.execution_epoch,
             ],
-            message_search_row,
+            |row| message_row(row, row.get(6)?),
         )
         .optional()?;
     if let Some(message) = message.as_mut() {
@@ -2032,9 +1609,11 @@ fn load_message_content(
         [message_id],
         |row| row.get(0),
     )?;
-    let content = normalize_content(serde_json::from_str::<StructuredThreadMessageContent>(
-        &content_json,
-    )?);
+    parse_message_content(&content_json)
+}
+
+fn parse_message_content(content_json: &str) -> Result<StructuredThreadMessageContent> {
+    let content = normalize_content(serde_json::from_str(content_json)?);
     validate_content(&content)?;
     Ok(content)
 }
@@ -2402,9 +1981,20 @@ mod slow_tests {
 
     #[test]
     fn literal_helpers_are_bounded_and_reference_aware() {
-        assert_eq!(literal_fts_query(r#"a" OR b*"#), r#""a"" OR b*""#);
-        assert_eq!(literal_match_rank("令牌令牌轮换", "令牌"), (2, 0));
-        assert_eq!(literal_match_rank("Alpha beta", "BETA"), (1, 6));
+        for (body, query, expected) in [
+            ("令牌令牌轮换", "令牌", (2, 0)),
+            ("Alpha beta", "BETA", (1, 6)),
+            ("aaaa", "aa", (3, 0)),
+            ("测试 ÉcHo %_ \"OR\"", "écho %_ \"or\"", (1, 3)),
+            ("A B", "A  B", (0, usize::MAX)),
+            ("A B", " A B ", (0, usize::MAX)),
+            ("A B", "A OR B", (0, usize::MAX)),
+        ] {
+            assert_eq!(
+                MessageSearch::new(query, 1).unwrap().match_rank(body, &[]),
+                expected
+            );
+        }
         assert_eq!(
             extract_query_references("check ADR-49 and issue-7"),
             vec![
@@ -2421,6 +2011,7 @@ mod slow_tests {
         assert!(effective_limit(Some(0), 10, 20).is_err());
         assert!(effective_limit(Some(21), 10, 20).is_err());
         assert!(required_query("   ").is_err());
+        assert_eq!(required_query(" amount ").unwrap(), " amount ");
         assert!(
             parse_date_range(Some("2026-08-02T00:00:00Z"), Some("2026-08-01T00:00:00Z")).is_err()
         );
@@ -2439,93 +2030,137 @@ mod slow_tests {
         );
     }
 
+    const SEARCH_FIXTURE_TABLES: &str = r#"
+        CREATE TABLE event_log(
+            global_sequence INTEGER PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            event_type TEXT NOT NULL
+        );
+        CREATE TABLE camp_message_reference(
+            camp_message_id TEXT NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL
+        );
+    "#;
+
     #[test]
-    fn candidate_budget_and_top_k_truncation_are_independent() {
-        let rows = (1..=9)
-            .map(|sequence| MessageRow {
-                member_names: BTreeMap::new(),
-                id: format!("message-{sequence}"),
-                camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
-                sequence,
-                author_type: "user".to_string(),
-                author_id: "local_user".to_string(),
-                reply_to_message_id: None,
-                body: "任务".to_string(),
-                created_at: "2026-08-01T00:00:00Z".to_string(),
-                recency: sequence,
-                camp_title: None,
-                withdrawn: false,
-            })
-            .collect();
-        let (candidates, search_incomplete) = body_candidates(rows, "任务", 8, true).unwrap();
-        assert!(search_incomplete);
-        assert_eq!(candidates.len(), 8);
-
-        let response = ranked_search_response(
-            &Connection::open_in_memory().unwrap(),
-            candidates,
-            "任务",
-            5,
-            false,
-            search_incomplete,
-        )
-        .unwrap();
-        assert_eq!(response["results"].as_array().unwrap().len(), 5);
-        assert_eq!(response["truncated"], true);
-        assert_eq!(response["searchIncomplete"], true);
-
+    fn scan_checks_all_batches_and_only_limits_returned_matches() {
         let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(SEARCH_FIXTURE_TABLES).unwrap();
         connection
             .execute_batch(
                 r#"
-                CREATE TABLE camp_message (
-                    id TEXT PRIMARY KEY,
-                    camp_id TEXT NOT NULL,
-                    sequence INTEGER NOT NULL,
-                    author_type TEXT NOT NULL,
-                    author_id TEXT NOT NULL,
-                    reply_to_camp_message_id TEXT,
-                    body TEXT NOT NULL,
-                    structured_content_json TEXT NOT NULL DEFAULT '[]',
-                    source_attachments_json TEXT NOT NULL DEFAULT '[]',
-                    quotes_json TEXT NOT NULL DEFAULT '[]',
-                    effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
-                    created_at TEXT NOT NULL,
-                    tombstoned_at TEXT,
-                    recall_state TEXT NOT NULL DEFAULT 'ineligible'
-                );
-                CREATE TABLE camp_message_delivery (
-                    message_id TEXT NOT NULL,
-                    recipient_agent_id TEXT NOT NULL,
-                    status TEXT NOT NULL
-                );
-                "#,
+            CREATE TABLE camp_message (
+                id TEXT PRIMARY KEY,
+                camp_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                author_type TEXT NOT NULL DEFAULT 'user',
+                author_id TEXT NOT NULL DEFAULT 'local_user',
+                reply_to_camp_message_id TEXT,
+                body TEXT NOT NULL DEFAULT 'stale cache',
+                structured_content_json TEXT NOT NULL,
+                quotes_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                tombstoned_at TEXT,
+                recall_state TEXT NOT NULL DEFAULT 'ineligible',
+                UNIQUE(camp_id, sequence)
+            );
+            "#,
             )
             .unwrap();
-        for sequence in 1..=9 {
-            connection
-                .execute(
-                    "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body, created_at) VALUES (?1, 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', ?2, 'user', 'local_user', 'x', '2026-08-01T00:00:00Z')",
-                    params![format!("short-{sequence}"), sequence],
-                )
-                .unwrap();
-        }
         let transaction = connection.transaction().unwrap();
-        let (short_candidates, short_incomplete) = load_current_body_candidates(
-            &transaction,
-            &RunFence {
-                manifest_id: "manifest-1".to_string(),
-                current_camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
-                current_boundary: 100,
-                global_boundary: 100,
-                live_directory: false,
+        let end = MESSAGE_SEARCH_BATCH_SIZE * 2 + 2;
+        for sequence in 1..=end + 4 {
+            let (body, recall_state, tombstone) = match sequence {
+                1 => ("旧消息：任务调度器", "ineligible", None),
+                seq if seq <= end => ("common", "ineligible", None),
+                seq if seq == end + 1 => ("未发布：任务调度器", "ineligible", None),
+                seq if seq == end + 2 => ("撤回：任务调度器", "withdrawn", None),
+                seq if seq == end + 3 => ("删除：任务调度器", "ineligible", Some("deleted")),
+                _ => ("较新：任务调度器 common common", "recallable", None),
+            };
+            transaction.execute(
+                "INSERT INTO camp_message(
+                    id, camp_id, sequence, structured_content_json, created_at, tombstoned_at, recall_state
+                 ) VALUES (?1, 'example', ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    format!("message-{sequence}"),
+                    sequence,
+                    json!([{"kind":"text","text":body}]).to_string(),
+                    if sequence == 1 { "2026-08-01T00:00:00Z" } else { "2026-08-02T00:00:00Z" },
+                    tombstone,
+                    recall_state,
+                ],
+            ).unwrap();
+            if sequence != end + 1 {
+                transaction.execute(
+                    "INSERT INTO event_log VALUES (?1, 'camp_message', ?2, 'camp_message.sent')",
+                    params![sequence, format!("message-{sequence}")],
+                ).unwrap();
+            }
+        }
+        // Two publication facts still yield a single hit at the first sequence.
+        transaction.execute("INSERT INTO event_log VALUES (?1, 'camp_message', 'message-1', 'camp_message.public_a2a_sent')", [end + 5]).unwrap();
+        transaction
+            .execute(
+                "INSERT INTO camp_message_reference VALUES ('message-1', 'adr', 'ADR-49')",
+                [],
+            )
+            .unwrap();
+
+        let run_search = |query, fence, dates| {
+            let mut search = MessageSearch::new(query, 1).unwrap();
+            scan_thread_messages(
+                &transaction,
+                "example",
+                fence,
+                Some("Frozen name"),
+                dates,
+                &mut search,
+            )
+            .unwrap();
+            ranked_search_response(&transaction, search, true).unwrap()
+        };
+        for fence in [
+            MessageFence::Current { boundary: end + 3 },
+            MessageFence::History {
+                global_boundary: end + 3,
             },
-            "x",
-            8,
+        ] {
+            for query in ["调", "调度", "任务调度器", "discuss ADR-49"] {
+                let result = run_search(query, fence, ParsedDateRange::default());
+                assert_eq!(result["results"][0]["messageId"], "message-1", "{query}");
+                assert_eq!(result["results"][0]["snippet"], "旧消息：任务调度器");
+                assert_eq!(result["results"][0]["threadTitle"], "Frozen name");
+                assert_eq!(result["truncated"], false);
+                assert_eq!(result["searchIncomplete"], false);
+            }
+        }
+        let fence = MessageFence::History {
+            global_boundary: end + 4,
+        };
+        let result = run_search("common", fence, ParsedDateRange::default());
+        assert_eq!(
+            result["results"][0]["messageId"],
+            format!("message-{}", end + 4)
+        );
+        assert_eq!(result["truncated"], true);
+        assert_eq!(result["searchIncomplete"], false);
+
+        let day = parse_date_range(
+            Some("2026-08-01T08:00:00+08:00"),
+            Some("2026-08-02T00:00:00Z"),
         )
         .unwrap();
-        assert_eq!(short_candidates.len(), 8);
-        assert!(short_incomplete);
+        assert_eq!(
+            run_search("调", fence, day)["results"][0]["messageId"],
+            "message-1"
+        );
+        assert_eq!(
+            run_search("common", fence, day),
+            json!({
+                "results": [], "truncated": false, "searchIncomplete": false
+            })
+        );
     }
 
     #[test]
@@ -2544,32 +2179,18 @@ mod slow_tests {
             camp_title: Some("Thread".to_string()),
             withdrawn: false,
         };
-        let mut candidates = CandidateMap::new();
-        let reference = row("reference", "no literal match", 1);
-        let frequent = row("frequent", "needle needle", 2);
-        let recent = row("recent", "needle", 3);
-        candidates.insert(
-            (reference.camp_id.clone(), reference.id.clone()),
-            rank_message(reference, "needle", true),
-        );
-        candidates.insert(
-            (frequent.camp_id.clone(), frequent.id.clone()),
-            rank_message(frequent, "needle", false),
-        );
-        candidates.insert(
-            (recent.camp_id.clone(), recent.id.clone()),
-            rank_message(recent, "needle", false),
-        );
-
-        let response = ranked_search_response(
-            &Connection::open_in_memory().unwrap(),
-            candidates,
-            "needle",
-            2,
-            false,
-            false,
-        )
-        .unwrap();
+        let mut search = MessageSearch::new("needle", 2).unwrap();
+        search.rank(row("recent", "needle", 3), false, &[]);
+        search.rank(row("reference", "no literal match", 1), true, &[]);
+        search.rank(row("frequent", "needle needle", 2), false, &[]);
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE camp_message(id TEXT PRIMARY KEY, quotes_json TEXT NOT NULL);",
+            )
+            .unwrap();
+        let transaction = connection.transaction().unwrap();
+        let response = ranked_search_response(&transaction, search, false).unwrap();
         assert_eq!(
             response["results"]
                 .as_array()
@@ -2586,6 +2207,7 @@ mod slow_tests {
     #[test]
     fn search_and_collection_reproject_authoritative_structured_content() {
         let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(SEARCH_FIXTURE_TABLES).unwrap();
         connection
             .execute_batch(
                 r#"
@@ -2622,61 +2244,38 @@ mod slow_tests {
                     '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"authoritative body"}]',
                     '2026-08-01T00:00:00Z'
                 );
+                INSERT INTO event_log VALUES (1, 'camp_message', 'message-projection', 'camp_message.sent');
                 "#,
             )
             .unwrap();
         let transaction = connection.transaction().unwrap();
-        let row = MessageRow {
-            member_names: BTreeMap::new(),
-            id: "message-projection".to_string(),
-            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
-            sequence: 1,
-            author_type: "agent".to_string(),
-            author_id: "agent_1".to_string(),
-            reply_to_message_id: None,
-            body: "CORRUPTED CACHE".to_string(),
-            created_at: "2026-08-01T00:00:00Z".to_string(),
-            recency: 1,
-            camp_title: None,
-            withdrawn: false,
-        };
-        let mut candidates = CandidateMap::from([(
-            (row.camp_id.clone(), row.id.clone()),
-            rank_message(row, "authoritative", false),
-        )]);
-        reproject_search_candidates(&transaction, "authoritative", &mut candidates).unwrap();
-        let search =
-            ranked_search_response(&transaction, candidates, "authoritative", 10, false, false)
-                .unwrap();
-        assert_eq!(search["results"][0]["snippet"], "@User authoritative body");
-
-        for query in ["@User", "@Principal"] {
-            let mut principal_candidates = CandidateMap::new();
-            assert!(
-                !merge_current_user_mention_candidates(
-                    &transaction,
-                    &RunFence {
-                        manifest_id: "manifest-1".to_string(),
-                        current_camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
-                        current_boundary: 1,
-                        global_boundary: 1,
-                        live_directory: false,
-                    },
-                    query,
-                    8,
-                    &mut principal_candidates,
-                )
-                .unwrap()
-            );
-            reproject_search_candidates(&transaction, query, &mut principal_candidates).unwrap();
-            let principal_search =
-                ranked_search_response(&transaction, principal_candidates, query, 10, false, false)
-                    .unwrap();
-            assert_eq!(principal_search["results"].as_array().unwrap().len(), 1);
+        for (query, expected_count) in [
+            ("authoritative", 1),
+            ("@User", 1),
+            ("@Principal", 1),
+            ("CORRUPTED CACHE", 0),
+        ] {
+            let mut search = MessageSearch::new(query, 10).unwrap();
+            scan_thread_messages(
+                &transaction,
+                "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                MessageFence::Current { boundary: 1 },
+                None,
+                ParsedDateRange::default(),
+                &mut search,
+            )
+            .unwrap();
+            let response = ranked_search_response(&transaction, search, false).unwrap();
             assert_eq!(
-                principal_search["results"][0]["snippet"],
-                "@User authoritative body"
+                response["results"].as_array().unwrap().len(),
+                expected_count
             );
+            if expected_count > 0 {
+                assert_eq!(
+                    response["results"][0]["snippet"],
+                    "@User authoritative body"
+                );
+            }
         }
 
         let rows = load_ordered_messages(
@@ -2720,17 +2319,23 @@ mod slow_tests {
             ("literal @Principal", (1, 8)),
         ] {
             assert_eq!(
-                user_mention_match_rank(body, query, &offsets),
+                MessageSearch::new(query, 1)
+                    .unwrap()
+                    .match_rank(body, &offsets),
                 expected,
                 "{query}"
             );
         }
         assert_eq!(
-            user_mention_match_rank("literal @Principal", "@User", &[]),
+            MessageSearch::new("@User", 1)
+                .unwrap()
+                .match_rank("literal @Principal", &[]),
             (0, usize::MAX)
         );
         assert_eq!(
-            user_mention_match_rank("literal @Principal", "@Principal", &[]),
+            MessageSearch::new("@Principal", 1)
+                .unwrap()
+                .match_rank("literal @Principal", &[]),
             (1, 8)
         );
     }
@@ -3134,13 +2739,9 @@ mod slow_tests {
                     .unwrap()
                     .unwrap();
                 for history in [false, true] {
-                    let candidates = CandidateMap::from([(
-                        (row.camp_id.clone(), row.id.clone()),
-                        rank_message(row.clone(), "A", false),
-                    )]);
-                    let search =
-                        ranked_search_response(&transaction, candidates, "A", 10, history, false)
-                            .unwrap();
+                    let mut search = MessageSearch::new("A", 10).unwrap();
+                    search.rank(row.clone(), false, &[]);
+                    let search = ranked_search_response(&transaction, search, history).unwrap();
                     for key in ["senderType", "senderId", "senderName"] {
                         assert_eq!(search["results"][0].get(key), message.get(key));
                     }
@@ -3185,17 +2786,30 @@ mod slow_tests {
         };
         let recallable = read_item(&transaction, &latest_target, &run, "message-2").unwrap();
         assert_eq!(recallable["items"][0]["body"], "waiting claim");
-        let search_fence = RunFence {
-            manifest_id: "manifest-1".to_string(),
-            current_camp_id: target.camp_id.clone(),
-            current_boundary: 3,
-            global_boundary: 3,
-            live_directory: false,
+        transaction.execute_batch(SEARCH_FIXTURE_TABLES).unwrap();
+        transaction
+            .execute_batch(
+                "INSERT INTO event_log VALUES
+              (1, 'camp_message', 'message-1', 'camp_message.sent'),
+              (2, 'camp_message', 'message-2', 'camp_message.sent'),
+              (3, 'camp_message', 'message-3', 'camp_message.sent');",
+            )
+            .unwrap();
+        let search_waiting = || {
+            let mut search = MessageSearch::new("w", 8).unwrap();
+            scan_thread_messages(
+                &transaction,
+                &latest_target.camp_id,
+                latest_target.fence,
+                None,
+                ParsedDateRange::default(),
+                &mut search,
+            )
+            .unwrap();
+            ranked_search_response(&transaction, search, false).unwrap()
         };
-        let (candidates, _) =
-            load_current_body_candidates(&transaction, &search_fence, "w", 8).unwrap();
-        assert!(candidates.contains_key(&(target.camp_id.clone(), "message-2".to_string())));
-        assert!(!candidates.contains_key(&(target.camp_id.clone(), "message-3".to_string())));
+        assert_eq!(search_waiting()["results"][0]["messageId"], "message-2");
+        assert_eq!(search_waiting()["results"].as_array().unwrap().len(), 1);
         let delivery_status: String = transaction
             .query_row(
                 "SELECT status FROM camp_message_delivery WHERE message_id = 'message-2'",
@@ -3238,9 +2852,7 @@ mod slow_tests {
             "Message withdrawn"
         );
         assert!(after_withdrawal["items"][0].get("body").is_none());
-        let (candidates, _) =
-            load_current_body_candidates(&transaction, &search_fence, "w", 8).unwrap();
-        assert!(!candidates.contains_key(&(target.camp_id.clone(), "message-2".to_string())));
+        assert_eq!(search_waiting()["results"], json!([]));
 
         for sequence in 4..=230 {
             transaction

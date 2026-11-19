@@ -203,6 +203,10 @@ Thread History exact help 保持三段职责：目标未知时用 `history.searc
 `rovai thread list` 对新 Run 使用当前名称和最新可见消息活动，旧 Run 继续使用已冻结目录。
 跨 Thread `thread.search` 和 `history.search` 仍受 Run 的全局消息发布边界限制；列表读取不推进这个边界。
 
+消息正文搜索在单个 SQLite 读事务内按 Thread 序列分批，使用首次公开发布事件检查可见边界。
+Core 对权威结构化正文投影后的文字匹配和排名，内存只保留当前消息与有界的最佳结果。
+Migration 227 随搜索替换移除消息 FTS 与三个写入触发器。引用和提及继续沿用上下文索引的维护路径。
+
 `thread.read` exact help 展示 timeline、exact item `--message-id MESSAGE_ID` 和回复链 `--reply-chain MESSAGE_ID`。
 timeline 与回复链使用互斥的 `--before/--after`，`--after 0` 从最早可见消息开始；limit 默认 20、最大 100。
 旧 `--thread` 仅作兼容输入；`mode`、`direction`、`around` 和 generic `cursor` 不是当前输入字段。

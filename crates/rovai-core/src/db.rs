@@ -523,7 +523,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 176;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 177;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1025,6 +1025,7 @@ struct CurrentMigrationState {
     v224: bool,
     v225: bool,
     v226: bool,
+    v227: bool,
 }
 
 impl CurrentMigrationState {
@@ -1046,6 +1047,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v227 {
+            let mut previous = *self;
+            previous.v227 = false;
+            return schema == 177 && previous.admits(contract, 176, classifier);
+        }
         if self.v226 {
             let mut previous = *self;
             previous.v226 = false;
@@ -3381,34 +3387,7 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
         .and_then(Option::as_ref)
         .is_some_and(|(contract, schema, _)| {
             contract == CURRENT_DATA_CONTRACT_VERSION
-                && matches!(
-                    schema,
-                    145 | 146
-                        | 147
-                        | 148
-                        | 149
-                        | 150
-                        | 151
-                        | 152
-                        | 153
-                        | 154
-                        | 155
-                        | 156
-                        | 157
-                        | 158
-                        | 159
-                        | 160
-                        | 161
-                        | 162
-                        | 163
-                        | 164
-                        | 165
-                        | 166
-                        | 167
-                        | 168
-                        | 169
-                        | 170
-                )
+                && (145..=CURRENT_PROJECTION_SCHEMA_VERSION).contains(schema)
         })
     {
         return Ok(matches!(
@@ -3859,40 +3838,7 @@ pub(crate) fn classify_database_contract(
     // Current databases do not re-prove every historical migration's SQL text.
     // Older layouts retain their migration-specific source recognition below.
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
-        && matches!(
-            marker.projection_schema_version,
-            145 | 146
-                | 147
-                | 148
-                | 149
-                | 150
-                | 151
-                | 152
-                | 153
-                | 154
-                | 155
-                | 156
-                | 157
-                | 158
-                | 159
-                | 160
-                | 161
-                | 162
-                | 163
-                | 164
-                | 165
-                | 166
-                | 167
-                | 168
-                | 169
-                | 170
-                | 171
-                | 172
-                | 173
-                | 174
-                | 175
-                | 176
-        )
+        && (145..=CURRENT_PROJECTION_SCHEMA_VERSION).contains(&marker.projection_schema_version)
     {
         let expected_migration = marker.projection_schema_version + 50;
         let completed: bool = connection.query_row(
@@ -3901,6 +3847,7 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 177 || message_fts_retired(connection)?)
             && (marker.projection_schema_version < 176
                 || runcard_usage::schema_matches(connection)?)
             && (marker.projection_schema_version < 174
@@ -4166,6 +4113,17 @@ pub(crate) fn classify_database_contract(
             marker,
         ))
     }
+}
+
+fn message_fts_retired(connection: &Connection) -> rusqlite::Result<bool> {
+    connection.query_row(
+        "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN (
+            'camp_message_fts', 'camp_message_fts_insert',
+            'camp_message_fts_delete', 'camp_message_fts_update'
+         ))",
+        [],
+        |row| row.get(0),
+    )
 }
 
 fn execution_lifecycle_v168_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
@@ -6303,7 +6261,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=225),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=226)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=226),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=227)
         "#,
         [],
         |row| {
@@ -6465,6 +6424,7 @@ fn load_current_migration_state(
                 v224: row.get(154)?,
                 v225: row.get(155)?,
                 v226: row.get(156)?,
+                v227: row.get(157)?,
             })
         },
     )
@@ -8844,6 +8804,19 @@ impl Database {
             }};
         }
         configure_runtime_connection(&self.connection, &self.path)?;
+        if !fresh_database
+            && matches!(
+                classify_startup_contract(&self.connection)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.projection_schema_version == 176
+            )
+        {
+            // A recognized recent store can omit historical receipts. Upgrade
+            // its admitted schema directly without replaying historical DDL.
+            migration_step!("migration_227", self.retire_message_fts());
+            self.maintain_notifications_after_migration();
+            return Ok(());
+        }
         if !fresh_database {
             migration_step!(
                 "migration_reconciliation",
@@ -9780,11 +9753,10 @@ impl Database {
             if !self.schema_migration_applied(226)? {
                 migration_step!("migration_226", runcard_usage::migrate(self));
             }
-            if let Err(error) =
-                crate::notification::maintain_notification_episode_retention(self.connection())
-            {
-                eprintln!("Notification Episode startup retention failed: {error:#}");
+            if !self.schema_migration_applied(227)? {
+                migration_step!("migration_227", self.retire_message_fts());
             }
+            self.maintain_notifications_after_migration();
             return Ok(());
         }
         self.migrate_direct_workspace_columns()?;
@@ -10683,11 +10655,50 @@ impl Database {
         if !self.schema_migration_applied(226)? {
             migration_step!("migration_226", runcard_usage::migrate(self));
         }
+        if !self.schema_migration_applied(227)? {
+            migration_step!("migration_227", self.retire_message_fts());
+        }
+        self.maintain_notifications_after_migration();
+        Ok(())
+    }
+
+    fn maintain_notifications_after_migration(&self) {
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
         {
             eprintln!("Notification Episode startup retention failed: {error:#}");
         }
+    }
+
+    fn retire_message_fts(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&transaction)?,
+                DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                    if marker.projection_schema_version == 176
+            ),
+            "Message FTS retirement requires schema 176"
+        );
+        transaction.execute_batch(
+            "DROP TRIGGER IF EXISTS camp_message_fts_insert;
+             DROP TRIGGER IF EXISTS camp_message_fts_delete;
+             DROP TRIGGER IF EXISTS camp_message_fts_update;
+             DROP TABLE IF EXISTS camp_message_fts;
+             INSERT INTO schema_migration VALUES (227, datetime('now'));
+             UPDATE rovai_data_contract SET projection_schema_version=177,
+                updated_at=datetime('now') WHERE singleton=1;",
+        )?;
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&transaction)?,
+                DatabaseContractClassification::Current(_)
+            ),
+            "Message FTS retirement failed schema admission"
+        );
+        transaction.commit()?;
         Ok(())
     }
 
@@ -40412,6 +40423,125 @@ mod tests {
     use super::*;
 
     #[test]
+    fn message_fts_retirement_is_atomic_and_keeps_message_data_across_reopens() {
+        use crate::database_admission::{AdmissionAssessment, DatabaseAdmission};
+
+        let mut fixture = crate::test_support::fresh_schema_database_fast_owned();
+        assert!(message_fts_retired(fixture.connection()).unwrap());
+        fixture.connection().execute_batch(
+            r#"
+            DELETE FROM schema_migration WHERE version IN (115, 227);
+            UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;
+            CREATE VIRTUAL TABLE camp_message_fts USING fts5(
+                body, content='camp_message', content_rowid='rowid', tokenize='trigram'
+            );
+            CREATE TRIGGER camp_message_fts_insert AFTER INSERT ON camp_message BEGIN
+                INSERT INTO camp_message_fts(rowid,body) VALUES(NEW.rowid,NEW.body);
+            END;
+            CREATE TRIGGER camp_message_fts_delete AFTER DELETE ON camp_message BEGIN
+                INSERT INTO camp_message_fts(camp_message_fts,rowid,body) VALUES('delete',OLD.rowid,OLD.body);
+            END;
+            CREATE TRIGGER camp_message_fts_update AFTER UPDATE OF body ON camp_message BEGIN
+                INSERT INTO camp_message_fts(camp_message_fts,rowid,body) VALUES('delete',OLD.rowid,OLD.body);
+                INSERT INTO camp_message_fts(rowid,body) VALUES(NEW.rowid,NEW.body);
+            END;
+            INSERT INTO camp(id,title,project_binding_kind,project_path,created_at,updated_at)
+            VALUES ('search-source','Kept','quick_chat','','2026-01-01','2026-01-01');
+            INSERT INTO camp_message(
+                id,camp_id,sequence,author_type,author_id,body,structured_content_json,
+                address_mode,addressed_agent_ids_json,created_at,updated_at
+            ) VALUES (
+                'kept-message','search-source',1,'user','local_user','Kept ADR-49',
+                '[{"kind":"text","text":"Kept ADR-49"}]','broadcast','[]','2026-01-01','2026-01-01'
+            );
+            INSERT INTO camp_message_reference(camp_message_id,kind,value)
+            VALUES ('kept-message','adr','ADR-49');
+            CREATE TEMP TRIGGER reject_search_upgrade BEFORE INSERT ON schema_migration
+            WHEN NEW.version=227 BEGIN SELECT RAISE(ABORT,'search upgrade rejected'); END;
+            "#,
+        ).unwrap();
+        assert!(
+            fixture
+                .retire_message_fts()
+                .unwrap_err()
+                .to_string()
+                .contains("search upgrade rejected")
+        );
+        assert!(!fixture.schema_migration_applied(227).unwrap());
+        assert!(matches!(
+            classify_database_contract(fixture.connection()).unwrap(),
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 176
+        ));
+        assert_eq!(
+            fixture
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'Kept'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(fixture.connection().query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name GLOB 'camp_message_fts_*'",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 3);
+        fixture.close();
+
+        let lease =
+            crate::core_data_dir_lock::CoreDataDirLease::acquire(fixture.directory()).unwrap();
+        let AdmissionAssessment::RequiresMigration(ticket) =
+            DatabaseAdmission::assess(&lease).unwrap()
+        else {
+            panic!("schema 176 should receive a migration ticket");
+        };
+        let runtime_root = fixture.directory().join("runtime-files");
+        let root_identity =
+            crate::camp_attachment_view::runtime_root_identity_digest_for_database(&runtime_root)
+                .unwrap();
+        let upgraded = crate::authority_migration::AuthorityMigrationRunner::run(
+            *ticket,
+            &runtime_root,
+            &root_identity,
+        )
+        .unwrap();
+        assert!(!upgraded.schema_migration_applied(115).unwrap());
+        drop(upgraded);
+
+        let mut receipt = None;
+        for _ in 0..2 {
+            let AdmissionAssessment::AdmittedExisting(ticket) =
+                DatabaseAdmission::assess(&lease).unwrap()
+            else {
+                panic!("schema 177 should admit without another migration");
+            };
+            let database = Database::open_admitted(*ticket).unwrap();
+            assert!(connection_has_current_data_contract(database.connection()).unwrap());
+            assert!(message_fts_retired(database.connection()).unwrap());
+            let (applied_at, body, reference, memory_fts, identity_index) = database.connection().query_row(
+                "SELECT migration.applied_at, message.body, reference.value,
+                    EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_fts'),
+                    EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='camp_message_camp_identity_unique')
+                 FROM schema_migration AS migration
+                 JOIN camp_message AS message ON message.id='kept-message'
+                 JOIN camp_message_reference AS reference ON reference.camp_message_id=message.id
+                 WHERE migration.version=227",
+                [], |row| Ok((
+                    row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?, row.get::<_, bool>(4)?,
+                )),
+            ).unwrap();
+            assert_eq!(body, "Kept ADR-49");
+            assert_eq!(reference, "ADR-49");
+            assert!(memory_fts);
+            assert!(identity_index);
+            assert_eq!(receipt.get_or_insert(applied_at.clone()), &applied_at);
+        }
+    }
+
+    #[test]
     fn session_context_migration_upgrades_schema_127_and_rolls_back_atomically() {
         let directory =
             std::env::temp_dir().join(format!("rovai-context-migration-{}", Uuid::new_v4()));
@@ -42486,6 +42616,7 @@ mod tests {
             v224: version >= 224,
             v225: version >= 225,
             v226: version >= 226,
+            v227: version >= 227,
         }
     }
 
@@ -53878,15 +54009,6 @@ mod tests {
                 "#,
             )
             .unwrap();
-        let indexed_before: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'legacy'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(indexed_before, 1);
         drop(database);
 
         let reopened = Database::open(&directory).expect("v37 database should reopen");
@@ -53910,15 +54032,7 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0, "{table} legacy A2A index should be removed");
         }
-        let indexed_after: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM camp_message_fts WHERE camp_message_fts MATCH 'legacy'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(indexed_after, 0);
+        assert!(message_fts_retired(reopened.connection()).unwrap());
         let index_count: i64 = reopened
             .connection()
             .query_row(

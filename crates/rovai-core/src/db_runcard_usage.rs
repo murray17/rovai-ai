@@ -56,7 +56,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 176
         ),
         "RunCard Usage failed schema admission"
     );
@@ -66,6 +67,12 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    c.execute_batch(
+        "DELETE FROM schema_migration WHERE version=227;
+         UPDATE rovai_data_contract SET projection_schema_version=176
+         WHERE singleton=1 AND projection_schema_version=177;",
+    )
+    .unwrap();
     for (table, column) in [
         ("runtime_usage_run_summary", "display_total_tokens"),
         ("runtime_usage_checkpoint", "native_total_baseline"),
@@ -173,5 +180,9 @@ pub(super) fn assert_optional_upgrade(database: &mut Database) {
         .unwrap();
     migrate(database).unwrap();
     assert!(!projection_exists(database.connection(), "runtime_usage_run_summary").unwrap());
-    assert!(connection_has_current_data_contract(database.connection()).unwrap());
+    assert!(matches!(
+        classify_database_contract(database.connection()).unwrap(),
+        DatabaseContractClassification::SupportedMigrationSource(ref marker)
+            if marker.projection_schema_version == 176
+    ));
 }

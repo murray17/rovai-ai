@@ -1901,6 +1901,11 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
             if argument.required { " required" } else { "" },
         )
         .expect("writing help to a String cannot fail");
+        if let Some(field_description) =
+            description.input_schema["properties"][&argument.field]["description"].as_str()
+        {
+            write_indented_help(output, field_description);
+        }
         if matches!(description.name.as_str(), "member.create" | "member.update")
             && argument.field == "professionalResponsibilities"
         {
@@ -2814,6 +2819,22 @@ mod tests {
                 "rovai thread search --thread-id '<thread-id>' --query 'amount'",
             ]
         );
+
+        let history = builtin_tool_description("history.search", true).unwrap();
+        for description in [&search, &history] {
+            let help = operation_help_text(description);
+            assert!(help.contains("Case-insensitive literal substring to find in message text."));
+            assert!(
+                help.contains(
+                    description.input_schema["properties"]["limit"]["description"]
+                        .as_str()
+                        .unwrap()
+                )
+            );
+        }
+        let history_help = operation_help_text(&history);
+        assert!(history_help.contains("Inclusive RFC 3339 timestamp."));
+        assert!(history_help.contains("Exclusive RFC 3339 timestamp."));
 
         let read = builtin_tool_description("thread.read", true).unwrap();
         let read_help = operation_help_text(&read);

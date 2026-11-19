@@ -599,6 +599,21 @@ ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 own
 以及最小验证命令是什么。使用完整数据库或进程 fixture 时，还必须说明为什么较低层测试不足。无法
 回答时，不新增独立测试函数。
 
+### 消息正文搜索与索引迁移
+
+`db::tests::message_fts_retirement_is_atomic_and_keeps_message_data_across_reopens` 拥有 Migration 227
+的生产启动、已填充 schema 176、DDL 与回执回滚及重复启动。旧 Usage 迁移 owner 无消息索引数据，也不覆盖
+227 的表和触发器状态。该验证复用独立 SQLite 夹具，需生产打开链路证明升级和重启持久性。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib message_fts_retirement`。
+
+继任搜索测试在原 `camp_history::slow_tests` 校验两批之外的旧消息、有界排序和完整性，并复用原有的
+正文投影、提及、引用和撤回 owners。当前 reprojection 与 context index 测试保留正文回滚、引用和提及断言，
+移除随旧表退出的 FTS 断言。定向命令为
+`cargo test -p rovai-core --features slow-tests --lib camp_history::`、
+`cargo test -p rovai-core --features slow-tests --lib context_index::` 和
+`cargo test -p rovai-core --bin rovai camp_help_teaches_default_and_explicit_single_camp_targets`。
+除 Migration 227 的重启 owner 外沿用现有测试函数。
+
 ### 删除、合并或改写测试
 
 删除 active test 必须给出以下一种可审阅证据：生产路径与合同在同一改动中退出；等价合同已有唯一
