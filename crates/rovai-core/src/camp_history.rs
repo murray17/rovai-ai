@@ -972,39 +972,41 @@ fn scan_thread_messages(
     dates: ParsedDateRange,
     search: &mut MessageSearch,
 ) -> Result<()> {
-    let (sequence_boundary, publication_boundary) = match fence {
-        MessageFence::Current { boundary } => (boundary, i64::MAX),
-        MessageFence::History { global_boundary } => (i64::MAX, global_boundary),
+    // Local publication is represented by the Thread sequence. Historical reads
+    // require the first global publication event to be within the Run's frozen fence.
+    let (recency, publication_join, boundary) = match fence {
+        MessageFence::Current { boundary } => ("message.sequence", String::new(), boundary),
+        MessageFence::History { global_boundary } => {
+            let predicate = public_camp_message_event_predicate("event.event_type");
+            let join = format!(
+                "JOIN event_log AS publication ON publication.global_sequence = (
+                     SELECT MIN(event.global_sequence) FROM event_log AS event
+                     WHERE event.entity_type = 'camp_message' AND event.entity_id = message.id
+                       AND {predicate} AND event.global_sequence IS NOT NULL)"
+            );
+            ("publication.global_sequence", join, global_boundary)
+        }
     };
-    // Seek by the per-Thread sequence, with a covering lookup for the first
-    // public event. Joining all publication events could rank one message twice.
-    let publication_predicate = public_camp_message_event_predicate("event.event_type");
     let sql = format!(
         r#"
         SELECT message.id, message.camp_id, message.sequence,
                message.author_type, message.author_id,
                message.reply_to_camp_message_id, message.structured_content_json,
-               message.created_at, publication.global_sequence, ?7,
-               CASE WHEN ?8 IS NULL THEN 0 ELSE EXISTS (
+               message.created_at, {recency}, ?6,
+               CASE WHEN ?7 IS NULL THEN 0 ELSE EXISTS (
                    SELECT 1
                    FROM camp_message_reference AS reference
-                   JOIN json_each(?8) AS requested
+                   JOIN json_each(?7) AS requested
                      ON reference.kind = json_extract(requested.value, '$[0]')
                     AND reference.value = json_extract(requested.value, '$[1]')
                    WHERE reference.camp_message_id = message.id
                ) END
         FROM camp_message AS message
-        JOIN event_log AS publication ON publication.global_sequence = (
-            SELECT MIN(event.global_sequence)
-            FROM event_log AS event
-            WHERE event.entity_type = 'camp_message' AND event.entity_id = message.id
-              AND {publication_predicate} AND event.global_sequence IS NOT NULL
-        )
-        WHERE message.camp_id = ?1 AND message.sequence > ?2 AND message.sequence <= ?3
-          AND publication.global_sequence <= ?4
+        {publication_join}
+        WHERE message.camp_id = ?1 AND message.sequence > ?2 AND {recency} <= ?3
           AND message.tombstoned_at IS NULL AND message.recall_state <> 'withdrawn'
-          AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
-          AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
+          AND (?4 IS NULL OR julianday(message.created_at) >= julianday(?4))
+          AND (?5 IS NULL OR julianday(message.created_at) < julianday(?5))
         ORDER BY message.sequence
         LIMIT {MESSAGE_SEARCH_BATCH_SIZE}
         "#,
@@ -1017,8 +1019,7 @@ fn scan_thread_messages(
         let mut rows = statement.query(params![
             camp_id,
             after,
-            sequence_boundary,
-            publication_boundary,
+            boundary,
             from,
             to,
             title,
@@ -1028,9 +1029,6 @@ fn scan_thread_messages(
         while let Some(row) = rows.next()? {
             let mut message = message_row(row, String::new())?;
             after = message.sequence;
-            if matches!(fence, MessageFence::Current { .. }) {
-                message.recency = message.sequence;
-            }
             let content = parse_message_content(row.get_ref(6)?.as_str()?)?;
             let (body, user_offsets) = render_agent_search_projection(transaction, &content)?;
             message.body = body;
@@ -2110,7 +2108,7 @@ mod slow_tests {
             let (body, recall_state, tombstone) = match sequence {
                 1 => ("旧消息：任务调度器", "ineligible", None),
                 seq if seq <= end => ("common", "ineligible", None),
-                seq if seq == end + 1 => ("未发布：任务调度器", "ineligible", None),
+                seq if seq == end + 1 => ("仅有会话序号", "ineligible", None),
                 seq if seq == end + 2 => ("撤回：任务调度器", "withdrawn", None),
                 seq if seq == end + 3 => ("删除：任务调度器", "ineligible", Some("deleted")),
                 _ => ("较新：任务调度器 common common", "recallable", None),
@@ -2172,9 +2170,22 @@ mod slow_tests {
                 assert_eq!(result["searchIncomplete"], false);
             }
         }
+        let local_only = run_search(
+            "仅有会话序号",
+            MessageFence::Current { boundary: end + 3 },
+            ParsedDateRange::default(),
+        );
+        assert_eq!(
+            local_only["results"][0]["messageId"],
+            format!("message-{}", end + 1)
+        );
         let fence = MessageFence::History {
             global_boundary: end + 4,
         };
+        assert_eq!(
+            run_search("仅有会话序号", fence, ParsedDateRange::default())["results"],
+            json!([])
+        );
         let result = run_search("common", fence, ParsedDateRange::default());
         assert_eq!(
             result["results"][0]["messageId"],
