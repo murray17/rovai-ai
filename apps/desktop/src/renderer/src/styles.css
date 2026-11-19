@@ -9728,3 +9728,31 @@ textarea.native-question-input { min-height: 96px; max-height: 180px; resize: ve
   .approval-dock.pending-dock { width: calc(100% - 24px); }
 }
 html[data-mobile-web="true"] .approval-dock.pending-dock { width: calc(100% - 24px); }
+
+.inline-message-edit {
+  min-inline-size: 0;
+  inline-size: min(38rem, 100%);
+  max-inline-size: 100%;
+  padding: 8px 10px;
+}
+.inline-message-edit .structured-mention-editor {
+  min-block-size: 3rem;
+  max-block-size: max(4rem, calc(100dvh - 24rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.inline-message-edit .structured-mention-editor:focus { outline: none; }
+.inline-edit-route { color: var(--muted); font-size: .9em; }
+.inline-edit-route span { color: var(--conversation-action-ink); }
+.inline-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block-start: 6px;
+}
+.inline-edit-actions > .composer-attachment-button { margin-inline-end: auto; }
+.inline-edit-actions > .quiet-button,
+.inline-edit-actions > .primary-button { flex-shrink: 0; white-space: nowrap; }
+.public-message-edited { color: var(--faint); white-space: nowrap; }
+.reply-detail-deleted-reference { color: var(--muted); font-size: .9em; margin: 0 0 4px; }

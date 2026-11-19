@@ -302,8 +302,8 @@ pub(crate) fn route_user_message(
             )?;
             crate::execution_input::record(tx, &delivery)?;
             tx.execute(
-                "UPDATE camp_message SET recall_state='closed',version=version+1
-                WHERE id=?1 AND recall_state='recallable'",
+                "UPDATE camp_message SET ever_bound_as_steer=1, recall_state=CASE WHEN recall_state='recallable' THEN 'closed' ELSE recall_state END,version=version+1
+                WHERE id=?1",
                 [message_id],
             )?;
         }
@@ -360,7 +360,7 @@ pub fn fail_preparation(tx: &Transaction<'_>, delivery: &str) -> Result<()> {
 pub fn return_to_queue(tx: &Transaction<'_>, delivery_id: &str, now: &str) -> Result<()> {
     let updated = tx.execute("UPDATE camp_message_delivery SET requested_mode='start',status='waiting',claimed_agent_run_id=NULL,target_execution_epoch=NULL,
         claimed_at=NULL,ended_at=NULL,failure_code=NULL,updated_at=?2,version=version+1
-        WHERE id=?1 AND requested_mode='steer' AND (status='claimed' OR (status='failed' AND failure_code='input_delivery_unknown'))
+        WHERE id=?1 AND EXISTS(SELECT 1 FROM camp_message WHERE id=camp_message_delivery.message_id AND tombstoned_at IS NULL AND recall_state<>'withdrawn') AND requested_mode='steer' AND (status='claimed' OR (status='failed' AND failure_code='input_delivery_unknown'))
           AND EXISTS(SELECT 1 FROM agent_run r WHERE r.id=claimed_agent_run_id AND r.cancel_requested_at IS NULL AND r.status IN ('running','waiting','succeeded'))
           AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
               WHERE m.source_delivery_id=?1 AND (i.status IN ('accepted','delivery_unknown')
@@ -396,6 +396,7 @@ pub(crate) fn settle_execution(
         tx.execute("UPDATE camp_message_delivery SET requested_mode='start',status='waiting',claimed_agent_run_id=NULL,target_execution_epoch=NULL,
         claimed_at=NULL,ended_at=NULL,updated_at=?2,version=version+1
         WHERE claimed_agent_run_id=?1 AND requested_mode='steer' AND status='claimed'
+          AND EXISTS(SELECT 1 FROM camp_message WHERE id=camp_message_delivery.message_id AND tombstoned_at IS NULL AND recall_state<>'withdrawn')
           AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
               WHERE m.source_delivery_id=camp_message_delivery.id AND i.status IN ('prepared','accepted','delivery_unknown'))", params![run_id,now])?;
     }

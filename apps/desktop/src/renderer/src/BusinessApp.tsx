@@ -4637,6 +4637,7 @@ export function BusinessApp({
               return result.status
             }}
             onWithdrawMessage={withdrawThreadMessage}
+            onMessageMutation={refreshActiveThreadSnapshot}
             onForkMessage={message => { void forkThread(activeThreadId!, message.id) }}
             forkBusy={forkBusy}
             reeditStore={reeditStore}

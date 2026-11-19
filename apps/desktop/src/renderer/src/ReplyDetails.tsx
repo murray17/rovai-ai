@@ -13,7 +13,7 @@ import type { ReplyReaderState, ThreadReplyReader } from './thread-reply-reader'
 import './reply-details.css'
 
 export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onClose, onReveal,
-  snapshot, profiles, eventsByRunId, windowedEvidence, onOpenExecution, author, renderBody, onCopy, onError }: {
+  snapshot, profiles, eventsByRunId, windowedEvidence, onOpenExecution, author, renderBody, renderActions, onCopy, onError }: {
   state: ReplyReaderState
   reader: ThreadReplyReader
   width: number
@@ -29,6 +29,7 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
   onOpenExecution(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
   author(message: ThreadMessageView): string
   renderBody(message: ThreadMessageView): ReactNode
+  renderActions?(message: ThreadMessageView, copy: {copied: boolean; run(): void}): ReactNode
   onCopy(message: ThreadMessageView): Promise<void>
   onError(error: unknown): void
 }): React.JSX.Element {
@@ -126,10 +127,11 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
           {message.authorType === 'agent' ? avatar(message.authorId, name) : <CurrentUserAvatar profile={profile} className="local-message-avatar" />}
           <div className="reply-detail-content">
             <div className="reply-detail-meta"><strong>{name}</strong><time dateTime={message.createdAt} title={new Date(message.createdAt).toLocaleString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
+            {message.replyParentDeleted && <p className="reply-detail-deleted-reference">{uiAttribute('原消息已删除')}</p>}
             {message.withdrawn ? <p className="reply-detail-status">{uiAttribute('消息已撤回')}</p> : renderBody(message)}
             <div className="reply-detail-actions">
-              {!message.withdrawn && <button type="button" className="reply-detail-icon" aria-label={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')}
-                title={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')} onClick={() => void copy(message)}><CopyIcon copied={copied === message.id} /></button>}
+              {renderActions?.(message, { copied: copied === message.id, run: () => void copy(message) }) ?? (!message.withdrawn && <button type="button" className="reply-detail-icon" aria-label={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')}
+                title={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')} onClick={() => void copy(message)}><CopyIcon copied={copied === message.id} /></button>)}
               <button type="button" className="reply-detail-icon" aria-label={uiAttribute('回到原文')} title={uiAttribute('回到原文')} onClick={() => onReveal(message.id)}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v12m12-6H7m4-4-4 4 4 4" /></svg>
               </button>
