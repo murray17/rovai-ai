@@ -1745,7 +1745,7 @@ export function ThreadWorkspace({
   onPendingThreadLeave?(draft: ThreadComposerDraftView): Promise<void>
   onThreadLeaveGuardChange?(threadId: string, guard: ThreadLeaveGuard | null): void
   onArchivePreparationChange?(threadId: string, save: (() => Promise<void>) | null): void
-  onUnarchive?(): Promise<void>
+  onUnarchive?(): Promise<number | undefined>
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<ThreadMemberAddOutcome>
   onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
@@ -1872,6 +1872,7 @@ export function ThreadWorkspace({
   const [archiveDraftError, setArchiveDraftError] = useState<string | null>(null)
   const [archiveDraftRetry, setArchiveDraftRetry] = useState(0)
   const [restoringArchive, setRestoringArchive] = useState(false)
+  const [unarchiveFocusRevision, setUnarchiveFocusRevision] = useState<number>()
   const archiveDraftSave = useRef<{ controller: AbortController; promise: Promise<void> } | null>(null)
   const locallySavedDraft = useRef<ThreadComposerDraftView | null>(null)
   const failedLocalDraft = useRef<ThreadComposerDraftView | null>(null)
@@ -3929,6 +3930,16 @@ export function ThreadWorkspace({
     continuationRepairRequired,
     replyRepairRequired
   ])
+
+  useEffect(() => {
+    const revision = snapshot.thread.archiveRevision
+    if (unarchiveFocusRevision === undefined || revision === undefined || revision < unarchiveFocusRevision) return
+    if (revision === unarchiveFocusRevision && !snapshot.thread.archivedAt) {
+      if (composerInteractionDisabled) return
+      composerHandleRef.current?.focus()
+    }
+    setUnarchiveFocusRevision(undefined)
+  }, [unarchiveFocusRevision, snapshot.thread.archiveRevision, snapshot.thread.archivedAt, composerInteractionDisabled])
 
   useEffect(() => {
     const threadId = snapshot.thread.id
@@ -6567,13 +6578,14 @@ export function ThreadWorkspace({
           <div className="message-composer-selection-slot">
           <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
           {snapshot.thread.archivedAt && <div className="archived-composer-notice">
-            <span role="status"><NavigationIcon name="archive" /><UiText zh="已归档" /></span>
+            <span role="status"><NavigationIcon name="archive" /><UiText zh="已归档。有新消息时会重新显示。" /></span>
             {archiveDraftError && <span role="alert">{archiveDraftError}
               <button type="button" className="quiet-button" onClick={() => setArchiveDraftRetry(value => value + 1)}><UiText zh="重试保存" /></button>
             </span>}
             {onUnarchive && <button type="button" className="quiet-button" disabled={restoringArchive} onClick={() => {
               setRestoringArchive(true)
-              void onUnarchive().catch(error => onNotifyError?.(readErrorMessage(error))).finally(() => setRestoringArchive(false))
+              void onUnarchive().then(setUnarchiveFocusRevision)
+                .catch(error => onNotifyError?.(readErrorMessage(error))).finally(() => setRestoringArchive(false))
             }}><UiText zh="取消归档" /></button>}
           </div>}
           <form

@@ -7,7 +7,7 @@ import { messageTimeParts, useMessageTimeDate } from './message-time'
 import { MissionDelete } from './MissionBoard'
 import { CompactDialog, MissionFilter } from './MissionControls'
 import { NavigationIcon } from './NavigationIcon'
-import { archiveTargetIsRemoved, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
+import { ArchiveCommandRejected, archiveTargetIsRemoved, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
 import { useArchiveRecords } from './useArchiveRecords'
 import './archive-settings.css'
 
@@ -151,13 +151,22 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
     setActionError(null)
     try {
       await action()
-    } catch (error) {
-      if (archiveTargetIsRemoved(error)) onNotify(readErrorMessage(error))
-      else setActionError(readErrorMessage(error))
     } finally {
       locks.current.delete(item.threadId)
       setPending(new Set(locks.current))
       refresh()
+    }
+  }
+
+  async function unarchive(item: ArchiveItem): Promise<void> {
+    try {
+      await operate(item, async () => {
+        await writeArchive(client, false, { threadId: item.threadId, expectedArchiveRevision: item.archiveRevision })
+        onNotify(uiAttribute('已取消归档'))
+      })
+    } catch (error) {
+      if (archiveTargetIsRemoved(error)) onNotify(readErrorMessage(error))
+      else setActionError(readErrorMessage(error))
     }
   }
 
@@ -167,11 +176,16 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
         threadId: item.threadId, expectedVersion: item.threadVersion, workspaceDisposition,
         archiveGuard: { expectedArchiveRevision: item.archiveRevision }
       }
-      await requestArchiveCommand(client, 'threads.delete', command)
-      onDeleted(item.threadId)
-      onNotify(uiAttribute('已提交删除'))
+      try {
+        await requestArchiveCommand(client, 'threads.delete', command)
+        onDeleted(item.threadId)
+        onNotify(uiAttribute('已提交删除'))
+      } catch (error) {
+        if (!archiveTargetIsRemoved(error)) throw error
+        onNotify(readErrorMessage(error))
+      }
+      setConfirm(null)
     })
-    setConfirm(null)
   }
 
   const groups = new Map<string, ArchiveItem[]>()
@@ -243,10 +257,7 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
               <div className="archive-row-actions">
                 <button type="button" className="archive-restore" disabled={disabled}
                   aria-label={uiAttribute('取消归档 {0}', item.title)}
-                  onClick={() => void operate(item, async () => {
-                    await writeArchive(client, false, { threadId: item.threadId, expectedArchiveRevision: item.archiveRevision })
-                    onNotify(uiAttribute('已取消归档'))
-                  })}><UiText zh="取消归档" /></button>
+                  onClick={() => void unarchive(item)}><UiText zh="取消归档" /></button>
                 <button type="button" className="archive-icon-button archive-delete" disabled={disabled}
                   aria-label={uiAttribute('删除 {0}', item.title)} title={uiAttribute('删除')}
                   onClick={() => setConfirm(item)}><NavigationIcon name="trash" /></button>
@@ -273,6 +284,7 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
   const [mission, setMission] = useState<MissionRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
+  const [confirmationStale, setConfirmationStale] = useState(false)
   useEffect(() => {
     if (!item.missionId) return
     let current = true
@@ -282,16 +294,36 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
       .catch(error => { if (current) setError(readErrorMessage(error)) })
     return () => { current = false }
   }, [client, item.missionId, retry])
-  if (mission) return <MissionDelete mission={mission} onClose={onClose} onDelete={onDelete} />
+  async function submitDelete(disposition?: 'retain' | 'cleanup'): Promise<void> {
+    try {
+      await onDelete(disposition)
+    } catch (error) {
+      if (error instanceof ArchiveCommandRejected
+        && (error.code === 'command.version_conflict' || error.code === 'camp.archive_conflict')) {
+        setConfirmationStale(true)
+        throw new Error(uiAttribute('记录已变化，请关闭并重新打开删除确认。'))
+      }
+      throw error
+    }
+  }
+
+  if (mission) return <MissionDelete mission={mission} confirmationStale={confirmationStale}
+    onClose={onClose} onDelete={submitDelete} />
   return <CompactDialog title={uiAttribute(item.missionId ? '删除使命' : '删除会话')} onClose={() => { if (!busy) onClose() }}
     footer={<>
       <button type="button" className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh="取消" /></button>
-      <button type="button" className="compact-primary archive-delete-confirm" disabled={busy || Boolean(item.missionId)}
-        onClick={() => void onDelete()}><UiText zh={busy ? '正在删除…' : '删除'} /></button>
+      <button type="button" className="compact-primary archive-delete-confirm"
+        disabled={busy || Boolean(item.missionId) || confirmationStale}
+        onClick={() => {
+          setError(null)
+          void submitDelete().catch(error => setError(readErrorMessage(error)))
+        }}><UiText zh={busy ? '正在删除…' : '删除'} /></button>
     </>}>
     <p>{item.title}</p>
     {item.missionId ? <p role={error ? 'alert' : 'status'}>{error ?? uiAttribute('正在读取关联工作区…')}
       {error && <button type="button" className="quiet-button" onClick={() => setRetry(value => value + 1)}><UiText zh="重试" /></button>}</p>
-      : <p><UiText zh="此会话及其中的消息和附件将被永久删除，正在执行的队员会停止。" /></p>}
+      : <><p><UiText zh="此会话及其中的消息和附件将被永久删除，正在执行的队员会停止。" /></p>
+        {error && <p className="compact-inline-error" role="alert">{error}</p>}
+      </>}
   </CompactDialog>
 }

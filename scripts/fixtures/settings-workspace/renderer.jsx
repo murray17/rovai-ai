@@ -30,7 +30,7 @@ const state = {
   preferences: fixture.preferences(), notifications: fixture.notifications(),
   channels: fixture.channelsSnapshot(), executionWeb: fixture.executionWeb(),
   memory: { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 },
-  startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null
+  startup: {}, diagnostics: fixture.diagnosticsSnapshot(), scenario: 'normal', failure: null, archiveDeleteRejection: null
 }
 state.preferences.newConversationDefaults.memberAgentIds = fixture.largeRoster.slice(0, 12).map(a => a.agentId)
 function aboutSnapshot() {
@@ -85,17 +85,26 @@ const archiveRows = Array.from({ length: 52 }, (_, index) => ({
   title: `归档样例 ${index + 1}`, projectKey: 'directory:/fixture', projectName: 'fixture',
   lastMessageAt: '2026-11-18T14:32:00.000Z', archiveRevision: 3, threadVersion: 9
 }))
+const archivedMission = {
+  missionId: 'archive-mission', title: '归档使命样例', workspaceEverCreated: true, workspaceResourcesPresent: true
+}
+archiveRows.push({
+  ...archiveRows[0], kind: 'mission', threadId: 'archive-mission-thread',
+  missionId: archivedMission.missionId, title: archivedMission.title
+})
+const archiveNotices = []
 const archiveClient = {
   async request(method, params) {
     await request(method, params)
     if (method === 'threads.archive.list') {
       const matching = archiveRows.filter(item => !params.query || item.title.includes(params.query) || item.threadId.includes(params.query))
-      const selected = params.kind === 'chat' ? matching : []
+      const selected = matching.filter(item => item.kind === params.kind)
+      const totals = archiveCounts(archiveRows)
       return {
         schemaVersion: 1, throughGlobalSequence: 12,
-        items: selected.slice(0, params.limit),
-        totals: { chat: archiveRows.length, mission: 0 }, matchingCounts: { chat: matching.length, mission: 0 },
-        projects: [{ projectKey: 'directory:/fixture', projectName: 'fixture', count: params.kind === 'chat' ? archiveRows.length : 0 }],
+        items: clone(selected.slice(0, params.limit)),
+        totals, matchingCounts: archiveCounts(matching),
+        projects: [{ projectKey: 'directory:/fixture', projectName: 'fixture', count: totals[params.kind] }],
         groups: selected.length ? [{ projectKey: 'directory:/fixture', totalCount: selected.length }] : [],
         hasMore: selected.length > params.limit
       }
@@ -105,7 +114,20 @@ const archiveClient = {
       archiveRows.splice(archiveRows.findIndex(row => row.threadId === threadId), 1)
       return { status: 'applied', payload: { threadId, archivedAt: null, archiveRevision: 4, changed: true } }
     }
+    if (method === 'missions.get') return archivedMission
+    if (method === 'missions.delivery') return { workspace: null }
+    if (method === 'threads.delete') {
+      const index = archiveRows.findIndex(row => row.threadId === params.command.threadId)
+      const code = state.archiveDeleteRejection
+      state.archiveDeleteRejection = null
+      if (code === 'command.version_conflict') archiveRows[index].threadVersion += 1
+      if (!code || code === 'camp.not_found') archiveRows.splice(index, 1)
+      return code ? { status: 'rejected', code } : { status: 'accepted', code: 'camp.delete_accepted' }
+    }
   }
+}
+function archiveCounts(items) {
+  return { chat: items.filter(item => item.kind === 'chat').length, mission: items.filter(item => item.kind === 'mission').length }
 }
 const savePreference = key => async value => {
   await request(key, value)
@@ -250,7 +272,8 @@ function Fixture() {
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
         {page === 'archive' && <ThreadClientProvider client={archiveClient}>
-          <ArchiveSettings projectNames={{ 'directory:/fixture': '本机项目名称' }} onDeleted={ignore} onNotify={ignore} />
+          <ArchiveSettings projectNames={{ 'directory:/fixture': '本机项目名称' }} onDeleted={ignore}
+            onNotify={message => archiveNotices.push(message)} />
         </ThreadClientProvider>}
         {page === 'runtime' && <RuntimeInstallationsPanel health={runtimeHealth} installations={[]} onReload={async () => { await request('runtime.reload') }} />}
         {page === 'channels' && <ChannelSettings agents={fixture.agents} />}
@@ -263,6 +286,7 @@ function Fixture() {
   </div>
 }
 window.settingsTest = {
+  archiveNotices,
   finishRuntimeCheck: (kind, result) => { pendingRuntimeChecks.get(kind)(result); pendingRuntimeChecks.delete(kind) },
   requests, state,
   releaseHostStatus: () => releaseHostStatus?.(),

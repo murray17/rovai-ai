@@ -3605,7 +3605,7 @@ export function BusinessApp({
 
   const changeArchive = async (
     threadId: string, archiveRevision: number | undefined, archived: boolean, mission: boolean
-  ): Promise<void> => {
+  ): Promise<number | undefined> => {
     if (archiveRevision === undefined || archiveWrites.current.has(threadId)) return
     archiveWrites.current.add(threadId)
     const refresh = (): void => {
@@ -3620,12 +3620,13 @@ export function BusinessApp({
       const result = await writeArchive(client, archived, { threadId, expectedArchiveRevision: archiveRevision })
       if (result.changed && archived) {
         setToast(current => current?.persistent ? current : {
-          message: uiAttribute('已归档'), tone: 'neutral',
+          message: uiAttribute('已归档。有新消息时会重新显示。'), tone: 'neutral',
           action: { label: uiAttribute('撤销'), onSelect: () => {
             void changeArchive(threadId, result.archiveRevision, false, mission).catch(error => notifyError(errorMessage(error)))
           } }
         })
       } else if (result.changed) notify(uiAttribute('已取消归档'))
+      return result.changed ? result.archiveRevision : undefined
     } finally {
       archiveWrites.current.delete(threadId)
       refresh()
@@ -4576,7 +4577,7 @@ export function BusinessApp({
     onThreadIdCopied={() => {
       setError(null)
     }}
-    onArchive={thread => changeArchive(thread.id, thread.archiveRevision, true, false)}
+    onArchive={async thread => { await changeArchive(thread.id, thread.archiveRevision, true, false) }}
     onRename={renameThread}
     onDelete={deleteThread}
     onDeleteError={(nextError) => notifyError(errorMessage(nextError))}
@@ -4598,7 +4599,7 @@ export function BusinessApp({
         await openMission(mission)
       }
     }}>
-    <MissionInteractionProvider missions={missionSurfaces} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onArchive={mission => changeArchive(mission.threadId, mission.archiveRevision, true, true)} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
+    <MissionInteractionProvider missions={missionSurfaces} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onArchive={async mission => { await changeArchive(mission.threadId, mission.archiveRevision, true, true) }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!startupGateVisible && !shuttingDown && (forkLoading || forkState.phase === 'unknown' || forkState.phase === 'rejected') && <AppToast
         toast={forkState.phase === 'unknown' ? { message: uiAttribute('分叉结果尚未确认'), tone: 'danger', persistent: true, keepOnAction: true, dismissible: false,

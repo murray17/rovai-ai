@@ -93,9 +93,10 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelectorAll('.archive-row').length === 52")
     assert.equal(await run("window.settingsTest.requests.filter(r => r.method === 'threads.archive.list').at(-1).params.limit"), 100)
     const sameRow = "document.querySelector('.archive-row')"
-    assert.ok(await run(`${sameRow}.querySelector('time').getBoundingClientRect().top < ${sameRow}.getBoundingClientRect().bottom`))
+    const timeBelowTitle = `${sameRow}.querySelector('time').getBoundingClientRect().top > ${sameRow}.querySelector('.archive-title').getBoundingClientRect().top`
+    assert.ok(await run(`innerWidth > 760 && (${timeBelowTitle})`), 'archive time belongs below the title at desktop width')
     window.setContentSize(740, 840)
-    await waitFor(`${sameRow}.querySelector('time').getBoundingClientRect().top > ${sameRow}.querySelector('.archive-title').getBoundingClientRect().top`)
+    await waitFor(`innerWidth <= 760 && (${timeBelowTitle})`)
     await noOverflow('archive narrow')
     window.setContentSize(1040, 840)
     window.webContents.setZoomFactor(2)
@@ -114,6 +115,39 @@ app.whenReady().then(async () => {
     await waitFor("document.activeElement.id === 'archive-tab-chat'")
     assert.deepEqual(await run("window.settingsTest.requests.find(r => r.method === 'threads.unarchive').params.command"),
       { threadId: 'archive-fixture-51', expectedArchiveRevision: 3 })
+    await click('.archive-search button')
+    await waitFor("document.querySelectorAll('.archive-row').length === 50")
+    const deleteRow = '[data-archive-thread="archive-fixture-0"] .archive-delete'
+    const lastDelete = "window.settingsTest.requests.filter(r => r.method === 'threads.delete').at(-1).params.command"
+    await click(deleteRow)
+    await run("window.settingsTest.state.archiveDeleteRejection = 'command.version_conflict'")
+    await click('.archive-delete-confirm')
+    await waitFor("document.querySelector('[role=dialog] [role=alert]')?.textContent.includes('重新打开删除确认')")
+    assert.equal(await run("document.querySelector('.archive-delete-confirm').disabled"), true)
+    assert.equal(await run(`${lastDelete}.expectedVersion`), 9)
+    await click('[role=dialog] .compact-cancel')
+    await waitFor("document.querySelector('#archive-results').getAttribute('aria-busy') === 'false'")
+    await click(deleteRow)
+    await run("window.settingsTest.state.archiveDeleteRejection = 'camp.not_found'")
+    await click('.archive-delete-confirm')
+    await waitFor("!document.querySelector('[role=dialog]') && window.settingsTest.archiveNotices.at(-1) === '目标已移除'")
+    assert.equal(await run(`${lastDelete}.expectedVersion`), 10)
+
+    await click('#archive-tab-mission')
+    await waitFor("document.querySelectorAll('.archive-row').length === 1")
+    await click('.archive-row .archive-delete')
+    await waitFor("document.querySelector('.mission-delete-confirm:not(:disabled)')")
+    await click('.mission-delete-workspace-option input')
+    await run("window.settingsTest.fail('threads.delete')")
+    await click('.mission-delete-confirm')
+    await waitFor("document.querySelector('.mission-delete-dialog [role=alert]')?.textContent.includes('暂时无法完成')")
+    assert.equal(await run("document.querySelector('.mission-delete-workspace-option input').checked"), true)
+    assert.equal(await run(`${lastDelete}.workspaceDisposition`), 'cleanup')
+    await click('.mission-delete-confirm')
+    await waitFor("!document.querySelector('[role=dialog]') && document.querySelectorAll('.archive-row').length === 0")
+    assert.deepEqual(await run(lastDelete), { threadId: 'archive-mission-thread', expectedVersion: 9,
+      workspaceDisposition: 'cleanup', archiveGuard: { expectedArchiveRevision: 3 } })
+    assert.equal(await run('window.settingsTest.archiveNotices.at(-1)'), '已提交删除')
     // Runtime editor regression: a selected program path saves directly, failure
     // preserves the draft, and clean/dirty transitions keep both actions visible.
     window.webContents.setZoomFactor(1); window.setContentSize(1280, 850)

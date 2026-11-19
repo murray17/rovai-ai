@@ -28,6 +28,7 @@ export class ArchiveCommandRejected extends Error {
       'camp.not_found': uiAttribute('目标已移除'),
       'camp.archive_conflict': uiAttribute('归档状态已变化，请刷新后重试。'),
       'command.version_conflict': uiAttribute('记录已变化，请重新确认。'),
+      'camp.workspace_cleanup_pending': uiAttribute('工作区正在清理，请稍后重试。'),
       'camp.deletion_in_progress': uiAttribute('记录正在删除。')
     }
     super(messages[code] ?? code)
