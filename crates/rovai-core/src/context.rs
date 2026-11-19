@@ -10423,6 +10423,11 @@ mod slow_tests {
     #[test]
     fn current_history_reads_live_state_without_id_guessing() {
         let mut fixture = fixture();
+        fixture
+            .database
+            .connection()
+            .execute_batch("PRAGMA journal_mode=WAL")
+            .unwrap();
         let run = materialize_history_fixture(&mut fixture);
         let initial_message_id: String = fixture
             .database
@@ -10447,6 +10452,9 @@ mod slow_tests {
         assert_eq!(empty["threads"].as_array().unwrap().len(), 0);
         assert_eq!(empty["truncated"], false);
 
+        let before_publication =
+            ThreadHistoryService::open_search_snapshot(&fixture.database).unwrap();
+        assert!(before_publication.is_readonly("main").unwrap());
         let late = CollaborationService::default()
             .send_test_camp_message(
                 &mut fixture.database,
@@ -10474,16 +10482,18 @@ mod slow_tests {
             .as_str()
             .unwrap()
             .to_string();
+        let query = ThreadSearchInput {
+            camp_id: None,
+            query: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
+            limit: None,
+        };
+        let previous_search =
+            ThreadHistoryService::search_camp_in_snapshot(&before_publication, &run, &query)
+                .unwrap();
+        assert_eq!(previous_search["results"], json!([]));
+        drop(before_publication);
         let late_search = ThreadHistoryService
-            .search_camp(
-                &mut fixture.database,
-                &run,
-                &ThreadSearchInput {
-                    camp_id: None,
-                    query: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
-                    limit: None,
-                },
-            )
+            .search_camp(&mut fixture.database, &run, &query)
             .unwrap();
         assert_eq!(late_search["results"].as_array().unwrap().len(), 1);
         assert_eq!(late_search["results"][0]["messageId"], late_message_id);

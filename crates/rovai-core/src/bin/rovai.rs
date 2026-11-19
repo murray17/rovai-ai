@@ -1901,7 +1901,10 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
             if argument.required { " required" } else { "" },
         )
         .expect("writing help to a String cannot fail");
-        if let Some(field_description) =
+        if matches!(
+            description.name.as_str(),
+            "thread.search" | "history.search"
+        ) && let Some(field_description) =
             description.input_schema["properties"][&argument.field]["description"].as_str()
         {
             write_indented_help(output, field_description);
@@ -2823,7 +2826,7 @@ mod tests {
         let history = builtin_tool_description("history.search", true).unwrap();
         for description in [&search, &history] {
             let help = operation_help_text(description);
-            assert!(help.contains("Case-insensitive literal substring to find in message text."));
+            assert!(help.contains("Case-insensitive literal substring."));
             assert!(
                 help.contains(
                     description.input_schema["properties"]["limit"]["description"]
@@ -2833,6 +2836,7 @@ mod tests {
             );
         }
         let history_help = operation_help_text(&history);
+        assert!(history_help.contains("Search public messages in other Threads."));
         assert!(history_help.contains("Inclusive RFC 3339 timestamp."));
         assert!(history_help.contains("Exclusive RFC 3339 timestamp."));
 
@@ -3162,6 +3166,12 @@ mod tests {
             .is_err()
         );
         assert_eq!(description.summary, CAMP_MESSAGE_SEND_SUMMARY);
+        assert_eq!(
+            operation_help_text(&description)
+                .matches("Mention the User and create an Inbox notification.")
+                .count(),
+            1
+        );
         assert!(!description.summary.contains("inline"));
         assert!(description.summary.contains("agentAddressingMode"));
         assert!(description.summary.contains("effectiveRecipients"));

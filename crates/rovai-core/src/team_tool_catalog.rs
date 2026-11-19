@@ -1270,7 +1270,7 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": HISTORY_SEARCH_TOOL_NAME,
             "title": "Search public Thread history",
-            "description": "Discover public timeline messages in other Threads when the target Thread is unknown. Target-Thread membership is not a read permission. Thread titles are metadata, not hits. Once a Thread is known, prefer thread.search and thread.read with stable IDs. Summaries and attachments are not searched.",
+            "description": "Search public messages in other Threads. Target-Thread membership is not a read permission. Thread titles are metadata, not hits. Once a Thread is known, prefer thread.search and thread.read with stable IDs. Summaries and attachments are not searched.",
             "inputSchema": ThreadHistoryService::history_search_input_schema(),
             "outputSchema": camp_search_success_schema(true)
         }),

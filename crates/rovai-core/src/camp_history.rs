@@ -5,7 +5,9 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -41,8 +43,7 @@ const CAMP_SEARCH_MAX_LIMIT: usize = 20;
 const HISTORY_SEARCH_DEFAULT_LIMIT: usize = 15;
 const HISTORY_SEARCH_MAX_LIMIT: usize = 30;
 const MESSAGE_SEARCH_BATCH_SIZE: i64 = 128;
-const MESSAGE_QUERY_DESCRIPTION: &str =
-    "Case-insensitive literal substring to find in message text.";
+const MESSAGE_QUERY_DESCRIPTION: &str = "Case-insensitive literal substring.";
 const MAX_QUERY_CHARS: usize = 512;
 const MAX_CAMP_QUERY_CHARS: usize = 200;
 const MAX_HISTORY_CAMP_IDS: usize = 20;
@@ -412,6 +413,27 @@ impl ThreadHistoryService {
         run: &AuthenticatedTeamToolRun,
         input: &ThreadSearchInput,
     ) -> Result<Value> {
+        let transaction = database.connection_mut().transaction()?;
+        let result = Self::search_camp_in_snapshot(&transaction, run, input)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    /// Pin the read view while the caller holds the authenticated writer guard. SQLite
+    /// establishes a deferred transaction's WAL snapshot on its first database read.
+    /// The blocking worker owns this one-shot connection. Closing it releases the view.
+    pub(crate) fn open_search_snapshot(database: &Database) -> Result<Connection> {
+        let reader =
+            Connection::open_with_flags(database.path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        reader.execute_batch("BEGIN DEFERRED; SELECT 1 FROM main.sqlite_schema LIMIT 1;")?;
+        Ok(reader)
+    }
+
+    pub(crate) fn search_camp_in_snapshot(
+        snapshot: &Connection,
+        run: &AuthenticatedTeamToolRun,
+        input: &ThreadSearchInput,
+    ) -> Result<Value> {
         let query = required_query(&input.query)?;
         let requested_camp_id = validate_requested_camp_id(input.camp_id.as_deref())?;
         let limit = effective_limit(
@@ -419,10 +441,7 @@ impl ThreadHistoryService {
             CAMP_SEARCH_DEFAULT_LIMIT,
             CAMP_SEARCH_MAX_LIMIT,
         )?;
-        let transaction = database
-            .connection_mut()
-            .transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let fence = match load_run_fence(&transaction, run) {
+        let fence = match load_run_fence(snapshot, run) {
             Ok(fence) => fence,
             Err(error)
                 if error
@@ -433,25 +452,34 @@ impl ThreadHistoryService {
             }
             Err(error) => return Err(error),
         };
-        let target = resolve_camp_target(&transaction, run, &fence, requested_camp_id.as_deref())?
+        let target = resolve_camp_target(snapshot, run, &fence, requested_camp_id.as_deref())?
             .ok_or_else(search_unavailable)?;
         let mut search = MessageSearch::new(query, limit)?;
         scan_thread_messages(
-            &transaction,
+            snapshot,
             &target.camp_id,
             target.fence,
             None,
             ParsedDateRange::default(),
             &mut search,
         )?;
-        let result = ranked_search_response(&transaction, search, false)?;
-        transaction.commit()?;
-        Ok(result)
+        ranked_search_response(snapshot, search, false)
     }
 
     pub fn search_history(
         &self,
         database: &mut Database,
+        run: &AuthenticatedTeamToolRun,
+        input: &HistorySearchInput,
+    ) -> Result<Value> {
+        let transaction = database.connection_mut().transaction()?;
+        let result = Self::search_history_in_snapshot(&transaction, run, input)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    pub(crate) fn search_history_in_snapshot(
+        snapshot: &Connection,
         run: &AuthenticatedTeamToolRun,
         input: &HistorySearchInput,
     ) -> Result<Value> {
@@ -463,15 +491,12 @@ impl ThreadHistoryService {
         )?;
         let requested_camps = validate_requested_camps(input.camp_ids.as_deref())?;
         let dates = parse_date_range(input.date_from.as_deref(), input.date_to.as_deref())?;
-        let transaction = database
-            .connection_mut()
-            .transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let fence = load_run_fence(&transaction, run)?;
-        let threads = history_search_threads(&transaction, &fence, requested_camps.as_deref())?;
+        let fence = load_run_fence(snapshot, run)?;
+        let threads = history_search_threads(snapshot, &fence, requested_camps.as_deref())?;
         let mut search = MessageSearch::new(query, limit)?;
         for (camp_id, title) in &threads {
             scan_thread_messages(
-                &transaction,
+                snapshot,
                 camp_id,
                 MessageFence::History {
                     global_boundary: fence.global_boundary,
@@ -481,9 +506,7 @@ impl ThreadHistoryService {
                 &mut search,
             )?;
         }
-        let result = ranked_search_response(&transaction, search, true)?;
-        transaction.commit()?;
-        Ok(result)
+        ranked_search_response(snapshot, search, true)
     }
 
     pub fn read(
@@ -662,10 +685,7 @@ fn parse_date_range(from: Option<&str>, to: Option<&str>) -> Result<ParsedDateRa
     Ok(range)
 }
 
-fn load_run_fence(
-    transaction: &Transaction<'_>,
-    run: &AuthenticatedTeamToolRun,
-) -> Result<RunFence> {
+fn load_run_fence(transaction: &Connection, run: &AuthenticatedTeamToolRun) -> Result<RunFence> {
     transaction
         .query_row(
             r#"
@@ -790,7 +810,7 @@ fn load_live_history_camps(
 }
 
 fn resolve_camp_target(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     run: &AuthenticatedTeamToolRun,
     fence: &RunFence,
     requested_camp_id: Option<&str>,
@@ -919,7 +939,7 @@ fn fold_char(value: char) -> char {
 }
 
 fn history_search_threads(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     fence: &RunFence,
     requested: Option<&[String]>,
 ) -> Result<Vec<(String, String)>> {
@@ -946,7 +966,7 @@ fn history_search_threads(
 }
 
 fn scan_thread_messages(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     camp_id: &str,
     fence: MessageFence,
     title: Option<&str>,
@@ -1157,7 +1177,7 @@ fn compare_ranked(left: &RankedMessage, right: &RankedMessage) -> Ordering {
 }
 
 fn ranked_search_response(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     search: MessageSearch,
     include_camp_title: bool,
 ) -> Result<Value> {
@@ -1223,7 +1243,7 @@ fn snippet(body: &str, first_match: Option<usize>) -> String {
 }
 
 fn attach_message_quotes(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     message_id: &str,
     value: &mut Value,
 ) -> Result<()> {

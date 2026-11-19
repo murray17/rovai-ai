@@ -614,6 +614,9 @@ ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 own
 `cargo test -p rovai-core --bin rovai camp_help_teaches_default_and_explicit_single_camp_targets`。
 除 Migration 227 的重启 owner 外沿用现有测试函数。
 
+`current_history_reads_live_state_without_id_guessing` 在同一 WAL 夹具中固定只读搜索快照，
+通过正常发送入口提交新消息，再验证旧快照和新查询各自的可见结果。
+
 ### 删除、合并或改写测试
 
 删除 active test 必须给出以下一种可审阅证据：生产路径与合同在同一改动中退出；等价合同已有唯一
