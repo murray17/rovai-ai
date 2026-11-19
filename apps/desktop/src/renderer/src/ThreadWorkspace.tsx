@@ -6578,11 +6578,15 @@ export function ThreadWorkspace({
           <div className="message-composer-selection-slot">
           <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
           {snapshot.thread.archivedAt && <div className="archived-composer-notice">
-            <span role="status"><NavigationIcon name="archive" /><UiText zh="已归档。有新消息时会重新显示。" /></span>
+            <div className="archived-composer-copy" role="status"><NavigationIcon name="archive" />
+              <div><strong><UiText zh={snapshot.thread.missionId ? '使命已归档' : '会话已归档'} /></strong>
+                <p><UiText zh={activeRuns.length ? '执行会继续，有新消息时会重新显示。' : '有新消息时会重新显示。'} /></p>
+              </div>
+            </div>
             {archiveDraftError && <span role="alert">{archiveDraftError}
               <button type="button" className="quiet-button" onClick={() => setArchiveDraftRetry(value => value + 1)}><UiText zh="重试保存" /></button>
             </span>}
-            {onUnarchive && <button type="button" className="quiet-button" disabled={restoringArchive} onClick={() => {
+            {onUnarchive && <button type="button" className="primary-button" disabled={restoringArchive} onClick={() => {
               setRestoringArchive(true)
               void onUnarchive().then(setUnarchiveFocusRevision)
                 .catch(error => onNotifyError?.(readErrorMessage(error))).finally(() => setRestoringArchive(false))

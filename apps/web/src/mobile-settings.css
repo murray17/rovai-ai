@@ -14,6 +14,10 @@ html[data-mobile-web="true"] .mobile-settings-workspace .settings-nav-header h1{
 html[data-mobile-web="true"] .mobile-settings-workspace .mobile-settings-detail{display:flex;flex:1;min-height:0;min-width:0;padding:0;overflow:hidden;animation:mobile-page-enter 200ms cubic-bezier(.2,.8,.2,1)}
 html[data-mobile-web="true"] .mobile-settings-workspace .mobile-settings-detail .settings-workbench{display:flex;flex:1;min-width:0;min-height:0}
 html[data-mobile-web="true"] .mobile-settings-workspace .mobile-settings-detail .settings-panel{flex:1;width:100%;max-width:none;min-height:0;min-width:0;overflow:auto;padding:18px 18px max(28px,env(safe-area-inset-bottom));background:var(--mobile-page)}
+html[data-mobile-web="true"] .mobile-settings-workspace[data-settings-section="archive"] .settings-nav-header{min-height:48px;gap:8px;padding:2px 12px;border-bottom:0;color:var(--muted);font-size:12px}
+.archive-settings-back{display:inline-flex;align-items:center;gap:16px;min-height:44px;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit}
+.archive-settings-back svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}
+html[data-mobile-web="true"] .mobile-settings-workspace[data-settings-section="archive"] .mobile-settings-detail .settings-panel-archive{padding:20px 16px max(36px,env(safe-area-inset-bottom))}
 html[data-mobile-web="true"] .mobile-settings-workspace .mobile-settings-detail .settings-page-heading-copy{display:none}
 html[data-mobile-web="true"] .mobile-settings-workspace .mobile-settings-detail .settings-page-heading{padding:0 0 14px;min-height:0;gap:0;margin:0;border:0}
 html[data-mobile-web="true"] .mobile-settings-workspace .mobile-settings-detail .settings-page-heading:not(:has(.settings-page-heading-aside)){display:none}

@@ -93,6 +93,9 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelectorAll('.archive-row').length === 52")
     assert.equal(await run("window.settingsTest.requests.filter(r => r.method === 'threads.archive.list').at(-1).params.limit"), 100)
     const sameRow = "document.querySelector('.archive-row')"
+    assert.equal(await run("document.querySelectorAll('.archive-tabs button > svg').length"), 2)
+    assert.equal(await run("Math.round(document.querySelector('.archive-row').getBoundingClientRect().height)"), 44)
+    assert.equal(await run("getComputedStyle(document.querySelector('.archive-restore')).borderTopWidth"), '1px')
     const timeBelowTitle = `${sameRow}.querySelector('time').getBoundingClientRect().top > ${sameRow}.querySelector('.archive-title').getBoundingClientRect().top`
     assert.ok(await run(`innerWidth > 760 && (${timeBelowTitle})`), 'archive time belongs below the title at desktop width')
     window.setContentSize(740, 840)
@@ -117,6 +120,15 @@ app.whenReady().then(async () => {
       { threadId: 'archive-fixture-51', expectedArchiveRevision: 3 })
     await click('.archive-search button')
     await waitFor("document.querySelectorAll('.archive-row').length === 50")
+    await click('.archive-search input')
+    await window.webContents.insertText('archive-mission-thread')
+    await waitFor("document.querySelector('.archive-empty-actions')?.textContent.includes('查看 1 个匹配的使命')")
+    await click('.archive-empty-actions button')
+    await waitFor("document.querySelector('.archive-row')?.dataset.archiveThread === 'archive-mission-thread'")
+    assert.equal(await run("document.querySelector('.archive-search input').value"), 'archive-mission-thread')
+    await click('.archive-search button')
+    await click('#archive-tab-chat')
+    await waitFor("document.querySelectorAll('.archive-row').length === 50")
     const deleteRow = '[data-archive-thread="archive-fixture-0"] .archive-delete'
     const lastDelete = "window.settingsTest.requests.filter(r => r.method === 'threads.delete').at(-1).params.command"
     await click(deleteRow)
@@ -137,6 +149,7 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelectorAll('.archive-row').length === 1")
     await click('.archive-row .archive-delete')
     await waitFor("document.querySelector('.mission-delete-confirm:not(:disabled)')")
+    assert.equal(await run("document.querySelector('.mission-delete-dialog p strong').textContent"), await run("document.querySelector('.archive-title').textContent"))
     await click('.mission-delete-workspace-option input')
     await run("window.settingsTest.fail('threads.delete')")
     await click('.mission-delete-confirm')

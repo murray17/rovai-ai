@@ -32,7 +32,8 @@ plain-text `+N`, and stationary “执行中” text in one upper-right group. A
 group. The execution-console Steel/Ember dual arcs flow around the complete
 group; the text itself has no sweep animation, and reduced motion keeps the arcs static. Unread uses an 8px
 solid blue dot plus 12px semibold blue “未读” in the footer, and raises that card title from 550 to 600 without
-a background, border or flashing. Card and list menus share this order: 编辑、状态、查看队员、队长、标签、删除. Click opens
+a background, border or flashing. A visible 归档 action on the card, list row and Mission detail header
+archives its Thread. The card and list menus show 编辑、状态、查看队员、队长、标签、归档、删除. Click opens
 submenus; chevrons use the existing 16px icon rhythm. Every actionable row exposes the same neutral hover and
 keyboard-focus background, while 删除 keeps the danger text and soft-danger background. Tags use a lightweight
 search/create/check popover.

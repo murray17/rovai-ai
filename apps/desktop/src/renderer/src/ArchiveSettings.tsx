@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { ArchiveItem, ArchiveKind, DeleteThreadCommand, MissionRecord } from '@contracts'
+import { DialogControlIcon } from './AppDialog'
 import { useThreadClient } from './camp-client'
 import { readErrorMessage } from './error-message'
 import { uiAttribute, useInterfaceLanguage, UiText } from './interface-language'
 import { messageTimeParts, useMessageTimeDate } from './message-time'
 import { MissionDelete } from './MissionBoard'
 import { CompactDialog, MissionFilter } from './MissionControls'
+import { MissionIcon } from './MissionIcon'
 import { NavigationIcon } from './NavigationIcon'
 import { ArchiveCommandRejected, archiveTargetIsRemoved, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
 import { useArchiveRecords } from './useArchiveRecords'
@@ -68,6 +70,7 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   const locks = useRef(new Set<string>())
   const list = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
+  const filters = useRef<HTMLDivElement>(null)
   const tabs = useRef(new Map<ArchiveKind, HTMLButtonElement>())
   const anchor = useRef<ScrollAnchor | null>(null)
   const focusAfter = useRef<{ id: string; neighbors: string[]; kind: ArchiveKind } | null>(null)
@@ -101,6 +104,19 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
     return () => clearTimeout(timer)
   }, [composing, text, query])
 
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent): void => {
+      if (confirm || event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey
+        || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'f'
+        || !search.current?.getClientRects().length) return
+      event.preventDefault()
+      search.current.focus()
+      search.current.select()
+    }
+    window.addEventListener('keydown', focusSearch)
+    return () => window.removeEventListener('keydown', focusSearch)
+  }, [confirm])
+
   useLayoutEffect(() => {
     const visible = new Map(rows().map(element => [element.dataset.archiveThread!, element]))
     if (anchor.current) {
@@ -129,6 +145,13 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   function changeProjects(next: string[]): void {
     setExpanded(null)
     setProjectKeys([...new Set(next)].sort())
+  }
+
+  function clearSearch(): void {
+    setText('')
+    setSearchQuery('')
+    setExpanded(null)
+    search.current?.focus()
   }
 
   function name(projectKey: string, fallback: string): string {
@@ -196,9 +219,13 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   }
   const counts = new Map(result?.groups.map(group => [group.projectKey, group.totalCount]))
   const projects = availableProjects.current?.client === client ? availableProjects.current.projects : []
+  const otherKind = kind === 'chat' ? 'mission' : 'chat'
+  const selectedProjects = projects.filter(project => projectKeys.includes(project.projectKey))
+    .map(project => name(project.projectKey, project.projectName))
   return <section className="archive-settings">
-    <header className="settings-page-heading">
-      <div className="settings-page-heading-copy"><h1><UiText zh="归档" /></h1></div>
+    <header className="archive-heading">
+      <h1><UiText zh="归档" /></h1>
+      <p><UiText zh="已归档的会话和使命保留全部消息与附件，取消归档后回到原来的位置。" /></p>
     </header>
     <div className="archive-toolbar">
       <div role="tablist" aria-label={uiAttribute('归档类型')} className="archive-tabs">
@@ -210,25 +237,39 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
             if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
             event.preventDefault()
             const next = event.key === 'Home' ? kinds[0] : event.key === 'End' ? kinds[1] : kinds[1 - index]
+            selectKind(next)
             tabs.current.get(next)?.focus()
           }}>
+          {item === 'chat' ? <NavigationIcon name="messages" /> : <MissionIcon />}
           {item === 'chat' ? <UiText zh="会话" /> : <UiText zh="使命" />}
           {result && <span className="archive-count">{result.matchingCounts[item]}</span>}
         </button>)}
       </div>
-      <div className="archive-filters">
+      <div className="archive-filters" ref={filters}>
         <MissionFilter label={uiAttribute('项目')} icon={<NavigationIcon name="folder-open" />}
           values={projectKeys} onChange={changeProjects}
           options={projects
             .map(project => ({ id: project.projectKey, label: name(project.projectKey, project.projectName), keywords: project.projectKey, count: project.count }))} />
-        <div className="archive-search">
+        {projectKeys.length > 0 && <button type="button" className="mission-clear-filters" aria-label={uiAttribute('清除筛选')}
+          title={uiAttribute('清除筛选')} onClick={() => {
+            changeProjects([])
+            filters.current?.querySelector<HTMLButtonElement>('.mission-filter')?.focus()
+          }}><DialogControlIcon name="close" /></button>}
+        <span className="archive-filter-divider" aria-hidden="true" />
+        <div className="mission-search archive-search">
           <NavigationIcon name="search" />
-          <input ref={search} type="text" aria-label={uiAttribute('搜索标题或会话 ID')} placeholder={uiAttribute('搜索标题或会话 ID')}
+          <input ref={search} type="search" autoComplete="off" spellCheck={false} aria-label={uiAttribute('搜索标题或会话 ID')}
+            placeholder={uiAttribute(kind === 'chat' ? '搜索已归档会话…' : '搜索已归档使命…')}
             value={text} onChange={event => setText(event.currentTarget.value)}
+            onKeyDown={event => {
+              if (event.key === 'Escape' && !event.nativeEvent.isComposing && !composing && text) {
+                event.preventDefault(); event.stopPropagation(); clearSearch()
+              }
+            }}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={event => { setText(event.currentTarget.value); setComposing(false) }} />
-          {text && <button type="button" className="archive-icon-button" aria-label={uiAttribute('清除搜索')}
-            onClick={() => { setText(''); setSearchQuery(''); setExpanded(null); search.current?.focus() }}>×</button>}
+          {text && <button type="button" aria-label={uiAttribute('清除搜索')}
+            onClick={clearSearch}><DialogControlIcon name="close" /></button>}
         </div>
       </div>
     </div>
@@ -237,11 +278,19 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
       {actionError && <p className="compact-inline-error" role="alert">{actionError}</p>}
       {error && <div className="archive-status" role="alert"><p>{error}</p><button type="button" className="quiet-button" onClick={refresh}><UiText zh="重试" /></button></div>}
       {!result && !error && <p className="archive-status" role="status"><UiText zh="正在读取归档…" /></p>}
-      {result && !result.items.length && <div className="archive-status" role="status">
-        {!result.totals[kind] ? <UiText zh={kind === 'chat' ? '暂无已归档会话' : '暂无已归档使命'} />
-          : <><p><UiText zh="没有匹配的归档记录" /></p><button type="button" className="quiet-button" onClick={() => {
-            setText(''); setSearchQuery(''); changeProjects([]); search.current?.focus()
-          }}><UiText zh="清除搜索和筛选" /></button></>}
+      {result && !result.items.length && <div className="archive-empty" role="status">
+        {!result.totals[kind] ? <p><UiText zh={kind === 'chat' ? '暂无已归档会话' : '暂无已归档使命'} /></p>
+          : <><h2><UiText zh={kind === 'chat' ? '没有匹配的已归档会话' : '没有匹配的已归档使命'} /></h2>
+            <p>{[searchQuery && uiAttribute('搜索「{0}」', searchQuery),
+              selectedProjects.length > 0 && uiAttribute('项目：{0}', selectedProjects.join(language === 'en' ? ', ' : '、'))]
+              .filter(Boolean).join(' · ')}</p>
+            <div className="archive-empty-actions">
+              {result.matchingCounts[otherKind] > 0 && <button type="button" onClick={() => {
+                selectKind(otherKind)
+                tabs.current.get(otherKind)?.focus()
+              }}>{uiAttribute(otherKind === 'mission' ? '查看 {0} 个匹配的使命' : '查看 {0} 个匹配的会话', String(result.matchingCounts[otherKind]))}</button>}
+              <button type="button" onClick={() => { clearSearch(); changeProjects([]) }}><UiText zh="清除搜索和筛选" /></button>
+            </div></>}
       </div>}
       {[...groups.entries()].map(([projectKey, items]) => <section className="archive-project" key={projectKey}>
         <h2><NavigationIcon name="folder-open" /><span title={projectKey.startsWith('directory:') ? projectKey.slice(10) : undefined}>
@@ -307,7 +356,7 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
     }
   }
 
-  if (mission) return <MissionDelete mission={mission} confirmationStale={confirmationStale}
+  if (mission) return <MissionDelete mission={mission} recordTitle={item.title} confirmationStale={confirmationStale}
     onClose={onClose} onDelete={submitDelete} />
   return <CompactDialog title={uiAttribute(item.missionId ? '删除使命' : '删除会话')} onClose={() => { if (!busy) onClose() }}
     footer={<>
