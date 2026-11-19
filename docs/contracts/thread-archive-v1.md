@@ -36,7 +36,7 @@ Core 在命令网关的同一写事务内设置 `camp.archived_at`，取消该 T
 
 ## 归档管理列表
 
-`threads.archive.list({ cursor?, limit? })` 只返回 `{ items, nextCursor }`。每条摘要含 `threadId`、`missionId`、`title`、`projectKey`、`lastMessageAt`、`threadVersion`。Core 从归档且未进入删除流程的记录中按 Thread ID 升序读取游标之后的记录。默认每页 200 条，有效范围 1 至 500。多取一条判定后续页，若有下一页则返回本页最后一个 Thread ID，末页返回 null。查询使用有界读队列和归档部分索引。最后消息时间沿用可见消息摘要和已有的只读回退。
+`threads.archive.list({ cursor?, limit? })` 只返回 `{ items, nextCursor }`。每条摘要含 `threadId`、`missionId`、`title`、`projectKey`、`lastMessageAt`。Core 从归档且未进入删除流程的记录中按 Thread ID 升序读取游标之后的记录。默认每页 200 条，有效范围 1 至 500。多取一条判定后续页，若有下一页则返回本页最后一个 Thread ID，末页返回 null。查询使用有界读队列和归档部分索引。最后消息时间沿用可见消息摘要和已有的只读回退。
 
 页面依次取齐各页后整体替换。归档状态变化、删除、窗口重新获得焦点时重新读取，期间保留上次完整结果和当前筛选。重复游标使此次读取失败，用户可重试。前端按 `missionId` 区分类型，按裁剪、NFKC 和逐字符小写匹配标题及 Thread ID。标签数量使用搜索和项目条件下的全部匹配记录。项目候选覆盖两种类型及已选项目，候选计数使用当前类型在该项目的全部归档数。
 
@@ -44,4 +44,4 @@ Core 在命令网关的同一写事务内设置 `camp.archived_at`，取消该 T
 
 ## 删除
 
-归档页采用[现有永久删除命令](camp-permanent-deletion-v4.md)，提交确认时使用对话框打开时取得的 Thread 版本。普通删除的权限、幂等、版本检查、工作树处置和后续清理继续适用。使命默认保留工作树与分支。可重试失败在原确认框内显示，保留清理选择。受理成功时显示「已提交删除」。
+归档页采用[现有永久删除命令](camp-permanent-deletion-v4.md)，确认后提交选中的 Thread ID 和工作树处置选项。权限、幂等和后续清理由公共删除服务处理。使命默认保留工作树与分支。可重试失败在原确认框内显示，保留清理选择。受理成功时显示「已提交删除」。

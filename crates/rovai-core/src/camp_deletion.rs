@@ -84,21 +84,13 @@ impl ThreadDeletionService {
                 ));
             }
 
-            let version = transaction
-                .query_row(
-                    "SELECT version FROM camp WHERE id = ?1",
-                    [&envelope.payload.camp_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?;
-            let Some(version) = version else {
+            let exists: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
+                [&envelope.payload.camp_id],
+                |row| row.get(0),
+            )?;
+            if !exists {
                 return Ok(rejected("camp.not_found", "Thread does not exist"));
-            };
-            if version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "command.version_conflict",
-                    json!({ "currentVersion": version }),
-                ));
             }
             if envelope.payload.workspace_disposition == MissionWorkspaceDisposition::Retain {
                 let cleanup_running: bool = transaction.query_row(
@@ -639,7 +631,6 @@ mod tests {
     fn deletion_envelope(
         command_id: String,
         camp_id: &str,
-        expected_version: i64,
     ) -> CommandEnvelope<DeleteThreadCommand> {
         CommandEnvelope {
             command_id,
@@ -651,7 +642,6 @@ mod tests {
             execution_epoch: None,
             payload: DeleteThreadCommand {
                 camp_id: camp_id.to_string(),
-                expected_version,
                 force: true,
                 workspace_disposition: MissionWorkspaceDisposition::Retain,
             },
@@ -674,7 +664,7 @@ mod tests {
         let camp_id = crate::camp_id::ThreadId::new().to_string();
         insert_test_camp(&database, &camp_id);
         let operation_id = Uuid::new_v4().to_string();
-        let envelope = deletion_envelope(operation_id.clone(), &camp_id, 1);
+        let envelope = deletion_envelope(operation_id.clone(), &camp_id);
 
         let accepted = ThreadDeletionService::default()
             .accept(&mut database, &envelope)
@@ -707,7 +697,7 @@ mod tests {
         let duplicate = ThreadDeletionService::default()
             .accept(
                 &mut database,
-                &deletion_envelope(Uuid::new_v4().to_string(), &camp_id, 999),
+                &deletion_envelope(Uuid::new_v4().to_string(), &camp_id),
             )
             .unwrap();
         assert_eq!(duplicate.result.status, CommandResultStatus::Accepted);
@@ -747,7 +737,7 @@ mod tests {
             )
             .unwrap();
         let operation_id = Uuid::new_v4().to_string();
-        let mut envelope = deletion_envelope(operation_id.clone(), &camp_id, 1);
+        let mut envelope = deletion_envelope(operation_id.clone(), &camp_id);
         envelope.payload.workspace_disposition = MissionWorkspaceDisposition::Cleanup;
 
         let accepted = ThreadDeletionService::default()

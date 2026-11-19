@@ -341,8 +341,7 @@ try {
     if(await browser.evaluate("document.querySelector('#camp-message .project-file-reference').getAttribute('data-availability')==='available'")) assert.deepEqual(await browser.evaluate("[...document.querySelectorAll('.project-file-actions button')].map(node=>node.textContent)"),['打开预览','重新选择','移除引用'])
     const held=await holdProjectFileRequest(browser,'projectFileReferences.resolve',undefined,override)
     // Existing directory invalidation refreshes availability without a normal-state Retry action.
-    const snapshot=await call('threads.open',{threadId:quick,traceId:randomUUID()})
-    assert.equal((await call('threads.rename',{commandId:randomUUID(),command:{threadId:quick,expectedVersion:snapshot.thread.version,title:`Project files · refresh ${++refreshSequence}`}})).status,'applied')
+    assert.equal((await call('threads.rename',{commandId:randomUUID(),command:{threadId:quick,title:`Project files · refresh ${++refreshSequence}`}})).status,'applied')
     return held()
   }
   const rootFailure=await checkFile({ok:false,error:{code:'root_unavailable'}})

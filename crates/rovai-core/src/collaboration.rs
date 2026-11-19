@@ -171,7 +171,6 @@ pub struct RenameThreadCommand {
     #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub title: String,
-    pub expected_version: i64,
 }
 
 impl sealed::Sealed for RenameThreadCommand {}
@@ -201,7 +200,6 @@ pub struct ChangeDefaultLeadCommand {
     #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     pub successor_agent_id: String,
-    pub expected_version: i64,
 }
 
 impl sealed::Sealed for ChangeDefaultLeadCommand {}
@@ -228,7 +226,6 @@ pub struct DeleteThreadCommand {
     #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
-    pub expected_version: i64,
     #[serde(default)]
     pub force: bool,
     #[serde(default)]
@@ -1127,26 +1124,15 @@ impl CollaborationService {
                     "A pending Thread must be activated by its first message",
                 ));
             }
-            if version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "command.version_conflict",
-                    json!({ "currentVersion": version }),
-                ));
-            }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 UPDATE camp
                 SET title = ?2, name_origin = 'user',
                     version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?4
+                WHERE id = ?1
                 "#,
-                params![
-                    envelope.payload.camp_id,
-                    title,
-                    now,
-                    envelope.payload.expected_version,
-                ],
+                params![envelope.payload.camp_id, title, now,],
             )?;
             append_domain_event(
                 transaction,
@@ -1194,12 +1180,6 @@ impl CollaborationService {
                     "A pending Thread must be activated by its first message",
                 ));
             }
-            if version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "command.version_conflict",
-                    json!({ "currentVersion": version }),
-                ));
-            }
             if !actor_has_capability(
                 transaction,
                 &envelope.actor,
@@ -1227,13 +1207,12 @@ impl CollaborationService {
                 r#"
                 UPDATE camp
                 SET default_lead_agent_id = ?2, version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?4
+                WHERE id = ?1
                 "#,
                 params![
                     envelope.payload.camp_id,
                     envelope.payload.successor_agent_id,
                     now,
-                    envelope.payload.expected_version,
                 ],
             )?;
             append_domain_event(
@@ -1374,104 +1353,6 @@ impl CollaborationService {
                     entity_type: "camp".to_string(),
                     entity_id: envelope.payload.camp_id.clone(),
                 }),
-            ))
-        })
-    }
-
-    pub fn delete_camp(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<DeleteThreadCommand>,
-    ) -> Result<CommandExecution> {
-        self.delete_camp_after_settlement(database, envelope, &[])
-    }
-
-    pub fn delete_camp_after_settlement(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<DeleteThreadCommand>,
-        prior_blockers: &[Value],
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            if !matches!(envelope.actor, ActorRef::User { .. }) {
-                return Ok(rejected(
-                    "camp.delete_user_required",
-                    "Only a User can permanently delete a Thread",
-                ));
-            }
-            let version = transaction
-                .query_row(
-                    "SELECT version FROM camp WHERE id = ?1",
-                    [&envelope.payload.camp_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?;
-            let Some(version) = version else {
-                return Ok(rejected("camp.not_found", "Thread does not exist"));
-            };
-            if version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "command.version_conflict",
-                    json!({ "currentVersion": version }),
-                ));
-            }
-
-            let mut blockers = camp_delete_blockers(transaction, &envelope.payload.camp_id)?;
-            if envelope.payload.force {
-                for blocker in prior_blockers {
-                    if !blockers.contains(blocker) {
-                        blockers.push(blocker.clone());
-                    }
-                }
-            }
-            if !blockers.is_empty() && !envelope.payload.force {
-                return Ok(CommandHandlerResult::rejected(
-                    "camp.delete_blocked",
-                    json!({ "threadId": envelope.payload.camp_id, "blockers": blockers }),
-                ));
-            }
-
-            let forced = !blockers.is_empty();
-            if envelope.payload.workspace_disposition == MissionWorkspaceDisposition::Retain {
-                let cleanup_running: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM mission_workspace WHERE camp_id=?1 AND state='cleanup_pending' AND NOT (cleanup_worktree_removed=1 AND cleanup_branch_removed=1))",
-                    [&envelope.payload.camp_id],
-                    |row| row.get(0),
-                )?;
-                if cleanup_running {
-                    return Ok(CommandHandlerResult::rejected(
-                        "camp.workspace_cleanup_pending",
-                        json!({"threadId": envelope.payload.camp_id}),
-                    ));
-                }
-            }
-            transaction.execute(
-                "DELETE FROM mission_workspace WHERE camp_id=?1 AND cleanup_worktree_removed=1 AND cleanup_branch_removed=1",
-                [&envelope.payload.camp_id],
-            )?;
-            let workspace_cleanup_scheduled = match envelope.payload.workspace_disposition {
-                MissionWorkspaceDisposition::Cleanup => transaction.execute(
-                    "UPDATE mission_workspace SET generation=generation+CASE WHEN state='ready' THEN 1 ELSE 0 END,state='cleanup_pending',cleanup_command_id=CASE WHEN state='cleanup_pending' THEN cleanup_command_id ELSE ?2 END,diagnostic=NULL,updated_at=?3 WHERE camp_id=?1 AND NOT (cleanup_worktree_removed=1 AND cleanup_branch_removed=1)",
-                    params![envelope.payload.camp_id, envelope.command_id, chrono::Utc::now().to_rfc3339()],
-                )?,
-                MissionWorkspaceDisposition::Retain => {
-                    transaction.execute(
-                        "UPDATE mission_workspace SET state='ready',cleanup_command_id=NULL,diagnostic=NULL,updated_at=?2 WHERE camp_id=?1 AND state IN ('cleanup_pending','cleanup_failed') AND NOT (cleanup_worktree_removed=1 AND cleanup_branch_removed=1)",
-                        params![envelope.payload.camp_id, chrono::Utc::now().to_rfc3339()],
-                    )?;
-                    0
-                }
-            };
-            delete_camp_aggregate(transaction, &envelope.payload.camp_id)?;
-            Ok(CommandHandlerResult::applied(
-                "camp.deleted",
-                json!({
-                    "threadId": envelope.payload.camp_id,
-                    "forced": forced,
-                    "bypassedBlockers": if forced { blockers } else { Vec::new() },
-                    "workspaceCleanupScheduled": workspace_cleanup_scheduled > 0,
-                }),
-                None,
             ))
         })
     }
@@ -5253,127 +5134,6 @@ fn content_after_leading_mentions(
     &content[cursor..]
 }
 
-pub(crate) fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<Value>> {
-    let checks = [
-        (
-            "nonterminal_agent_run",
-            r#"
-            SELECT COUNT(*)
-            FROM agent_run
-            LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
-              AND agent_run.status IN ('queued', 'running', 'waiting')
-            "#,
-        ),
-        (
-            "nonterminal_camp_turn",
-            r#"
-            SELECT COUNT(*) FROM camp_turn
-            WHERE camp_id = ?1 AND status IN ('running', 'waiting')
-            "#,
-        ),
-        (
-            "pending_approval",
-            r#"
-            SELECT COUNT(*)
-            FROM approval
-            LEFT JOIN task ON task.id = approval.task_id
-            LEFT JOIN action_execution ON action_execution.id = approval.action_id
-            LEFT JOIN agent_run ON agent_run.id = action_execution.agent_run_id
-            LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE approval.status = 'pending'
-              AND (task.camp_id = ?1 OR COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1)
-            "#,
-        ),
-        (
-            "unsettled_action",
-            r#"
-            SELECT COUNT(*)
-            FROM action_execution
-            JOIN agent_run ON agent_run.id = action_execution.agent_run_id
-            LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
-              AND (
-                action_execution.status IN ('prepared', 'executing')
-                OR (action_execution.status = 'unknown'
-                    AND action_execution.unknown_disposition = 'active')
-              )
-            "#,
-        ),
-        (
-            "pending_message_delivery",
-            r#"
-            SELECT COUNT(*) FROM message_delivery
-            WHERE camp_id = ?1 AND status IN ('pending', 'running')
-            "#,
-        ),
-        (
-            "waiting_camp_message_delivery",
-            r#"
-            SELECT COUNT(*) FROM camp_message_delivery
-            WHERE camp_id = ?1 AND status IN ('waiting', 'claimed')
-            "#,
-        ),
-        (
-            "pending_runtime_delivery",
-            r#"
-            SELECT COUNT(*)
-            FROM runtime_delivery_checkpoint
-            JOIN agent_run ON agent_run.id = runtime_delivery_checkpoint.agent_run_id
-            LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
-              AND runtime_delivery_checkpoint.status NOT IN ('acked', 'safely_closed')
-            "#,
-        ),
-        (
-            "pending_context_delivery",
-            r#"
-            SELECT COUNT(*)
-            FROM runtime_input_delivery
-            JOIN agent_run ON agent_run.id = runtime_input_delivery.agent_run_id
-            LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
-              AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
-            "#,
-        ),
-        (
-            "active_worker_lease",
-            r#"
-            SELECT
-                (SELECT COUNT(*)
-                 FROM agent_run
-                 LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                 WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
-                   AND agent_run.execution_lease_owner IS NOT NULL)
-              + (SELECT COUNT(*)
-                 FROM action_execution
-                 JOIN agent_run ON agent_run.id = action_execution.agent_run_id
-                 LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                 WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
-                   AND action_execution.execution_lease_owner IS NOT NULL)
-              + (SELECT COUNT(*) FROM message_delivery_attempt
-                 JOIN message_delivery ON message_delivery.id = message_delivery_attempt.delivery_id
-                 WHERE message_delivery.camp_id = ?1 AND message_delivery_attempt.status = 'attempting')
-            "#,
-        ),
-        (
-            "unfinished_membership_change",
-            r#"
-            SELECT COUNT(*) FROM camp_member
-            WHERE camp_id = ?1 AND leave_requested_at IS NOT NULL
-            "#,
-        ),
-    ];
-    let mut blockers = Vec::new();
-    for (code, sql) in checks {
-        let count: i64 = transaction.query_row(sql, [camp_id], |row| row.get(0))?;
-        if count > 0 {
-            blockers.push(json!({ "code": code, "count": count }));
-        }
-    }
-    Ok(blockers)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreadTurnExecutionBudgetExhaustion {
     pub newly_exhausted: bool,
@@ -7376,7 +7136,6 @@ mod slow_tests {
                     RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: "不应提前生效".to_string(),
-                        expected_version: 1,
                     },
                 ),
             )
@@ -9089,6 +8848,21 @@ mod slow_tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    fn finish_accepted_thread_deletion(database: &mut Database, camp_id: &str) {
+        let deletion = crate::camp_deletion::ThreadDeletionService::default();
+        let views =
+            crate::camp_attachment_view::ThreadAttachmentViewStore::for_test(database).unwrap();
+        let candidate = deletion.due_camps(database, 1).unwrap().remove(0);
+        assert_eq!(candidate.camp_id, camp_id);
+        let cleanup = views
+            .prepare_camp_delete_cleanup(database, camp_id, &candidate.operation_id)
+            .unwrap()
+            .unwrap();
+        deletion
+            .commit_business_delete(database, &views, &candidate, &cleanup, &[])
+            .unwrap();
+    }
+
     fn camp_version(database: &Database, camp_id: &str) -> i64 {
         database
             .connection()
@@ -9155,44 +8929,14 @@ mod slow_tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
     #[test]
-    fn camp_rename_lead_change_and_quiescent_delete_with_cleanup_are_versioned() {
+    fn rename_lead_change_and_delete_apply_after_thread_activity() {
         let (mut database, directory) = test_database();
         crate::task_capability::set(database.connection(), true).unwrap();
         let service = CollaborationService::default();
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
-        let rename_version = camp_version(&database, &camp_id);
-        let renamed = service
-            .rename_camp(
-                &mut database,
-                &user_envelope(
-                    "rename-camp",
-                    Some(&camp_id),
-                    RenameThreadCommand {
-                        camp_id: camp_id.clone(),
-                        title: "  新的\n标题 ".to_string(),
-                        expected_version: rename_version,
-                    },
-                ),
-            )
-            .expect("Camp should be renamed");
-        assert_eq!(renamed.result.code, "camp.renamed");
-        let lead_version = camp_version(&database, &camp_id);
-        let changed = service
-            .change_default_lead(
-                &mut database,
-                &user_envelope(
-                    "change-lead",
-                    Some(&camp_id),
-                    ChangeDefaultLeadCommand {
-                        camp_id: camp_id.clone(),
-                        successor_agent_id: "agent_2".to_string(),
-                        expected_version: lead_version,
-                    },
-                ),
-            )
-            .expect("Default Lead should change");
-        assert_eq!(changed.result.code, "camp.default_lead_changed");
+        // A client that opened the Thread before this message can still send its old wire shape.
+        let initial_version = camp_version(&database, &camp_id);
         service
             .send_test_camp_message(
                 &mut database,
@@ -9211,6 +8955,42 @@ mod slow_tests {
                 ),
             )
             .expect("ordinary message should persist");
+        let message_version = camp_version(&database, &camp_id);
+        assert!(message_version > initial_version);
+        let renamed = service
+            .rename_camp(
+                &mut database,
+                &user_envelope(
+                    "rename-camp",
+                    Some(&camp_id),
+                    serde_json::from_value(json!({
+                        "threadId": camp_id,
+                        "title": "  新的\n标题 ",
+                        "expectedVersion": initial_version
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .expect("Camp should be renamed");
+        assert_eq!(renamed.result.code, "camp.renamed");
+        assert_eq!(renamed.result.payload["version"], message_version + 1);
+        let changed = service
+            .change_default_lead(
+                &mut database,
+                &user_envelope(
+                    "change-lead",
+                    Some(&camp_id),
+                    serde_json::from_value(json!({
+                        "threadId": camp_id,
+                        "successorAgentId": "agent_2",
+                        "expectedVersion": initial_version
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .expect("Default Lead should change");
+        assert_eq!(changed.result.code, "camp.default_lead_changed");
+        assert_eq!(changed.result.payload["version"], message_version + 2);
         let completed_execution = service
             .send_test_camp_message(
                 &mut database,
@@ -9331,24 +9111,26 @@ mod slow_tests {
             "INSERT INTO mission_workspace(id,mission_id,camp_id,execution_host_id,source_directory,repository_root,git_common_dir,worktree_path,working_directory,base_branch,branch,base_sha,preparation_token,state,diagnostic,created_at,updated_at) VALUES('workspace-before-delete','mission-before-delete',?1,?2,'/repo','/repo','/repo/.git','/worktree','/worktree','main','rovai/mission/001','base','owner','ready','old diagnostic','created','updated')",
             params![camp_id, execution_host_id],
         ).unwrap();
-        let delete_version = camp_version(&database, &camp_id);
+        let operation_id = Uuid::new_v4().to_string();
         let delete_envelope = user_envelope(
-            "delete-camp",
+            &operation_id,
             Some(&camp_id),
-            DeleteThreadCommand {
-                camp_id: camp_id.clone(),
-                expected_version: delete_version,
-                force: false,
-                workspace_disposition: MissionWorkspaceDisposition::Cleanup,
-            },
+            serde_json::from_value(json!({
+                "threadId": camp_id,
+                "expectedVersion": initial_version,
+                "workspaceDisposition": "cleanup"
+            }))
+            .unwrap(),
         );
-        let delete = service
-            .delete_camp(&mut database, &delete_envelope)
-            .expect("quiescent Camp should be deleted");
-        let replay = service
-            .delete_camp(&mut database, &delete_envelope)
+        let deletion = crate::camp_deletion::ThreadDeletionService::default();
+        let delete = deletion
+            .accept(&mut database, &delete_envelope)
+            .expect("deletion should be accepted");
+        finish_accepted_thread_deletion(&mut database, &camp_id);
+        let replay = deletion
+            .accept(&mut database, &delete_envelope)
             .expect("delete should replay");
-        assert_eq!(delete.result.code, "camp.deleted");
+        assert_eq!(delete.result.code, "camp.delete_accepted");
         assert_eq!(delete.result.payload["workspaceCleanupScheduled"], true);
         assert!(replay.replayed);
         let cleanup_intent: (String, Option<String>, i64, Option<String>) = database
@@ -9361,12 +9143,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             cleanup_intent,
-            (
-                "cleanup_pending".into(),
-                Some("delete-camp".into()),
-                2,
-                None
-            )
+            ("cleanup_pending".into(), Some(operation_id), 2, None)
         );
         assert_eq!(row_count(&database, "camp"), 0);
         assert_eq!(row_count(&database, "camp_member"), 0);
@@ -9391,7 +9168,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn camp_delete_blocks_by_default_and_force_removes_running_work() {
+    fn accepted_delete_stops_running_work_and_replays_after_cleanup() {
         let (mut database, directory) = test_database();
         configure_test_runtime(&database, &["agent_1"]);
         let service = CollaborationService::default();
@@ -9439,35 +9216,6 @@ mod slow_tests {
                 .unwrap(),
             "attachment mutation fencing must recognize a running Delivery-first Run",
         );
-        let delete_version = camp_version(&database, &camp_id);
-        let result = service
-            .delete_camp(
-                &mut database,
-                &user_envelope(
-                    "delete-running-camp",
-                    Some(&camp_id),
-                    DeleteThreadCommand {
-                        camp_id: camp_id.clone(),
-                        expected_version: delete_version,
-                        force: false,
-                        workspace_disposition: Default::default(),
-                    },
-                ),
-            )
-            .expect("delete blocker should be a durable result");
-
-        assert_eq!(result.result.status, CommandResultStatus::Rejected);
-        assert_eq!(result.result.code, "camp.delete_blocked");
-        assert!(
-            result.result.payload["blockers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|blocker| blocker["code"] == "nonterminal_agent_run")
-        );
-        assert_eq!(row_count(&database, "camp"), 1);
-        assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 1);
         let epoch = database
             .connection()
             .query_row(
@@ -9483,25 +9231,18 @@ mod slow_tests {
         assert_eq!(cleanup_targets.len(), 1);
         assert_eq!(cleanup_targets[0].adapter_kind, AdapterKind::CodexCli);
         let runtime = ExecutionRuntimeService::default();
-        let stale = runtime
-            .settle_forced_camp_deletion(
-                &mut database,
-                &camp_id,
-                delete_version + 1,
-                "stale-force-delete",
-            )
-            .unwrap();
-        assert!(stale.is_err());
-        assert_eq!(runtime.count_nonterminal_agent_runs(&database).unwrap(), 1);
-        let prior_blockers = runtime
-            .settle_forced_camp_deletion(
-                &mut database,
-                &camp_id,
-                delete_version,
-                "force-delete-running-camp",
-            )
-            .unwrap()
-            .unwrap();
+        let deletion = crate::camp_deletion::ThreadDeletionService::default();
+        let envelope = user_envelope(
+            &Uuid::new_v4().to_string(),
+            Some(&camp_id),
+            DeleteThreadCommand {
+                camp_id: camp_id.clone(),
+                force: false,
+                workspace_disposition: Default::default(),
+            },
+        );
+        let accepted = deletion.accept(&mut database, &envelope).unwrap();
+        assert_eq!(accepted.result.code, "camp.delete_accepted");
         assert_eq!(runtime.count_nonterminal_agent_runs(&database).unwrap(), 0);
         database.connection().execute(
             "UPDATE agent_run SET cancel_requested_at='old-stop',cancel_reason_code='user_requested',cancel_acknowledged_at=NULL WHERE id=?1",
@@ -9548,51 +9289,10 @@ mod slow_tests {
                 .unwrap(),
             "selecting current cleanup targets must not fabricate a historical ACK"
         );
-        let forced = service
-            .delete_camp_after_settlement(
-                &mut database,
-                &user_envelope(
-                    "force-delete-running-camp",
-                    Some(&camp_id),
-                    DeleteThreadCommand {
-                        camp_id: camp_id.clone(),
-                        expected_version: delete_version,
-                        force: true,
-                        workspace_disposition: Default::default(),
-                    },
-                ),
-                &prior_blockers,
-            )
-            .expect("forced delete should commit");
-
-        let replay = DomainCommandGateway
-            .replay_if_recorded(
-                &database,
-                &user_envelope(
-                    "force-delete-running-camp",
-                    Some(&camp_id),
-                    DeleteThreadCommand {
-                        camp_id: camp_id.clone(),
-                        expected_version: delete_version,
-                        force: true,
-                        workspace_disposition: Default::default(),
-                    },
-                ),
-            )
-            .unwrap()
-            .unwrap();
+        finish_accepted_thread_deletion(&mut database, &camp_id);
+        let replay = deletion.accept(&mut database, &envelope).unwrap();
         assert!(replay.replayed);
-        assert_eq!(replay.result, forced.result);
-        assert_eq!(forced.result.status, CommandResultStatus::Applied);
-        assert_eq!(forced.result.code, "camp.deleted");
-        assert_eq!(forced.result.payload["forced"], true);
-        assert!(
-            forced.result.payload["bypassedBlockers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|blocker| blocker["code"] == "nonterminal_agent_run")
-        );
+        assert_eq!(replay.result, accepted.result);
         assert_eq!(row_count(&database, "camp"), 0);
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 0);

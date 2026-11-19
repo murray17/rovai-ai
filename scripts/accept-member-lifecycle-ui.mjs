@@ -1318,16 +1318,10 @@ try {
   )
   await capture(running.cdp, captures.memberProjectNavigation)
   await openCamp(running.cdp, projectCampTitle)
-  const projectSnapshot = await request(running.cdp, 'camps.snapshot', {
-    threadId: projectCampId
-  })
   await openMembers(running.cdp)
   const deletedProjectCamp = await request(running.cdp, 'camps.delete', {
     commandId: crypto.randomUUID(),
-    command: {
-      threadId: projectCampId,
-      expectedVersion: projectSnapshot.thread.version
-    }
+    command: { threadId: projectCampId }
   })
   assert(
     deletedProjectCamp.status === 'accepted',

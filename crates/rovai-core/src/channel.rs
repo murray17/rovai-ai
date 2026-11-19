@@ -24101,12 +24101,6 @@ mod tests {
         assert_eq!(settled_replay.result, settled.result);
 
         // A local rename changes only the raw title and survives the next FIFO root.
-        let version = database
-            .connection()
-            .query_row("SELECT version FROM camp WHERE id = ?1", [camp_id], |row| {
-                row.get(0)
-            })
-            .unwrap();
         let renamed = crate::collaboration::CollaborationService::default()
             .rename_camp(
                 &mut database,
@@ -24121,7 +24115,6 @@ mod tests {
                     payload: crate::collaboration::RenameThreadCommand {
                         camp_id: camp_id.to_string(),
                         title: "OAuth 登录问题".to_string(),
-                        expected_version: version,
                     },
                 },
             )

@@ -413,28 +413,9 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
                 .count(),
             2
         );
-        let source_version = database
-            .connection()
-            .query_row("SELECT version FROM camp WHERE id=?1", [&source_id], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        let deleted = service
-            .delete_camp(
-                &mut database,
-                &envelope(
-                    &format!("delete-source-{broadcast}"),
-                    Some(&source_id),
-                    DeleteThreadCommand {
-                        camp_id: source_id.clone(),
-                        expected_version: source_version,
-                        force: false,
-                        workspace_disposition: MissionWorkspaceDisposition::Retain,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(deleted.result.code, "camp.deleted");
+        let transaction = database.connection_mut().transaction().unwrap();
+        delete_camp_aggregate(&transaction, &source_id).unwrap();
+        transaction.commit().unwrap();
         assert_eq!(
             crate::camp_content::render_agent_plain_text(
                 database.connection(),

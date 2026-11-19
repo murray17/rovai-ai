@@ -829,9 +829,8 @@ describe('Project directory selection', () => {
 
 describe('Thread snapshot cache', () => {
   it('authorizes physical deletion from the destructive confirmation', () => {
-    expect(campDeleteCommand({ id: 'camp-delete', version: 7 })).toEqual({
+    expect(campDeleteCommand('camp-delete')).toEqual({
       threadId: 'camp-delete',
-      expectedVersion: 7,
       force: true
     })
   })

@@ -22,7 +22,7 @@ accept + durable admission fence
   -> complete cleanup journal
 ```
 
-`ThreadDeletionService` 在短事务内完成 User/exact-version 校验、abortive settlement、Mission Workspace
+`ThreadDeletionService` 在短事务内校验用户身份和目标 Thread，完成 abortive settlement、Mission Workspace
 处置意图和 Thread Deletion Intent。`AgentRuntimeFleetManager` 的 Thread admission gate 覆盖该事务：事务接受时先安装
 进程内 tombstone 再释放 Starting/acquire gate，事务拒绝则不安装。SQLite Thread marker 是唯一持久准入权威，Fleet
 tombstone 只是其当前进程派生；启动恢复在普通 scheduler 运行前重新投影全部 marker。

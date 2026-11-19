@@ -555,9 +555,8 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       }
       assert.ok(!frames.includes('Web SSE Team'), 'SSE exposes invalidation, not private Team contents')
     })())
-    const referenceSource = (await call(first, 'camps.open', { threadId, traceId: crypto.randomUUID() })).thread
     assert.equal((await call(first, 'camps.rename', { commandId: crypto.randomUUID(), command: {
-      threadId, expectedVersion: referenceSource.version, title: 'Reference source renamed'
+      threadId, title: 'Reference source renamed'
     } })).status, 'applied')
     await within((async () => {
       let frames = ''
@@ -968,15 +967,14 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal(JSON.stringify(exported).includes(fixture), false)
     const temporary = await call(first, 'camps.create', { ...createParams, commandId: crypto.randomUUID(), name: 'Temporary remote management Camp' })
     const temporaryId = temporary.payload.threadId
-    const temporaryCamp = (await call(first, 'camps.open', { threadId: temporaryId, traceId: crypto.randomUUID() })).thread
-    const renameParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, expectedVersion: temporaryCamp.version, title: 'Renamed remotely' } }
+    const renameParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, title: 'Renamed remotely' } }
     const renamed = await call(first, 'camps.rename', renameParams)
     assert.equal(renamed.status, 'applied')
     assert.equal((await call(second, 'camps.open', { threadId: temporaryId, traceId: crypto.randomUUID() })).thread.title, 'Renamed remotely')
     for (const operation of ['threads.rename', 'camps.rename']) {
       assert.deepEqual((await call(first, 'commands.reconcile', { operation, params: renameParams })).result, renamed)
     }
-    const deleteParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, expectedVersion: (await call(first, 'camps.open', { threadId: temporaryId, traceId: crypto.randomUUID() })).thread.version, force: false } }
+    const deleteParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, force: false } }
     const deleted = await call(first, 'camps.delete', deleteParams)
     assert.equal(deleted.status, 'accepted')
     assert.equal(await call(first, 'camps.exists', { threadId: temporaryId }), false)
@@ -999,8 +997,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const deletingSource = { ...transferSource, threadId: deletingId }
     const deletingGrant = await grant(deletingSource)
     const deletingStream = await fetch(origin + deletingGrant.url)
-    const deletingVersion = (await call(first, 'camps.open', { threadId: deletingId, traceId: crypto.randomUUID() })).thread.version
-    assert.equal((await host.request('camps.delete', { commandId: crypto.randomUUID(), command: { threadId: deletingId, expectedVersion: deletingVersion, force: false } })).status, 'accepted')
+    assert.equal((await host.request('camps.delete', { commandId: crypto.randomUUID(), command: { threadId: deletingId, force: false } })).status, 'accepted')
     let drainedAfterDeletion = 0
     for await (const bytes of deletingStream.body) drainedAfterDeletion += bytes.length
     assert.equal(drainedAfterDeletion, sizeForSlow, 'business deletion does not interrupt an admitted stream')

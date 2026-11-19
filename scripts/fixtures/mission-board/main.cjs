@@ -304,7 +304,7 @@ app.whenReady().then(async () => {
   const acceptance = mode === 'mentions' ? 'window.missionQA.runMentions()' : mode === 'large-diff'
     ? 'window.missionQA.runLargeDiff()'
     : mode === 'checkout-view' ? 'window.missionQA.runCheckoutView()'
-      : mode === 'delete-trace' ? 'window.missionQA.runDeleteTrace()' : 'window.missionQA.run()'
+      : mode === 'delete' ? 'window.missionQA.runDelete()' : 'window.missionQA.run()'
   stage = 'renderer acceptance'
   const report = await window.webContents.executeJavaScript(`Promise.resolve().then(() => ${acceptance}).catch(error => ({ ok: false, error: error?.stack ?? String(error) }))`, true)
   if (!report.ok) {
@@ -320,7 +320,7 @@ app.whenReady().then(async () => {
       writeFileSync(join(dirname(userData), `mission-mentions-${theme}.png`), (await window.webContents.capturePage()).toPNG())
     }
   }
-  if (mode === 'mentions' || mode === 'large-diff' || mode === 'checkout-view' || mode === 'delete-trace') {
+  if (mode === 'mentions' || mode === 'large-diff' || mode === 'checkout-view' || mode === 'delete') {
     console.log(JSON.stringify(report)); app.exit(report.ok ? 0 : 1); return
   }
   report.layouts = narrowLayout
