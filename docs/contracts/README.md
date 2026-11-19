@@ -8,7 +8,7 @@ last_updated: 2026-11-16
 
 User 的主称呼、结构化提及及冻结恢复见 [User Naming v1](user-naming-v1.md)。
 
-公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v43/v44](context-manifest-evidence-v44.md)、[Built-in Tool Transport v45](builtin-tool-transport-v45.md)。
+公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v43/v44](context-manifest-evidence-v44.md)、[Built-in Tool Transport v46](builtin-tool-transport-v46.md)。
 
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
@@ -28,7 +28,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Thread Fork v1](thread-fork-v1.md)：公开历史的原子副本、应用作用域回执与前台导航恢复；后继读取和执行复用普通 Thread。
 
 - [Durable Task v6](durable-task-v6.md)
-- [Built-in Tool Transport v45](builtin-tool-transport-v45.md)：引用输出统一为 kind/text；继承 [v44（历史）](builtin-tool-transport-v44.md) 的 Thread read 正向分页、Send 输入来源与 Task 发现边界。
+- [Built-in Tool Transport v46](builtin-tool-transport-v46.md) 将两个消息搜索的成功结果精简为两个顶层字段。引用输出见 [v45（历史）](builtin-tool-transport-v45.md)，Thread read 正向分页与 Send 输入来源见 [v44（历史）](builtin-tool-transport-v44.md)。
 - [ContextManifest Evidence v43 / v44](context-manifest-evidence-v44.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
 - [Run Facts v10](run-facts-v10.md)
@@ -99,7 +99,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp History v12（历史）](camp-history-v12.md)：mentions 统一，作者字段保留原始身份。
 - [ContextManifest v34（历史）](context-manifest-evidence-v34.md)：路由投影精简，public 34/11/9、non-batch 35/12/6，旧输入原格式恢复。
 - [ContextManifest v33（历史）](context-manifest-evidence-v33.md)：新 Run Mention 字段、原版本恢复和现有预算/摘要。
-- [Camp History v17（当前）](camp-history-v17.md)：引用直接读取保存的文字，不过滤来源；继承 [v16（历史）](camp-history-v16.md) 的分页、消息可见性和读取预算。
+- [Camp History v18（当前）](camp-history-v18.md) 定义完整扫描后的成功输出。匹配和引用沿用 [v17（历史）](camp-history-v17.md)，分页和可见性继承 [v16（历史）](camp-history-v16.md)。
 - [Camp History v13（历史）](camp-history-v13.md)：read/search 统一发送者，Agent Output 12；历史回执保持。
 
 ## 生命周期

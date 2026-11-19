@@ -653,7 +653,7 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
     assert_eq!(&history["items"][0]["mentions"], mentions);
     let search = crate::camp_history::ThreadHistoryService
         .search_camp(
-            &mut db,
+            &db,
             &crate::team_tool::AuthenticatedTeamToolRun {
                 camp_id: target.clone(),
                 agent_id: "agent_1".into(),

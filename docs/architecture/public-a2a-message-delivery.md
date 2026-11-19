@@ -10,7 +10,7 @@ last_updated: 2026-11-10
 
 本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v30](../contracts/camp-message-send-v31.md)、
 [Message Delivery v18](../contracts/message-delivery-v18.md)、[ContextManifest v43/v44](../contracts/context-manifest-evidence-v44.md)
-与 [Camp History v17](../contracts/camp-history-v17.md)。Single Chat 不使用本主链。
+与 [Camp History v18](../contracts/camp-history-v18.md)。Single Chat 不使用本主链。
 
 ## 三类事实
 
@@ -93,7 +93,7 @@ Single Chat Pending 接续与 non-batch Run 由自己的提交后通知推进，
 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)，展示见
 [Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)。
 
-RUN_INPUT 沿用冻结输入可见性；显式 read/search 使用 [History v17](../contracts/camp-history-v17.md) 的主动查询可见性。
+RUN_INPUT 沿用冻结输入可见性；显式 read/search 使用 [History v18](../contracts/camp-history-v18.md) 的主动查询可见性。
 公共 Thread 历史对所有受认证队员可读；membership 只控制参与、寻址与执行，不是历史 ACL。
 已保存 quotes 按承载消息的权限投影 kind/text，不重读或过滤来源，见 [Message Quotes v2](../contracts/message-quotes-v2.md)。
 ContextManifest 冻结当前输入和 discovery 时序证据，但 `thread.read` 按调用时最新状态解析存续 Thread，

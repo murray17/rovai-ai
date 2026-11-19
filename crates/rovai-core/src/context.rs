@@ -10422,7 +10422,29 @@ mod slow_tests {
 
     #[test]
     fn current_history_reads_live_state_without_id_guessing() {
+        use crate::collaboration::message_mutation::{
+            DeleteThreadMessageCommand, EditThreadMessageCommand,
+        };
+
+        fn user_command<T>(thread: &str, payload: T) -> CommandEnvelope<T> {
+            CommandEnvelope {
+                command_id: Uuid::new_v4().to_string(),
+                actor: ActorRef::User {
+                    user_id: crate::current_user::CURRENT_USER_ID.into(),
+                },
+                camp_id: Some(thread.into()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload,
+            }
+        }
+
         let mut fixture = fixture();
+        fixture
+            .database
+            .connection()
+            .execute_batch("PRAGMA journal_mode=WAL")
+            .unwrap();
         let run = materialize_history_fixture(&mut fixture);
         let initial_message_id: String = fixture
             .database
@@ -10447,18 +10469,15 @@ mod slow_tests {
         assert_eq!(empty["threads"].as_array().unwrap().len(), 0);
         assert_eq!(empty["truncated"], false);
 
+        let before_publication =
+            ThreadHistoryService::open_search_snapshot(&fixture.database).unwrap();
+        assert!(before_publication.is_readonly("main").unwrap());
         let late = CollaborationService::default()
             .send_test_camp_message(
                 &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: ActorRef::User {
-                        user_id: "test-user".to_string(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: TestThreadMessageCommand {
+                &user_command(
+                    &fixture.camp_id,
+                    TestThreadMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
@@ -10467,23 +10486,25 @@ mod slow_tests {
                         reply_to_camp_message_id: Some(initial_message_id.clone()),
                         execution: None,
                     },
-                },
+                ),
             )
             .unwrap();
         let late_message_id = late.result.payload["threadMessageId"]
             .as_str()
             .unwrap()
             .to_string();
+        let query = ThreadSearchInput {
+            camp_id: None,
+            query: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
+            limit: None,
+        };
+        let previous_search =
+            ThreadHistoryService::search_camp_in_snapshot(&before_publication, &run, &query)
+                .unwrap();
+        assert_eq!(previous_search["results"], json!([]));
+        drop(before_publication);
         let late_search = ThreadHistoryService
-            .search_camp(
-                &mut fixture.database,
-                &run,
-                &ThreadSearchInput {
-                    camp_id: None,
-                    query: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
-                    limit: None,
-                },
-            )
+            .search_camp(&fixture.database, &run, &query)
             .unwrap();
         assert_eq!(late_search["results"].as_array().unwrap().len(), 1);
         assert_eq!(late_search["results"][0]["messageId"], late_message_id);
@@ -10636,6 +10657,56 @@ mod slow_tests {
             "thread.read_unavailable"
         );
 
+        let service = CollaborationService::default();
+        let new_text = "修改后的任务调度器";
+        let edit = user_command(
+            &fixture.camp_id,
+            EditThreadMessageCommand {
+                camp_id: fixture.camp_id.clone(),
+                message_id: late_message_id.clone(),
+                expected_content_revision: 1,
+                content: crate::camp_content::ComposerDocument {
+                    segments: vec![crate::camp_content::ComposerSegment::Text {
+                        text: new_text.into(),
+                    }],
+                    ..Default::default()
+                },
+                retain_attachment_ids: vec![],
+                source_attachments: vec![],
+            },
+        );
+        let edited = service
+            .edit_camp_message(&mut fixture.database, &edit, None)
+            .unwrap();
+        assert_eq!(edited.result.payload["contentRevision"], 2);
+        let old_text = ThreadHistoryService
+            .search_camp(&fixture.database, &run, &query)
+            .unwrap();
+        assert_eq!(old_text["results"], json!([]));
+        let new_query = ThreadSearchInput {
+            query: "　调度 ".into(),
+            ..query
+        };
+        let found = ThreadHistoryService
+            .search_camp(&fixture.database, &run, &new_query)
+            .unwrap();
+        assert_eq!(found["results"][0]["messageId"], late_message_id);
+
+        let delete = user_command(
+            &fixture.camp_id,
+            DeleteThreadMessageCommand {
+                camp_id: fixture.camp_id.clone(),
+                message_id: late_message_id,
+            },
+        );
+        let deleted = service
+            .delete_camp_message(&mut fixture.database, &delete)
+            .unwrap();
+        assert_eq!(deleted.result.code, "message.deleted");
+        let absent = ThreadHistoryService
+            .search_camp(&fixture.database, &run, &new_query)
+            .unwrap();
+        assert_eq!(absent["results"], json!([]));
         fixture.cleanup();
     }
 
@@ -10714,7 +10785,7 @@ mod slow_tests {
 
         let searched_without_snapshot = ThreadHistoryService
             .search_camp(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &ThreadSearchInput {
                     camp_id: Some(unjoined_camp_id.clone()),
@@ -10730,7 +10801,7 @@ mod slow_tests {
 
         let searched = ThreadHistoryService
             .search_camp(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &ThreadSearchInput {
                     camp_id: Some(left_after_snapshot_camp_id.clone()),
@@ -10762,7 +10833,7 @@ mod slow_tests {
 
         let history = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_LIVE_MEMBERSHIP".to_string(),
@@ -10779,7 +10850,7 @@ mod slow_tests {
         );
         let history_without_snapshot = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_SNAPSHOT_MEMBERSHIP".to_string(),
@@ -10820,7 +10891,7 @@ mod slow_tests {
         assert!(withdrawn["items"][0].get("body").is_none());
         let no_results = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_SNAPSHOT_MEMBERSHIP".to_string(),
@@ -11008,7 +11079,7 @@ mod slow_tests {
             .unwrap();
         let late = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "AFTER_FROZEN_BOUNDARY".to_string(),
@@ -11135,7 +11206,7 @@ mod slow_tests {
         );
         let late_search = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &live_run,
                 &HistorySearchInput {
                     query: "LIVE_DIRECTORY_BODY_FENCE".into(),

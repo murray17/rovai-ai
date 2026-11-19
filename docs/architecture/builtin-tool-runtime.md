@@ -203,6 +203,13 @@ Thread History exact help 保持三段职责：目标未知时用 `history.searc
 `rovai thread list` 对新 Run 使用当前名称和最新可见消息活动，旧 Run 继续使用已冻结目录。
 跨 Thread `thread.search` 和 `history.search` 仍受 Run 的全局消息发布边界限制；列表读取不推进这个边界。
 
+两个消息搜索命令的参数帮助直接读取各自输入 Schema 的字段说明。
+Core 在鉴权并记录调用开始后，用独立只读连接固定 SQLite 快照，再释放共享数据库锁。
+同一 Core 的正文扫描依次在阻塞工作线程执行，消息写入可以与扫描并行。
+搜索在该快照内按 Thread 序列分批。当前公屏按会话消息序号判断可见性，跨会话搜索按首次全局公开发布事件检查冻结边界。
+Core 对权威结构化正文投影后的文字匹配和排名，内存只保留当前消息与有界的最佳结果。
+Migration 229 在主线消息投递索引迁移 228 之后移除消息 FTS 与三个写入触发器。引用和提及继续沿用上下文索引的维护路径。
+
 `thread.read` exact help 展示 timeline、exact item `--message-id MESSAGE_ID` 和回复链 `--reply-chain MESSAGE_ID`。
 timeline 与回复链使用互斥的 `--before/--after`，`--after 0` 从最早可见消息开始；limit 默认 20、最大 100。
 旧 `--thread` 仅作兼容输入；`mode`、`direction`、`around` 和 generic `cursor` 不是当前输入字段。
@@ -225,7 +232,7 @@ CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 gramm
 目录静态复用，说明和 schema 不再计算目录摘要；真正不兼容的接口改动使用原协议版本。
 当前 Contract/CLI 与 Agent Output 版本由本页开头的 Transport 合同拥有；IPC 和 Envelope 沿现有封闭协议，不生成或校验结果摘要 receipt。
 [Thread Runs v2](../contracts/thread-runs-v2.md) 复用公开读取范围，用一个事务组合直接属于目标 Thread 的实际 Run 和按队员聚合的等待消息；不回退旧 Turn，也不进入调度写路径。
-Thread History 由 [当前读取合同](../contracts/camp-history-v17.md) 定义。
+Thread History 由 [当前读取合同](../contracts/camp-history-v18.md) 定义。
 Antigravity 使用当前工具协议版本，不含目录指纹；目录与 Bootstrap 文案更新不轮换旧 Session。
 新 Binding 的 Bootstrap 与新 Run 的 Formatter/Manifest 以当前 ContextManifest 合同为准；原生恢复继续使用绑定已冻结的兼容身份。
 Skill 正文与 reference 通过现有受管同步更新原路径；旧、新 Session 后续读取均可使用新版。
