@@ -101,8 +101,6 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
         const state = submittingId === run.id && ['queued', 'running', 'waiting'].includes(run.status) ? 'stopping' : stopState(run)
         const canStop = state === 'available' || state === 'stopping' || state === 'confirming'
         const inputTooLarge = run.failure?.code === 'context_payload_too_large'
-        const canContinue = !inputTooLarge && (run.status === 'failed' || run.status === 'cancelled')
-          && run.invocationKind === 'batch' && (run.inputMessageIds?.length ?? 0) > 0
         const description = inputTooLarge ? uiAttribute('输入内容过大，查看详情') : run.status === 'failed' ? uiAttribute('执行中断，查看原因')
           : uiAttribute('查看执行过程')
         return <article key={run.id} className="conversation-bubble agent conversation-run-presence"
@@ -132,7 +130,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
                 }}>
                 <ExecutionStopIcon />
               </button></Popover.Anchor>}
-              {canContinue &&
+              {run.canContinue &&
                 <ContinueAgentRunButton threadId={snapshot.thread.id} agentRunId={run.id} appearance={run.status === 'failed' ? 'retry' : 'continue'}
                   onError={onError} onApplied={() => onContinued(run.id)} />}
             </div>

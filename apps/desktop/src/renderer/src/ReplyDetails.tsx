@@ -126,6 +126,7 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
           {message.authorType === 'agent' ? avatar(message.authorId, name) : <CurrentUserAvatar profile={profile} className="local-message-avatar" />}
           <div className="reply-detail-content">
             <div className="reply-detail-meta"><strong>{name}</strong><time dateTime={message.createdAt} title={new Date(message.createdAt).toLocaleString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
+            {message.replyParentDeleted && <p className="reply-detail-deleted-reference">{uiAttribute('原消息已删除')}</p>}
             {message.withdrawn ? <p className="reply-detail-status">{uiAttribute('消息已撤回')}</p> : renderBody(message)}
             <div className="reply-detail-actions">
               {!message.withdrawn && <button type="button" className="reply-detail-icon" aria-label={copied === message.id ? uiAttribute('已复制') : uiAttribute('复制')}

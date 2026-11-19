@@ -601,9 +601,9 @@ ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 own
 
 ### 消息正文搜索与索引迁移
 
-`db::tests::message_fts_retirement_is_atomic_and_keeps_message_data_across_reopens` 拥有 Migration 227
-的生产启动、已填充 schema 176、DDL 与回执回滚及重复启动。旧 Usage 迁移 owner 无消息索引数据，也不覆盖
-227 的表和触发器状态。该验证复用独立 SQLite 夹具，需生产打开链路证明升级和重启持久性。
+`db::tests::message_fts_retirement_is_atomic_and_keeps_message_data_across_reopens` 拥有 Migration 228
+的生产启动、已填充 schema 177、缺旧回执的 schema 176、DDL 与回执回滚及重复启动。旧 Usage 迁移 owner 无消息索引数据，也不覆盖
+228 的表和触发器状态。该验证复用独立 SQLite 夹具，需生产打开链路证明升级和重启持久性。
 最小命令为 `cargo test -p rovai-core --features extended-tests --lib message_fts_retirement`。
 
 继任搜索测试在原 `camp_history::slow_tests` 校验两批之外的旧消息、有界排序和完整性，并复用原有的
@@ -612,10 +612,10 @@ ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 own
 `cargo test -p rovai-core --features slow-tests --lib camp_history::`、
 `cargo test -p rovai-core --features slow-tests --lib context_index::` 和
 `cargo test -p rovai-core --bin rovai camp_help_teaches_default_and_explicit_single_camp_targets`。
-除 Migration 227 的重启 owner 外沿用现有测试函数。
+除 Migration 228 的重启 owner 外沿用现有测试函数。
 
 `current_history_reads_live_state_without_id_guessing` 在同一 WAL 夹具中固定只读搜索快照，
-通过正常发送入口提交新消息，再验证旧快照和新查询各自的可见结果。
+通过正常发送入口提交新消息，再验证旧快照和新查询各自的可见结果。同一测试经正式编辑与删除入口验证新旧正文及删除后的搜索结果。
 
 ### 删除、合并或改写测试
 

@@ -42,9 +42,26 @@ pub(crate) fn eligible_source(
     camp_id: &str,
     run_id: &str,
 ) -> Result<Option<ContinuationSource>> {
-    // Original messages remain authoritative across continuation requests.
-    // Retained Task links do not constrain message execution.
-    Ok(connection.query_row(
+    eligible(connection, camp_id, run_id, None)
+}
+
+pub(crate) fn eligible_waiting(
+    connection: &Connection,
+    camp_id: &str,
+    run_id: &str,
+    delivery_id: &str,
+) -> Result<Option<ContinuationSource>> {
+    eligible(connection, camp_id, run_id, Some(delivery_id))
+}
+
+fn eligible(
+    connection: &Connection,
+    camp_id: &str,
+    run_id: &str,
+    delivery_id: Option<&str>,
+) -> Result<Option<ContinuationSource>> {
+    // Initial admission uses the source Run; a queued request owns its current input list.
+    let mut statement = connection.prepare_cached(
         "SELECT conversation.id, conversation.agent_id
          FROM agent_run AS run
          JOIN conversation ON conversation.id=run.conversation_id
@@ -56,15 +73,35 @@ pub(crate) fn eligible_source(
            AND run.status IN ('failed','cancelled') AND camp.deletion_operation_id IS NULL
            AND member.status='active' AND member.leave_requested_at IS NULL AND profile.profile_status='present'
            AND NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id=run.camp_id AND mission.status='completed')
-           AND EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=run.id)
-           AND NOT EXISTS(SELECT 1 FROM agent_run_input AS input
-               LEFT JOIN camp_message AS message ON message.id=input.message_id
-               WHERE input.agent_run_id=run.id AND (message.id IS NULL OR message.camp_id<>?2
-                   OR message.tombstoned_at IS NOT NULL OR message.recall_state='withdrawn'
-                   OR message.content_digest<>input.message_content_digest))",
-        params![run_id, camp_id],
-        |row| Ok(ContinuationSource { conversation_id: row.get(0)?, agent_id: row.get(1)? }),
-    ).optional()?)
+           AND (
+             (?3 IS NULL
+               AND EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=run.id)
+               AND NOT EXISTS(SELECT 1 FROM agent_run_input AS input
+                 LEFT JOIN camp_message AS message ON message.id=input.message_id
+                 WHERE input.agent_run_id=run.id AND (message.camp_id IS NOT ?2
+                     OR message.tombstoned_at IS NOT NULL OR message.recall_state='withdrawn'
+                     OR message.content_digest<>input.message_content_digest
+                     OR message.content_revision<>input.message_content_revision)))
+             OR (?3 IS NOT NULL
+               AND EXISTS(SELECT 1 FROM camp_message_delivery d JOIN camp_run_continuation_input i ON i.delivery_id=d.id
+                 WHERE d.id=?3 AND d.camp_id=?2 AND d.recipient_agent_id=conversation.agent_id AND d.status='waiting')
+               AND NOT EXISTS(SELECT 1 FROM camp_run_continuation_input AS input
+                 LEFT JOIN camp_message AS message ON message.id=input.message_id
+                 LEFT JOIN agent_run_input AS prior ON prior.agent_run_id=run.id AND prior.message_id=input.message_id
+                 WHERE input.delivery_id=?3 AND (message.camp_id IS NOT ?2
+                     OR message.tombstoned_at IS NOT NULL OR message.recall_state='withdrawn'
+                     OR message.content_revision<>input.content_revision
+                     OR (prior.message_content_revision=input.content_revision AND prior.message_content_digest<>message.content_digest))))
+           )",
+    )?;
+    Ok(statement
+        .query_row(params![run_id, camp_id, delivery_id], |row| {
+            Ok(ContinuationSource {
+                conversation_id: row.get(0)?,
+                agent_id: row.get(1)?,
+            })
+        })
+        .optional()?)
 }
 
 /// Only an unresolved dispatched native turn requires preemptive rotation.
@@ -149,10 +186,37 @@ pub fn continue_agent_run(
         let delivery=enqueue_continuation_delivery(tx,&command.camp_id,source.agent_id,&now)?;
         tx.execute("INSERT INTO camp_run_continuation(delivery_id,source_agent_run_id,use_new_session) VALUES(?1,?2,?3)",
             params![delivery.delivery_id,command.agent_run_id,command.use_new_session])?;
+        tx.execute("INSERT INTO camp_run_continuation_input(delivery_id,message_id,ordinal,content_revision)
+            SELECT ?1,message_id,ordinal,message_content_revision FROM agent_run_input WHERE agent_run_id=?2",
+            params![delivery.delivery_id,command.agent_run_id])?;
         Ok(CommandHandlerResult::applied("agent_run.continuation_requested",
             json!({"threadId":command.camp_id,"deliveryId":delivery.delivery_id}),
             Some(EntityReference { entity_type:"camp_message_delivery".into(),entity_id:delivery.delivery_id })))
     })
+}
+
+/// Keeps the original source, session choice and authorization on the same recipient lane.
+pub(crate) fn replace_request(
+    tx: &Transaction<'_>,
+    thread: &str,
+    recipient: &str,
+    previous: &str,
+    authorization: &str,
+    input_ids: &[String],
+    now: &str,
+) -> Result<()> {
+    let delivery =
+        enqueue_continuation_delivery(tx, thread, recipient.to_owned(), now)?.delivery_id;
+    tx.execute(
+        "UPDATE camp_message_delivery SET continuation_authorization_id=?2 WHERE id=?1",
+        params![delivery, authorization],
+    )?;
+    tx.execute("INSERT INTO camp_run_continuation(delivery_id,source_agent_run_id,use_new_session)
+        SELECT ?1,source_agent_run_id,use_new_session FROM camp_run_continuation WHERE delivery_id=?2",params![delivery,previous])?;
+    tx.execute("INSERT INTO camp_run_continuation_input(delivery_id,message_id,ordinal,content_revision)
+        SELECT ?1,m.id,CAST(j.key AS INTEGER),m.content_revision FROM json_each(?2) j JOIN camp_message m ON m.id=j.value",
+        params![delivery,serde_json::to_string(input_ids)?])?;
+    Ok(())
 }
 
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {

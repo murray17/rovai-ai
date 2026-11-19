@@ -28,6 +28,8 @@ mod member_routing;
 mod memory_capability;
 #[path = "db_message_mentions.rs"]
 mod message_mentions;
+#[path = "db_message_mutations.rs"]
+mod message_mutations;
 #[path = "db_message_senders.rs"]
 mod message_senders;
 #[path = "db_minimax.rs"]
@@ -523,7 +525,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 177;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 178;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1026,6 +1028,7 @@ struct CurrentMigrationState {
     v225: bool,
     v226: bool,
     v227: bool,
+    v228: bool,
 }
 
 impl CurrentMigrationState {
@@ -1047,6 +1050,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v228 {
+            let mut previous = *self;
+            previous.v228 = false;
+            return schema == 178 && previous.admits(contract, 177, classifier);
+        }
         if self.v227 {
             let mut previous = *self;
             previous.v227 = false;
@@ -3847,7 +3855,9 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
-            && (marker.projection_schema_version < 177 || message_fts_retired(connection)?)
+            && (marker.projection_schema_version < 178 || message_fts_retired(connection)?)
+            && (marker.projection_schema_version < 177
+                || message_mutations::schema_matches(connection)?)
             && (marker.projection_schema_version < 176
                 || runcard_usage::schema_matches(connection)?)
             && (marker.projection_schema_version < 174
@@ -6262,7 +6272,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=225),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=226),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=227)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=227),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=228)
         "#,
         [],
         |row| {
@@ -6425,6 +6436,7 @@ fn load_current_migration_state(
                 v225: row.get(155)?,
                 v226: row.get(156)?,
                 v227: row.get(157)?,
+                v228: row.get(158)?,
             })
         },
     )
@@ -8805,15 +8817,16 @@ impl Database {
         }
         configure_runtime_connection(&self.connection, &self.path)?;
         if !fresh_database
-            && matches!(
-                classify_startup_contract(&self.connection)?,
-                DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                    if marker.projection_schema_version == 176
-            )
+            && let DatabaseContractClassification::SupportedMigrationSource(marker) =
+                classify_startup_contract(&self.connection)?
+            && matches!(marker.projection_schema_version, 176 | 177)
         {
-            // A recognized recent store can omit historical receipts. Upgrade
-            // its admitted schema directly without replaying historical DDL.
-            migration_step!("migration_227", self.retire_message_fts());
+            // A recognized recent store can omit historical receipts. Apply only
+            // the successors of its admitted schema, without replaying historical DDL.
+            if marker.projection_schema_version == 176 {
+                migration_step!("migration_227", message_mutations::migrate(self));
+            }
+            migration_step!("migration_228", self.retire_message_fts());
             self.maintain_notifications_after_migration();
             return Ok(());
         }
@@ -9754,7 +9767,10 @@ impl Database {
                 migration_step!("migration_226", runcard_usage::migrate(self));
             }
             if !self.schema_migration_applied(227)? {
-                migration_step!("migration_227", self.retire_message_fts());
+                migration_step!("migration_227", message_mutations::migrate(self));
+            }
+            if !self.schema_migration_applied(228)? {
+                migration_step!("migration_228", self.retire_message_fts());
             }
             self.maintain_notifications_after_migration();
             return Ok(());
@@ -10656,7 +10672,10 @@ impl Database {
             migration_step!("migration_226", runcard_usage::migrate(self));
         }
         if !self.schema_migration_applied(227)? {
-            migration_step!("migration_227", self.retire_message_fts());
+            migration_step!("migration_227", message_mutations::migrate(self));
+        }
+        if !self.schema_migration_applied(228)? {
+            migration_step!("migration_228", self.retire_message_fts());
         }
         self.maintain_notifications_after_migration();
         Ok(())
@@ -10678,17 +10697,17 @@ impl Database {
             matches!(
                 classify_database_contract(&transaction)?,
                 DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                    if marker.projection_schema_version == 176
+                    if marker.projection_schema_version == 177
             ),
-            "Message FTS retirement requires schema 176"
+            "Message FTS retirement requires schema 177"
         );
         transaction.execute_batch(
             "DROP TRIGGER IF EXISTS camp_message_fts_insert;
              DROP TRIGGER IF EXISTS camp_message_fts_delete;
              DROP TRIGGER IF EXISTS camp_message_fts_update;
              DROP TABLE IF EXISTS camp_message_fts;
-             INSERT INTO schema_migration VALUES (227, datetime('now'));
-             UPDATE rovai_data_contract SET projection_schema_version=177,
+             INSERT INTO schema_migration VALUES (228, datetime('now'));
+             UPDATE rovai_data_contract SET projection_schema_version=178,
                 updated_at=datetime('now') WHERE singleton=1;",
         )?;
         anyhow::ensure!(
@@ -40430,8 +40449,8 @@ mod tests {
         assert!(message_fts_retired(fixture.connection()).unwrap());
         fixture.connection().execute_batch(
             r#"
-            DELETE FROM schema_migration WHERE version IN (115, 227);
-            UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;
+            DELETE FROM schema_migration WHERE version IN (115, 228);
+            UPDATE rovai_data_contract SET projection_schema_version=177 WHERE singleton=1;
             CREATE VIRTUAL TABLE camp_message_fts USING fts5(
                 body, content='camp_message', content_rowid='rowid', tokenize='trigram'
             );
@@ -40457,7 +40476,7 @@ mod tests {
             INSERT INTO camp_message_reference(camp_message_id,kind,value)
             VALUES ('kept-message','adr','ADR-49');
             CREATE TEMP TRIGGER reject_search_upgrade BEFORE INSERT ON schema_migration
-            WHEN NEW.version=227 BEGIN SELECT RAISE(ABORT,'search upgrade rejected'); END;
+            WHEN NEW.version=228 BEGIN SELECT RAISE(ABORT,'search upgrade rejected'); END;
             "#,
         ).unwrap();
         assert!(
@@ -40467,11 +40486,11 @@ mod tests {
                 .to_string()
                 .contains("search upgrade rejected")
         );
-        assert!(!fixture.schema_migration_applied(227).unwrap());
+        assert!(!fixture.schema_migration_applied(228).unwrap());
         assert!(matches!(
             classify_database_contract(fixture.connection()).unwrap(),
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                if marker.projection_schema_version == 176
+                if marker.projection_schema_version == 177
         ));
         assert_eq!(
             fixture
@@ -40495,7 +40514,7 @@ mod tests {
         let AdmissionAssessment::RequiresMigration(ticket) =
             DatabaseAdmission::assess(&lease).unwrap()
         else {
-            panic!("schema 176 should receive a migration ticket");
+            panic!("schema 177 should receive a migration ticket");
         };
         let runtime_root = fixture.directory().join("runtime-files");
         let root_identity =
@@ -40515,7 +40534,7 @@ mod tests {
             let AdmissionAssessment::AdmittedExisting(ticket) =
                 DatabaseAdmission::assess(&lease).unwrap()
             else {
-                panic!("schema 177 should admit without another migration");
+                panic!("schema 178 should admit without another migration");
             };
             let database = Database::open_admitted(*ticket).unwrap();
             assert!(connection_has_current_data_contract(database.connection()).unwrap());
@@ -40527,7 +40546,7 @@ mod tests {
                  FROM schema_migration AS migration
                  JOIN camp_message AS message ON message.id='kept-message'
                  JOIN camp_message_reference AS reference ON reference.camp_message_id=message.id
-                 WHERE migration.version=227",
+                 WHERE migration.version=228",
                 [], |row| Ok((
                     row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
                     row.get::<_, bool>(3)?, row.get::<_, bool>(4)?,
@@ -40539,6 +40558,21 @@ mod tests {
             assert!(identity_index);
             assert_eq!(receipt.get_or_insert(applied_at.clone()), &applied_at);
         }
+
+        // A previously admitted RunCard store may also lack old receipts.
+        // It must pass the message-edit migration before retiring the index.
+        let mut older = crate::test_support::fresh_schema_database_fast_owned();
+        message_mutations::downgrade_for_test(older.connection());
+        older
+            .connection()
+            .execute("DELETE FROM schema_migration WHERE version=115", [])
+            .unwrap();
+        older.migrate(false).unwrap();
+        assert!(older.schema_migration_applied(227).unwrap());
+        assert!(older.schema_migration_applied(228).unwrap());
+        assert!(!older.schema_migration_applied(115).unwrap());
+        assert!(message_mutations::schema_matches(older.connection()).unwrap());
+        assert!(connection_has_current_data_contract(older.connection()).unwrap());
     }
 
     #[test]
@@ -42617,6 +42651,7 @@ mod tests {
             v225: version >= 225,
             v226: version >= 226,
             v227: version >= 227,
+            v228: version >= 228,
         }
     }
 

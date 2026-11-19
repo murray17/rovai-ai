@@ -252,9 +252,9 @@ fn read_transaction(
                     "batch Run is missing frozen inputs"
                 );
             }
-            if let Some((count, first)) = inputs.get(run_id) {
-                row.count = Some(*count);
-                row.first_message = Some(first.clone());
+            if let Some(input) = inputs.get(run_id) {
+                row.count = Some(input.count);
+                row.first_message = Some(input.first_message.clone());
             }
         }
     }
@@ -265,10 +265,17 @@ fn read_transaction(
     let bodies = visible_message_bodies(transaction, &target, &message_ids)?;
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
-        let preview = row
-            .first_message
-            .as_ref()
-            .and_then(|id| bodies.get(id).map(|body| message_preview(id, body)));
+        let preview = row.first_message.as_ref().and_then(|id| {
+            // The live read still provides visibility. The preview bytes of
+            // an already claimed input come from the Run's own revision.
+            let visible = bodies.get(id)?;
+            let frozen = row
+                .run_id
+                .as_ref()
+                .and_then(|run| inputs.get(run))
+                .and_then(|input| input.frozen_body.as_deref());
+            Some(message_preview(id, frozen.unwrap_or(visible)))
+        });
         items.push(json!({
             "agentRunId": row.run_id, "agentId": row.agent_id, "status": row.status,
             "messageCount": row.count, "messagePreview": preview, "waitReason": null,
@@ -281,16 +288,24 @@ fn read_transaction(
     )
 }
 
+struct FrozenInputs {
+    count: i64,
+    first_message: String,
+    frozen_body: Option<String>,
+}
+
 fn frozen_inputs(
     transaction: &Transaction<'_>,
     run_ids: &[&str],
-) -> Result<HashMap<String, (i64, String)>> {
+) -> Result<HashMap<String, FrozenInputs>> {
     if run_ids.is_empty() {
         return Ok(HashMap::new());
     }
     let mut statement = transaction.prepare(
         "SELECT input.agent_run_id, COUNT(*),
                 (SELECT first.message_id FROM agent_run_input first
+                 WHERE first.agent_run_id = input.agent_run_id ORDER BY first.ordinal LIMIT 1),
+                (SELECT json_extract(first.input_snapshot_json,'$.body') FROM agent_run_input first
                  WHERE first.agent_run_id = input.agent_run_id ORDER BY first.ordinal LIMIT 1)
          FROM agent_run_input input
          WHERE input.agent_run_id IN (SELECT value FROM json_each(?1))
@@ -298,7 +313,14 @@ fn frozen_inputs(
     )?;
     Ok(statement
         .query_map([serde_json::to_string(run_ids)?], |row| {
-            Ok((row.get(0)?, (row.get(1)?, row.get(2)?)))
+            Ok((
+                row.get(0)?,
+                FrozenInputs {
+                    count: row.get(1)?,
+                    first_message: row.get(2)?,
+                    frozen_body: row.get(3)?,
+                },
+            ))
         })?
         .collect::<rusqlite::Result<HashMap<_, _>>>()?)
 }
@@ -351,7 +373,7 @@ const CANDIDATES_SQL: &str = r#"
         ), waiting AS (
             SELECT recipient_agent_id AS agent_id,
                    SUM(CASE WHEN continuation.delivery_id IS NULL THEN 1 ELSE (
-                     SELECT COUNT(*) FROM agent_run_input WHERE agent_run_id = continuation.source_agent_run_id
+                     SELECT COUNT(*) FROM camp_run_continuation_input WHERE delivery_id = continuation.delivery_id
                    ) END) AS message_count, MIN(queue_sequence) AS head
             FROM camp_message_delivery
             LEFT JOIN camp_run_continuation AS continuation ON continuation.delivery_id = camp_message_delivery.id
@@ -362,8 +384,8 @@ const CANDIDATES_SQL: &str = r#"
             SELECT NULL AS run_id, waiting.agent_id, 'queued' AS status, 0 AS batch,
                    delivery.created_at, NULL AS started_at, NULL AS ended_at, NULL AS cancel_requested_at,
                    waiting.message_count, COALESCE(delivery.message_id, (
-                     SELECT message_id FROM agent_run_input
-                     WHERE agent_run_id = continuation.source_agent_run_id ORDER BY ordinal LIMIT 1
+                     SELECT message_id FROM camp_run_continuation_input
+                     WHERE delivery_id=continuation.delivery_id ORDER BY ordinal LIMIT 1
                    )) AS first_message,
                    rovai_thread_run_time_key(delivery.created_at) AS created_key,
                    0 AS source, waiting.agent_id AS identity
@@ -608,10 +630,11 @@ mod read_tests {
             CREATE INDEX agent_run_camp_delete_idx ON agent_run(camp_id, id) WHERE camp_id IS NOT NULL;
             CREATE INDEX agent_run_a2a_turn_idx ON agent_run(camp_turn_id, invocation_kind, created_at);
             CREATE TABLE context_manifest(id TEXT, agent_run_id TEXT, global_public_message_boundary INTEGER, history_fence_version INTEGER);
-            CREATE TABLE agent_run_input(agent_run_id TEXT, ordinal INTEGER, message_id TEXT);
+            CREATE TABLE agent_run_input(agent_run_id TEXT, ordinal INTEGER, message_id TEXT, input_snapshot_json TEXT);
             CREATE TABLE camp_message_delivery(camp_id TEXT, recipient_agent_id TEXT, status TEXT,
                 queue_sequence INTEGER, created_at TEXT, message_id TEXT, id TEXT PRIMARY KEY);
             CREATE TABLE camp_run_continuation(delivery_id TEXT PRIMARY KEY, source_agent_run_id TEXT);
+            CREATE TABLE camp_run_continuation_input(delivery_id TEXT, message_id TEXT, ordinal INTEGER);
             CREATE INDEX camp_message_delivery_waiting_idx
                 ON camp_message_delivery(camp_id, recipient_agent_id, queue_sequence) WHERE status = 'waiting';
             CREATE TABLE camp_message(id TEXT, camp_id TEXT, sequence INTEGER, author_type TEXT DEFAULT 'user',
@@ -705,8 +728,8 @@ mod read_tests {
             connection.execute("INSERT INTO camp_message(id,camp_id,sequence,structured_content_json) VALUES(?1,?2,?3,?4)", params![id,THREAD,sequence, json!([{"kind":"text","text": id}]).to_string()]).unwrap();
         }
         // Insertion order and anchor cannot replace the frozen ordinal.
-        connection.execute_batch("INSERT INTO agent_run_input VALUES ('actual-queued',1,'anchor'),('actual-queued',0,'first');").unwrap();
-        connection.execute_batch("INSERT INTO agent_run_input
+        connection.execute_batch("INSERT INTO agent_run_input(agent_run_id,ordinal,message_id) VALUES ('actual-queued',1,'anchor'),('actual-queued',0,'first');").unwrap();
+        connection.execute_batch("INSERT INTO agent_run_input(agent_run_id,ordinal,message_id)
             SELECT id,0,'anchor' FROM agent_run WHERE invocation_kind='batch' AND id<>'actual-queued';").unwrap();
         for (id, sequence) in [("q1", 3), ("q2", 4), ("q3", 5)] {
             connection.execute("INSERT INTO camp_message_delivery(camp_id,recipient_agent_id,status,queue_sequence,created_at,message_id) VALUES(?1,'agent_1','waiting',?2,'2026-10-03T13:00:00Z',?3)", params![THREAD,sequence,id]).unwrap();
@@ -732,6 +755,10 @@ mod read_tests {
             tx.commit().unwrap();
             result
         };
+        connection.execute(
+            "UPDATE agent_run_input SET input_snapshot_json=?1 WHERE agent_run_id='actual-queued' AND ordinal=0",
+            [json!({"body":"first at claim"}).to_string()],
+        ).unwrap();
         let all = read(&mut connection, ThreadRunsInput::default()).unwrap();
         assert_eq!(all["items"].as_array().unwrap().len(), 5);
         assert!(all["items"].as_array().unwrap().iter().all(|item| {
@@ -760,6 +787,7 @@ mod read_tests {
             .unwrap();
         assert_eq!(actual["messageCount"], 2);
         assert_eq!(actual["messagePreview"]["messageId"], "first");
+        assert_eq!(actual["messagePreview"]["text"], "first at claim");
         assert!(
             all["items"]
                 .as_array()
@@ -813,7 +841,8 @@ mod read_tests {
         // while the FIFO head still selects the first business message preview.
         connection.execute("INSERT INTO camp_message_delivery VALUES(?1,'agent_1','waiting',1,'2026-10-03T13:00:00Z',NULL,'continuation-a')", [THREAD]).unwrap();
         connection.execute("INSERT INTO camp_message_delivery VALUES(?1,'agent_1','waiting',2,'2026-10-03T13:00:00Z',NULL,'continuation-b')", [THREAD]).unwrap();
-        connection.execute_batch("INSERT INTO camp_run_continuation VALUES ('continuation-a','actual-queued'),('continuation-b','actual-queued');").unwrap();
+        connection.execute_batch("INSERT INTO camp_run_continuation VALUES ('continuation-a','actual-queued'),('continuation-b','actual-queued');
+            INSERT INTO camp_run_continuation_input SELECT c.delivery_id,i.message_id,i.ordinal FROM camp_run_continuation c JOIN agent_run_input i ON i.agent_run_id=c.source_agent_run_id;").unwrap();
         let continued = read(&mut connection, ThreadRunsInput::default()).unwrap();
         assert_eq!(continued["items"][0]["messageCount"], 7);
         assert_eq!(
@@ -1029,10 +1058,9 @@ mod read_tests {
         assert_eq!(rows[0].run_id.as_deref(), Some(current));
         assert!(rows[0].batch);
         assert_eq!(rows[0].status, "succeeded");
-        assert_eq!(
-            frozen_inputs(&tx, &[current]).unwrap()[current],
-            (1, anchor)
-        );
+        let inputs = frozen_inputs(&tx, &[current]).unwrap();
+        assert_eq!(inputs[current].count, 1);
+        assert_eq!(inputs[current].first_message, anchor);
         assert_eq!(
             tx.query_row(
                 "SELECT status FROM agent_run WHERE id=?1",

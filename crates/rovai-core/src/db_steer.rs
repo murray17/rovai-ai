@@ -525,31 +525,6 @@ pub(crate) fn assert_legacy_upgrade(database: &mut Database) {
     // Recreate the deployed branch 203 layout with populated input/receipt rows.
     // Only the fixture removes the compact columns; production converges forward.
     super::minimax::downgrade_for_test(database.connection());
-    let branch_rows = |c: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
-        [
-            "context_manifest",
-            "agent_run_input",
-            "runtime_input_delivery",
-            "camp_message_delivery",
-            "agent_run_claim_context",
-        ]
-        .iter()
-        .map(|table| {
-            let mut q = c
-                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
-                .unwrap();
-            let count = q.column_count();
-            q.query_map([], |r| {
-                (0..count)
-                    .map(|i| r.get(i))
-                    .collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
-        })
-        .collect()
-    };
     compact_execution::remove_compact_for_test(database.connection());
     database
         .connection()
@@ -559,6 +534,46 @@ pub(crate) fn assert_legacy_upgrade(database: &mut Database) {
         UPDATE rovai_data_contract SET projection_schema_version=153 WHERE singleton=1;",
         )
         .unwrap();
+    let branch_columns = [
+        "context_manifest",
+        "agent_run_input",
+        "runtime_input_delivery",
+        "camp_message_delivery",
+        "agent_run_claim_context",
+    ]
+    .into_iter()
+    .map(|table| {
+        let columns = table_columns(database.connection(), table)
+            .unwrap()
+            .into_iter()
+            .map(|column| format!("\"{column}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        (table, columns)
+    })
+    .collect::<Vec<_>>();
+    // Verify every source column byte-for-byte even when later migrations
+    // append their own fields to the same tables.
+    let branch_rows = |c: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        branch_columns
+            .iter()
+            .map(|(table, columns)| {
+                let mut query = c
+                    .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1"))
+                    .unwrap();
+                let count = query.column_count();
+                query
+                    .query_map([], |r| {
+                        (0..count)
+                            .map(|i| r.get(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+            .collect()
+    };
     let branch_before = branch_rows(database.connection());
     assert!(
         matches!(classify_database_contract(database.connection()).unwrap(),

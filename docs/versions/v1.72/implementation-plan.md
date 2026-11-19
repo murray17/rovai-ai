@@ -3,10 +3,26 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-16
+last_updated: 2026-11-19
 ---
 
 # v1.72 实施与验收
+
+## 公共消息编辑、删除与撤回（2026-11-19）
+
+本轮在 `rovai/thread-message-mutations` 从 `0461437fdf80a8cd01e5b888ec7c67006dae85d` 实施。
+规则归[消息投递](../../contracts/message-delivery-v19.md#公共消息改删)和[会话界面](../../ui/components/conversation-workspace.md)。
+Migration 227 将投影 schema 从 176 升至 177，等待中的 Continue 初始化独立输入清单，旧消息修订号从 1 开始。
+跨目标编辑保持原队员的主动继续次数，新队员收到一次普通投递。「已编辑」由内容修订号派生。
+
+Rust 验收由 `message_mutations_keep_independent_authorizations_and_frozen_inputs` 拥有。
+该场景同时覆盖已启动和仍在等待的两次主动继续，读取源 Run 或按消息全局去重会分别导致执行旧输入或吞掉一次重试。
+既有继续执行测试验证单次授权和 FIFO，新增场景还需验证消息编辑、取消和等待输入写入在同一个 SQLite 事务里回滚，
+所以使用领域命令、生产调度和读取模型夹具。最小命令为
+`cargo test -p rovai-core --features extended-tests --lib message_mutations_keep_independent_authorizations_and_frozen_inputs`。
+
+隔离 Host 和 390px Chrome 验证了长正文编辑框滚动、只添加两个附件时正文不变、保存后显示「（已编辑）」、
+删除后旧正文从时间线和执行来源消失，以及从子消息继续打开回复详情。此验收使用未配置 Runtime 的队员。
 
 ## 会话文件下载合入（2026-11-16）
 

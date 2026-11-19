@@ -126,9 +126,10 @@ function Workbench() {
       showFullExportCase: model.showFullExportCase.bind(model), appendExportMessage: model.appendExportMessage.bind(model),
       revealExportHistory: model.revealExportHistory,
       removeExportMessage: model.removeExportMessage,
-      showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
+      showReplyCase: model.showReplyCase.bind(model), editReply: model.editReply, withdrawReply: model.withdrawReply,
+      showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline, deleteSteerTimelineSource: model.deleteSteerTimelineSource,
       appendHistoryMessage: model.appendHistoryMessage, emitCoreEvent: model.emitCoreEvent,
-      showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setHistoryModel: model.setHistoryModel, setMemberAvailability: model.setMemberAvailability,
+      showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setRunCanContinue: model.setRunCanContinue, setHistoryModel: model.setHistoryModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot
         const ids = [...document.querySelectorAll<HTMLElement>('[data-message-id]')].map(e => e.dataset.messageId)

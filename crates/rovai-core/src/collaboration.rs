@@ -1,3 +1,5 @@
+#[path = "message_mutation.rs"]
+pub mod message_mutation;
 use crate::draft_client::DraftClient;
 use crate::message_quote::{MessageQuoteSnapshot, QuoteStorage, load_quotes, store_quotes};
 use std::{
@@ -763,19 +765,9 @@ impl CollaborationService {
             let source_command_id = source_command_id
                 .filter(|value| !value.trim().is_empty())
                 .context("recallable Composer message has no publication command identity")?;
-            let unsafe_delivery_exists: bool = transaction.query_row(
-                r#"
-                SELECT EXISTS(
-                    SELECT 1 FROM camp_message_delivery
-                    WHERE message_id = ?1 AND status <> 'waiting'
-                ) OR EXISTS(
-                    SELECT 1 FROM agent_run_input WHERE message_id = ?1
-                )
-                "#,
-                [&envelope.payload.message_id],
-                |row| row.get(0),
-            )?;
-            if unsafe_delivery_exists {
+            if !message_mutation::capabilities(transaction, &envelope.payload.message_id)?
+                .can_withdraw
+            {
                 return Ok(rejected(
                     "message.withdraw_too_late",
                     "The message has crossed an Agent recognition boundary",
@@ -3249,6 +3241,7 @@ impl CollaborationService {
                     )?;
                     let result_payload = json!({
                         "threadMessageId": camp_message_id,
+                        "contentRevision": 1,
                         "sequence": queued.camp_sequence,
                         "deliveryIds": queued.delivery_ids,
                     });

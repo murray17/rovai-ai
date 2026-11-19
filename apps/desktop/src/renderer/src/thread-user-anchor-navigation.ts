@@ -85,6 +85,8 @@ export class ThreadUserAnchorNavigation {
       this.#set({ window: null, previews: new Map() })
     }
   }
+  bodyIsUnavailable = (messageId: string): boolean => this.#unavailable.has(messageId)
+
   changed(change: ThreadMessageChange): void {
     if (change.threadId !== this.threadId) return
     for (const id of change.unavailableMessageIds ?? []) this.#unavailable.add(id)

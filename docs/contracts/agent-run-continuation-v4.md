@@ -16,3 +16,7 @@ last_updated: 2026-10-29
 清理准入统一采用[当前执行所有权判断](../architecture/agent-run-recovery.md#4-cleanuplane-与-execution-root)：
 当前 Core 持有的 Run/epoch 清理未确认时等待；历史缺 ACK、不可读或身份未知不能持续阻挡新继续。
 放行不补写旧 ACK，也不把新的用户授权等同于重放原 Runtime 投递。
+
+公开 Run 视图的 `canContinue` 复用新 Continue 对原输入版本、成员与会话的准入判断，并保留界面的输入过大例外。
+原冻结输入被修改或删除时撤下继续入口。已受理的授权独立保留，当前原输入仍有效时可再次主动继续；
+命令在事务内复核。

@@ -28,12 +28,13 @@ const selectionTouches = (element: HTMLElement, selection: Selection | null): bo
 
 /** Public history owns its viewport, dynamic heights, selection retention and explicit-target mounting. */
 export function TimelineVirtualList<T extends { id: string }>({ items, viewportRef, controllerRef,
-  followingLatest, preserveReadingPosition, children }: {
+  followingLatest, preserveReadingPosition, editingId, children }: {
   items: readonly T[]
   viewportRef: RefObject<HTMLElement | null>
   controllerRef: RefObject<TimelineVirtualListHandle | null>
   followingLatest(): boolean
   preserveReadingPosition(): boolean
+  editingId?: string
   children(item: T, index: number): ReactNode
 }) {
   const root = useRef<HTMLDivElement>(null)
@@ -340,7 +341,8 @@ export function TimelineVirtualList<T extends { id: string }>({ items, viewportR
   const end = virtual ? Math.min(items.length, start + range.end - range.start) : items.length
   const indexes = new Set<number>()
   for (let index = start; index < end; index++) indexes.add(index)
-  for (const id of [...retained, ...transitionRetained, ...(target ? [target] : [])]) {
+  for (const id of [...retained, ...transitionRetained, target, editingId]) {
+    if (!id) continue
     const index = indexesById.get(id)
     if (index !== undefined) for (let neighbor = Math.max(0, index - 1); neighbor <= Math.min(items.length - 1, index + 1); neighbor++) indexes.add(neighbor)
   }

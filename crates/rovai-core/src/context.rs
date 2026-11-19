@@ -10422,6 +10422,23 @@ mod slow_tests {
 
     #[test]
     fn current_history_reads_live_state_without_id_guessing() {
+        use crate::collaboration::message_mutation::{
+            DeleteThreadMessageCommand, EditThreadMessageCommand,
+        };
+
+        fn user_command<T>(thread: &str, payload: T) -> CommandEnvelope<T> {
+            CommandEnvelope {
+                command_id: Uuid::new_v4().to_string(),
+                actor: ActorRef::User {
+                    user_id: crate::current_user::CURRENT_USER_ID.into(),
+                },
+                camp_id: Some(thread.into()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload,
+            }
+        }
+
         let mut fixture = fixture();
         fixture
             .database
@@ -10458,15 +10475,9 @@ mod slow_tests {
         let late = CollaborationService::default()
             .send_test_camp_message(
                 &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: ActorRef::User {
-                        user_id: "test-user".to_string(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: TestThreadMessageCommand {
+                &user_command(
+                    &fixture.camp_id,
+                    TestThreadMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
@@ -10475,7 +10486,7 @@ mod slow_tests {
                         reply_to_camp_message_id: Some(initial_message_id.clone()),
                         execution: None,
                     },
-                },
+                ),
             )
             .unwrap();
         let late_message_id = late.result.payload["threadMessageId"]
@@ -10646,6 +10657,56 @@ mod slow_tests {
             "thread.read_unavailable"
         );
 
+        let service = CollaborationService::default();
+        let new_text = "修改后的任务调度器";
+        let edit = user_command(
+            &fixture.camp_id,
+            EditThreadMessageCommand {
+                camp_id: fixture.camp_id.clone(),
+                message_id: late_message_id.clone(),
+                expected_content_revision: 1,
+                content: crate::camp_content::ComposerDocument {
+                    segments: vec![crate::camp_content::ComposerSegment::Text {
+                        text: new_text.into(),
+                    }],
+                    ..Default::default()
+                },
+                retain_attachment_ids: vec![],
+                source_attachments: vec![],
+            },
+        );
+        let edited = service
+            .edit_camp_message(&mut fixture.database, &edit, None)
+            .unwrap();
+        assert_eq!(edited.result.payload["contentRevision"], 2);
+        let old_text = ThreadHistoryService
+            .search_camp(&mut fixture.database, &run, &query)
+            .unwrap();
+        assert_eq!(old_text["results"], json!([]));
+        let new_query = ThreadSearchInput {
+            query: "调度".into(),
+            ..query
+        };
+        let found = ThreadHistoryService
+            .search_camp(&mut fixture.database, &run, &new_query)
+            .unwrap();
+        assert_eq!(found["results"][0]["messageId"], late_message_id);
+
+        let delete = user_command(
+            &fixture.camp_id,
+            DeleteThreadMessageCommand {
+                camp_id: fixture.camp_id.clone(),
+                message_id: late_message_id,
+            },
+        );
+        let deleted = service
+            .delete_camp_message(&mut fixture.database, &delete)
+            .unwrap();
+        assert_eq!(deleted.result.code, "message.deleted");
+        let absent = ThreadHistoryService
+            .search_camp(&mut fixture.database, &run, &new_query)
+            .unwrap();
+        assert_eq!(absent["results"], json!([]));
         fixture.cleanup();
     }
 

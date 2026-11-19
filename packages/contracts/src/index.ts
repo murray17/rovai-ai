@@ -1435,6 +1435,11 @@ export interface ThreadMessageView {
   createdAt: string
   withdrawn: boolean
   canWithdraw: boolean
+  canEdit?: boolean
+  canDelete?: boolean
+  contentRevision?: number
+  submittedAsSteer?: boolean
+  replyParentDeleted?: boolean
   version: number
 }
 
@@ -2045,10 +2050,14 @@ export type AgentRunCancelReasonCode =
   | 'camp_turn_cancelled'
   | 'execution_budget_exhausted'
   | 'user_requested_agent_run_stop'
+  | 'message_input_edited'
+  | 'message_input_deleted'
   | 'single_chat_ended'
 
 export interface AgentRunView {
   canSteer?: boolean
+  /** Core allows a new manual continuation of this public Run's original inputs. */
+  canContinue?: boolean
   /** Core's decision for this Run's frozen installation and active input binding. */
   steerUnavailableReason?: 'runtime_unsupported' | 'execution_not_ready' | 'execution_changed'
     | 'input_outcome_unknown' | 'runtime_identity_unknown' | 'protocol_incompatible'
@@ -2061,6 +2070,7 @@ export interface AgentRunView {
   publicTailSequenceAtStart?: number | null
   /** Core-rendered title source, independent of the loaded conversation page. */
   inputSummary?: string | null
+  inputPreviews?: Record<string, { summary: string | null; deleted: boolean }>
   /** At least one continuation Delivery was accepted for this Run; not an execution-eligibility lock. */
   hasAcceptedContinuation?: boolean
   conversationId: string
@@ -4691,6 +4701,8 @@ export type CoreMethod =
   | 'thread.messages.around'
   | 'thread.messages.find'
   | 'thread.messages.withdraw'
+  | 'thread.messages.edit'
+  | 'thread.messages.delete'
   | 'agentRunEvidence.getContent'
   | 'agentRunEvidence.list'
   | 'agentRunExecution.page'
@@ -4704,6 +4716,8 @@ export type CoreMethod =
   | 'runtimeInputs.reconcile'
   | 'thread.messages.send'
   | 'thread.messages.withdraw'
+  | 'thread.messages.edit'
+  | 'thread.messages.delete'
   | 'userAutomation.thread.send'
   | 'action.approvals.resolve'
   | 'nativeInteractions.respond'

@@ -202,6 +202,8 @@ export const WEB_OPERATIONS = [
   'messageQuotes.capture',
   'thread.messages.send',
   'thread.messages.withdraw',
+  'thread.messages.edit',
+  'thread.messages.delete',
   'action.approvals.resolve',
   'nativeInteractions.respond',
   'agentRuns.cancel', 'agentRuns.continue',
@@ -287,7 +289,7 @@ const RECONCILABLE_COMMANDS = new Set<WebOperation>([
   'automations.delete',
   'automations.run',
 
-  'thread.messages.send', 'thread.messages.withdraw', 'action.approvals.resolve', 'nativeInteractions.respond', 'agentRuns.cancel', 'agentRuns.continue',
+  'thread.messages.send', 'thread.messages.withdraw', 'thread.messages.edit', 'thread.messages.delete', 'action.approvals.resolve', 'nativeInteractions.respond', 'agentRuns.cancel', 'agentRuns.continue',
   'threads.fork',
   'threads.create', 'threads.changeDefaultLead', 'threads.members.add', 'threads.members.remove',
   'members.create', 'members.update', 'members.avatar.set', 'members.runtime.set', 'members.runtime.clear',

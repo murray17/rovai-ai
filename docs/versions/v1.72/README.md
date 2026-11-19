@@ -6,10 +6,19 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-16
+last_updated: 2026-11-19
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 公开消息正文搜索（2026-11-19）
+
+当前公屏与历史公屏统一支持连续原文搜索。输入文案、扫描边界、迁移与实测见[消息搜索上下文对照](model-context-change-message-search.md)。
+
+## 公共消息编辑与删除（2026-11-19）
+
+正文与附件可原地修改。旧批次的有效普通输入自动重排，主动继续授权留在原队员。
+撤回判断统一使用实际领取和插话绑定事实。范围与验收见[本版实施记录](implementation-plan.md#公共消息编辑删除与撤回2026-11-19)。
 
 ## 会话文件下载（2026-11-15）
 
