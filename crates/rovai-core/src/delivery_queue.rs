@@ -2045,7 +2045,7 @@ mod tests {
                 for (query, expected_count) in [("继续了", 1), ("原目标", 2)] {
                     let found = ThreadHistoryService
                         .search_camp(
-                            &mut fixture.database,
+                            &fixture.database,
                             &reader,
                             &serde_json::from_value::<ThreadSearchInput>(json!({"query":query}))
                                 .unwrap(),
@@ -2054,7 +2054,7 @@ mod tests {
                     assert_eq!(found["results"].as_array().unwrap().len(), expected_count);
                     let found = ThreadHistoryService
                         .search_history(
-                            &mut fixture.database,
+                            &fixture.database,
                             &reader,
                             &serde_json::from_value::<HistorySearchInput>(json!({"query":query}))
                                 .unwrap(),
@@ -2156,7 +2156,7 @@ mod tests {
         for (query, count) in [("继续了", 1), ("原目标", 2), ("visible history", 1)] {
             let result = crate::camp_history::ThreadHistoryService
                 .search_history(
-                    &mut fixture.database,
+                    &fixture.database,
                     &reader,
                     &serde_json::from_value(json!({"query":query})).unwrap(),
                 )

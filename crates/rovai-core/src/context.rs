@@ -10504,7 +10504,7 @@ mod slow_tests {
         assert_eq!(previous_search["results"], json!([]));
         drop(before_publication);
         let late_search = ThreadHistoryService
-            .search_camp(&mut fixture.database, &run, &query)
+            .search_camp(&fixture.database, &run, &query)
             .unwrap();
         assert_eq!(late_search["results"].as_array().unwrap().len(), 1);
         assert_eq!(late_search["results"][0]["messageId"], late_message_id);
@@ -10680,15 +10680,15 @@ mod slow_tests {
             .unwrap();
         assert_eq!(edited.result.payload["contentRevision"], 2);
         let old_text = ThreadHistoryService
-            .search_camp(&mut fixture.database, &run, &query)
+            .search_camp(&fixture.database, &run, &query)
             .unwrap();
         assert_eq!(old_text["results"], json!([]));
         let new_query = ThreadSearchInput {
-            query: "调度".into(),
+            query: "　调度 ".into(),
             ..query
         };
         let found = ThreadHistoryService
-            .search_camp(&mut fixture.database, &run, &new_query)
+            .search_camp(&fixture.database, &run, &new_query)
             .unwrap();
         assert_eq!(found["results"][0]["messageId"], late_message_id);
 
@@ -10704,7 +10704,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(deleted.result.code, "message.deleted");
         let absent = ThreadHistoryService
-            .search_camp(&mut fixture.database, &run, &new_query)
+            .search_camp(&fixture.database, &run, &new_query)
             .unwrap();
         assert_eq!(absent["results"], json!([]));
         fixture.cleanup();
@@ -10785,7 +10785,7 @@ mod slow_tests {
 
         let searched_without_snapshot = ThreadHistoryService
             .search_camp(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &ThreadSearchInput {
                     camp_id: Some(unjoined_camp_id.clone()),
@@ -10801,7 +10801,7 @@ mod slow_tests {
 
         let searched = ThreadHistoryService
             .search_camp(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &ThreadSearchInput {
                     camp_id: Some(left_after_snapshot_camp_id.clone()),
@@ -10833,7 +10833,7 @@ mod slow_tests {
 
         let history = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_LIVE_MEMBERSHIP".to_string(),
@@ -10850,7 +10850,7 @@ mod slow_tests {
         );
         let history_without_snapshot = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_SNAPSHOT_MEMBERSHIP".to_string(),
@@ -10891,7 +10891,7 @@ mod slow_tests {
         assert!(withdrawn["items"][0].get("body").is_none());
         let no_results = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "PUBLIC_HISTORY_WITHOUT_SNAPSHOT_MEMBERSHIP".to_string(),
@@ -11079,7 +11079,7 @@ mod slow_tests {
             .unwrap();
         let late = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &run,
                 &HistorySearchInput {
                     query: "AFTER_FROZEN_BOUNDARY".to_string(),
@@ -11206,7 +11206,7 @@ mod slow_tests {
         );
         let late_search = ThreadHistoryService
             .search_history(
-                &mut fixture.database,
+                &fixture.database,
                 &live_run,
                 &HistorySearchInput {
                     query: "LIVE_DIRECTORY_BODY_FENCE".into(),

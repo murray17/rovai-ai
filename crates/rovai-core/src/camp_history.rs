@@ -407,16 +407,15 @@ impl ThreadHistoryService {
         Ok(result)
     }
 
-    pub fn search_camp(
+    #[cfg(test)]
+    pub(crate) fn search_camp(
         &self,
-        database: &mut Database,
+        database: &Database,
         run: &AuthenticatedTeamToolRun,
         input: &ThreadSearchInput,
     ) -> Result<Value> {
-        let transaction = database.connection_mut().transaction()?;
-        let result = Self::search_camp_in_snapshot(&transaction, run, input)?;
-        transaction.commit()?;
-        Ok(result)
+        let reader = Self::open_search_snapshot(database)?;
+        Self::search_camp_in_snapshot(&reader, run, input)
     }
 
     /// Pin the read view while the caller holds the authenticated writer guard. SQLite
@@ -466,16 +465,15 @@ impl ThreadHistoryService {
         ranked_search_response(snapshot, search, false)
     }
 
-    pub fn search_history(
+    #[cfg(test)]
+    pub(crate) fn search_history(
         &self,
-        database: &mut Database,
+        database: &Database,
         run: &AuthenticatedTeamToolRun,
         input: &HistorySearchInput,
     ) -> Result<Value> {
-        let transaction = database.connection_mut().transaction()?;
-        let result = Self::search_history_in_snapshot(&transaction, run, input)?;
-        transaction.commit()?;
-        Ok(result)
+        let reader = Self::open_search_snapshot(database)?;
+        Self::search_history_in_snapshot(&reader, run, input)
     }
 
     pub(crate) fn search_history_in_snapshot(
@@ -608,7 +606,8 @@ fn effective_limit(value: Option<usize>, default: usize, maximum: usize) -> Resu
 }
 
 fn required_query(query: &str) -> Result<&str> {
-    if query.trim().is_empty() || query.chars().count() > MAX_QUERY_CHARS {
+    let query = query.trim();
+    if query.is_empty() || query.chars().count() > MAX_QUERY_CHARS {
         return Err(invalid_argument(
             "query must contain between 1 and 512 Unicode scalars",
         ));
@@ -2048,7 +2047,8 @@ mod slow_tests {
         assert!(effective_limit(Some(0), 10, 20).is_err());
         assert!(effective_limit(Some(21), 10, 20).is_err());
         assert!(required_query("   ").is_err());
-        assert_eq!(required_query(" amount ").unwrap(), " amount ");
+        assert_eq!(required_query(" amount ").unwrap(), "amount");
+        assert_eq!(required_query("\t 调度  归档　\n").unwrap(), "调度  归档");
         assert!(
             parse_date_range(Some("2026-08-02T00:00:00Z"), Some("2026-08-01T00:00:00Z")).is_err()
         );
