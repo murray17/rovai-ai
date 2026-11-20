@@ -27,8 +27,6 @@
   "归档 {0}": "Archive {0}",
   "该使命已归档，可在「设置 → 归档」中取消归档": "This mission is archived. You can unarchive it in Settings → Archive.",
   "该会话已归档，可在「设置 → 归档」中取消归档": "This conversation is archived. You can unarchive it in Settings → Archive.",
-  "归档并停止执行": "Archive and stop running work",
-  "归档 {0} 并停止执行": "Archive {0} and stop running work",
   "已归档。": "Archived.",
   "归档失败：{0}": "Could not archive: {0}",
   "取消归档失败：{0}": "Could not unarchive: {0}",

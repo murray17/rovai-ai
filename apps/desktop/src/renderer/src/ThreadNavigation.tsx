@@ -1239,7 +1239,7 @@ function ThreadRow({
     key: 'export', label: menuLabels[5], icon: 'export', onSelect: onExport
   })
   if (thread.activationState === 'active' && !thread.archivedAt) menuItems.push({
-    key: 'archive', label: uiAttribute(thread.marker === 'loading' ? '归档并停止执行' : '归档'), icon: 'archive', onSelect: () => onAction('archive', thread)
+    key: 'archive', label: uiAttribute('归档'), icon: 'archive', onSelect: () => onAction('archive', thread)
   })
   menuItems.push({
     key: 'delete',
