@@ -279,7 +279,7 @@ try {
   assert.equal(git(source, 'rev-parse', '--verify', 'refs/heads/external/mission-validation'), managedCommit)
   applied(await command('missions.workspace.cleanup', { missionId: mission.missionId }))
   await waitForWorkspaceCleanupFinished(mission.missionId)
-  accepted(await command('camps.delete', { threadId: mission.threadId, force: false, workspaceDisposition: 'retain' }))
+  accepted(await command('camps.delete', { threadId: mission.threadId, workspaceDisposition: 'retain' }))
   assert.equal(db.prepare('SELECT count(*) n FROM mission_workspace WHERE mission_id=?').get(mission.missionId).n, 0)
   report.cases.push('dirty cleanup is refused asynchronously without leaving cleanup_failed; a legacy untouched failure recovers on retry; clean non-managed checkout cleanup preserves its branch and the next Run rebuilds through the preparation path')
   report.runs = [...rebuiltSnapshot.agentRuns, ...plainSnapshot.agentRuns].map(({ id, status, workspace }) => ({ id, status, workspace }))

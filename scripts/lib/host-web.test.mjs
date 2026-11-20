@@ -974,7 +974,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     for (const operation of ['threads.rename', 'camps.rename']) {
       assert.deepEqual((await call(first, 'commands.reconcile', { operation, params: renameParams })).result, renamed)
     }
-    const deleteParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId, force: false } }
+    const deleteParams = { commandId: crypto.randomUUID(), command: { threadId: temporaryId } }
     const deleted = await call(first, 'camps.delete', deleteParams)
     assert.equal(deleted.status, 'accepted')
     assert.equal(await call(first, 'camps.exists', { threadId: temporaryId }), false)
@@ -997,7 +997,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const deletingSource = { ...transferSource, threadId: deletingId }
     const deletingGrant = await grant(deletingSource)
     const deletingStream = await fetch(origin + deletingGrant.url)
-    assert.equal((await host.request('camps.delete', { commandId: crypto.randomUUID(), command: { threadId: deletingId, force: false } })).status, 'accepted')
+    assert.equal((await host.request('camps.delete', { commandId: crypto.randomUUID(), command: { threadId: deletingId } })).status, 'accepted')
     let drainedAfterDeletion = 0
     for await (const bytes of deletingStream.body) drainedAfterDeletion += bytes.length
     assert.equal(drainedAfterDeletion, sizeForSlow, 'business deletion does not interrupt an admitted stream')

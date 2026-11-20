@@ -49,7 +49,6 @@ import {
   bootstrapAuthorityCopy,
   campActivationPreview,
   campActivationStateForCreation,
-  campDeleteCommand,
   campViewIsVisibleForReadAcknowledgement,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
@@ -828,13 +827,6 @@ describe('Project directory selection', () => {
 })
 
 describe('Thread snapshot cache', () => {
-  it('authorizes physical deletion from the destructive confirmation', () => {
-    expect(campDeleteCommand('camp-delete')).toEqual({
-      threadId: 'camp-delete',
-      force: true
-    })
-  })
-
   it('retains the current workspace until an uncached Thread projection is ready', () => {
     const snapshot = (threadId: string): ThreadSnapshot => ({
       thread: { id: threadId }

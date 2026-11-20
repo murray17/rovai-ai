@@ -869,7 +869,7 @@ async function assertExpandedWindowFreshness(cdp) {
   await waitForExpression(cdp, titleIs('收起期间更新后重新展开'))
   const deleted = await request(cdp, 'camps.delete', {
     commandId: crypto.randomUUID(),
-    command: { threadId: target.id, force: true }
+    command: { threadId: target.id }
   })
   assert(deleted.status === 'accepted', `Fixture delete was not accepted: ${JSON.stringify(deleted)}`)
   await waitForExpression(cdp, `!document.querySelector(${JSON.stringify(targetSelector)})

@@ -642,7 +642,6 @@ mod tests {
             execution_epoch: None,
             payload: DeleteThreadCommand {
                 camp_id: camp_id.to_string(),
-                force: true,
                 workspace_disposition: MissionWorkspaceDisposition::Retain,
             },
         }

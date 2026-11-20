@@ -34,7 +34,6 @@
   "取消归档失败：{0}": "Could not unarchive: {0}",
   "撤销": "Undo",
   "目标已移除": "This record was removed",
-  "记录已变化，请关闭并重新打开删除确认。": "The record changed. Close and reopen the deletion dialog.",
   "工作区正在清理，请稍后重试。": "Workspace cleanup is in progress. Try again shortly.",
   "记录正在删除。": "This record is being deleted.",
   "归档列表返回了重复的游标。": "The archive list returned a repeated cursor.",

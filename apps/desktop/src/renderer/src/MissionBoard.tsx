@@ -213,7 +213,7 @@ export function MissionInteractionProvider({ missions, projects, agents, install
       <MissionWorkspaceCleanup key={cleaning.missionId} mission={cleaning} onClose={() => setCleaning(null)} onRequested={async () => { await cleanup(cleaning); setCleaning(null) }}/>
     )}
     {deleting && <MissionDelete key={deleting.missionId} mission={deleting} onClose={() => setDeleting(null)} onDelete={async workspaceDisposition => {
-      await missionCommand(client, 'threads.delete', { threadId: deleting.threadId, force: true, workspaceDisposition })
+      await missionCommand(client, 'threads.delete', { threadId: deleting.threadId, workspaceDisposition })
       await onDeleted(deleting.threadId); setDeleting(null)
     }}/>}
   </Actions.Provider></MissionPeopleProvider>
