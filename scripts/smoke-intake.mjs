@@ -104,10 +104,7 @@ try {
     }
     const deletion = await core.request('camps.delete', {
       commandId: crypto.randomUUID(),
-      command: {
-        threadId,
-        expectedVersion: restoredEmptySnapshot.thread.version
-      }
+      command: { threadId }
     })
     if (deletion.status !== 'accepted' || deletion.code !== 'camp.delete_accepted') {
       throw new Error(`Quiescent Windows Camp deletion was not accepted: ${JSON.stringify(deletion)}`)
@@ -224,10 +221,7 @@ try {
 
   const deletion = await core.request('camps.delete', {
     commandId: crypto.randomUUID(),
-    command: {
-      threadId,
-      expectedVersion: restoredSnapshot.thread.version
-    }
+    command: { threadId }
   })
   if (deletion.status !== 'accepted' || deletion.code !== 'camp.delete_accepted') {
     throw new Error(`Quiescent Camp deletion was not accepted: ${JSON.stringify(deletion)}`)

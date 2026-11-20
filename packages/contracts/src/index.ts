@@ -896,13 +896,11 @@ export interface ThreadCreationPreflight {
 export interface RenameThreadCommand {
   threadId: string
   title: string
-  expectedVersion: number
 }
 
 export interface ChangeDefaultLeadCommand {
   threadId: string
   successorAgentId: string
-  expectedVersion: number
 }
 
 export interface ReconcileDefaultLeadCommand {
@@ -911,8 +909,6 @@ export interface ReconcileDefaultLeadCommand {
 
 export interface DeleteThreadCommand {
   threadId: string
-  expectedVersion: number
-  force?: boolean
   workspaceDisposition?: 'retain' | 'cleanup'
 }
 
@@ -1078,7 +1074,6 @@ export interface ArchiveItem {
   title: string
   projectKey: string
   lastMessageAt: string | null
-  threadVersion: number
 }
 
 export interface ArchiveList {

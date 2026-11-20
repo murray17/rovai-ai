@@ -5610,14 +5610,6 @@ mod slow_tests {
                 ),
             )
             .unwrap();
-        let version = database
-            .connection()
-            .query_row(
-                "SELECT version FROM camp WHERE id = ?1",
-                [&camp_id],
-                |row| row.get(0),
-            )
-            .unwrap();
         collaboration
             .rename_camp(
                 database,
@@ -5627,7 +5619,6 @@ mod slow_tests {
                     RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: title.to_string(),
-                        expected_version: version,
                     },
                 ),
             )
@@ -6058,14 +6049,6 @@ mod slow_tests {
         let viewed = read_model.navigation_snapshot(&mut database).unwrap();
         assert_eq!(viewed.projects[0].recent_camps[0].marker, "none");
 
-        let version: i64 = database
-            .connection()
-            .query_row(
-                "SELECT version FROM camp WHERE id = ?1",
-                [&camp_id],
-                |row| row.get(0),
-            )
-            .unwrap();
         collaboration
             .rename_camp(
                 &mut database,
@@ -6075,7 +6058,6 @@ mod slow_tests {
                     RenameThreadCommand {
                         camp_id: camp_id.clone(),
                         title: "重命名不改变活动".to_string(),
-                        expected_version: version,
                     },
                 ),
             )

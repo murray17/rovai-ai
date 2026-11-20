@@ -3628,8 +3628,7 @@ export function BusinessApp({
         commandId: newCommandId(),
         command: {
           threadId: thread.id,
-          title,
-          expectedVersion: thread.version
+          title
         }
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
@@ -3684,7 +3683,7 @@ export function BusinessApp({
       }
       const result = await client.request<StoredCommandResult>('threads.delete', {
         commandId: newCommandId(),
-        command: campDeleteCommand(thread)
+        command: { threadId: thread.id }
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       hideAcceptedThreadDeletion(thread.id)
@@ -3788,8 +3787,7 @@ export function BusinessApp({
         commandId: newCommandId(),
         command: {
           threadId: activeThreadId,
-          successorAgentId: agentId,
-          expectedVersion: campSnapshot.thread.version
+          successorAgentId: agentId
         }
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
@@ -5551,16 +5549,6 @@ function membershipConflictCode(code: string): boolean {
     || code === 'camp.membership_version_conflict'
     || code === 'camp.member_not_found'
     || code === 'camp.member_not_active'
-}
-
-export function campDeleteCommand(
-  thread: Pick<NavigationThreadItem, 'id' | 'version'>
-): { threadId: string; expectedVersion: number; force: true } {
-  return {
-    threadId: thread.id,
-    expectedVersion: thread.version,
-    force: true
-  }
 }
 
 export function runtimeRecoveryFromCommandResult(

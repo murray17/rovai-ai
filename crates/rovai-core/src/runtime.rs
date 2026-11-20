@@ -1214,59 +1214,7 @@ impl ExecutionRuntimeService {
         Ok(expired)
     }
 
-    pub fn settle_forced_camp_deletion(
-        &self,
-        database: &mut Database,
-        camp_id: &str,
-        expected_version: i64,
-        command_id: &str,
-    ) -> Result<std::result::Result<Vec<Value>, CommandHandlerResult>> {
-        let changes_before = database.connection().total_changes();
-        let transaction = database.connection_mut().transaction()?;
-        let version: Option<i64> = transaction
-            .query_row("SELECT version FROM camp WHERE id = ?1", [camp_id], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        let Some(version) = version else {
-            return Ok(Err(rejected("camp.not_found", "Thread does not exist")));
-        };
-        if version != expected_version {
-            return Ok(Err(CommandHandlerResult::rejected(
-                "command.version_conflict",
-                json!({ "currentVersion": version }),
-            )));
-        }
-        let blockers =
-            self.settle_camp_deletion_in_transaction(&transaction, camp_id, command_id)?;
-        transaction.commit()?;
-        if database.connection().total_changes() != changes_before {
-            database.execution_wake.execution_changed();
-        }
-        Ok(Ok(blockers))
-    }
-
-    pub(crate) fn settle_camp_deletion_in_transaction(
-        &self,
-        transaction: &Transaction<'_>,
-        camp_id: &str,
-        command_id: &str,
-    ) -> Result<Vec<Value>> {
-        let blockers = crate::collaboration::camp_delete_blockers(transaction, camp_id)?;
-        self.apply_camp_deletion_settlement(transaction, camp_id, command_id)?;
-        Ok(blockers)
-    }
-
     pub(crate) fn settle_camp_deletion_cutover_in_transaction(
-        &self,
-        transaction: &Transaction<'_>,
-        camp_id: &str,
-        command_id: &str,
-    ) -> Result<()> {
-        self.apply_camp_deletion_settlement(transaction, camp_id, command_id)
-    }
-
-    fn apply_camp_deletion_settlement(
         &self,
         transaction: &Transaction<'_>,
         camp_id: &str,

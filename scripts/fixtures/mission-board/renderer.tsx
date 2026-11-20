@@ -1,7 +1,7 @@
 import { loadLocalThreadComposerDraft } from '../../../apps/desktop/src/renderer/src/camp-composer-local-store'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { missionDescriptionText, missionMentionIds } from '../../../apps/desktop/src/renderer/src/mission-description'
-import {runMissionMentionAcceptance,runMissionAcceptance,runMissionCheckoutViewAcceptance,runMissionDeleteTraceAcceptance,runMissionLargeDiffAcceptance} from './acceptance'
+import {runMissionMentionAcceptance,runMissionAcceptance,runMissionCheckoutViewAcceptance,runMissionDeleteAcceptance,runMissionLargeDiffAcceptance} from './acceptance'
 import React from 'react'
 import {createRoot} from 'react-dom/client'
 import {BusinessApp} from '../../../apps/desktop/src/renderer/src/BusinessApp'
@@ -269,7 +269,7 @@ const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}}
 let traverse: ((state: any) => Promise<unknown>) | undefined
 const navigationHistory={initial:{entries:[{kind:'missions' as const}],index:0},write:(state:any)=>state,go:async()=>false,listen:(fn: typeof traverse)=>{traverse=fn;return()=>{traverse=undefined}}}
 const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{calls.push({method:"fixture.file.open",p:req});return model.fileApi.open({...req,...(req.threadId?{threadId:initial.thread.id}:{})} as any)}},preferences,navigationHistory,selectWorkspaceDirectory:async()=>({name:'rovai-ai',projectPath:'/workspace/rovai-ai'})}
-;(window as any).missionQA={items,calls,errors:[],runMentions:runMissionMentionAcceptance,failNextMissionSave:()=>{failNextMissionSave=true},run:runMissionAcceptance,runCheckoutView:runMissionCheckoutViewAcceptance,runDeleteTrace:runMissionDeleteTraceAcceptance,runLargeDiff:runMissionLargeDiffAcceptance,admitMissionNotification,
+;(window as any).missionQA={items,calls,errors:[],runMentions:runMissionMentionAcceptance,failNextMissionSave:()=>{failNextMissionSave=true},run:runMissionAcceptance,runCheckoutView:runMissionCheckoutViewAcceptance,runDelete:runMissionDeleteAcceptance,runLargeDiff:runMissionLargeDiffAcceptance,admitMissionNotification,
  failNextArchive: (failure: 'transport' | 'rejected') => {nextArchiveFailure = failure},
  holdThreadOpen: () => {threadOpenGate = new Promise<void>(resolve => {releaseThreadOpen = resolve})},
  releaseThreadOpen: () => {releaseThreadOpen?.(); threadOpenGate = undefined},

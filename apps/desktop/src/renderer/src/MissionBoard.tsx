@@ -3,8 +3,8 @@ import { missionDescriptionContent, missionDescriptionText, missionMentionIds, u
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type Ref } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import type { AdapterInstallation, AgentProfile, ThreadOpenProjection, MissionDelivery, MissionRecord, MissionStatus, MissionUpdate, MissionWorkspace, ProjectNavigationGroup } from '@contracts'
-import { useThreadClient, type ThreadClient } from './camp-client'
+import type { AdapterInstallation, AgentProfile, MissionDelivery, MissionRecord, MissionStatus, MissionUpdate, MissionWorkspace, ProjectNavigationGroup } from '@contracts'
+import { useThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { DialogControlIcon } from './AppDialog'
 import { NavigationIcon } from './NavigationIcon'
@@ -73,10 +73,6 @@ export function missionDate(value: string): string {
   if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
   if (date.toDateString() === yesterday.toDateString()) return uiAttribute("昨天")
   return date.toLocaleDateString(locale, { month: 'numeric', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } as const : {}) })
-}
-
-function openMissionThread(client: Pick<ThreadClient, 'request'>, threadId: string): Promise<ThreadOpenProjection> {
-  return client.request<ThreadOpenProjection>('threads.open', { traceId: newCommandId(), threadId })
 }
 
 /** Shared overlays keep card actions identical in the board, drawer and full conversation. */
@@ -202,8 +198,7 @@ export function MissionInteractionProvider({ missions, projects, agents, install
       onEdit={() => { if (selected) setEditing(selected); setPosition(null) }}
       onStatus={status => { if (selected) actions.status(selected, status) }}
       onLead={id => { if (selected) report((async () => {
-        const snapshot = await openMissionThread(client, selected.threadId)
-        await missionCommand(client, 'threads.changeDefaultLead', { threadId: selected.threadId, successorAgentId: id, expectedVersion: snapshot.thread.version })
+        await missionCommand(client, 'threads.changeDefaultLead', { threadId: selected.threadId, successorAgentId: id })
         await onChanged(selected.threadId)
       })()) }}
       onSaveTags={tags => selected ? change(selected, 'update', { tags }) : Promise.resolve()}
@@ -218,8 +213,7 @@ export function MissionInteractionProvider({ missions, projects, agents, install
       <MissionWorkspaceCleanup key={cleaning.missionId} mission={cleaning} onClose={() => setCleaning(null)} onRequested={async () => { await cleanup(cleaning); setCleaning(null) }}/>
     )}
     {deleting && <MissionDelete key={deleting.missionId} mission={deleting} onClose={() => setDeleting(null)} onDelete={async workspaceDisposition => {
-      const snapshot = await openMissionThread(client, deleting.threadId)
-      await missionCommand(client, 'threads.delete', { threadId: deleting.threadId, expectedVersion: snapshot.thread.version, force: true, workspaceDisposition })
+      await missionCommand(client, 'threads.delete', { threadId: deleting.threadId, workspaceDisposition })
       await onDeleted(deleting.threadId); setDeleting(null)
     }}/>}
   </Actions.Provider></MissionPeopleProvider>

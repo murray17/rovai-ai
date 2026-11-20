@@ -143,17 +143,13 @@ app.whenReady().then(async () => {
     const deleteRow = '[data-archive-thread="archive-fixture-0"] .archive-delete'
     const lastDelete = "window.settingsTest.requests.filter(r => r.method === 'threads.delete').at(-1).params.command"
     await click(deleteRow)
-    await run("window.settingsTest.state.archiveDeleteRejection = 'command.version_conflict'")
+    await run("window.settingsTest.fail('threads.delete')")
     await click('.archive-delete-confirm')
-    await waitFor("document.querySelector('[role=dialog] [role=alert]')?.textContent.includes('重新打开删除确认')")
-    assert.equal(await run(`${lastDelete}.expectedVersion`), 9)
-    await click('[role=dialog] .compact-cancel')
-    await waitFor("document.querySelector('#archive-results').getAttribute('aria-busy') === 'false'")
-    await click(deleteRow)
+    await waitFor("document.querySelector('[role=dialog] [role=alert]')?.textContent.includes('暂时无法完成')")
+    assert.deepEqual(await run(lastDelete), { threadId: 'archive-fixture-0', workspaceDisposition: 'retain' })
     await run("window.settingsTest.state.archiveDeleteRejection = 'camp.not_found'")
     await click('.archive-delete-confirm')
     await waitFor("!document.querySelector('[role=dialog]') && window.settingsTest.archiveNotices.at(-1) === '目标已移除'")
-    assert.equal(await run(`${lastDelete}.expectedVersion`), 10)
     assert.equal(await run('!!document.querySelector(' + JSON.stringify(deleteRow) + ')'), false)
 
     await click('#archive-tab-mission')
@@ -169,7 +165,7 @@ app.whenReady().then(async () => {
     assert.equal(await run(`${lastDelete}.workspaceDisposition`), 'cleanup')
     await click('.mission-delete-confirm')
     await waitFor("!document.querySelector('[role=dialog]') && document.querySelectorAll('.archive-row').length === 0")
-    assert.deepEqual(await run(lastDelete), { threadId: 'archive-mission-thread', expectedVersion: 9,
+    assert.deepEqual(await run(lastDelete), { threadId: 'archive-mission-thread',
       workspaceDisposition: 'cleanup' })
     assert.equal(await run('window.settingsTest.archiveNotices.at(-1)'), '已提交删除')
     // Runtime editor regression: a selected program path saves directly, failure

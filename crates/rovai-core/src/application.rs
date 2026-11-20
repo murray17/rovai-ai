@@ -36214,9 +36214,6 @@ done
             Ok(completed) => completed.unwrap().unwrap(),
             Err(_) => repair_request.await.unwrap().unwrap(),
         };
-        let first_camp_version = camp_replies[0].result.as_ref().unwrap()["thread"]["version"]
-            .as_i64()
-            .unwrap();
         let renamed = service
             .request(
                 "camps.rename",
@@ -36224,8 +36221,7 @@ done
                     "commandId": "dispatch-rename-after-enter",
                     "command": {
                         "threadId": camp_ids[0],
-                        "title": "Renamed after enter",
-                        "expectedVersion": first_camp_version
+                        "title": "Renamed after enter"
                     }
                 }),
             )
@@ -37642,12 +37638,6 @@ done
         let operation_id = uuid::Uuid::new_v4().to_string();
         let cleanup = {
             let mut database = core.database.lock().await;
-            let version = database
-                .connection()
-                .query_row("SELECT version FROM camp WHERE id=?1", [&camp_id], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap();
             let accepted = ThreadDeletionService::default()
                 .accept(
                     &mut database,
@@ -37661,8 +37651,6 @@ done
                         execution_epoch: None,
                         payload: DeleteThreadCommand {
                             camp_id: camp_id.clone(),
-                            expected_version: version,
-                            force: true,
                             workspace_disposition:
                                 rovai_core::collaboration::MissionWorkspaceDisposition::Cleanup,
                         },

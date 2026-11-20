@@ -3489,21 +3489,11 @@ mod tests {
                     .unwrap()
                     .output_root;
             std::fs::write(output.join("daily-result.txt"), b"Daily output").unwrap();
-            let version = database
-                .connection()
-                .query_row(
-                    "SELECT version FROM camp WHERE id=?1",
-                    [&target.camp_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
             let operation_id = Uuid::new_v4().to_string();
             let mut envelope = user_command(
                 &operation_id,
                 DeleteThreadCommand {
                     camp_id: target.camp_id.clone(),
-                    expected_version: version,
-                    force: false,
                     workspace_disposition: MissionWorkspaceDisposition::Retain,
                 },
             );

@@ -14,6 +14,10 @@ last_updated: 2026-10-13
 exact lifetime fence。本版允许已存在的 Thread 没有 active member，取消最后一位成员保护；
 不改变显式创建 Dialog 的初始队伍校验或 Pending 首条消息的原子邀请协议。
 
+显式更换队长使用 `threads.changeDefaultLead({ threadId, successorAgentId })`。Core 在同一事务内校验
+`camp.default_lead.change` 权限，以及继任者仍为活跃、在场且未申请离开的成员。成功后递增 Thread 版本，
+多个有效选择以最后一次提交为准。添加或移出成员继续使用各自的 generation/version 校验。
+
 ## 空会话与接收者
 
 - 最后一位队员离开后 Thread 保持原 ID、工作区、active 状态与公开历史，不自动删除或改成 Pending。

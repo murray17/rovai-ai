@@ -5,36 +5,34 @@ authority: camp-deletion-asynchronous-acceptance-and-handoff
 status: accepted
 version: 4
 source_version: v1.65
-last_updated: 2026-10-29
+last_updated: 2026-11-19
 ---
 
 # Camp Permanent Deletion v4
 
-本合同替代 [v3](camp-permanent-deletion-v3.md)。继承 User-only、exact-version、受管目录 identity、外部文件保护、
+本合同替代 [v3](camp-permanent-deletion-v3.md)。继承 User-only、受管目录 identity、外部文件保护、
 幂等 Domain Command 与聚合删除原子性；把所有 Runtime 状态统一为可靠的异步删除，并以 Camp marker 到既有 cleanup
 journal 的阶段交接完成崩溃恢复，不新增删除任务表或用户任务中心。
 
 ## 1. 接口与受理 receipt
 
-`camps.delete` 保留现有 payload：
+`threads.delete` 按 Thread ID 删除用户选中的会话或使命，范围包含受理时的全部内容。旧入口 `camps.delete` 和 `campId` 输入别名继续可用。
 
 ```ts
 {
   commandId: string
   command: {
-    campId: string
-    expectedVersion: number
-    force?: boolean
+    threadId: string
     workspaceDisposition?: 'retain' | 'cleanup'
   }
 }
 ```
 
-`force` 为兼容字段，不再选择同步/异步 Runtime 路径。用户确认永久删除即授权 Core 终结当前业务执行并在后台完成
-停机、删库和受管资源清理。首次受理必须在一个短事务及同一 Fleet admission gate 内完成：
+用户确认永久删除即授权 Core 终结当前业务执行，并在后台完成停机、删库和受管资源清理。
+Core 在同一 Fleet admission gate 内通过一个短事务完成首次受理。
 
-1. 检查同 command replay 或该 Camp 已存在的删除意图；
-2. 验证 User 与 exact Camp version；
+1. 回放同一命令已有的回执，首次执行时校验用户身份；
+2. 按 Thread ID 复用已受理的删除操作，首次受理时确认目标存在；
 3. 复用 abortive settlement 终结当前 Turn、Run 和 Delivery，并保存现有 Run 的精确 cleanup 身份；
 4. 记录 Mission Workspace retain/cleanup 处置；
 5. 在 Camp 写入不可取消的 Deletion Intent、首个 command ID 和 retry checkpoint；
@@ -59,7 +57,7 @@ journal 的阶段交接完成崩溃恢复，不新增删除任务表或用户任
 aggregate。请求在该事务后立即返回，不等待 Runtime、SQLite 聚合删除、预览释放、Mission Git 或文件系统。
 
 同 command ID 重放原 receipt；不同 command ID 对同一 Camp 的重复删除也返回首个 operation，即使 Camp 聚合已经删除。
-已有 operation 的查找早于 version/not-found 判断。首个 accepted `command.result` 必须排除于 Camp event 清理，且不得承载
+查找已有 operation 先于检查目标是否仍存在。首个 accepted `command.result` 必须排除于 Camp event 清理，且不得承载
 可变阶段 checkpoint。
 
 ## 2. 删除准入 fence
