@@ -227,8 +227,6 @@ pub struct DeleteThreadCommand {
     #[serde(rename = "threadId", alias = "campId")]
     pub camp_id: String,
     #[serde(default)]
-    pub force: bool,
-    #[serde(default)]
     pub workspace_disposition: MissionWorkspaceDisposition,
 }
 
@@ -9118,6 +9116,7 @@ mod slow_tests {
             serde_json::from_value(json!({
                 "threadId": camp_id,
                 "expectedVersion": initial_version,
+                "force": true,
                 "workspaceDisposition": "cleanup"
             }))
             .unwrap(),
@@ -9237,7 +9236,6 @@ mod slow_tests {
             Some(&camp_id),
             DeleteThreadCommand {
                 camp_id: camp_id.clone(),
-                force: false,
                 workspace_disposition: Default::default(),
             },
         );

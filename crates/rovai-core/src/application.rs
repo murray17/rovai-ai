@@ -37651,7 +37651,6 @@ done
                         execution_epoch: None,
                         payload: DeleteThreadCommand {
                             camp_id: camp_id.clone(),
-                            force: true,
                             workspace_disposition:
                                 rovai_core::collaboration::MissionWorkspaceDisposition::Cleanup,
                         },

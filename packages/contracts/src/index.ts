@@ -909,7 +909,6 @@ export interface ReconcileDefaultLeadCommand {
 
 export interface DeleteThreadCommand {
   threadId: string
-  force?: boolean
   workspaceDisposition?: 'retain' | 'cleanup'
 }
 

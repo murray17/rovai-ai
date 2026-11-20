@@ -5,7 +5,7 @@ authority: camp-deletion-asynchronous-acceptance-and-handoff
 status: accepted
 version: 4
 source_version: v1.65
-last_updated: 2026-10-29
+last_updated: 2026-11-19
 ---
 
 # Camp Permanent Deletion v4
@@ -23,14 +23,13 @@ journal 的阶段交接完成崩溃恢复，不新增删除任务表或用户任
   commandId: string
   command: {
     threadId: string
-    force?: boolean
     workspaceDisposition?: 'retain' | 'cleanup'
   }
 }
 ```
 
-`force` 为兼容字段，不再选择同步/异步 Runtime 路径。用户确认永久删除即授权 Core 终结当前业务执行并在后台完成
-停机、删库和受管资源清理。首次受理必须在一个短事务及同一 Fleet admission gate 内完成：
+用户确认永久删除即授权 Core 终结当前业务执行，并在后台完成停机、删库和受管资源清理。
+Core 在同一 Fleet admission gate 内通过一个短事务完成首次受理。
 
 1. 回放同一命令已有的回执，首次执行时校验用户身份；
 2. 按 Thread ID 复用已受理的删除操作，首次受理时确认目标存在；

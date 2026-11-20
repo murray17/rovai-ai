@@ -3494,7 +3494,6 @@ mod tests {
                 &operation_id,
                 DeleteThreadCommand {
                     camp_id: target.camp_id.clone(),
-                    force: false,
                     workspace_disposition: MissionWorkspaceDisposition::Retain,
                 },
             );

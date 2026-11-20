@@ -697,7 +697,9 @@ export async function runMissionDeleteAcceptance(): Promise<{ ok: true; cases: s
   check(!deletionError(), `Mission deletion must not fail before the command is admitted: ${deletionError()}`)
   check(deletionCommitted(), 'Mission deletion did not remove its card')
   check(!qa.calls.slice(deleteStartedAt).some((call:any) => call.method === 'threads.open' && call.p.threadId === mission.threadId), 'Mission deletion opened the Thread to read its version')
-  check(qa.calls.some((call:any) => call.method === 'threads.delete' && call.p.command?.threadId === mission.threadId), 'Mission deletion command was not admitted')
+  const command = qa.calls.slice(deleteStartedAt).find((call:any) => call.method === 'threads.delete')?.p.command
+  check(command?.threadId === mission.threadId && command.workspaceDisposition === 'retain' && !('force' in command),
+    'Mission deletion must submit the selected Thread ID and worktree choice without a force flag')
   return { ok: true, cases: ['Mission deletion submits the selected Thread ID without opening its history'] }
 }
 

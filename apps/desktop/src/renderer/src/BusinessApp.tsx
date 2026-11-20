@@ -3683,7 +3683,7 @@ export function BusinessApp({
       }
       const result = await client.request<StoredCommandResult>('threads.delete', {
         commandId: newCommandId(),
-        command: campDeleteCommand(thread.id)
+        command: { threadId: thread.id }
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       hideAcceptedThreadDeletion(thread.id)
@@ -5549,10 +5549,6 @@ function membershipConflictCode(code: string): boolean {
     || code === 'camp.membership_version_conflict'
     || code === 'camp.member_not_found'
     || code === 'camp.member_not_active'
-}
-
-export function campDeleteCommand(threadId: string): { threadId: string; force: true } {
-  return { threadId, force: true }
 }
 
 export function runtimeRecoveryFromCommandResult(
