@@ -30,7 +30,7 @@ test('withdrawn text recovery uses production storage, expiry and composer inter
   const scenario = async name => { await b.evaluate(`window.__withdrawReview.scenario(${JSON.stringify(name)})`); await pause(250) }
   const check = async (name, run) => { await run(); checks.push(name); console.log('PASS ' + name) }
   const withdraw = async () => {
-    await click('[aria-label="撤回尚未领取的消息"]'); await click('[aria-label="确认撤回消息"]'); await pause(550)
+    await click('[aria-label="撤回这条消息"]'); await click('[aria-label="确认撤回消息"]'); await pause(550)
   }
   const key = async (key, code) => {
     await b.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code })
@@ -102,10 +102,10 @@ test('withdrawn text recovery uses production storage, expiry and composer inter
       await scenario('failure'); await withdraw()
       assert.equal((await state()).messages[3].withdrawn, false)
       assert.equal(await count(), 0)
-      await click('[aria-label="取消撤回"]')
+      await click('.message-withdraw-dialog [aria-label="取消"]')
       await scenario('unknown'); await withdraw()
       assert.equal(await count(), 0)
-      await click('[aria-label="取消撤回"]')
+      await click('.message-withdraw-dialog [aria-label="取消"]')
       await b.evaluate('window.__withdrawReview.recover()'); await pause(250)
       assert.equal(await count(), 1)
     })
@@ -149,6 +149,8 @@ test('withdrawn text recovery uses production storage, expiry and composer inter
         assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".message-reedit-action")).textDecorationLine'), 'none')
         await b.send('Emulation.setDeviceMetricsOverride', { width: 1040, height: 700, deviceScaleFactor: 1, mobile: false }); await pause(150)
         assert.equal(await b.evaluate('document.documentElement.scrollWidth > innerWidth'), false)
+        assert.equal(await b.evaluate('!!document.querySelector(".withdrawn-message-event .message-more-button")'), false)
+        assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".withdrawn-message-event time")).paddingTop'), '2px')
         await capture(`05-${theme}`)
       }
       assert.deepEqual(b.errors, [])

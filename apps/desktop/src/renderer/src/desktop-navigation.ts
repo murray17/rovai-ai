@@ -1,4 +1,4 @@
-import type { MemoryScopeKind, RestorableLocation, SettingsSection } from '@contracts'
+import type { ArchiveKind, MemoryScopeKind, RestorableLocation, SettingsSection } from '@contracts'
 
 export type MemoryNavigationTarget = {
   kind: 'memory'
@@ -9,9 +9,11 @@ export type MemoryNavigationTarget = {
   search?: string
 }
 
+export type ArchiveNavigationSelection = { kind: ArchiveKind; threadId: string }
+
 export type NavigationTarget = Exclude<RestorableLocation, { kind: 'memory' }>
   | MemoryNavigationTarget
-  | { kind: 'settings'; section: SettingsSection; overview?: true }
+  | { kind: 'settings'; section: SettingsSection; overview?: true; archive?: ArchiveNavigationSelection }
   | { kind: 'automations' }
   | { kind: 'missions' }
 
@@ -30,6 +32,7 @@ export function sameNavigationDestination(a: NavigationTarget, b: NavigationTarg
   switch (a.kind) {
     case 'camp': return b.kind === 'camp' && a.threadId === b.threadId
     case 'settings': return b.kind === 'settings' && a.section === b.section && a.overview === b.overview
+      && a.archive?.kind === b.archive?.kind && a.archive?.threadId === b.archive?.threadId
     case 'members': return b.kind === 'members' && a.agentId === b.agentId && a.tab === b.tab
     case 'memory': return b.kind === 'memory' && a.memoryId === b.memoryId
     default: return true

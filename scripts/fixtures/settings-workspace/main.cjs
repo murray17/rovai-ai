@@ -127,6 +127,7 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelectorAll('.archive-row').length === 0")
     assert.equal(await run("document.querySelector('.archive-search input').value"), 'archive-fixture-51')
     await waitFor("document.activeElement.id === 'archive-tab-chat'")
+    assert.equal(await run("window.settingsTest.state.restoredArchiveThread"), 'archive-fixture-51')
     assert.deepEqual(await run("window.settingsTest.requests.find(r => r.method === 'threads.unarchive').params.command"),
       { threadId: 'archive-fixture-51' })
     await click('.archive-search button')

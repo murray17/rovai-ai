@@ -82,6 +82,57 @@ app.whenReady().then(async () => {
     assert.equal(await run('document.activeElement.getAttribute("data-quote-owner")'),`thread:${quotedCopy}`)
     assert.equal(await run('!!document.querySelector(".message-quote-error")'),false);await key('Escape')
     await row('source');await wait('document.querySelector("[contenteditable=true]")?.textContent==="保留源草稿"')
+    const userRow = '[data-message-id=review-message-1]'
+    await click(`document.querySelector('${userRow} .message-more-button')`)
+    await wait('!!document.querySelector(".message-action-menu [role=separator]")')
+    const userMenu = await run(`[...document.querySelectorAll('.message-action-menu [role=menuitem]')].map(item => ({
+      label: item.textContent.trim(), icon: Boolean(item.querySelector('.sidebar-action-menu-icon')), danger: item.classList.contains('danger')
+    }))`)
+    assert.deepEqual(userMenu[0], { label: '编辑', icon: true, danger: false })
+    assert.deepEqual(userMenu.at(-1), { label: '删除', icon: true, danger: true })
+    await select()
+    await wait(`!!document.querySelector('${userRow} .message-surface > .message-bubble > .revision-editor')`)
+    const editing = await run(`(() => {
+      const row = document.querySelector('${userRow}')
+      const editor = row.querySelector('.revision-editor')
+      const save = editor.querySelector('button[type=submit]')
+      const time = row.querySelector('.message-action-time')
+      const more = row.querySelector('.message-more-button .more-icon')
+      return {
+        actions: !!row.querySelector('.message-action-line .message-copy-button'),
+        timePadding: getComputedStyle(time).paddingTop,
+        moreWidth: more.getBoundingClientRect().width,
+        moreFill: getComputedStyle(more).fill === getComputedStyle(more).color,
+        saveHeight: save.getBoundingClientRect().height,
+        saveFont: getComputedStyle(save).fontSize,
+        bubbleBorder: getComputedStyle(editor.parentElement).borderTopWidth
+      }
+    })()`)
+    assert.deepEqual(editing, { actions: true, timePadding: '1px', moreWidth: 15, moreFill: true,
+      saveHeight: 28, saveFont: '11.5px', bubbleBorder: '1px' })
+    await click(`document.querySelector('${userRow} .revision-editor .quiet-button')`)
+    await wait('!document.querySelector(".revision-editor")')
+    assert.equal(await run('document.querySelector("[contenteditable=true]").textContent'), '保留源草稿')
+    await click(`document.querySelector('${userRow} .message-more-button')`)
+    await wait('!!document.querySelector(".message-action-menu")')
+    await select()
+    await wait(`!!document.querySelector('${userRow} .revision-editor [contenteditable=true]')`)
+    await click(`document.querySelector('${userRow} .revision-editor [contenteditable=true]')`)
+    await window.webContents.insertText(' 更新')
+    await mkdir(output, { recursive: true })
+    await writeFile(join(output, 'inline-message-editor.png'), (await window.webContents.capturePage()).toPNG())
+    screenshots.push('inline-message-editor.png')
+    await click(`document.querySelector('${userRow} .revision-editor button[type=submit]')`)
+    await wait('!document.querySelector(".revision-editor") && !!document.querySelector(".public-message-edited")')
+    assert.equal(await run('forkQA.calls.find(c => c.method === "thread.messages.edit").params.command.expectedContentRevision'), 1)
+    assert.match(await run(`document.querySelector('${userRow} .message-bubble').textContent`), /更新/)
+    await run('forkQA.language("en")')
+    await wait('document.querySelector(".public-message-edited")?.textContent === "(edited)"')
+    assert.deepEqual(await run(`(() => {
+      const styles = getComputedStyle(document.querySelector('.public-message-edited'))
+      return [styles.fontSize, styles.fontWeight, styles.marginInlineStart]
+    })()`), ['11px', '400', '2.42px'])
+    await run('forkQA.language("zh-CN")')
     const initialRequests=await count()
     await fork();await row('other');await run('forkQA.release()');await quiet()
     assert.equal(await active(),'other');assert.equal(await count(),initialRequests+1)
@@ -112,6 +163,14 @@ app.whenReady().then(async () => {
     await click('document.querySelector(".app-toast-action")');await quiet()
     assert.equal(await count(),uncertainAttempts)
     await row('source');await run('forkQA.lose()');await menu();await select();await wait('document.querySelector(".app-toast")?.textContent.includes("尚未确认")')
+    const attemptsBeforeExpiry = await count()
+    await quiet()
+    await menu()
+    assert.equal(await run('document.querySelector(".message-action-menu [role=menuitem]").getAttribute("aria-disabled")'), null)
+    await select()
+    await quiet()
+    assert.equal(await count(), attemptsBeforeExpiry, 'reopening the original entry reconciles the original request')
+    await row('source');await run('forkQA.lose()');await menu();await select();await wait('document.querySelector(".app-toast")?.textContent.includes("尚未确认")')
     const copies=await run('forkQA.receipts.size');await window.webContents.reload()
     await wait('!!document.querySelector("[data-message-id=review-message-2]") && forkQA.calls.some(c=>c.method==="commands.reconcile")');await quiet()
     assert.equal(await count(),0);assert.equal(await run('forkQA.receipts.size'),copies)
@@ -134,7 +193,7 @@ app.whenReady().then(async () => {
       assert.equal(grouped.position,'static',JSON.stringify(grouped));assert(grouped.below&&grouped.visible,JSON.stringify(grouped))
       await menu()
       const measured=await run(`(()=>{const m=document.querySelector('.message-action-menu'),r=m.getBoundingClientRect(),items=[...m.querySelectorAll('[role=menuitem]')];return {labels:items.map(i=>i.textContent),width:r.width,inside:r.x>=0&&r.right<=innerWidth&&r.y>=0&&r.bottom<=innerHeight,minWidth:getComputedStyle(m).minWidth,items:items.map(i=>{const icon=i.querySelector('svg').getBoundingClientRect(),span=i.querySelector('span').getBoundingClientRect();return {icon:icon.width,delta:Math.abs(icon.y+icon.height/2-span.y-span.height/2)}})}})()`)
-      assert.deepEqual(measured.labels,language==='en'?['Fork chat from here','Select messages']:['从此处分叉','多选']);assert(measured.inside);assert.equal(measured.minWidth,'0px');assert(measured.items.every(i=>i.icon===16&&i.delta<1),JSON.stringify(measured))
+      assert.deepEqual(measured.labels,language==='en'?['Fork chat from here','Select messages','Delete']:['从此处分叉','多选','删除']);assert(measured.inside);assert.equal(measured.minWidth,'0px');assert(measured.items.every(i=>i.icon===16&&i.delta<1),JSON.stringify(measured))
       const name=`${language}-${theme}-${size.join('x')}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);geometry.push({language,theme,size,grouped,...measured});await key('Escape')
       await click('document.querySelector("[data-thread-id=source] .camp-menu-trigger")');await wait('!!document.querySelector(".sidebar-action-menu:not(.message-action-menu)")');await pause(140)
       const labels=await run('[...document.querySelectorAll(".sidebar-action-menu:not(.message-action-menu) [role=menuitem]")].map(e=>e.textContent.trim())')
@@ -158,8 +217,11 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:0,radiusX:2,radiusY:2,force:1}]})
     await window.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await wait('!!document.querySelector(".message-action-menu")');await key('Escape')
     await writeFile(join(output,'loading-reduced-motion.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('loading-reduced-motion.png')
+    await window.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled',{enabled:false})
+    await click('document.querySelector(".app-toast-close")')
+    await quiet()
     await run('forkQA.release()');await pause(100)
-    await wait('!document.querySelector(".app-toast")')
+    await quiet()
     // Shared production portals stack independent owners and clean up in StrictMode.
     const toastGeometry=[]
     for(const language of ['zh-CN','en'])for(const theme of ['day','night','horizon','classic-red','ember']) {
@@ -169,24 +231,23 @@ app.whenReady().then(async () => {
       await wait('document.querySelectorAll(".app-toast").length===2')
       const measured=await run(`(()=>{
         const host=document.querySelector('.app-toast-viewport'),shell=document.querySelector('.app-shell'),toasts=[...host.querySelectorAll('.app-toast')];
-        const sample=document.createElement('div');sample.style.cssText='color:var(--ink);background:var(--surface)';shell.append(sample);
+        const sample=document.createElement('div');sample.style.cssText='color:var(--ink);background:var(--surface-raised)';shell.append(sample);
         const normal=getComputedStyle(sample);const colors={ink:normal.color,surface:normal.backgroundColor};const dangerSample=document.createElement('div');dangerSample.style.cssText='color:var(--danger)';shell.append(dangerSample);colors.danger=getComputedStyle(dangerSample).color;sample.remove();dangerSample.remove();
-        const bounds=shell.getBoundingClientRect(),rows=toasts.map(t=>{const r=t.getBoundingClientRect(),message=t.querySelector('.app-toast-message').getBoundingClientRect(),action=t.querySelector('.app-toast-action'),a=action.getBoundingClientRect(),close=t.querySelector('.app-toast-close'),c=close.getBoundingClientRect(),style=getComputedStyle(t);return {top:r.top,bottom:r.bottom,center:Math.abs(r.x+r.width/2-bounds.x-bounds.width/2),inside:r.left>=bounds.left&&r.right<=bounds.right,aligned:Math.max(Math.abs(message.y+message.height/2-a.y-a.height/2),Math.abs(c.y+c.height/2-a.y-a.height/2)),actionBackground:getComputedStyle(action).backgroundColor,actionHeight:a.height,closeWidth:c.width,closeHeight:c.height,svg:!!close.querySelector('svg'),closeText:close.textContent,role:t.getAttribute('role'),live:t.getAttribute('aria-live'),color:style.color,background:style.backgroundColor,pointer:style.pointerEvents}});
+        const bounds=shell.getBoundingClientRect(),rows=toasts.map(t=>{const r=t.getBoundingClientRect(),message=t.querySelector('.app-toast-message').getBoundingClientRect(),action=t.querySelector('.app-toast-action'),a=action.getBoundingClientRect(),close=t.querySelector('.app-toast-close'),c=close.getBoundingClientRect(),style=getComputedStyle(t);return {top:r.top,bottom:r.bottom,center:Math.abs(r.x+r.width/2-bounds.x-bounds.width/2),inside:r.left>=bounds.left&&r.right<=bounds.right,aligned:Math.max(Math.abs(message.y+message.height/2-a.y-a.height/2),Math.abs(c.y+c.height/2-a.y-a.height/2)),actionBackground:getComputedStyle(action).backgroundColor,actionBorder:getComputedStyle(action).borderTopWidth,actionHeight:a.height,appRegion:style.getPropertyValue('-webkit-app-region'),height:r.height,closeWidth:c.width,closeHeight:c.height,svg:!!close.querySelector('svg'),closeText:close.textContent,role:t.getAttribute('role'),live:t.getAttribute('aria-live'),color:style.color,background:style.backgroundColor,pointer:style.pointerEvents}});
         return {hosts:document.querySelectorAll('.app-toast-viewport').length,parent:host.parentElement===shell,top:rows[0].top-bounds.top,gap:rows[1].top-rows[0].bottom,rows,colors,pointer:getComputedStyle(host).pointerEvents};
       })()`)
-      assert.equal(measured.hosts,1);assert(measured.parent);assert.equal(measured.top,10);assert.equal(measured.gap,8);assert.equal(measured.pointer,'none')
-      assert(measured.rows.every(r=>r.center<1&&r.inside&&r.aligned<1&&r.actionHeight>=28&&r.closeWidth===28&&r.closeHeight===28&&r.svg&&r.closeText===''&&r.pointer==='auto'&&r.actionBackground==='rgba(0, 0, 0, 0)'),JSON.stringify(measured))
+      assert.equal(measured.hosts,1);assert(measured.parent);assert.equal(measured.top,46);assert.equal(measured.gap,8);assert.equal(measured.pointer,'none')
+      assert(measured.rows.every(r=>r.center<1&&r.inside&&r.aligned<1&&r.height===40&&r.actionHeight===26&&r.closeWidth===26&&r.closeHeight===26&&r.svg&&r.closeText===''&&r.pointer==='auto'&&r.appRegion==='no-drag'&&r.actionBorder==='1px'&&r.actionBackground==='rgba(0, 0, 0, 0)'),JSON.stringify(measured))
       assert.equal(measured.rows[0].role,'status');assert.equal(measured.rows[0].live,'polite');assert.equal(measured.rows[1].role,'alert');assert.equal(measured.rows[1].live,'assertive')
       assert.equal(measured.rows[0].color,measured.colors.ink);assert.equal(measured.rows[0].background,measured.colors.surface);assert.equal(measured.rows[1].color,measured.colors.danger)
       await run(`document.querySelector('.app-toast.is-danger .app-toast-action').focus()`);await key('Tab');await key('Tab',['shift'])
-      assert.equal(await run(`getComputedStyle(document.querySelector('.app-toast.is-danger .app-toast-action')).backgroundColor`),'rgba(0, 0, 0, 0)')
-      assert.equal(await run(`getComputedStyle(document.querySelector('.app-toast.is-danger .app-toast-action > span')).textDecorationLine`),'underline')
+      assert.notEqual(await run(`getComputedStyle(document.querySelector('.app-toast.is-danger .app-toast-action')).backgroundColor`),'rgba(0, 0, 0, 0)')
       assert.equal(await run(`document.activeElement===document.querySelector('.app-toast.is-danger .app-toast-action')`),true)
-      await key('Return');assert.deepEqual(await run('forkQA.probeActions'),['retry']);assert.equal(await run('document.querySelectorAll(".app-toast").length'),2)
       const name=`toast-${language}-${theme}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);toastGeometry.push({language,theme,...measured})
-      await click(`document.querySelector('.app-toast.is-danger .app-toast-close')`);await wait('document.querySelectorAll(".app-toast").length===1')
-      await click(`document.querySelector('.app-toast-action')`);await wait('!document.querySelector(".app-toast-viewport")')
-      assert.deepEqual(await run('forkQA.probeActions'),['retry','close:danger','close:neutral','retry-neutral'])
+      await key('Return')
+      await wait('document.querySelectorAll(".app-toast").length===1')
+      await click(`document.querySelector('.app-toast-action + .app-toast-action')`);await wait('!document.querySelector(".app-toast-viewport")')
+      assert.deepEqual(await run('forkQA.probeActions'),['close:danger','retry','close:neutral','view'])
     }
     window.webContents.setZoomFactor(2)
     await run(`forkQA.showToasts('A long conversation title '.repeat(8))`)
@@ -195,8 +256,30 @@ app.whenReady().then(async () => {
     assert(zoomed)
     await writeFile(join(output,'toast-zoom-200-long.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('toast-zoom-200-long.png')
     await run('forkQA.clearToasts()');await wait('!document.querySelector(".app-toast-viewport")');window.webContents.setZoomFactor(1)
+    window.webContents.sendInputEvent({ type: 'mouseMove', x: 1, y: 100 })
+    await run('forkQA.showTimedToasts()')
+    await wait('document.querySelectorAll(".app-toast").length===2')
+    await wait('forkQA.probeActions.includes("close:plain")')
+    assert.deepEqual(await run('forkQA.probeActions'), ['close:plain'])
+    await run('document.querySelector(".app-toast[role=alert] .app-toast-close").focus()')
+    await pause(2100)
+    assert.deepEqual(await run('forkQA.probeActions'), ['close:plain'], 'keyboard focus pauses the clock')
+    const errorPoint = await run(`(() => {
+      const bounds = document.querySelector('.app-toast[role=alert]').getBoundingClientRect()
+      return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) }
+    })()`)
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...errorPoint })
+    await wait('document.querySelector(".app-toast[role=alert]").matches(":hover")')
+    await run('document.activeElement.blur()')
+    await pause(2100)
+    assert.deepEqual(await run('forkQA.probeActions'), ['close:plain'], 'hover still pauses after blur')
+    window.webContents.sendInputEvent({ type: 'mouseMove', x: 1, y: 100 })
+    await pause(400)
+    assert.deepEqual(await run('forkQA.probeActions'), ['close:plain'], 'leaving resumes the remaining time')
+    await quiet()
+    assert.deepEqual(await run('forkQA.probeActions'), ['close:plain', 'close:error'])
     assert.deepEqual(await run('forkQA.errors'),[]);assert.deepEqual(errors,[])
-    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,loadingTiming,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','aligned transparent actions and SVG close','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
+    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,loadingTiming,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','outlined toast actions and SVG close','hover and focus pause the remaining time','inline editor stays in the message bubble with its actions','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
     await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:true,output,verified:report.verified}));app.exit(0)
   }catch(error){console.error(error.stack??error);console.error(await run('JSON.stringify(forkQA.calls.slice(-12))').catch(()=>''));app.exit(1)}
 })

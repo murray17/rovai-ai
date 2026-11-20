@@ -5,6 +5,7 @@ import type { AgentProfile, NewConversationDefaults, SaveTeamCommand, StoredComm
 import { newCommandId } from '../../shared/command-id'
 import { useThreadClient } from './camp-client'
 import { MemberAvatar } from './MemberAvatar'
+import { NavigationIcon } from './NavigationIcon'
 import { MemberRosterLayout, useMemberRosterLayout } from './MemberRosterLayout'
 import { TeamGlyph } from './MissionDefinitionEditor'
 import { TeamMemberPicker } from './TeamPicker'
@@ -176,8 +177,8 @@ export function TeamWorkspace({ teams, agents, loading, loadError, defaultTeamId
               const present = member?.presence === 'present' && member.removedAt === null
               const lead = draft.defaultLeadAgentId === id
               return <li className="team-member-row" key={id}><MemberAvatar agentId={id} avatarRef={member?.avatarRef ?? null} displayName={member?.displayName ?? '?'} size="list" decorative/><div className="team-member-identity"><div className="team-member-name"><strong>{member?.displayName ?? uiAttribute('已移除队员')}</strong>{lead && <span className="team-lead-badge">{uiAttribute('队长')}</span>}{!present && <span className="team-member-attention">{uiAttribute('当前不可用')}</span>}</div><span className="team-member-role">{member?.teamRole ?? id}</span></div>
-                <div className="team-row-actions">{!lead && <button type="button" className="team-row-action" disabled={frozen || !present} aria-label={uiAttribute('设 {0} 为队长', member?.displayName ?? id)} onClick={() => change({ defaultLeadAgentId: id })}><TeamRowIcon name="lead"/>{uiAttribute('设为队长')}</button>}
-                  <button type="button" className="team-row-action team-row-remove" disabled={frozen} aria-label={uiAttribute('将 {0} 移出团队', member?.displayName ?? id)} onClick={() => { const ids = draft.memberAgentIds.filter(member => member !== id); change({ memberAgentIds: ids, defaultLeadAgentId: lead ? ids[0] ?? '' : draft.defaultLeadAgentId }) }}><TeamRowIcon name="remove"/>{uiAttribute('移出团队')}</button></div>
+                <div className="team-row-actions">{!lead && <button type="button" className="team-row-action" disabled={frozen || !present} aria-label={uiAttribute('设 {0} 为队长', member?.displayName ?? id)} onClick={() => change({ defaultLeadAgentId: id })}><NavigationIcon name="crown"/>{uiAttribute('设为队长')}</button>}
+                  <button type="button" className="team-row-action team-row-remove" disabled={frozen} aria-label={uiAttribute('将 {0} 移出团队', member?.displayName ?? id)} onClick={() => { const ids = draft.memberAgentIds.filter(member => member !== id); change({ memberAgentIds: ids, defaultLeadAgentId: lead ? ids[0] ?? '' : draft.defaultLeadAgentId }) }}><RemoveTeamMemberIcon/>{uiAttribute('移出团队')}</button></div>
               </li>
             })}</ul> : <div className="team-roster-empty">{uiAttribute('添加队员，组建你的团队。')}</div>}
           </section>
@@ -187,8 +188,8 @@ export function TeamWorkspace({ teams, agents, loading, loadError, defaultTeamId
   </div>
 }
 
-function TeamRowIcon({ name }: { name: 'lead' | 'remove' }): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{name === 'lead' ? <path d="m2 8 5 4 5-9 5 9 5-4-3 12H5L2 8Z"/> : <><circle cx="8.5" cy="7.5" r="3.5"/><path d="M2 20v-2a6.5 6.5 0 0 1 13 0v2M17 10h5"/></>}</svg>
+function RemoveTeamMemberIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="8.5" cy="7.5" r="3.5"/><path d="M2 20v-2a6.5 6.5 0 0 1 13 0v2M17 10h5"/></svg>
 }
 
 function TeamPortrait({ ids, agents, large = false }: { ids: string[]; agents: AgentProfile[]; large?: boolean }): React.JSX.Element {

@@ -33,6 +33,8 @@ function seed(id: string, title: string) {
   Object.assign(value.thread,{id,title,activationState:'active',projectBindingKind:'quick_chat',projectPath:'/fixture'})
   Object.assign(value,{messages:[message(1,'用户先前消息','user'),message(2,'离队队员的已发布回复','agent'),message(3,'队员最后的已发布回复','agent')],
     agentRuns:[],messageDeliveries:[],executionEvidence:[],approvals:[],tasks:[],turns:[]})
+  Object.assign(value.messages[0], { canEdit: true, canDelete: true })
+  value.messages[1].canDelete = true
   value.messages[1].authorId=agents[1].agentId
   value.messages[2].authorId=agents[1].agentId
   for(const item of value.messages.slice(1)) Object.assign(item,{threadTurnId:'fixture-turn',sourceAgentRunId:'fixture-run'})
@@ -81,6 +83,15 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
       if(loseResponse) {loseResponse=false;throw new Error('Lost response')}
       return result
     }
+    if (method === 'thread.messages.edit') {
+      const target = value.messages.find((message: any) => message.id === command.messageId)
+      target.content = structuredClone(command.content.segments)
+      target.body = target.content.map((segment: any) => segment.text ?? '').join('')
+      target.contentRevision = command.expectedContentRevision + 1
+      sequence++
+      checkpoint()
+      return { ...applied(), code: 'message.updated' }
+    }
     if(method==='commands.reconcile')return receipts.has(params.params.commandId)?{state:'recorded',result:receipts.get(params.params.commandId)}:{state:'unknown'}
     if(method==='members.list')return agents
     if(method==='runtime.installations.list')return installations
@@ -127,13 +138,24 @@ const renderToasts = () => probeRoot.render(<StrictMode>{probeToasts.map(toast =
 const showToasts = (message?: string) => {
   probeActions.length = 0
   probeToasts = [
-    { id: 'neutral', message: message ?? uiAttribute('响应模式未保存，请重试。'), tone: 'neutral', action: { label: uiAttribute('重试'), icon: 'retry', onSelect: () => probeActions.push('retry-neutral') } },
-    { id: 'danger', message: uiAttribute('删除未完成，请重试。'), tone: 'danger', keepOnAction: true,
-      action: { label: uiAttribute('重试'), icon: 'retry', onSelect: () => probeActions.push('retry') } }
+    { id: 'neutral', message: message ?? uiAttribute('已归档'), tone: 'neutral', icon: 'archive', actions: [
+      { label: uiAttribute('撤销'), onSelect: () => probeActions.push('undo') },
+      { label: uiAttribute('查看'), onSelect: () => probeActions.push('view') }
+    ] },
+    { id: 'danger', message: uiAttribute('删除未完成，请重试。'), tone: 'danger',
+      actions: [{ label: uiAttribute('重试'), icon: 'retry', onSelect: () => probeActions.push('retry') }] }
   ]
   renderToasts()
 }
-;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,probeActions,clearToasts:()=>{probeToasts=[];renderToasts()},hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+const showTimedToasts = () => {
+  probeActions.length = 0
+  probeToasts = [
+    { id: 'plain', message: 'Ordinary toast', tone: 'neutral' },
+    { id: 'error', message: 'Error toast', tone: 'danger' }
+  ]
+  renderToasts()
+}
+;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,probeActions,clearToasts:()=>{probeToasts=[];renderToasts()},hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
   addAttachment:()=>{const input=document.querySelector('.camp-workspace form.composer:not(.single-chat-composer) .composer-file-input') as HTMLInputElement;const data=new DataTransfer();data.items.add(new File(['pending'],'pending.txt',{type:'text/plain'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))},attachmentPending:()=>attachmentPending,releaseAttachment:()=>releaseAttachment?.(),
   language:(value:any)=>changeInterfaceLanguage(preferences.generalPreferences,value),
   theme:(theme:any)=>applyAppearanceSnapshot(document.documentElement,{...appearance,preference:theme,resolvedTheme:['night','ember'].includes(theme)?'night':'day'})}

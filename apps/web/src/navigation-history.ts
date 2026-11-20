@@ -115,7 +115,13 @@ function isTarget(value: unknown): value is NavigationTarget {
     case 'camp': return typeof target.threadId === 'string'
     case 'members': return (target.agentId === null || typeof target.agentId === 'string') && ['identity', 'runtime', 'skills', 'mcp'].includes(String(target.tab))
     case 'memory': return target.memoryId === null || typeof target.memoryId === 'string'
-    case 'settings': return typeof target.section === 'string' && (target.overview === undefined || target.overview === true)
+    case 'settings': {
+      if (typeof target.section !== 'string' || (target.overview !== undefined && target.overview !== true)) return false
+      if (target.archive === undefined) return true
+      if (target.section !== 'archive' || target.overview || !target.archive || typeof target.archive !== 'object') return false
+      const archive = target.archive as Record<string, unknown>
+      return (archive.kind === 'chat' || archive.kind === 'mission') && typeof archive.threadId === 'string' && archive.threadId.length > 0
+    }
     default: return false
   }
 }

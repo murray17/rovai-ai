@@ -4091,6 +4091,7 @@
   "无法确认最新审核状态，请刷新后再处理。{0}": "The latest review state is unconfirmed. Refresh before taking another action. {0}",
   "正式记忆 ": "Memory ",
   " · 版本 ": " · Revision ",
+  "（已编辑）": "(edited)",
   " · 接受前已编辑": " · Edited before acceptance",
   "回复详情": "Reply details",
   "{0} 条回复": "{0} replies",

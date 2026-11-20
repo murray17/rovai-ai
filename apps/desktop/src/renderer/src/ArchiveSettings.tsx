@@ -41,15 +41,19 @@ function highlight(title: string, query: string): ReactNode {
   return runs.map(({ match, text }, index) => match ? <mark key={index}>{text}</mark> : text)
 }
 
-export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
+export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThreadId, onDeleted, onRestored, onNotify, onError }: {
   projectNames: Readonly<Record<string, string>>
+  initialKind?: ArchiveKind
+  firstThreadId?: string
   onDeleted(threadId: string): void
+  onRestored(item: ArchiveItem): void
   onNotify(message: string): void
+  onError(message: string): void
 }) {
   const client = useThreadClient()
   const language = useInterfaceLanguage()
   const today = useMessageTimeDate()
-  const [kind, setKind] = useState<ArchiveKind>('chat')
+  const [kind, setKind] = useState<ArchiveKind>(initialKind)
   const [text, setText] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [composing, setComposing] = useState(false)
@@ -67,7 +71,8 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
   const rows = () => Array.from(list.current?.querySelectorAll<HTMLElement>('[data-archive-thread]') ?? [])
 
   const { items, error, refresh, discardStaleItem } = useArchiveRecords(client)
-  const result = useMemo(() => items && archiveView(items, kind, query, projectKeys), [items, kind, query, projectKeys])
+  const result = useMemo(() => items && archiveView(items, kind, query, projectKeys, firstThreadId),
+    [items, kind, query, projectKeys, firstThreadId])
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent): void => {
       if (confirm || event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey
@@ -140,12 +145,12 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
       await operate(item, async () => {
         const result = await writeArchive(client, false, { threadId: item.threadId })
         if (!result.changed) discardStaleItem(item)
-        onNotify(uiAttribute('已取消归档'))
+        onRestored(item)
       })
     } catch (error) {
       if (archiveTargetIsRemoved(error)) {
         discardStaleItem(item)
-        onNotify(readErrorMessage(error))
+        onError(readErrorMessage(error))
       } else setActionError(readErrorMessage(error))
     }
   }
@@ -162,7 +167,7 @@ export function ArchiveSettings({ projectNames, onDeleted, onNotify }: {
       } catch (error) {
         if (!archiveTargetIsRemoved(error)) throw error
         discardStaleItem(item)
-        onNotify(readErrorMessage(error))
+        onError(readErrorMessage(error))
       }
       setConfirm(null)
     })

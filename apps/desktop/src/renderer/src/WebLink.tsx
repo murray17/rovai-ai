@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AppToast } from './AppToast'
+import { AppToast, type AppToastValue } from './AppToast'
 import { uiAttribute } from './interface-language'
 import { isWebUrl } from '../../web-url'
 import { ResourceReferenceIcon } from './FilePreviewTabIcon'
@@ -17,13 +17,9 @@ export function openWebLink(target: string, onError: (message: string) => void):
 }
 
 export function WebLinkFeedback({ message, onClose }: { message: string | null; onClose(): void }): ReactNode {
-  useEffect(() => {
-    if (!message) return
-    const timer = setTimeout(onClose, 5000)
-    return () => clearTimeout(timer)
-  }, [message, onClose])
-  return message && createPortal(<div data-quote-exclude data-file-find-exclude>
-    <AppToast toast={{ message, tone: 'danger' }} onClose={onClose} />
+  const toast = useMemo<AppToastValue | null>(() => message ? { message, tone: 'danger' } : null, [message])
+  return toast && createPortal(<div data-quote-exclude data-file-find-exclude>
+    <AppToast toast={toast} onClose={onClose} />
   </div>, document.body)
 }
 

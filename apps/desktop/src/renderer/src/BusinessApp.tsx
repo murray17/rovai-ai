@@ -13,8 +13,8 @@ import { collectMemoryChanges, memoryChangesAfter, memoryChangeText, memoryEvent
 import { useTaskCapability } from './TaskCapabilityProvider'
 import { ShortcutSettings } from './ShortcutSettings'
 import { useShortcutAction } from './ShortcutProvider'
-import { AppToast, type AppToastValue } from './AppToast'
-import { ThreadForkOperation } from './thread-fork'
+import { AppToast, type AppToastAction, type AppToastValue } from './AppToast'
+import { ThreadForkOperation, type ThreadForkState } from './thread-fork'
 import { useForkLoading } from './use-fork-loading'
 export { AppToast } from './AppToast'
 import { EMPTY_SNAPSHOT, isProjectPath } from '../../shared/navigation-preferences-model'
@@ -45,6 +45,7 @@ import type {
   AppUpdatePrompt as AppUpdatePromptValue,
   AppearancePreferences,
   AppearanceSnapshot,
+  ArchiveKind,
   ThreadActivationState,
   ThreadCreationPreflight,
   ThreadComposerDraftView,
@@ -127,7 +128,7 @@ import { MissionHeader } from './MissionHeader'
 import { FilePreviewProvider } from './FilePreviewContext'
 import { NavigationShell } from './NavigationShell'
 import { StartupLoadingCanvas } from './StartupLoadingCanvas'
-import { createDesktopNavigation, type NavigationTarget, type NavigationTransaction, type NavigationIntent, type MemoryNavigationTarget } from './desktop-navigation'
+import { createDesktopNavigation, type NavigationTarget, type NavigationTransaction, type NavigationIntent, type MemoryNavigationTarget, type ArchiveNavigationSelection } from './desktop-navigation'
 import { forgetFilePreviewSession } from './file-preview-session'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutUpdatesSettings } from './AboutUpdatesSettings'
@@ -170,7 +171,7 @@ import {
   type OnboardingRuntimePhase
 } from './OnboardingFlow'
 import { provisionFirstRun } from './onboarding-provisioning'
-import { UiText, changeInterfaceLanguage, initializeInterfaceLanguage, uiAttribute, useInterfaceLanguage } from './interface-language'
+import { UiText, changeInterfaceLanguage, initializeInterfaceLanguage, translateUi, uiAttribute, useInterfaceLanguage } from './interface-language'
 import {
   currentProjectAccessDecision,
   currentProjectForThread,
@@ -1139,6 +1140,7 @@ export function BusinessApp({
   const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
   const [memberCreationDrafts, setMemberCreationDrafts] = useState(() => new Map<string, MemberCreationDraft>())
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
+  const [archiveSelection, setArchiveSelection] = useState<ArchiveNavigationSelection>()
   const [remotePort, setRemotePort] = useState<string | null>(null)
   const newConversationRequestBusy = useRef(false)
   const [generalPreferences, setGeneralPreferencesState] = useState<GeneralPreferencesSnapshot | null>(null)
@@ -1189,17 +1191,16 @@ export function BusinessApp({
   const [toast, setToast] = useState<AppToastValue | null>(null)
   const forkOperation = useMemo(() => new ThreadForkOperation(client, client.reeditScope), [client])
   const forkState = useSyncExternalStore(forkOperation.subscribe, forkOperation.getSnapshot, forkOperation.getSnapshot)
-  const forkLoading = useForkLoading(forkState.phase)
+  const { visible: forkLoading, dismiss: dismissForkLoading } = useForkLoading(forkState.phase)
+  const [dismissedForkState, setDismissedForkState] = useState<ThreadForkState | null>(null)
   const forkOpening = useRef(false)
   const forkOrigin = useRef<{ threadId: string; visit: ReturnType<typeof desktopNavigation.captureVisit> } | null>(null)
-  const forkBusy = forkState.phase === 'pending' || forkState.phase === 'unknown'
+  const forkBusy = forkState.phase === 'pending' || (forkState.phase === 'unknown' && dismissedForkState !== forkState)
   const notify = useCallback((message: string): void => {
-    setToast((current) => current?.persistent ? current : { message, tone: 'neutral' })
+    setToast({ message, tone: 'neutral' })
   }, [])
-  const notifyError = useCallback((message: string, action?: AppToastValue['action'], persistent = false): void => {
-    setToast((current) => current?.persistent && !persistent
-      ? current
-      : { message, tone: 'danger', action, persistent })
+  const notifyError = useCallback((message: string, action?: AppToastAction): void => {
+    setToast({ message, tone: 'danger', actions: action ? [action] : undefined })
   }, [])
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
   const [runtimeRecovery, setRuntimeRecovery] = useState<ThreadRuntimeRecovery | null>(null)
@@ -1607,9 +1608,8 @@ export function BusinessApp({
         command: { operationId }
       }).then((result) => {
         if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-        setToast(null)
       }).catch(() => {
-        notifyError(uiAttribute('删除未完成，请重试。'), { label:uiAttribute("重试"), icon: 'retry', onSelect: retry }, true)
+        notifyError(uiAttribute('删除未完成，请重试。'), { label: uiAttribute('重试'), icon: 'retry', onSelect: retry })
       })
     }
     retry()
@@ -1624,8 +1624,7 @@ export function BusinessApp({
     shownDeletionIssuesRef.current.add(`${issue.operationId}:${issue.attentionRevision}`)
     notifyError(
       uiAttribute('删除未完成，请重试。'),
-      { label:uiAttribute("重试"), icon: 'retry', onSelect: () => retryThreadDeletion(issue.operationId) },
-      true
+      { label: uiAttribute('重试'), icon: 'retry', onSelect: () => retryThreadDeletion(issue.operationId) }
     )
   }, [client, notifyError, retryThreadDeletion])
 
@@ -2050,11 +2049,6 @@ export function BusinessApp({
   useEffect(() => {
     if (startupStatus === 'resolved') void forkOperation.recover()
   }, [forkOperation, startupStatus])
-  useEffect(() => {
-    if (forkState.phase !== 'rejected') return
-    const timer = setTimeout(() => forkOperation.dismiss(), 3_200)
-    return () => clearTimeout(timer)
-  }, [forkOperation, forkState.phase, forkState.error])
 
   const openFork = useCallback(async (onlyIf?: () => boolean): Promise<void> => {
     if (forkOpening.current) return
@@ -2083,19 +2077,7 @@ export function BusinessApp({
     finally { forkOpening.current = false }
   }, [desktopNavigation, forkOperation])
 
-  const forkThread = useCallback(async (sourceThreadId: string, sourceMessageId?: string): Promise<void> => {
-    if (['pending', 'unknown'].includes(forkOperation.getSnapshot().phase)) return
-    const visit = desktopNavigation.captureVisit()
-    const fromSource = viewRef.current === 'camp' && activeThreadIdRef.current === sourceThreadId
-    forkOrigin.current = fromSource ? { threadId: sourceThreadId, visit } : null
-    const target = await forkOperation.start({ commandId: newCommandId(), sourceThreadId,
-      ...(sourceMessageId ? { sourceMessageId } : {}) })
-    if (target && fromSource && visit.isCurrent()) {
-      await openFork(() => visit.isSameVisit() && viewRef.current === 'camp' && activeThreadIdRef.current === sourceThreadId)
-    }
-  }, [desktopNavigation, forkOperation, openFork])
-
-  const retryFork = async (): Promise<void> => {
+  const retryFork = useCallback(async (): Promise<void> => {
     const origin = forkOrigin.current
     const automatic = !!origin && origin.visit.isCurrent()
       && viewRef.current === 'camp' && activeThreadIdRef.current === origin.threadId
@@ -2104,7 +2086,41 @@ export function BusinessApp({
       await openFork(() => origin.visit.isSameVisit()
         && viewRef.current === 'camp' && activeThreadIdRef.current === origin.threadId)
     }
-  }
+  }, [forkOperation, openFork])
+
+  const forkThread = useCallback(async (sourceThreadId: string, sourceMessageId?: string): Promise<void> => {
+    const current = forkOperation.getSnapshot()
+    if (current.phase === 'pending') return
+    if (current.phase === 'unknown'
+      && (current.saved?.sourceThreadId !== sourceThreadId || current.saved.sourceMessageId !== sourceMessageId)) {
+      setDismissedForkState(null)
+      return
+    }
+    const visit = desktopNavigation.captureVisit()
+    const fromSource = viewRef.current === 'camp' && activeThreadIdRef.current === sourceThreadId
+    forkOrigin.current = fromSource ? { threadId: sourceThreadId, visit } : null
+    if (current.phase === 'unknown') {
+      await retryFork()
+      return
+    }
+    const target = await forkOperation.start({ commandId: newCommandId(), sourceThreadId,
+      ...(sourceMessageId ? { sourceMessageId } : {}) })
+    if (target && fromSource && visit.isCurrent()) {
+      await openFork(() => visit.isSameVisit() && viewRef.current === 'camp' && activeThreadIdRef.current === sourceThreadId)
+    }
+  }, [desktopNavigation, forkOperation, openFork, retryFork])
+
+  const forkToast = useMemo<AppToastValue | null>(() => {
+    if (dismissedForkState === forkState) return null
+    if (forkState.phase === 'unknown') {
+      return {
+        message: translateUi(interfaceLanguage, '分叉结果尚未确认'), tone: 'danger',
+        actions: [{ label: translateUi(interfaceLanguage, '重试'), icon: 'retry', onSelect: () => { void retryFork() } }]
+      }
+    }
+    if (forkState.phase === 'rejected') return { message: translateUi(interfaceLanguage, forkState.error ?? '分叉失败'), tone: 'danger' }
+    return forkLoading ? { message: translateUi(interfaceLanguage, '正在分叉…'), tone: 'neutral', loading: true } : null
+  }, [dismissedForkState, forkLoading, forkState, interfaceLanguage, retryFork])
 
   useEffect(() => desktop?.userAutomation.onOpenThread(({ threadId }) => {
     void activateThread(threadId, { reconcileDefaultLead: false })
@@ -2234,12 +2250,6 @@ export function BusinessApp({
     if (!action.available) return false
     return notificationMessageIsVisible(action.messageId)
   }, [refreshActiveThreadSnapshot])
-
-  useEffect(() => {
-    if (!toast || toast.persistent) return undefined
-    const timer = setTimeout(() => setToast(null), 3_200)
-    return () => clearTimeout(timer)
-  }, [toast])
 
   useEffect(() => {
     if (startupStatus !== 'resolved') return
@@ -3184,7 +3194,12 @@ export function BusinessApp({
       context?.beforeCommit?.()
       setNotificationFocus(null)
       switch (target.kind) {
-        case 'settings': setSettingsSection(target.section); setMobileSettingsList(target.overview === true); setView(target.section === 'memory' && !target.overview ? 'memory' : 'settings'); break
+        case 'settings':
+          setSettingsSection(target.section)
+          setArchiveSelection(target.archive)
+          setMobileSettingsList(target.overview === true)
+          setView(target.section === 'memory' && !target.overview ? 'memory' : 'settings')
+          break
         case 'members':
           if (viewRef.current !== 'members') setMemberRosterEntryReady(false)
           membersViewRef.current?.showSelectedMember()
@@ -3641,8 +3656,20 @@ export function BusinessApp({
     }
   }
 
+  const showUnarchivedToast = (threadId: string, kind: ArchiveKind): void => {
+    setToast({
+      message: uiAttribute('已取消归档'), tone: 'neutral', icon: 'archive',
+      actions: [{ label: uiAttribute('查看'), onSelect: () => {
+        const open = kind === 'mission'
+          ? openMission({ threadId })
+          : activateThread(threadId, { reconcileDefaultLead: false })
+        void open.catch(error => notifyError(errorMessage(error)))
+      } }]
+    })
+  }
+
   const changeArchive = async (
-    threadId: string, archived: boolean, mission: boolean
+    threadId: string, archived: boolean, kind: ArchiveKind
   ): Promise<void> => {
     if (archiveWrites.current.has(threadId)) return
     archiveWrites.current.add(threadId)
@@ -3656,15 +3683,22 @@ export function BusinessApp({
         return
       }
       campSnapshotCache.current.delete(threadId)
-      if (archived) leaveArchivedWorkspace(threadId, mission)
-      if (changed && archived) {
-        setToast(current => current?.persistent ? current : {
-          message: uiAttribute('已归档。'), tone: 'neutral',
-          action: { label: uiAttribute('撤销'), onSelect: () => {
-            void changeArchive(threadId, false, mission).catch(error => notifyError(errorMessage(error)))
+      if (!archived) {
+        showUnarchivedToast(threadId, kind)
+        return
+      }
+      leaveArchivedWorkspace(threadId, kind === 'mission')
+      if (changed) setToast({
+        message: uiAttribute('已归档'), tone: 'neutral', icon: 'archive',
+        actions: [
+          { label: uiAttribute('撤销'), onSelect: () => {
+            void changeArchive(threadId, false, kind).catch(error => notifyError(errorMessage(error)))
+          } },
+          { label: uiAttribute('查看'), onSelect: () => {
+            void desktopNavigation.push({ kind: 'settings', section: 'archive', archive: { kind, threadId } })
           } }
-        })
-      } else if (changed) notify(uiAttribute('已取消归档'))
+        ]
+      })
     }
     try {
       if (archived && viewRef.current === 'camp' && activeThreadIdRef.current === threadId) await leaveActiveThread(apply)
@@ -4103,7 +4137,6 @@ export function BusinessApp({
     // a pending input as an optimistic public ThreadMessage before that decision.
     setBusy('camp-message')
     setError(null)
-    setToast((current) => current?.persistent ? current : null)
     setRuntimeRecovery((current) => current?.threadId === threadId ? null : current)
     let rejectedForRuntime = false
     try {
@@ -4617,7 +4650,7 @@ export function BusinessApp({
     onThreadIdCopied={() => {
       setError(null)
     }}
-    onArchive={async thread => { await changeArchive(thread.id, true, false) }}
+    onArchive={async thread => { await changeArchive(thread.id, true, 'chat') }}
     onRename={renameThread}
     onDelete={deleteThread}
     onDeleteError={(nextError) => notifyError(errorMessage(nextError))}
@@ -4639,14 +4672,13 @@ export function BusinessApp({
         await openMission(mission)
       }
     }}>
-    <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onArchive={async mission => { await changeArchive(mission.threadId, true, true) }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
+    <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onArchive={async mission => { await changeArchive(mission.threadId, true, 'mission') }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
-      {!startupGateVisible && !shuttingDown && (forkLoading || forkState.phase === 'unknown' || forkState.phase === 'rejected') && <AppToast
-        toast={forkState.phase === 'unknown' ? { message: uiAttribute('分叉结果尚未确认'), tone: 'danger', persistent: true, keepOnAction: true, dismissible: false,
-          action: { label: uiAttribute('重试'), icon: 'retry', onSelect: () => { void retryFork() } } }
-          : forkState.phase === 'rejected' ? { message: uiAttribute(forkState.error ?? '分叉失败'), tone: 'danger' }
-          : { message: uiAttribute('正在分叉…'), tone: 'neutral', loading: true, persistent: true }}
-        onClose={() => forkOperation.dismiss()} />}
+      {!startupGateVisible && !shuttingDown && forkToast && <AppToast toast={forkToast}
+        onClose={() => {
+          if (forkToast.loading) dismissForkLoading()
+          else setDismissedForkState(forkState)
+        }} />}
       {!mobile && renderNavigation()}
       {!startupGateVisible && mobile && ['compose', 'members', 'teams', 'automations'].includes(view) && <MobilePageHeader
         title={({ compose:uiAttribute("新对话"), members:uiAttribute("队员"), teams:uiAttribute("团队"), automations:uiAttribute("定时任务") } as Record<string, string>)[view]}
@@ -4673,7 +4705,7 @@ export function BusinessApp({
         )}
         {!startupGateVisible && view !== 'members' && view !== 'automations' && view !== 'memory' && inlineNotices}
         {!startupGateVisible && !shuttingDown && toast && (
-          <AppToast toast={toast} onClose={() => setToast(null)} />
+          <AppToast toast={toast} onClose={() => setToast(current => current === toast ? null : current)} />
         )}
 
         {!startupGateVisible && startupStatus === 'waiting' && startupRoutePending?.kind === 'camp' && view === 'camp' && (
@@ -4858,8 +4890,11 @@ export function BusinessApp({
             installations={installations}
             busy={busy}
             section={settingsSection}
-            archiveContent={settingsSection === 'archive' && <ArchiveSettings projectNames={projectNames}
-              onDeleted={threadId => { hideAcceptedThreadDeletion(threadId); void missionList.refresh() }} onNotify={notify} />}
+            archiveContent={settingsSection === 'archive' && <ArchiveSettings key={archiveSelection?.threadId}
+              projectNames={projectNames} initialKind={archiveSelection?.kind} firstThreadId={archiveSelection?.threadId}
+              onDeleted={threadId => { hideAcceptedThreadDeletion(threadId); void missionList.refresh() }}
+              onRestored={item => showUnarchivedToast(item.threadId, item.missionId ? 'mission' : 'chat')}
+              onNotify={notify} onError={notifyError} />}
             updates={appUpdates}
             serverUpdates={environment.serverUpdates}
             commonEnvironmentReturn={commonEnvironmentReturn ? {

@@ -27,11 +27,12 @@ function messageTime(item: ArchiveItem): number {
   return item.lastMessageAt ? Date.parse(item.lastMessageAt) : -Infinity
 }
 
-export function archiveView(items: ArchiveItem[], kind: ArchiveKind, query: string, selectedProjects: string[]) {
+export function archiveView(items: ArchiveItem[], kind: ArchiveKind, query: string, selectedProjects: string[], firstThreadId?: string) {
   const totals = { chat: 0, mission: 0 }
   const matchingCounts = { chat: 0, mission: 0 }
   const projects = new Map(selectedProjects.map(key => [key, 0]))
   const groups = new Map<string, ArchiveItem[]>()
+  let firstProjectKey: string | undefined
   for (const item of items) {
     const type = item.missionId === null ? 'chat' : 'mission'
     totals[type]++
@@ -40,12 +41,21 @@ export function archiveView(items: ArchiveItem[], kind: ArchiveKind, query: stri
     if (query && !normalizeArchiveText(item.title).includes(query) && !normalizeArchiveText(item.threadId).includes(query)) continue
     matchingCounts[type]++
     if (type !== kind) continue
+    if (item.threadId === firstThreadId) firstProjectKey = item.projectKey
     const group = groups.get(item.projectKey)
     if (group) group.push(item)
     else groups.set(item.projectKey, [item])
   }
   for (const rows of groups.values()) rows.sort((a, b) => messageTime(b) - messageTime(a) || compareIds(a.threadId, b.threadId))
   const sortedGroups = [...groups].sort(([ka, a], [kb, b]) => messageTime(b[0]) - messageTime(a[0]) || compareIds(ka, kb))
+  const firstGroup = sortedGroups.findIndex(([key]) => key === firstProjectKey)
+  if (firstGroup >= 0) {
+    const [group] = sortedGroups.splice(firstGroup, 1)
+    const rows = group[1]
+    const [item] = rows.splice(rows.findIndex(row => row.threadId === firstThreadId), 1)
+    rows.unshift(item)
+    sortedGroups.unshift(group)
+  }
   return { totals, matchingCounts, projects, groups: sortedGroups }
 }
 

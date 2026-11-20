@@ -270,7 +270,8 @@ function Fixture() {
         {page === 'notifications' && <NotificationSettings />}
         {page === 'archive' && <ThreadClientProvider client={archiveClient}>
           <ArchiveSettings projectNames={{ 'directory:/fixture': '本机项目名称' }} onDeleted={ignore}
-            onNotify={message => archiveNotices.push(message)} />
+            onRestored={item => { state.restoredArchiveThread = item.threadId }}
+            onNotify={message => archiveNotices.push(message)} onError={message => archiveNotices.push(message)} />
         </ThreadClientProvider>}
         {page === 'runtime' && <RuntimeInstallationsPanel health={runtimeHealth} installations={[]} onReload={async () => { await request('runtime.reload') }} />}
         {page === 'channels' && <ChannelSettings agents={fixture.agents} />}

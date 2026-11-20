@@ -1,4 +1,5 @@
 import { ThreadMessageEditor } from './ThreadMessageEditor'
+import { MoreMenuIcon, SidebarMenuIcon } from './SidebarMenuIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import { ForkIcon } from './ForkIcon'
 import { InlineProjectFileReference } from './InlineProjectFileReference'
@@ -1903,7 +1904,8 @@ export function ThreadWorkspace({
   const [messageRemoval, setMessageRemoval] = useState<{
     message: ThreadMessageView; kind: 'withdraw' | 'delete'; commandId: string
   } | null>(null)
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [messageEdit, setMessageEdit] = useState<{ id: string; contentWidth?: number } | null>(null)
+  const editingMessageId = messageEdit?.id
   const deletingMessage = messageRemoval?.kind === 'delete'
   const [deliveryMode, setDeliveryMode] = useState<'start' | 'steer'>('steer')
   useEffect(() => setDeliveryMode('steer'), [snapshot.thread.id])
@@ -1913,7 +1915,7 @@ export function ThreadWorkspace({
   const [reeditError, setReeditError] = useState<string | null>(null)
   useEffect(() => {
     setMessageRemoval(null)
-    setEditingMessageId(null)
+    setMessageEdit(null)
     setWithdrawalError(null)
     setReeditMessageId(null)
     setReeditError(null)
@@ -2696,7 +2698,7 @@ export function ThreadWorkspace({
   const editingMessage = editUnavailable ? undefined : editTarget
   const hideComposerForEdit = mobile && conversationView === 'conversation' && !!editingMessage
   useEffect(() => {
-    if (editUnavailable) setEditingMessageId(current => current === editingMessageId ? null : current)
+    if (editUnavailable) setMessageEdit(current => current?.id === editingMessageId ? null : current)
   }, [editingMessageId, editUnavailable])
   const activeVisibleMessageById = useRef(visibleMessageById)
   activeVisibleMessageById.current = visibleMessageById
@@ -5368,18 +5370,31 @@ export function ThreadWorkspace({
       onActivateSkillMention={openSkillPreview} onFileReference={onFileReference} />
   }
 
+  const startMessageEdit = (messageId: string): void => {
+    if (editingMessageId === messageId) return
+    const bubble = timelineScrollRef.current?.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(messageId)}"] .message-bubble[data-message-quote-body]`
+    )
+    let contentWidth: number | undefined
+    if (bubble) {
+      const styles = getComputedStyle(bubble)
+      contentWidth = bubble.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)
+    }
+    setMessageEdit({ id: messageId, contentWidth })
+  }
+
   const renderMessageEditor = (message: ThreadMessageView): JSX.Element => {
     const defaultLead = snapshot.members.find(member => member.agentId === snapshot.thread.defaultLeadAgentId)
     return <ThreadMessageEditor key={message.id} message={message} threadId={snapshot.thread.id}
-      defaultLead={defaultLead?.displayName ?? null}
+      defaultLead={defaultLead?.displayName ?? null} contentWidth={messageEdit?.contentWidth}
       editorContext={{
         referenceScope: { threadId: snapshot.thread.id, client, projectBound: snapshot.thread.projectBindingKind === 'directory' },
         members: composerMentionCandidates.filter(member => snapshot.members.some(current => current.agentId === member.agentId)),
         skills: composerSkills,
         onNeedSkills: () => refreshSkillCatalogRef.current?.()
       }}
-      onCancel={() => setEditingMessageId(null)}
-      onSaved={async () => { await messageMutationCommitted(); setEditingMessageId(current => current === message.id ? null : current) }} />
+      onCancel={() => setMessageEdit(null)}
+      onSaved={async () => { await messageMutationCommitted(); setMessageEdit(current => current?.id === message.id ? null : current) }} />
   }
 
   const messageDeleteAction = (message: ThreadMessageView): (() => void) | undefined =>
@@ -5919,13 +5934,7 @@ export function ThreadWorkspace({
                       {reeditStore && <MessageReeditButton store={reeditStore} threadId={snapshot.thread.id}
                         messageId={campMessage.id} disabled={composerInteractionDisabled || busy}
                         onSelect={() => requestReedit(campMessage.id)} />}
-                      <time>{messageClockTime(campMessage.createdAt)}</time>
-                      {campMessage.canDelete && <DropdownMenu.Root modal={false}>
-                        <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
-                        <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu">
-                          <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => openMessageRemoval(campMessage, 'delete')}><UiText zh="删除" /></DropdownMenu.Item>
-                        </DropdownMenu.Content></DropdownMenu.Portal>
-                      </DropdownMenu.Root>}
+                      <time dateTime={campMessage.createdAt}>{messageClockTime(campMessage.createdAt)}</time>
                     </div>
                   )
                   return items
@@ -5962,7 +5971,8 @@ export function ThreadWorkspace({
                 const joinsNextMessage = nextItem?.kind === 'camp_message'
                   && publicMessagesJoin(campMessage, nextItem.message)
                 const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
-                const messageTimestamp = !joinsNextMessage && messageTime ? (
+                const isEditingMessage = editingMessage?.id === campMessage.id
+                const messageTimestamp = (!joinsNextMessage || isEditingMessage) && messageTime ? (
                   <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}
                     title={messageTime.full} aria-label={`${messageTime.full} · #${campMessage.sequence}`}>
                     {messageTime.short}
@@ -6116,10 +6126,7 @@ export function ThreadWorkspace({
                               )}
                             </div>
                             <div className="public-message-readout">
-                            {editingMessage?.id === campMessage.id ? <>
-                              {replyQuote}
-                              {renderMessageEditor(campMessage)}
-                            </> : <MessageSurface
+                            <MessageSurface
                               timestamp={messageTimestamp}
                               copied={copied}
                               hasDelivery={campMessage.authorType === 'agent' && campMessageDeliveries.length > 0}
@@ -6142,13 +6149,19 @@ export function ThreadWorkspace({
                               onReply={humanAuthored ? undefined : handleReply}
                               onCopy={handleCopy}
                               onWithdraw={campMessage.canWithdraw && onWithdrawMessage ? () => openMessageRemoval(campMessage, 'withdraw') : undefined}
-                              onEdit={campMessage.canEdit ? () => setEditingMessageId(campMessage.id) : undefined}
+                              onEdit={campMessage.canEdit ? () => startMessageEdit(campMessage.id) : undefined}
                               onDelete={messageDeleteAction(campMessage)}
                               deleteDisabled={campMessage.canDelete === false}
                               onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                             >
                               <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
 
+                              {isEditingMessage ? (
+                                <div className="message-bubble" data-quote-exclude>
+                                  {replyQuote}
+                                  {renderMessageEditor(campMessage)}
+                                </div>
+                              ) : <>
                               {!displayBody.trim() && defaultRecipientAgentId === null && replyQuote && <div className="message-bubble">{replyQuote}</div>}
                               {humanAuthored && (
                                 <MessageAttachmentGroups
@@ -6198,7 +6211,8 @@ export function ThreadWorkspace({
                                   onNotify={onNotify}
                                 />
                               )}
-                            </MessageSurface>}
+                              </>}
+                            </MessageSurface>
                             {campMessage.authorType === 'agent' && (
                               <ThreadMessageDeliveryFooter
                                 deliveries={campMessageDeliveries}
@@ -10483,12 +10497,19 @@ export function MessageActions({
         </button>
       )}
       {(onFork || onEdit || onDelete) ? <DropdownMenu.Root modal={false}>
-        <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" title={uiAttribute('更多消息操作')} aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
+        <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" title={uiAttribute('更多消息操作')} aria-label={uiAttribute('更多消息操作')}><MoreMenuIcon /></button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu" align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()} loop>
-          {onEdit && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onEdit}><UiText zh="编辑" /></DropdownMenu.Item>}
+          {onEdit && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onEdit}>
+            <SidebarMenuIcon kind="edit" /><span><UiText zh="编辑" /></span>
+          </DropdownMenu.Item>}
           {onFork && <DropdownMenu.Item className="sidebar-action-menu-item" disabled={forkBusy} onSelect={onFork}><ForkIcon /><span>{uiAttribute('从此处分叉')}</span></DropdownMenu.Item>}
           {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><MessageSelectGlyph /><span>{uiAttribute('多选')}</span></DropdownMenu.Item>}
-          {onDelete && <DropdownMenu.Item className="sidebar-action-menu-item" disabled={deleteDisabled} onSelect={onDelete}><UiText zh="删除" /></DropdownMenu.Item>}
+          {onDelete && <>
+            {(onEdit || onFork || onSelect) && <DropdownMenu.Separator className="sidebar-action-menu-separator" />}
+            <DropdownMenu.Item className="sidebar-action-menu-item danger" disabled={deleteDisabled} onSelect={onDelete}>
+              <SidebarMenuIcon kind="trash" /><span><UiText zh="删除" /></span>
+            </DropdownMenu.Item>
+          </>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root> : onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}
