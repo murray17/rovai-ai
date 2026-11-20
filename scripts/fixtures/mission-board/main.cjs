@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
     await waitFor('!!document.querySelector(' + JSON.stringify(card) + ')', 'Mission board did not load')
     await click(card)
     await waitFor('!!document.querySelector(' + JSON.stringify(editor) + ')', 'Mission editor did not open')
-    const archiveButton = '.mission-drawer .mission-header-action[aria-label^="归档"]'
+    const archiveButton = '.mission-drawer .mission-header-action[title="归档"][aria-label="归档 补齐使命工作区恢复路径"]'
     await click('.mission-drawer [aria-label="关闭使命抽屉"]')
     await waitFor("!document.querySelector('.mission-drawer')", 'Mission drawer did not close')
     await run(qa + '.holdThreadOpen()')

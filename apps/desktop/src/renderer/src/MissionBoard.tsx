@@ -58,8 +58,8 @@ export function MissionArchiveButton({ mission, header = false }: { mission: Mis
   const archive = useContext(Actions)?.archive
   if (!archive || mission.archivedAt) return null
   return <button type="button" className={header ? 'mission-header-action' : 'mission-card-archive'}
-    title={uiAttribute(mission.runningAgentIds?.length ? '归档并停止执行' : '归档')}
-    aria-label={uiAttribute(mission.runningAgentIds?.length ? '归档 {0} 并停止执行' : '归档 {0}', mission.title)} onClick={() => archive(mission)}>
+    title={uiAttribute('归档')}
+    aria-label={uiAttribute('归档 {0}', mission.title)} onClick={() => archive(mission)}>
     {header && <NavigationIcon name="archive" />}<span><UiText zh="归档" /></span>
   </button>
 }
