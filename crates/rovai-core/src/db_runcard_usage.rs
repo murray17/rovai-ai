@@ -193,6 +193,6 @@ pub(super) fn assert_optional_upgrade(database: &mut Database) {
         .unwrap();
     super::message_mutations::migrate_input_storage(database).unwrap();
     database.retire_message_fts().unwrap();
-    super::thread_archive::migrate(database).unwrap();
+    database.migrate(false).unwrap();
     assert!(connection_has_current_data_contract(database.connection()).unwrap());
 }

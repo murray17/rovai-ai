@@ -2733,11 +2733,12 @@ export function ThreadWorkspace({
   )
   // Applied receipts update both presence and historical markers together while
   // Core's refreshed projection is in flight; re-entry still uses the Core fact.
-  const [continuedRunIds, setContinuedRunIds] = useState<ReadonlySet<string>>(() => new Set())
-  useEffect(() => setContinuedRunIds(new Set()), [snapshot.thread.id])
+  const [acceptedRetry, setAcceptedRetry] = useState<{threadId: string; sequence: number; ids: Set<string>} | null>(null)
+  const pendingProjection = acceptedRetry?.threadId === snapshot.thread.id
+    && acceptedRetry.sequence === snapshot.throughGlobalSequence ? acceptedRetry.ids : undefined
   const presenceTimeline = useMemo(() => conversationRunPresenceTimeline(
-    conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, continuedRunIds
-  ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, continuedRunIds])
+    conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, pendingProjection
+  ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, pendingProjection])
   const retainedStopIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
     item.kind === 'run_presence' && isUserInterruptedRun(item.slot.run) ? [item.slot.run.id] : []
   )), [presenceTimeline])
@@ -5758,7 +5759,11 @@ export function ThreadWorkspace({
                       confirming: confirmingRunIds.has(run.id),
                       turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
                     })}
-                    onContinued={runId => setContinuedRunIds(current => new Set(current).add(runId))}
+                    onContinued={id => setAcceptedRetry(previous => ({
+                      threadId: snapshot.thread.id, sequence: snapshot.throughGlobalSequence,
+                      ids: new Set(previous?.threadId === snapshot.thread.id && previous.sequence === snapshot.throughGlobalSequence
+                        ? previous.ids : undefined).add(id)
+                    }))}
                     onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
                   return items
                 }
@@ -5965,10 +5970,7 @@ export function ThreadWorkspace({
                 ) : undefined
                 const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                   delivery.deliveryKind === 'public_a2a'
-                  && (delivery.continuationRequest
-                    ? campMessage.authorType === 'user'
-                      && (delivery.inputMessageIds ?? [delivery.messageId]).includes(campMessage.id)
-                    : delivery.messageId === campMessage.id)
+                  && delivery.messageId === campMessage.id
                 )
                 const userMessageRuns = campMessage.authorType === 'user'
                   ? snapshot.agentRuns.filter((run) =>
@@ -7528,23 +7530,20 @@ export function executionEmptyStateShouldRender(
 export function executionDeliveryQueueBatches(
   deliveries: readonly MessageDeliveryView[]
 ): ExecutionDeliveryQueueBatch[] {
-  const byBatch = new Map<string, MessageDeliveryView[]>()
-  const ordinaryBatch = new Map<string, string>()
-  // The snapshot already resolves equal timestamps by the durable queue sequence.
-  const ordered = deliveries.filter(messageDeliveryWaitsInExecutionQueue).slice().sort((left, right) =>
-    left.createdAt.localeCompare(right.createdAt))
+  const byAgent = new Map<string, MessageDeliveryView[]>()
+  const ordered = deliveries.filter(messageDeliveryWaitsInExecutionQueue).sort((left, right) =>
+    (left.messageSequence ?? Infinity) - (right.messageSequence ?? Infinity)
+      || left.createdAt.localeCompare(right.createdAt))
   for (const delivery of ordered) {
-    const agent = delivery.recipientAgentId
-    if (delivery.continuationRequest) ordinaryBatch.delete(agent)
-    const key = delivery.continuationRequest ? delivery.id : ordinaryBatch.get(agent) ?? delivery.id
-    if (!delivery.continuationRequest) ordinaryBatch.set(agent, key)
-    byBatch.set(key, [...(byBatch.get(key) ?? []), delivery])
+    const batch = byAgent.get(delivery.recipientAgentId)
+    if (batch) batch.push(delivery)
+    else byAgent.set(delivery.recipientAgentId, [delivery])
   }
-  return [...byBatch.values()].map((batch) => ({
+  return [...byAgent.values()].map((batch) => ({
     agentId: batch[0].recipientAgentId,
     deliveries: batch,
-    messageIds: [...new Set(batch.flatMap((delivery) => delivery.inputMessageIds ?? [delivery.messageId]))],
-    createdAt: batch.at(-1)?.createdAt ?? ''
+    messageIds: batch.map(delivery => delivery.messageId),
+    createdAt: batch[0].createdAt
   })).sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt) || left.agentId.localeCompare(right.agentId))
 }
@@ -8690,23 +8689,14 @@ function UserMessageDeliveryReceipt({
   const ordered = message.addressedAgentIds.map((agentId) => {
     const candidates = deliveries.filter(item => item.recipientAgentId === agentId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    let delivery = candidates.find(item => !item.continuationRequest)
+    const delivery = candidates[0]
     const boundRun = allRuns.find(r => r.id === delivery?.targetAgentRunId)
     const latestRun = runByAgentId.get(agentId)
     let run = delivery?.requestedMode === 'steer' ? boundRun ?? latestRun ?? null
       : latestRun && (!boundRun || latestRun.createdAt >= boundRun.createdAt) ? latestRun : boundRun ?? null
-    if (delivery?.requestedMode !== 'steer') {
-      const continuation = candidates.find(item => item.continuationRequest)
-      const ordinaryWaiting = delivery?.status === 'waiting' ? delivery : undefined
-      const queued = ordinaryWaiting && (!continuation || ordinaryWaiting.createdAt >= continuation.createdAt)
-        ? ordinaryWaiting : continuation
-      const runDelivery = deliveries.find(d => d.targetAgentRunId === run?.id)
-      // An accepted replacement may be waiting when the older Run finishes.
-      if (queued && (!run || queued.targetAgentRunId === run.id
-        || queued.createdAt >= (runDelivery?.createdAt ?? run.createdAt))) {
-        delivery = queued
-        run = allRuns.find(r => r.id === queued.targetAgentRunId) ?? null
-      }
+    if (delivery?.status === 'waiting' && delivery.requestedMode !== 'steer') {
+      const runDelivery = deliveries.find(item => item.targetAgentRunId === run?.id)
+      if (!run || delivery.createdAt >= (runDelivery?.createdAt ?? run.createdAt)) run = null
     }
     const deliveryOwnsStatus = delivery?.requestedMode === 'steer' || !run || delivery?.targetAgentRunId === run.id
     // Classify each target once. A Steer receipt describes delivery, even when

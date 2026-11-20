@@ -88,6 +88,8 @@ pub(crate) fn assert_single_chat_facts_upgrade(database: &mut Database) {
     quote_text::assert_upgrade(database);
     single_chat_facts::assert_upgrade(database);
 }
+#[cfg(all(test, feature = "slow-tests"))]
+pub(crate) use quote_text::assert_edited_message_upgrade;
 
 #[cfg(all(test, feature = "slow-tests"))]
 pub(crate) fn assert_interruption_upgrade(database: &mut Database) {
@@ -130,7 +132,7 @@ pub(crate) fn downgrade_message_mentions_fixture(database: &Database) {
 }
 
 #[cfg(all(test, feature = "extended-tests"))]
-pub(crate) use run_continuation::assert_legacy_request_upgrade;
+pub(crate) use run_continuation::assert_request_upgrade;
 #[cfg(all(test, feature = "extended-tests"))]
 pub(crate) use steer::assert_legacy_upgrade as assert_legacy_steer_upgrade;
 
@@ -528,7 +530,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 180;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 182;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1034,6 +1036,8 @@ struct CurrentMigrationState {
     v228: bool,
     v229: bool,
     v230: bool,
+    v231: bool,
+    v232: bool,
 }
 
 impl CurrentMigrationState {
@@ -1055,6 +1059,16 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v232 {
+            let mut previous = *self;
+            previous.v232 = false;
+            return schema == 182 && previous.admits(contract, 181, classifier);
+        }
+        if self.v231 {
+            let mut previous = *self;
+            previous.v231 = false;
+            return schema == 181 && previous.admits(contract, 180, classifier);
+        }
         if self.v230 {
             let mut previous = *self;
             previous.v230 = false;
@@ -3870,6 +3884,10 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 181
+                || run_continuation::retired_schema_matches(connection)?)
+            && (!(177..=180).contains(&marker.projection_schema_version)
+                || message_mutations::waiting_continuation_schema_matches(connection)?)
             && (marker.projection_schema_version < 180
                 || thread_archive::schema_matches(connection)?)
             && (marker.projection_schema_version < 179 || message_fts_retired(connection)?)
@@ -3888,7 +3906,11 @@ pub(crate) fn classify_database_contract(
                     && goose::schema_matches(connection)?))
             && (marker.projection_schema_version < 170
                 || channel_native::schema_matches(connection)?)
-            && (marker.projection_schema_version < 168 || quote_text::schema_matches(connection)?)
+            && (marker.projection_schema_version < 168
+                || quote_text::schema_matches(
+                    connection,
+                    marker.projection_schema_version >= 182,
+                )?)
             && (marker.projection_schema_version < 167
                 || hermes::rules_schema_matches(connection)?)
             && (marker.projection_schema_version < 166 || hermes::schema_matches(connection)?)
@@ -4091,7 +4113,8 @@ pub(crate) fn classify_database_contract(
         || (migrations.v182 && !member_creation::schema_matches(connection)?)
         || (migrations.v183 && !pending_draft::schema_matches(connection)?)
         || (migrations.v184 && !runtime_v184_source_schema_matches(connection, migrations.v185)?)
-        || (migrations.v186 && !run_continuation::schema_matches(connection)?)
+        || (migrations.v231 && !run_continuation::retired_schema_matches(connection)?)
+        || (migrations.v186 && !migrations.v231 && !run_continuation::schema_matches(connection)?)
         || (migrations.v185 && !runtime_v185_source_schema_matches(connection, migrations.v186)?)
         || (migrations.v187
             && (!mission_description::schema_matches(connection)?
@@ -4099,10 +4122,12 @@ pub(crate) fn classify_database_contract(
         || (migrations.v189 && !message_mentions::schema_matches(connection)?)
         || (migrations.v188
             && (!user_anchors::schema_matches(connection)?
-                || !run_continuation::request_source_schema_matches(connection)?
+                || (!migrations.v231
+                    && !run_continuation::request_source_schema_matches(connection)?)
                 || (!command_code_runtime_v185_schema_matches(connection)?
                     && (!message_mentions::schema_matches(connection)?
-                        || !run_continuation::request_schema_matches(connection)?))))
+                        || (!migrations.v231
+                            && !run_continuation::request_schema_matches(connection)?)))))
         || (migrations.v191 && !member_environment::schema_matches(connection, migrations.v193)?)
         || (migrations.v192
             && !migrations.v193
@@ -4110,7 +4135,7 @@ pub(crate) fn classify_database_contract(
         || (migrations.v193 && !member_environment::retired_schema_matches(connection)?)
         || (migrations.v195 && !run_bootstrap_schema_matches(connection)?)
         || (migrations.v190
-            && (!run_continuation::request_schema_matches(connection)?
+            && ((!migrations.v231 && !run_continuation::request_schema_matches(connection)?)
                 || !command_code_runtime_v185_schema_matches(connection)?))
         || (migrations.v156
             && !migrations.v157
@@ -6294,7 +6319,9 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=227),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=228),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=229),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=230)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=230),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=231),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=232)
         "#,
         [],
         |row| {
@@ -6460,6 +6487,8 @@ fn load_current_migration_state(
                 v228: row.get(158)?,
                 v229: row.get(159)?,
                 v230: row.get(160)?,
+                v231: row.get(161)?,
+                v232: row.get(162)?,
             })
         },
     )
@@ -8869,6 +8898,14 @@ impl Database {
         }
         if !self.schema_migration_applied(230)? {
             observe_migration_step(progress, "migration_230", || thread_archive::migrate(self))?;
+        }
+        if !self.schema_migration_applied(231)? {
+            observe_migration_step(progress, "migration_231", || run_continuation::retire(self))?;
+        }
+        if !self.schema_migration_applied(232)? {
+            observe_migration_step(progress, "migration_232", || {
+                quote_text::migrate_edited_messages(self)
+            })?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40627,7 +40664,9 @@ mod tests {
             "migration_227".into(),
             "migration_228".into(),
             "migration_229".into(),
-            "migration_230".into()
+            "migration_230".into(),
+            "migration_231".into(),
+            "migration_232".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40705,7 +40744,9 @@ mod tests {
                 "migration_reconciliation",
                 "migration_main_metrics_convergence",
                 "migration_229",
-                "migration_230"
+                "migration_230",
+                "migration_231",
+                "migration_232"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
@@ -42621,7 +42662,7 @@ mod tests {
                     "main's structured atoms must not become literal text"
                 );
             }
-            assert!(run_continuation::schema_matches(reopened.connection()).unwrap());
+            assert!(run_continuation::retired_schema_matches(reopened.connection()).unwrap());
             assert!(cline_runtime_v184_schema_matches(reopened.connection()).unwrap());
             assert!(command_code_runtime_v185_schema_matches(reopened.connection()).unwrap());
             assert!(matches!(
@@ -42796,6 +42837,8 @@ mod tests {
             v228: version >= 228,
             v229: version >= 229,
             v230: version >= 230,
+            v231: version >= 231,
+            v232: version >= 232,
         }
     }
 
@@ -57059,6 +57102,8 @@ mod tests {
             true,
         );
         let legacy_objects = [
+            "camp_run_continuation",
+            "camp_run_continuation_input",
             "camp_summary",
             "camp_summary_frontier",
             "context_compaction_attempt",
@@ -57136,8 +57181,8 @@ mod tests {
         assert_table_columns(
             connection,
             "camp",
-            &["activation_state"],
-            &["status", "archived_at"],
+            &["activation_state", "archived_at"],
+            &["status"],
         );
         assert_table_columns(
             connection,

@@ -78,6 +78,7 @@ const LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES: usize = 128 * 1024;
 fn run_facts_schema_version(manifest_version: i64, invocation_kind: &str) -> i64 {
     if invocation_kind == "batch" {
         match manifest_version {
+            PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION => 14,
             40 | 43 => 11,
             37 | 39 => 10,
             32 | 33 | 34 | 36 | 38 => 9,
@@ -1482,6 +1483,7 @@ impl ContextService {
                         | 37
                         | 38
                         | 39
+                        | 43
                         | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
                 ));
             })
@@ -4886,6 +4888,7 @@ fn frozen_batch_context_manifest_version(
                 | 38
                 | 39
                 | 40
+                | 43
                 | PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
         ),
         "Batch AgentRun uses an unsupported context version"
@@ -8811,8 +8814,9 @@ mod tests {
                     context_manifest_version INTEGER
                 );
                 INSERT INTO agent_run_input VALUES ('historical', 26);
-                INSERT INTO agent_run_input VALUES ('current', 43);
-                INSERT INTO agent_run_input VALUES ('current', 43);
+                INSERT INTO agent_run_input VALUES ('current', 45);
+                INSERT INTO agent_run_input VALUES ('current', 45);
+                INSERT INTO agent_run_input VALUES ('before_edit_marker', 43);
                 INSERT INTO agent_run_input VALUES ('previous', 36);
                 INSERT INTO agent_run_input VALUES ('previous', 36);
                 INSERT INTO agent_run_input VALUES ('legacy', 29);
@@ -8827,6 +8831,10 @@ mod tests {
         assert_eq!(
             frozen_batch_context_manifest_version(&connection, "current").unwrap(),
             PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
+        );
+        assert_eq!(
+            frozen_batch_context_manifest_version(&connection, "before_edit_marker").unwrap(),
+            43
         );
         assert_eq!(
             frozen_batch_context_manifest_version(&connection, "legacy").unwrap(),
@@ -11826,7 +11834,7 @@ mod slow_tests {
     // A claimed input without a Manifest must survive an upgrade using its frozen formatter.
     #[test]
     fn claimed_legacy_batch_keeps_its_format_after_context_upgrades() {
-        for expected_version in [32, 33, 36, 38] {
+        for expected_version in [32, 33, 36, 38, 43] {
             let mut fixture = fixture();
             fixture.database.connection().execute(
                 "INSERT INTO camp_member(camp_id,agent_id,status,capability_overrides_json,version,joined_at) VALUES(?1,'agent_2','active','{}',1,datetime('now'))",
@@ -11844,8 +11852,11 @@ mod slow_tests {
             if expected_version >= 36 {
                 fixture.database.connection().execute("UPDATE camp_message SET author_type='agent',author_id='agent_2' WHERE id=(SELECT message_id FROM agent_run_input WHERE agent_run_id=?1)", [&fixture.run_id]).unwrap();
                 freeze_fixture_claim(&mut fixture);
+                if expected_version == 43 {
+                    crate::db::assert_edited_message_upgrade(&mut fixture.database);
+                }
                 if expected_version == 38 {
-                    // Construct an actual historical claim; the current fixture now claims v40.
+                    // Keep the manually constructed v38 claim on its original formatter.
                     let connection = fixture.database.connection();
                     let guard: String = connection.query_row("SELECT sql FROM sqlite_master WHERE name='agent_run_input_context_projection_immutable'", [], |row| row.get(0)).unwrap();
                     let tx = connection.unchecked_transaction().unwrap();
@@ -11917,7 +11928,8 @@ mod slow_tests {
             );
             if expected_version >= 36 {
                 assert_eq!(input["messages"][0]["senderId"], "agent_2");
-                if expected_version == 38 {
+                assert!(input["messages"][0].get("edited").is_none());
+                if expected_version >= 38 {
                     assert_eq!(input["messages"][0]["senderName"], author_name);
                 } else {
                     assert!(input["messages"][0].get("senderName").is_none());
@@ -11956,6 +11968,9 @@ mod slow_tests {
                 )
                 .unwrap();
             assert_eq!(version, expected_version);
+            if expected_version == 43 {
+                assert!(!first.runtime_payload.contains("A message marked edited"));
+            }
             fixture
                 .database
                 .connection()

@@ -2,7 +2,6 @@ use super::*;
 use crate::{
     delivery_queue,
     project_file_reference::Preflight,
-    run_continuation,
     runtime::{recompute_camp_turn, settle_abortive_agent_run_in_tx},
 };
 
@@ -324,13 +323,6 @@ fn finish_mutation(
     Ok(())
 }
 
-struct RunToRegroup {
-    id: String,
-    recipient: String,
-    authorization: Option<String>,
-    delivery: String,
-}
-
 fn reschedule(
     tx: &Transaction<'_>,
     thread: &str,
@@ -352,61 +344,18 @@ fn reschedule(
     tx.execute("UPDATE camp_message_delivery SET message_content_revision=(SELECT content_revision FROM camp_message WHERE id=?1),
         updated_at=?2,version=version+1 WHERE message_id=?1 AND status='waiting'",params![message,now])?;
 
-    let mut covered = HashSet::new();
-    let waiting = {
-        let mut statement = tx.prepare("SELECT d.id,d.recipient_agent_id FROM camp_run_continuation_input i
-            JOIN camp_message_delivery d ON d.id=i.delivery_id WHERE i.message_id=?1 AND d.status='waiting' ORDER BY d.queue_sequence")?;
-        statement
-            .query_map([message], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    for (delivery, recipient) in waiting {
-        if targets.contains(&recipient) {
-            tx.execute("UPDATE camp_run_continuation_input SET content_revision=(SELECT content_revision FROM camp_message WHERE id=?2)
-                WHERE delivery_id=?1 AND message_id=?2",params![delivery,message])?;
-            covered.insert(recipient);
-        } else {
-            tx.execute(
-                "DELETE FROM camp_run_continuation_input WHERE delivery_id=?1 AND message_id=?2",
-                params![delivery, message],
-            )?;
-        }
-        let has_inputs: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM camp_run_continuation_input WHERE delivery_id=?1)",
-            [&delivery],
-            |r| r.get(0),
-        )?;
-        if has_inputs {
-            tx.execute(
-                "UPDATE camp_message_delivery SET updated_at=?2,version=version+1 WHERE id=?1",
-                params![delivery, now],
-            )?;
-        } else {
-            tx.execute("UPDATE camp_message_delivery SET status='cancelled',failure_code=?2,ended_at=?3,updated_at=?3,version=version+1 WHERE id=?1",
-                params![delivery,reason,now])?;
-        }
-    }
-
-    let mut statement = tx.prepare("SELECT r.id,c.agent_id,d.continuation_authorization_id,d.id
+    let mut statement = tx.prepare("SELECT r.id,c.agent_id
         FROM agent_run_input i JOIN agent_run r ON r.id=i.agent_run_id JOIN conversation c ON c.id=r.conversation_id
-        JOIN camp_message_delivery d ON d.id=i.delivery_id
         WHERE i.message_id=?1 AND r.camp_id=?2 AND r.status IN ('queued','running','waiting')
         ORDER BY r.created_at,r.id")?;
     let runs = statement
         .query_map(params![message, thread], |r| {
-            Ok(RunToRegroup {
-                id: r.get(0)?,
-                recipient: r.get(1)?,
-                authorization: r.get(2)?,
-                delivery: r.get(3)?,
-            })
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    for run in runs {
-        let settlement = settle_abortive_agent_run_in_tx(tx, &run.id, reason, actor, now)?;
+    for (run_id, recipient) in runs {
+        let settlement = settle_abortive_agent_run_in_tx(tx, &run_id, reason, actor, now)?;
         if !settlement.camp_turn_id.is_empty() {
             recompute_camp_turn(
                 tx,
@@ -417,7 +366,7 @@ fn reschedule(
                 now,
             )?;
         }
-        if active_address_target(tx, thread, &run.recipient)?.is_none() {
+        if active_address_target(tx, thread, &recipient)?.is_none() {
             continue;
         }
         let inputs = {
@@ -428,37 +377,17 @@ fn reschedule(
             )?;
             statement
                 .query_map(
-                    params![run.id, message, targets.contains(&run.recipient)],
+                    params![run_id, message, targets.contains(&recipient)],
                     |r| r.get::<_, String>(0),
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
-        if inputs.is_empty() {
-            continue;
-        }
-        if let Some(authorization) = run.authorization {
-            run_continuation::replace_request(
-                tx,
-                thread,
-                &run.recipient,
-                &run.delivery,
-                &authorization,
-                &inputs,
-                now,
-            )?;
-        } else {
-            for input in &inputs {
-                delivery_queue::enqueue_message_if_absent(tx, thread, input, &run.recipient, now)?;
-            }
-        }
-        if inputs.iter().any(|input| input == message) {
-            covered.insert(run.recipient);
+        for input in inputs {
+            delivery_queue::enqueue_message_if_absent(tx, thread, &input, &recipient, now)?;
         }
     }
     for target in targets {
-        if !covered.contains(target) {
-            delivery_queue::enqueue_message_if_absent(tx, thread, message, target, now)?;
-        }
+        delivery_queue::enqueue_message_if_absent(tx, thread, message, target, now)?;
     }
     Ok(())
 }

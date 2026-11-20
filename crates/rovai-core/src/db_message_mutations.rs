@@ -4,14 +4,31 @@ const WAITING_INDEX: &str = "CREATE UNIQUE INDEX ordinary_waiting_message_target
     ON camp_message_delivery(message_id,recipient_agent_id)
     WHERE source_kind='message' AND status='waiting'";
 
+pub(super) const CONTINUATION_INPUT_SCHEMA: &str = "CREATE TABLE camp_run_continuation_input(
+                delivery_id TEXT NOT NULL REFERENCES camp_run_continuation(delivery_id) ON DELETE CASCADE,
+                message_id TEXT NOT NULL REFERENCES camp_message(id), ordinal INTEGER NOT NULL,
+                content_revision INTEGER NOT NULL CHECK(content_revision>0),
+                PRIMARY KEY(delivery_id,message_id), UNIQUE(delivery_id,ordinal));
+            CREATE INDEX continuation_input_message ON camp_run_continuation_input(message_id,delivery_id);
+            CREATE UNIQUE INDEX continuation_waiting_authorization ON camp_message_delivery(continuation_authorization_id)
+                WHERE source_kind='continuation' AND status='waiting';";
+
 pub(super) fn schema_matches(c: &Connection) -> rusqlite::Result<bool> {
     c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('camp_message') WHERE name='content_revision')
         AND EXISTS(SELECT 1 FROM pragma_table_info('camp_message') WHERE name='ever_bound_as_steer')
         AND EXISTS(SELECT 1 FROM pragma_table_info('agent_run_input') WHERE name='input_snapshot_json')
         AND EXISTS(SELECT 1 FROM pragma_table_info('camp_message_delivery') WHERE name='message_content_revision')
         AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='ordinary_waiting_message_target')
-        AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='continuation_waiting_authorization')
-        AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='camp_run_continuation_input')", [], |row|row.get(0))
+", [], |row|row.get(0))
+}
+
+pub(super) fn waiting_continuation_schema_matches(c: &Connection) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='continuation_waiting_authorization')
+        AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='camp_run_continuation_input')",
+        [],
+        |row| row.get(0),
+    )
 }
 
 fn rebuild_delivery(tx: &Transaction<'_>, remove_lifetime_unique: bool) -> Result<()> {
@@ -55,15 +72,9 @@ pub(super) fn migrate(db: &mut Database) -> Result<()> {
             ALTER TABLE camp_message_delivery ADD COLUMN continuation_authorization_id TEXT;
             ALTER TABLE agent_run_input ADD COLUMN message_content_revision INTEGER NOT NULL DEFAULT 1 CHECK(message_content_revision>0);
             ALTER TABLE agent_run_input ADD COLUMN input_snapshot_json TEXT;
-            CREATE TABLE camp_run_continuation_input(
-                delivery_id TEXT NOT NULL REFERENCES camp_run_continuation(delivery_id) ON DELETE CASCADE,
-                message_id TEXT NOT NULL REFERENCES camp_message(id), ordinal INTEGER NOT NULL,
-                content_revision INTEGER NOT NULL CHECK(content_revision>0),
-                PRIMARY KEY(delivery_id,message_id), UNIQUE(delivery_id,ordinal));
-            CREATE INDEX continuation_input_message ON camp_run_continuation_input(message_id,delivery_id);
-            UPDATE camp_message_delivery SET continuation_authorization_id=id WHERE source_kind='continuation';
-            CREATE UNIQUE INDEX continuation_waiting_authorization ON camp_message_delivery(continuation_authorization_id)
-                WHERE source_kind='continuation' AND status='waiting';
+            ")?;
+        tx.execute_batch(CONTINUATION_INPUT_SCHEMA)?;
+        tx.execute_batch("UPDATE camp_message_delivery SET continuation_authorization_id=id WHERE source_kind='continuation';
             INSERT INTO camp_run_continuation_input SELECT c.delivery_id,i.message_id,i.ordinal,i.message_content_revision
               FROM camp_run_continuation c JOIN camp_message_delivery d ON d.id=c.delivery_id AND d.status='waiting'
               JOIN agent_run_input i ON i.agent_run_id=c.source_agent_run_id;

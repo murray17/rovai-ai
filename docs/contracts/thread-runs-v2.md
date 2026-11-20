@@ -21,7 +21,7 @@ last_updated: 2026-11-05
 仅通过旧 Turn 关联的运行不进入普通、active 或 status 筛选结果，即使其存储状态仍为 waiting。
 原始运行和状态不迁移、回填或删除；此工具不作为保留旧执行列表的诊断入口。
 当前 waiting Delivery 仍按其直接会话归属独立聚合，未 claim 时继续返回 queued / null agentRunId；
-续做请求的输入计数与首条预览来源保持。
+重投按普通等待消息计数，队首预览使用消息 sequence、投递 queue_sequence 顺序中的第一条有效消息。
 
 候选 Run 只使用已有直接会话索引；不得随同会话的旧 Turn-only Run 或其他会话 Run 数量逐行增长。
 时间戳排序仍会检查本会话匹配的运行，队列计数仍覆盖本会话完整 waiting 集合；不承诺 O(limit)。

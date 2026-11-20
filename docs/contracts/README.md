@@ -8,7 +8,7 @@ last_updated: 2026-11-16
 
 User 的主称呼、结构化提及及冻结恢复见 [User Naming v1](user-naming-v1.md)。
 
-公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v43/v44](context-manifest-evidence-v44.md)、[Built-in Tool Transport v46](builtin-tool-transport-v46.md)。
+公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)。当前模型与 CLI 版本见 [ContextManifest v45](context-manifest-evidence-v45.md) 和 [Built-in Tool Transport v46](builtin-tool-transport-v46.md)。
 
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
@@ -30,13 +30,14 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 - [Durable Task v6](durable-task-v6.md)
 - [Built-in Tool Transport v46](builtin-tool-transport-v46.md) 将两个消息搜索的成功结果精简为两个顶层字段。引用输出见 [v45（历史）](builtin-tool-transport-v45.md)，Thread read 正向分页与 Send 输入来源见 [v44（历史）](builtin-tool-transport-v44.md)。
-- [ContextManifest Evidence v43 / v44](context-manifest-evidence-v44.md)
+- [ContextManifest Evidence v45](context-manifest-evidence-v45.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
-- [Run Facts v10](run-facts-v10.md)
+- [Run Facts v11](run-facts-v11.md)
 - [Camp Message Send v31](camp-message-send-v31.md)
 - [Project File Reference v2](project-file-reference-v2.md)
 - [Thread Reference v3](thread-reference-v3.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
-- [AgentRun Continuation v4](agent-run-continuation-v4.md)
+- [AgentRun Continuation v5](agent-run-continuation-v5.md)
+- [AgentRun Continuation v4（历史）](agent-run-continuation-v4.md)
 - [Camp Open Projection v33](camp-open-projection-v33.md)
 - [Notification Episode v12](notification-episode-v12.md)
 - [Desktop Shortcuts v2](desktop-shortcuts-v2.md)
@@ -676,9 +677,11 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Skills Rebuild v1（历史）](skills-rebuild-v1.md) | 受管平台/工具箱、队员配置、原生发现、Selection/Resolution v2、动态索引与旧来源恢复 |
 | [Run Input Skill Links v2（历史）](current-input-skill-links-v2.md) | 旧 Library/Exposure 的 Structured Skill Mention 与 per-message `RUN_INPUT.messages[].skills` |
 | [Current Input Skill Links v1（历史）](current-input-skill-links-v1.md) | Direct Run send-time snapshot 与 optional sibling `CURRENT_INPUT.skills[{name,path}]` |
-| [ContextManifest Evidence v43/v44（当前）](context-manifest-evidence-v44.md) | 引用仅 kind/text；public 43 / non-batch 44，Facts 11/13、Profile 15/16 保持；旧冻结输入原字节恢复 |
+| [ContextManifest Evidence v45（当前）](context-manifest-evidence-v45.md) | 公共普通初始输入增加可选 edited，公共 45 / non-batch 44，Facts 14/13、Profile 15/16 |
+| [ContextManifest Evidence v43/v44（历史）](context-manifest-evidence-v44.md) | 引用仅 kind/text，公共 43 / non-batch 44，Facts 11/13、Profile 15/16 |
 | [ContextManifest Evidence v42（历史）](context-manifest-evidence-v42.md) | non-batch 42 / Facts 13 / Profile 16；public 40 / Facts 11 / Profile 15；旧冻结输入原字节恢复 |
-| [Run Facts v10（当前）](run-facts-v10.md) | 新单聊仅保留附件输出根与按条件出现的 external effect；不投递固定 singleChat 对象 |
+| [Run Facts v11（当前）](run-facts-v11.md) | 公共普通批次存在编辑消息时追加一条 historyHint 提示 |
+| [Run Facts v10（历史）](run-facts-v10.md) | 新单聊保留附件输出根和按条件出现的 external effect |
 | [ContextManifest Evidence v31（历史 public Camp）](context-manifest-evidence-v31.md) | 公开 31/10/8、Charter revision 14；claim 冻结额外可见消息判断，保留 Skills 与旧 30/29 有界恢复 |
 | [ContextManifest Evidence v30（历史 public Camp）](context-manifest-evidence-v30.md) | 主线公开 30/10/7 与非 batch 27/7/5，冻结完整工具箱 section；旧 v29/v26 有界恢复 |
 | [ContextManifest Evidence v29（历史 public Camp）](context-manifest-evidence-v29.md) | public 29/9/7，无自动公屏历史；RUN_INPUT 完整、historyHint 冻结 |

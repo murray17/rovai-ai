@@ -8,8 +8,8 @@ last_updated: 2026-11-10
 
 # Public Thread Message、Delivery 与 AgentRun
 
-本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v30](../contracts/camp-message-send-v31.md)、
-[Message Delivery v18](../contracts/message-delivery-v18.md)、[ContextManifest v43/v44](../contracts/context-manifest-evidence-v44.md)
+本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v31](../contracts/camp-message-send-v31.md)、
+[Message Delivery v19](../contracts/message-delivery-v19.md)、[ContextManifest v45](../contracts/context-manifest-evidence-v45.md)
 与 [Camp History v18](../contracts/camp-history-v18.md)。Single Chat 不使用本主链。
 
 ## 三类事实
@@ -17,7 +17,7 @@ last_updated: 2026-11-10
 ```text
 public ThreadMessage
   └─ waiting Delivery × explicit target
-       └─ Scheduler claims one FIFO prefix
+       └─ Scheduler claims a prefix in Thread message order
             └─ immutable multi-input AgentRun
                  ├─ AgentRunInput × N
                  ├─ frozen ContextManifest
@@ -102,7 +102,7 @@ ContextManifest 冻结当前输入和 discovery 时序证据，但 `thread.read`
 ## 终态、停止与恢复
 
 Run 终态按输入 Delivery 分别写入 `settled | failed | cancelled`。普通 Stop 以精确 `agentRunId + version` CAS，只停止被点击
-的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v4](../contracts/agent-run-continuation-v4.md) 提交新的独立授权。Runtime 明确未接受且无
+的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v5](../contracts/agent-run-continuation-v5.md) 将有效原输入重投给原队员。Runtime 明确未接受且无
 副作用风险时，可以恢复同一冻结 Run 的运输；accepted/unknown 永不作为未执行重新投递。
 
 Run 显示失败不等于旧执行已隔离。Scheduler 在 claim 前分别检查同一 Thread+Agent 的旧执行隔离和实际共享
@@ -144,7 +144,7 @@ PublicOnly 只抑制 Agent 路由，仍允许用户提及；通知沿用当前�
 普通、active 与 status 筛选使用同一范围。旧记录不回填或删除，waiting Delivery 聚合保持。
 本查询不建立快照分页、缓存或调度管理机制；动态页间变化按命令说明保留明确限制。
 
-用户主动继续复用此队列，但单独成批，普通消息合批不跨过续做请求；旧 Run 与旧投递终态不变。
+用户主动继续将输入送回普通队列，可与同队员其他输入合批。队首与领取均按消息 sequence、投递 queue_sequence 升序。
 
 ### claim 前的 Mission 工作区准备
 

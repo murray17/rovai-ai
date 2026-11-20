@@ -202,6 +202,115 @@ const OBJECTS: &[(&str, &str)] = &[
         ) BEGIN SELECT RAISE(ABORT, 'Delivery input belongs to one authorized Run'); END"),
 ];
 
+const ORDINARY_INPUT_OWNER: &str = "CREATE TRIGGER agent_run_input_delivery_owner
+    BEFORE INSERT ON agent_run_input WHEN EXISTS (
+        SELECT 1 FROM agent_run_input WHERE delivery_id=NEW.delivery_id
+    ) BEGIN SELECT RAISE(ABORT, 'Delivery already has a frozen input'); END";
+
+pub(super) fn retired_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    connection.query_row("SELECT NOT EXISTS(SELECT 1 FROM sqlite_schema
+        WHERE name IN ('camp_run_continuation','camp_run_continuation_input','continuation_waiting_authorization'))
+        AND NOT EXISTS(SELECT 1 FROM pragma_table_info('camp_message_delivery') WHERE name='continuation_authorization_id')
+        AND EXISTS(SELECT 1 FROM sqlite_schema WHERE name='agent_run_input_delivery_owner' AND sql=?1)",
+        [ORDINARY_INPUT_OWNER], |row| row.get(0))
+}
+
+pub(super) fn retire(db: &mut Database) -> Result<()> {
+    let tx = db
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    anyhow::ensure!(
+        matches!(classify_database_contract(&tx)?,
+        DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version==180),
+        "Ordinary redelivery requires schema 180"
+    );
+    let now = chrono::Utc::now().to_rfc3339();
+    {
+        let mut waiting = tx.prepare("SELECT d.camp_id, i.message_id, d.recipient_agent_id
+            FROM camp_run_continuation_input i
+            JOIN camp_message_delivery d ON d.id=i.delivery_id
+            JOIN camp t ON t.id=d.camp_id AND t.deletion_operation_id IS NULL AND t.archived_at IS NULL
+            JOIN camp_message m ON m.id=i.message_id AND m.camp_id=d.camp_id
+            JOIN camp_member member ON member.camp_id=d.camp_id AND member.agent_id=d.recipient_agent_id
+            JOIN agent_profile p ON p.id=member.agent_id
+            WHERE d.status='waiting' AND d.source_kind='continuation'
+              AND m.tombstoned_at IS NULL AND m.recall_state<>'withdrawn' AND m.content_revision=i.content_revision
+              AND member.status='active' AND member.leave_requested_at IS NULL AND p.profile_status='present'
+              AND NOT EXISTS(SELECT 1 FROM mission WHERE camp_id=d.camp_id AND status='completed')
+            ORDER BY d.camp_id,d.queue_sequence,d.id,i.ordinal")?;
+        let inputs = waiting
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (thread, message, recipient) in inputs {
+            crate::delivery_queue::enqueue_message_if_absent(
+                &tx, &thread, &message, &recipient, &now,
+            )?;
+        }
+    }
+    tx.execute("UPDATE camp_message_delivery SET status='cancelled',failure_code='continuation_converted',
+        ended_at=?1,updated_at=?1,version=version+1 WHERE source_kind='continuation' AND status='waiting'",[&now])?;
+    tx.execute_batch(
+        "DROP TRIGGER agent_run_input_delivery_owner;
+        DROP TRIGGER camp_run_continuation_immutable;
+        DROP TABLE camp_run_continuation_input;
+        DROP TABLE camp_run_continuation;
+        DROP INDEX continuation_waiting_authorization;
+        ALTER TABLE camp_message_delivery DROP COLUMN continuation_authorization_id;",
+    )?;
+    tx.execute_batch(ORDINARY_INPUT_OWNER)?;
+    tx.execute_batch("INSERT INTO schema_migration VALUES(231,datetime('now'));
+        UPDATE rovai_data_contract SET projection_schema_version=181,updated_at=datetime('now') WHERE singleton=1;")?;
+    anyhow::ensure!(
+        matches!(
+            classify_database_contract(&tx)?,
+            DatabaseContractClassification::Current(ref marker)
+                | DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 181
+        ),
+        "Ordinary redelivery failed schema admission"
+    );
+    tx.commit()?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn restore_requests_for_test(c: &Connection) {
+    quote_text::downgrade_edited_messages_for_test(c);
+    if !c
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=231)",
+            [],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap()
+    {
+        return;
+    }
+    let tx = c.unchecked_transaction().unwrap();
+    tx.execute_batch(
+        "DROP TRIGGER agent_run_input_delivery_owner;
+        ALTER TABLE camp_message_delivery ADD COLUMN continuation_authorization_id TEXT;",
+    )
+    .unwrap();
+    for (name, sql) in OBJECTS {
+        if *name != "agent_run_input_delivery_idx" {
+            tx.execute_batch(sql).unwrap();
+        }
+    }
+    tx.execute_batch(REQUEST_GUARDS[1].1).unwrap();
+    tx.execute_batch(message_mutations::CONTINUATION_INPUT_SCHEMA)
+        .unwrap();
+    tx.execute_batch("DELETE FROM schema_migration WHERE version=231;
+        UPDATE rovai_data_contract SET projection_schema_version=180 WHERE singleton=1 AND projection_schema_version=181;").unwrap();
+    tx.commit().unwrap();
+}
+
 pub(super) fn schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
     for (name, expected) in OBJECTS {
         let actual: Option<String> = connection
@@ -331,7 +440,105 @@ pub(super) fn downgrade_for_test(connection: &Connection) {
 
 // Reuse the populated queue owner to exercise the legacy source conversion.
 #[cfg(all(test, feature = "extended-tests"))]
-pub(crate) fn assert_legacy_request_upgrade(database: &mut Database, sources: &[(&str, &str)]) {
+pub(crate) fn assert_request_upgrade(
+    database: &mut Database,
+    thread: &str,
+    run: &str,
+    legacy: bool,
+) {
+    let sources = [
+        ("request-1", "legacy-operation-1"),
+        ("request-2", "legacy-operation-2"),
+    ];
+    let c = database.connection();
+    restore_requests_for_test(c);
+    for (id, _) in sources {
+        let seq: i64=c.query_row("UPDATE camp SET last_delivery_sequence=last_delivery_sequence+1 WHERE id=?1 RETURNING last_delivery_sequence",[thread],|r|r.get(0)).unwrap();
+        c.execute("INSERT INTO camp_message_delivery(id,camp_id,source_kind,recipient_agent_id,
+                recipient_membership_version_at_admission,queue_sequence,status,version,created_at,updated_at,continuation_authorization_id)
+                VALUES(?1,?2,'continuation','agent_1',1,?3,'waiting',1,datetime('now'),datetime('now'),?1)",params![id,thread,seq]).unwrap();
+        c.execute(
+            "INSERT INTO camp_run_continuation VALUES(?1,?2,0)",
+            params![id, run],
+        )
+        .unwrap();
+        c.execute("INSERT INTO camp_run_continuation_input SELECT ?1,message_id,ordinal,message_content_revision
+            FROM agent_run_input WHERE agent_run_id=?2",params![id,run]).unwrap();
+    }
+    if !legacy {
+        c.execute(
+            "DELETE FROM camp_run_continuation_input WHERE message_id='a'",
+            [],
+        )
+        .unwrap();
+        // Before retirement a claimed request could own several frozen inputs.
+        c.execute("INSERT INTO camp_message_delivery(
+            id,camp_id,source_kind,recipient_agent_id,recipient_membership_version_at_admission,
+            queue_sequence,status,version,claimed_agent_run_id,created_at,updated_at,claimed_at,ended_at)
+            SELECT 'historical-retry',camp_id,'continuation',recipient_agent_id,recipient_membership_version_at_admission,
+                queue_sequence+1,'cancelled',1,?1,created_at,updated_at,created_at,updated_at FROM camp_message_delivery WHERE id='request-2'",[run]).unwrap();
+        c.execute(
+            "UPDATE camp SET last_delivery_sequence=last_delivery_sequence+1 WHERE id=?1",
+            [thread],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO camp_run_continuation VALUES('historical-retry',?1,0)",
+            [run],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE agent_run_input SET delivery_id='historical-retry' WHERE agent_run_id=?1",
+            [run],
+        )
+        .unwrap();
+        // The effective lists of the two requests overlap an existing ordinary wait.
+        let tx = c.unchecked_transaction().unwrap();
+        let reused = crate::delivery_queue::enqueue_message_if_absent(
+            &tx,
+            thread,
+            "b",
+            "agent_1",
+            "2026-11-19T00:00:00Z",
+        )
+        .unwrap()
+        .unwrap();
+        tx.commit().unwrap();
+        c.execute_batch(
+            "CREATE TEMP TRIGGER fail_retire BEFORE INSERT ON schema_migration WHEN NEW.version=231
+            BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+        )
+        .unwrap();
+        assert!(
+            retire(database)
+                .unwrap_err()
+                .to_string()
+                .contains("fixture")
+        );
+        let c = database.connection();
+        assert_eq!(
+            c.query_row(
+                "SELECT count(*) FROM camp_run_continuation_input",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
+        c.execute_batch("DROP TRIGGER fail_retire").unwrap();
+        retire(database).unwrap();
+        quote_text::migrate_edited_messages(database).unwrap();
+        let c = database.connection();
+        assert!(retired_schema_matches(c).unwrap());
+        let rows=c.prepare("SELECT id,message_id FROM camp_message_delivery WHERE status='waiting' ORDER BY queue_sequence").unwrap()
+            .query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM agent_run_input WHERE agent_run_id=?1 AND delivery_id='historical-retry'",[run],|r|r.get::<_,i64>(0)).unwrap(),3);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], (reused, "b".into()));
+        assert_eq!(rows[1].1, "c");
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM camp_message_delivery WHERE status='cancelled' AND failure_code='continuation_converted'",[],|r|r.get::<_,i64>(0)).unwrap(),2);
+        return;
+    }
     let connection = database.connection();
     connection
         .execute_batch("DROP TRIGGER camp_delivery_source_immutable")

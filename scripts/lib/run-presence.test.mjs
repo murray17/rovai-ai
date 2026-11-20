@@ -542,7 +542,7 @@ try {
     await b.evaluate('window.__presenceReloadPending = true'); await b.send('Page.reload')
     await b.wait('!window.__presenceReloadPending && !!window.__presence && !!document.querySelector(".composer-box")')
     assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),0)
-    assert.equal(await b.evaluate('__presence.getState().snapshot.messageDeliveries.filter(d=>d.continuationRequest).length'),1)
+    assert.equal(await b.evaluate('__presence.getState().snapshot.messageDeliveries.filter(d=>d.id.startsWith("retry-delivery-")).length'),1)
     await b.evaluate('__presence.controls.holdDispatch=false')
     await b.wait('document.querySelector(".conversation-run-presence")?.dataset.presenceState === "running"')
     const resumedRun = await b.evaluate('document.querySelector(".conversation-run-presence").dataset.presenceRun')
@@ -605,7 +605,7 @@ try {
   await scenario('failed',2)
   await b.evaluate('__presence.controls.holdDispatch=true;__presence.controls.persistServer=true')
   await b.click('.run-presence-resume'); await b.wait('!document.querySelector(".run-presence-resume")')
-  const waiting = () => b.evaluate(`({runs:__presence.getState().snapshot.agentRuns.map(r=>({id:r.id,status:r.status,accepted:r.hasAcceptedContinuation})),deliveries:__presence.getState().snapshot.messageDeliveries.filter(d=>d.continuationRequest).map(d=>({id:d.id,status:d.status,target:d.targetAgentRunId}))})`)
+  const waiting = () => b.evaluate(`({runs:__presence.getState().snapshot.agentRuns.map(r=>({id:r.id,status:r.status,accepted:r.hasAcceptedContinuation})),deliveries:__presence.getState().snapshot.messageDeliveries.filter(d=>d.id.startsWith("retry-delivery-")).map(d=>({id:d.id,status:d.status,target:d.targetAgentRunId}))})`)
   const accepted = await waiting()
   assert.deepEqual(accepted.runs,[{id:'run-alice',status:'failed',accepted:true}])
   assert.equal(accepted.deliveries.length,1);assert.equal(accepted.deliveries[0].status,'waiting');assert.equal(accepted.deliveries[0].target,null)
@@ -652,8 +652,7 @@ try {
   report.interactions.push('User receipts follow accepted, running, successful and failed continuation attempts, retain the latest execution link, and recover after reload across all five themes')
   report.interactions.push('accepted Retry remains hidden while dispatch is held, through stale cached entry preview, sidebar navigation/remount and full reload; exactly one waiting Delivery; a failed successor retries only that new Run')
 
-  // The history action is intentionally repeatable: each deliberate click is
-  // a new authorization, even though the inline failure has been handled.
+  // Two deliberate history clicks have separate receipts and share one ordinary wait.
   await scenario('failed',2); await b.evaluate('__presence.controls.holdDispatch=true')
   await b.evaluate('__presence.setRunCanContinue(false)')
   await b.wait('!!document.querySelector(".run-presence-open") && !document.querySelector(".run-presence-resume")')
@@ -665,12 +664,12 @@ try {
   for (let i=0;i<2;i++) { await b.click('.camp-detail-popover button[title="继续执行"]'); await settle() }
   const authorized = await b.evaluate(`__presence.controls.continueAttempts.slice(${historyAttempts})`)
   assert.equal(authorized.length,2);assert.notEqual(authorized[0].commandId,authorized[1].commandId)
-  assert.equal((await waiting()).deliveries.length,2)
+  assert.equal((await waiting()).deliveries.length,1)
   await b.key('Escape'); await settle()
   await b.click('[data-thread-id="demo-thread-0"] button'); await settle()
   await b.click(`[data-thread-id="${homeThread}"] button`); await settle()
   assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),0)
-  report.interactions.push('history RunCard can accept two explicit continuations; each creates a distinct Delivery; returning to the conversation does not revive its handled failure')
+  report.interactions.push('history RunCard accepts two explicit retries while the input is waiting, reuses its delivery, and keeps the handled failure out of the conversation')
 
   // Retrying from either view shares the same accepted continuation and stop semantics.
   await scenario('failed',2);await b.click('.run-presence-open');await settle()

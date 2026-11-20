@@ -219,7 +219,7 @@ mod tests {
             assert_eq!(page.as_object().unwrap().len(), 2);
             assert_eq!(page["items"].as_array().unwrap().len(), 1);
             let item = &page["items"][0];
-            assert_eq!(item.as_object().unwrap().len(), 6);
+            assert_eq!(item.as_object().unwrap().len(), 5);
             assert_eq!(item["threadId"], id.as_str());
             if *id == &a {
                 assert!(item["lastMessageAt"].is_null());
