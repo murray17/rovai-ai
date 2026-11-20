@@ -110,3 +110,11 @@ User 审阅 r2 后，在消息 `b8561ae8-8921-44d6-a018-f9b4a249340f` 确认实�
 Migration 232 / schema 182 扩展版本约束并保留旧 claim、Manifest 与 Runtime 接收证据。
 版本配对和提示分别由 [ContextManifest v45](../../contracts/context-manifest-evidence-v45.md)
 和 [Run Facts v11](../../contracts/run-facts-v11.md) 维护。
+
+### 实际输入对照
+
+基线 `1a9fdda25` 和 r2 `1a2a310c6` 分别用隔离 Core、普通消息提交 API 与同一个可记录 ACP 输入的夹具。
+在 A 开始后依次发送 B、D，再编辑 A。基线收到 B、D、A′，锚点为 A′。r2 收到 A′、B、D，锚点为 D，
+仅 A′ 带 `edited: true`，提示追加一次。两侧都保留旧 Run 的原 claim 和 payload Blob。
+定向回归通过未编辑重试、附件编辑、同批多个编辑消息、预算截断、Steer 和迁移后物化 v43 claim。
+实际输入对照使用测试 Runtime。通用 12 Case 的模型语义验收由独立 Gate 记录。
