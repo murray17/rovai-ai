@@ -120,6 +120,15 @@ module.exports = async ({ window, userData, waitFor, click: nativeClick }) => {
   assert.deepEqual(await evaluate(`${createCalls}[2].p`), await evaluate(`${createCalls}[1].p`), 'Recovery repeats identical command ID and payload')
   assert.equal(await evaluate("window.missionQA.calls.filter(c=>c.method.startsWith('preferences.set')).length"), 0, 'Mission never writes global creation defaults')
 
+  await click('.rail-button[aria-label="团队"]')
+  await waitFor("!!document.querySelector('.team-row-action [data-navigation-icon=crown]')", 'Team roster has a Make lead action')
+  assert.deepEqual(await evaluate(`(() => {
+    const { width, height } = document.querySelector('.team-row-action [data-navigation-icon=crown]').getBoundingClientRect()
+    return [width, height]
+  })()`), [14, 14], 'The shared crown keeps the Team member action size')
+  await click('.rail-button[aria-label^="使命板"]')
+  await waitFor("!!document.querySelector('.rail-button[aria-label^=使命板][aria-current=page]')", 'Return to the Mission board')
+
   // An explicitly selected Custom remains usable through a pending/failed Team
   // refresh; releasing that Promise cannot replace the user's source choice.
   await evaluate('window.missionQA.holdTeamRefresh()')

@@ -13,6 +13,7 @@ export type NavigationIconName =
   | 'calendar-clock'
   | 'chart-line'
   | 'cpu'
+  | 'crown'
   | 'info'
   | 'monitor-smartphone'
   | 'radio-tower'
@@ -61,6 +62,8 @@ function navigationIconPaths(name: NavigationIconName): React.JSX.Element {
       return <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v6M14 10v6" /></>
     case 'square-pen':
       return <><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z" /></>
+    case 'crown':
+      return <path d="m2 8 5 4 5-9 5 9 5-4-3 12H5L2 8Z" />
     case 'users':
       return <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>
     case 'brain':

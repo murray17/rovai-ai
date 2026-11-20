@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ThreadForkState } from './thread-fork'
 
 /** Smooth only the indicator; command completion and navigation never wait. */
-export function useForkLoading(phase: ThreadForkState['phase']): boolean {
+export function useForkLoading(phase: ThreadForkState['phase']) {
   const [visible, setVisible] = useState(false)
   const shownAt = useRef<number | null>(null)
   useEffect(() => {
@@ -23,5 +23,9 @@ export function useForkLoading(phase: ThreadForkState['phase']): boolean {
     }
     return () => clearTimeout(timer)
   }, [phase])
-  return visible
+  const dismiss = useCallback(() => {
+    shownAt.current = null
+    setVisible(false)
+  }, [])
+  return { visible, dismiss }
 }

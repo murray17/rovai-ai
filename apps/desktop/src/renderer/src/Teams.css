@@ -77,7 +77,7 @@
 .team-row-actions { display:flex; flex:0 0 auto; align-items:center; justify-content:flex-end; gap:4px; opacity:0; pointer-events:none; transition:opacity 120ms ease; }
 .team-member-row:hover .team-row-actions,.team-member-row:focus-within .team-row-actions { opacity:1; pointer-events:auto; }
 .team-row-action { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:30px; padding:5px 8px; border:0; border-radius:5px; color:var(--muted); background:transparent; font:inherit; font-size:11px; white-space:nowrap; cursor:pointer; }
-.team-row-action svg { width:14px; height:14px; flex-shrink:0; }
+.team-row-action svg { width:14px; height:14px; flex:0 0 14px; }
 .team-row-action:hover { color:var(--ink); background:var(--neutral-hover); }
 .team-row-remove,.team-row-remove:hover { color:var(--danger); }
 .team-row-remove:hover { background:var(--danger-soft); }

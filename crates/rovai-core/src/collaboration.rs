@@ -9446,6 +9446,32 @@ mod slow_tests {
         );
         assert!(changes.try_recv().is_err());
 
+        let snapshot = crate::read_model::ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let marker = snapshot
+            .messages
+            .iter()
+            .find(|m| m.id == message_id)
+            .unwrap();
+        assert!(marker.withdrawn);
+        assert!(!marker.can_delete);
+        let delete = service
+            .delete_camp_message(
+                &mut database,
+                &user_envelope(
+                    "delete-withdrawn-message",
+                    Some(&camp_id),
+                    message_mutation::DeleteThreadMessageCommand {
+                        camp_id: camp_id.clone(),
+                        message_id: message_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(delete.result.code, "message.delete_unavailable");
+        assert!(changes.try_recv().is_err());
+
         let erased: (
             String,
             String,

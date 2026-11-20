@@ -28,8 +28,8 @@ describe('browser navigation adapter', () => {
     const host = browser()
     const navigation = createDesktopNavigation(async (_target, tx) => { tx.commit() }, createBrowserNavigationHistory('phone', host))
     const stop = navigation.connect()
-    const overview: NavigationTarget = { kind: 'settings', section: 'runtime', overview: true }
-    const detail: NavigationTarget = { kind: 'settings', section: 'runtime' }
+    const overview: NavigationTarget = { kind: 'settings', section: 'archive', overview: true }
+    const detail: NavigationTarget = { kind: 'settings', section: 'archive', archive: { kind: 'mission', threadId: 'M' } }
     navigation.reset({ kind: 'missions' })
     await navigation.replace(overview)
     await navigation.push(detail)

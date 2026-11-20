@@ -110,7 +110,8 @@ navigation. Completion after leaving the source, and save/open failure after a k
 opening-failure toast, target title, or Open action. The known copy remains accessible through ordinary navigation;
 its saved locator is not a new copy request. Fork opening does not commit a cached preview before the full projection
 succeeds. An already visible target counts as opened only with a full projection; recovery identifiers are cleared only
-after this confirmation. Rejected feedback auto-dismisses after 3.2 seconds; unknown outcomes retain explicit retry.
-The loading indicator waits 200ms before appearing and stays visible for at least 600ms once shown, with errors taking
-precedence. This visual timing never delays the command, navigation or busy-state completion. The
+after this confirmation. Rejected and unknown outcomes use the shared error toast timing. Dismissal preserves
+an unknown request. The same fork entry can retry that request after the toast closes. A different fork entry brings
+back the unresolved prompt. The loading indicator waits 200ms before appearing and normally stays visible for at
+least 600ms once shown. Manual dismissal and error feedback can end it earlier. This visual timing never delays the command, navigation or busy-state completion. The
 [conversation UI contract](../ui/components/conversation-workspace.md#thread-分叉) owns presentation.

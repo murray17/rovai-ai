@@ -14,6 +14,10 @@ it('orders complete projects by their latest matching chat and keeps counts acro
     ['P', ['a', 'c', 'f']], ['Q', ['b']], ['S', ['d']]
   ])
   expect(all.matchingCounts).toEqual({ chat: 5, mission: 2 })
+  const landing = archiveView(items, 'chat', '', [], 'd')
+  expect(landing.groups.map(([key]) => key)).toEqual(['S', 'P', 'Q'])
+  expect(archiveView(items, 'chat', '', [], 'f').groups[0][1].map(row => row.threadId)).toEqual(['f', 'a', 'c'])
+  expect(archiveView(items, 'chat', '', ['P'], 'd').groups).toEqual([all.groups[0]])
   const selected = archiveView(items, 'mission', 'mission-1', ['Q', 'R', 'empty'])
   expect(selected.matchingCounts).toEqual({ chat: 0, mission: 1 })
   expect(selected.projects.get('Q')).toBe(1)

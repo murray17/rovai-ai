@@ -75,6 +75,8 @@ const projects=[{projectKey:'directory:/workspace/rovai-ai',projectPath:'/worksp
 // Empty project groups are pruned by the real navigation owner. Seed an ordinary Camp in each picker project.
 const populatedProjects=projects.map((project,index)=>({...project,totalCount:1,recentThreads:[{...navigation(initial).projects[0].recentThreads[0],id:`fixture-project-camp-${index}`,title:`${project.name} 的普通对话`,projectPath:project.projectPath}]}))
 const nav={schemaVersion:3,throughGlobalSequence:10,quickChat:{totalCount:0,recentThreads:[]},projects:populatedProjects}
+const archiveChat = nav.projects[0].recentThreads[0]
+const archiveChatRecord = { ...items[0], threadId: archiveChat.id, missionId: null, title: archiveChat.title } as unknown as MissionRecord
 const prefs={...DEFAULT_GENERAL_PREFERENCES,interfaceLanguagePreference:'zh-CN',interfaceLanguage:'zh-CN',systemLanguage:'zh-CN',languageRevision:0,readError:null,newConversationDefaults:{memberAgentIds:profiles.map(a=>a.agentId),defaultLeadAgentId:profiles[0].agentId}}
 if(query.has('executionAutoOpen')){prefs.executionConsolePlacement='right';prefs.executionConsoleAutoOpen=query.get('executionAutoOpen')==='1'}
 const navigationPrefs={...structuredClone(EMPTY_SNAPSHOT),registeredProjects:projects.map(p=>p.projectPath),legacyProjectsSynced:true,projectOrder:projects.map(p=>p.projectKey)}
@@ -166,6 +168,15 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
   return structuredClone(missionTeams)
  }
  const c=p.command??p,m=items.find(m=>m.missionId===c.missionId||m.threadId===c.threadId)
+  ?? (c.threadId === archiveChat.id ? archiveChatRecord : undefined)
+ if (method === 'threads.archive.list') {
+  const archived = [...items, archiveChatRecord].filter(item => item.archivedAt)
+  return { items: archived.map(item => ({
+    threadId: item.threadId, missionId: item.missionId, title: item.title,
+    projectKey: `directory:${item.projectPath}`,
+    lastMessageAt: item.missionId === 'mission-1' ? '2026-10-01T12:00:00Z' : now
+  })), nextCursor: null }
+ }
  if(method==='missions.list'){
   if(failNextMissionRefresh){failNextMissionRefresh=false;missionRefreshPending=true;await new Promise(resolve=>setTimeout(resolve,150));missionRefreshPending=false;throw new Error('fixture mission refresh failed')}
   return structuredClone(items.filter(item => !item.archivedAt))
@@ -256,7 +267,12 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
    if (failure === 'transport') throw new Error('fixture connection lost')
    return {status: 'rejected', code: 'camp.deletion_in_progress', payload: {}}
   }
-  setArchive(m!,method==='threads.archive')
+  const archived = method === 'threads.archive'
+  if (m === archiveChatRecord) {
+   nav.projects[0].recentThreads = archived ? [] : [archiveChat]
+   nav.projects[0].totalCount = nav.projects[0].recentThreads.length
+  }
+  setArchive(m!, archived)
   return applied({threadId:m!.threadId,archivedAt:m!.archivedAt,changed:true})
  }
  if(method==='threads.delete'){

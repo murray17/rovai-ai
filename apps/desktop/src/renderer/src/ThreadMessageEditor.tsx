@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from 'react'
 import type { LocalAttachmentSourceView, StoredCommandResult, ThreadMessageAroundSnapshot, ThreadMessageView } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import { AttachmentCard, ComposerAttachmentStrip } from './AttachmentCard'
@@ -32,6 +32,7 @@ export function ThreadMessageEditor({
   message,
   threadId,
   defaultLead,
+  contentWidth,
   editorContext,
   onCancel,
   onSaved
@@ -39,6 +40,7 @@ export function ThreadMessageEditor({
   message: ThreadMessageView
   threadId: string
   defaultLead: string | null
+  contentWidth?: number
   editorContext: EditorContext
   onCancel(): void
   onSaved(): Promise<void>
@@ -64,6 +66,8 @@ export function ThreadMessageEditor({
   const status = composerDocumentStatus(document, editorContext.members, editorContext.skills ?? [])
   const attachmentCount = retained.length + added.length
   const canSubmit = !saving && !preparing && !pendingInsertion && (status.hasContent || attachmentCount > 0)
+
+  useLayoutEffect(() => { editor.current?.focus() }, [])
 
   const discardPrepared = useCallback(() => {
     const ids = preparedRef.current.splice(0)
@@ -217,11 +221,9 @@ export function ThreadMessageEditor({
     }
   }
 
-  return <form className="composer inline-message-edit" aria-label={uiAttribute('编辑消息')}
+  return <form className="revision-editor" aria-label={uiAttribute('编辑消息')}
+    style={contentWidth ? { '--revision-content-width': `${contentWidth}px` } as CSSProperties : undefined}
     onSubmit={event => { event.preventDefault(); void save() }}>
-    {!status.hasExplicitRecipient && defaultLead && <div className="inline-edit-route">
-      <UiText zh="默认由队长" /> <span>@{defaultLead}</span> <UiText zh="接收" />
-    </div>}
     {(retained.length > 0 || added.length > 0) && <ComposerAttachmentStrip>
       {retained.map(attachment => <AttachmentCard key={attachment.id} attachment={attachment}
         locator={{ owner: 'message', threadId, messageId: message.id, attachmentRefId: attachment.id }}
@@ -237,6 +239,9 @@ export function ThreadMessageEditor({
       ariaLabel={uiAttribute('编辑消息正文')} disabled={saving}
       onEffectiveDocumentChange={setDocument} onFileInsertionPendingChange={setPendingInsertion}
       onPasteFiles={files => { void addFiles(files) }} onSubmit={() => void save()} />
+    {!status.hasExplicitRecipient && defaultLead && <div className="revision-default-recipient">
+      <UiText zh="默认由队长" /> <strong>@{defaultLead}</strong> <UiText zh="接收" />
+    </div>}
     {conflict && <div className="inline-edit-conflict">
       {conflict.status === 'loading' && <div role="status"><UiText zh="正在读取最新内容…" /></div>}
       {conflict.status === 'error' && <div role="alert">
@@ -262,7 +267,7 @@ export function ThreadMessageEditor({
       </>}
     </div>}
     {error && <div className="message-withdraw-error" role="alert">{error}</div>}
-    <div className="inline-edit-actions">
+    <div className="revision-editor-actions">
       <input ref={picker} type="file" hidden multiple onChange={event => {
         const files = Array.from(event.currentTarget.files ?? [])
         event.currentTarget.value = ''

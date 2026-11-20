@@ -73,10 +73,10 @@ pub(crate) fn capabilities(tx: &Connection, message_id: &str) -> Result<MessageC
         |r| Ok((r.get::<_,bool>(0)?,r.get::<_,bool>(1)?,r.get::<_,String>(2)?,r.get::<_,bool>(3)?,
             r.get::<_,i64>(4)?,r.get::<_,bool>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,bool>(9)?))
     )?;
-    let live = !deleted && !thread_deleted;
+    let live = !deleted && !thread_deleted && recall != "withdrawn";
     Ok(MessageCapabilities {
         can_withdraw: live && own && recall == "recallable" && !bound && !recognized,
-        can_edit: live && own && recall != "withdrawn" && !bound,
+        can_edit: live && own && !bound,
         can_delete: live && (own || agent) && !in_flight,
         revision,
         bound,

@@ -10,6 +10,7 @@ app.setPath('userData', userData); app.setPath('sessionData', join(userData, 'se
 // In-memory Renderer projections only. No Core, SQLite, Skill Library or Runtime.
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: process.platform === 'linux', width: 1440, height: 920, useContentSize: true,
+    ...(mode === 'archive' ? { titleBarStyle: 'hidden' } : {}),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   await window.loadFile(renderer, mode === 'large-diff'
     ? { query: { largeDiff: '1' } }
@@ -53,7 +54,18 @@ app.whenReady().then(async () => {
     await waitFor('!!document.querySelector(' + JSON.stringify(card) + ')', 'Mission board did not load')
     await click(card)
     await waitFor('!!document.querySelector(' + JSON.stringify(editor) + ')', 'Mission editor did not open')
-    const archiveButton = '.mission-drawer .mission-header-action[title="归档"][aria-label="归档 补齐使命工作区恢复路径"]'
+    const archiveOpenMission = async () => {
+      // Keep the drawer's draft active while invoking its board card's command.
+      await run(`document.querySelector(${JSON.stringify(card)}).dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: 300, clientY: 120
+      }))`)
+      await waitFor("!!document.querySelector('.mission-action-menu [data-navigation-icon=archive]')", 'Mission archive menu did not open')
+      await click('.mission-action-menu [role=menuitem]:has([data-navigation-icon=archive])')
+    }
+    const archiveToast = '.app-toast:has(.app-toast-glyph [data-navigation-icon=archive])'
+    const toastAction = n => `${archiveToast} > .app-toast-action:nth-of-type(${n})`
+    assert.equal(await run("!!document.querySelector('.mission-card-archive, .mission-drawer .mission-header-action[title=归档]')"), false)
+    assert.equal(await run("!!document.querySelector('.mission-drawer .mission-activity-entry')"), true)
     await click('.mission-drawer [aria-label="关闭使命抽屉"]')
     await waitFor("!document.querySelector('.mission-drawer')", 'Mission drawer did not close')
     await run(qa + '.holdThreadOpen()')
@@ -64,7 +76,7 @@ app.whenReady().then(async () => {
     await run("document.getElementById('camp-message').focus(); document.execCommand('insertText', false, '保留的使命草稿')")
     for (const [failure, reason] of [['transport', 'fixture connection lost'], ['rejected', '记录正在删除。']]) {
       await run(qa + '.failNextArchive(' + JSON.stringify(failure) + ')')
-      await click(archiveButton)
+      await archiveOpenMission()
       await waitFor('document.body.textContent.includes(' + JSON.stringify('归档失败：' + reason) + ')', 'The archive error must name the operation and the cause: ' + failure)
       assert.equal(await run("document.body.textContent.includes('离开当前会话前未能完成输入操作')"), false)
       await waitFor("document.getElementById('camp-message')?.isContentEditable", 'Failed archive must return control to the editor')
@@ -72,13 +84,57 @@ app.whenReady().then(async () => {
       await click('.app-toast-close')
       await waitFor("!document.querySelector('.app-toast-message')", 'The error message should dismiss')
     }
-    await click(archiveButton)
+    await archiveOpenMission()
     await waitFor("!document.getElementById('camp-message') && !document.querySelector(" + JSON.stringify(card) + ")", 'Archive did not return to board')
     assert.equal(await run(qa + ".calls.find(c => c.method === 'threads.archive').savedDraft"), '保留的使命草稿')
-    await run("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === '撤销').click()")
-    await waitFor('!!document.querySelector(' + JSON.stringify(card) + ')', 'Undo did not restore the Mission card')
-    await click(card)
-    await waitFor("document.getElementById('camp-message')?.textContent.includes('保留的使命草稿')", 'Restored mission lost draft')
+    await waitFor("document.querySelector('.app-toast-message')?.textContent === '已归档'", 'Archive toast did not appear')
+    const measuredToast = await run(`(() => {
+      const toast = document.querySelector(${JSON.stringify(archiveToast)})
+      const style = getComputedStyle(toast)
+      return { top: toast.getBoundingClientRect().top - document.querySelector('.app-shell').getBoundingClientRect().top,
+        appRegion: style.getPropertyValue('-webkit-app-region'),
+        buttons: [...toast.querySelectorAll('.app-toast-action')].map(button => button.textContent) }
+    })()`)
+    assert.deepEqual(measuredToast, { top: 58, appRegion: 'no-drag', buttons: ['撤销', '查看'] })
+    await click(toastAction(1))
+    await waitFor('!!document.querySelector(' + JSON.stringify(card) + ')', 'Native click on Undo did not restore the Mission card')
+    await waitFor("document.querySelector('.app-toast-message')?.textContent === '已取消归档'", 'Undo did not show restoration feedback')
+    await click(toastAction(1))
+    await waitFor("document.getElementById('camp-message')?.textContent.includes('保留的使命草稿')", 'View from Undo did not open the restored Mission with its draft')
+    await click('.mission-drawer [aria-label="关闭使命抽屉"]')
+    await waitFor("!document.querySelector('.mission-drawer')", 'Mission drawer did not close after Undo')
+
+    // A separate archived record with a later last-message time must appear below the just-archived target.
+    await run(qa + '.setArchive(' + qa + '.items[0], true)')
+    await click('.mission-view-trigger')
+    await waitFor('document.querySelectorAll("[role=menuitemradio]").length === 2', 'The board/list view menu did not open')
+    await click('[role=menuitemradio]:last-child')
+    await waitFor("!!document.querySelector('.mission-list-cards')", 'List view did not open')
+    assert.equal(await run("!!document.querySelector('.mission-list-cards .mission-card-archive')"), false)
+    // Right-click a visible cell so the row's menu is positioned within the viewport.
+    await click(card + ' .mission-card-open', 'right')
+    await waitFor("!!document.querySelector('.mission-action-menu [data-navigation-icon=archive]')", 'Mission list archive menu did not open')
+    const icons = await run(`[...document.querySelectorAll('.mission-action-menu > .compact-option')].map(item => ({
+      label: item.querySelector('span:last-of-type')?.textContent.trim(),
+      icon: item.firstElementChild.matches('svg, .mission-state-glyph')
+    }))`)
+    assert(icons.length >= 7 && icons.every(item => item.icon))
+    const status = await run(`(() => {
+      const icon = document.querySelector('.mission-action-menu .mission-state-glyph')
+      return [icon.classList.contains('is-in_progress'), icon.getBoundingClientRect().width, getComputedStyle(icon).marginInlineStart, getComputedStyle(icon).marginInlineEnd]
+    })()`)
+    assert.deepEqual(status, [true, 14, '1px', '1px'])
+    await click('.mission-action-menu [role=menuitem]:has([data-navigation-icon=archive])')
+    await waitFor("document.querySelector('.app-toast-message')?.textContent === '已归档'", 'Archive toast did not appear from the list')
+    await click(toastAction(2))
+    await waitFor("document.querySelector('#archive-tab-mission')?.getAttribute('aria-selected') === 'true'", 'View did not open the Mission archive tab')
+    const missionThreadId = await run(m + '.threadId')
+    await waitFor(`document.querySelector('.archive-row')?.dataset.archiveThread === ${JSON.stringify(missionThreadId)}`, 'View did not put the newly archived Mission first')
+    await click('.archive-row .archive-restore')
+    await waitFor("document.querySelector('.app-toast-message')?.textContent === '已取消归档'", 'Settings did not show restoration feedback')
+    assert(await run("!!document.querySelector('.archive-settings')"))
+    await click(toastAction(1))
+    await waitFor("document.getElementById('camp-message')?.textContent.includes('保留的使命草稿')", 'View in Settings did not open the restored Mission')
     await run("document.getElementById('camp-message').focus(); document.execCommand('insertText',false,'跨窗口'); " + qa + '.setArchive(' + m + ', true)')
     await waitFor("!document.getElementById('camp-message') && document.body.textContent.includes('该使命已归档')", 'External archive did not leave the open Mission')
     assert((await run(qa + '.storedDraft(' + m + '.threadId).body')).includes('跨窗口'))
@@ -91,7 +147,24 @@ app.whenReady().then(async () => {
     await run(qa + '.openStoredLink(' + qa + '.archivedChatLink())')
     await waitFor("!!document.querySelector('.compose-content') && document.body.textContent.includes('该会话已归档')", 'Archived chat link did not go to new conversation')
     assert.equal(await run("!!document.getElementById('camp-message')"), false)
-    console.log(JSON.stringify({ ok: true, cases: ['cached mission before formal open', 'failed archive keeps editor and reports cause', 'save before archive and undo', 'external archive saves draft', 'archived mission and chat links'] }))
+    await run(qa + ".setLanguage('en')")
+    await waitFor("document.documentElement.lang === 'en'", 'English did not apply')
+    const chatId = 'fixture-project-camp-0'
+    const chatMenu = `[data-thread-id="${chatId}"] .camp-menu-trigger`
+    await click(chatMenu)
+    await waitFor("!!document.querySelector('.sidebar-action-menu [data-navigation-icon=archive]')", 'Chat archive menu did not open')
+    await click('.sidebar-action-menu [role=menuitem]:has([data-navigation-icon=archive])')
+    await waitFor("document.querySelector('.app-toast-message')?.textContent === 'Archived'", 'English archive toast did not appear')
+    await click(toastAction(2))
+    await waitFor("document.querySelector('#archive-tab-chat')?.getAttribute('aria-selected') === 'true'", 'View did not open the chat archive tab')
+    await waitFor(`document.querySelector('.archive-row')?.dataset.archiveThread === '${chatId}'`, 'Chat did not appear in Archives')
+    await click('.archive-row .archive-restore')
+    await waitFor("document.querySelector('.app-toast-message')?.textContent === 'Unarchived'", 'Settings did not show English restoration feedback')
+    await click(toastAction(1))
+    await waitFor(`document.querySelector('[data-thread-id="${chatId}"] .camp-nav-open')?.getAttribute('aria-current') === 'page' && !!document.getElementById('camp-message')`, 'View did not reopen the restored chat')
+    console.log(JSON.stringify({ ok: true, cases: ['cached mission before formal open', 'failed archive keeps editor and reports cause',
+      'save before archive and native Undo/View', 'list menu icons and Mission archive tab/View', 'external archive saves draft',
+      'archived mission and chat links', 'English chat archive tab and restored chat View'] }))
     app.exit(0)
     return
   }
@@ -134,6 +207,7 @@ app.whenReady().then(async () => {
     await click('.mission-board-card[data-mission-id="mission-1"]')
     await waitFor(`!!document.querySelector('#camp-message') && !!document.querySelector('.mobile-camp-tabs')`, 'Mobile Mission conversation is ready')
     await settle()
+    assert.equal(await run("!!document.querySelector('.camp-topbar .mission-header-action[title=归档]')"), false)
     assert.equal(await run(executionSelected), false, 'Mobile ignores the enabled auto-open preference')
     assert.equal(await run(executionVisible), false, 'Mobile Mission execution remains manual')
     cases.push('mobile-mission-manual-with-auto-open-enabled')

@@ -33,7 +33,6 @@ import { displayProjectPath } from '../../shared/project-display-name'
 import { UiText, getInterfaceLanguage, uiAttribute } from './interface-language'
 
 type MissionActions = {
-  archive?(mission: MissionRecord): void
   edit(mission: MissionRecord): void
   menu(mission: MissionRecord, event: MouseEvent<HTMLElement>): void
   roster(mission: MissionRecord, event: MouseEvent<HTMLElement>): void
@@ -54,15 +53,6 @@ export function useMissionActions(): MissionActions {
   return actions
 }
 
-export function MissionArchiveButton({ mission, header = false }: { mission: MissionRecord; header?: boolean }) {
-  const archive = useContext(Actions)?.archive
-  if (!archive || mission.archivedAt) return null
-  return <button type="button" className={header ? 'mission-header-action' : 'mission-card-archive'}
-    title={uiAttribute('归档')}
-    aria-label={uiAttribute('归档 {0}', mission.title)} onClick={() => archive(mission)}>
-    {header && <NavigationIcon name="archive" />}<span><UiText zh="归档" /></span>
-  </button>
-}
 export function missionProject(m: MissionRecord, projects: ProjectNavigationGroup[]): string {
   return m.projectBindingKind === 'quick_chat' ? uiAttribute('快速对话') : projects.find(p => p.projectPath === m.projectPath)?.name ?? m.projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? m.projectPath
 }
@@ -187,7 +177,6 @@ export function MissionInteractionProvider({ missions, projects, agents, install
   }, [cleanupFeedbacks, missions, onError, onOpen])
   useEffect(() => () => { cleanupTimers.current.forEach(timer => clearTimeout(timer)) }, [])
   const actions: MissionActions = {
-    archive: onArchive ? mission => report(onArchive(mission)) : undefined,
     edit: setEditing, menu: (m, e) => anchor('menu', m, e), roster: (m, e) => anchor('members', m, e), tags: (m, e) => anchor('tags', m, e),
     status: (m, status) => report(change(m, 'status', { status })), start: m => report(start(m)), cleanup,
     cleanupFeedback: m => cleanupFeedbacks[m.missionId] ?? (m.workspaceCleanup?.state === 'cleaning' || m.workspaceCleanup?.state === 'failed' ? m.workspaceCleanup.state : null),
@@ -203,7 +192,7 @@ export function MissionInteractionProvider({ missions, projects, agents, install
       })()) }}
       onSaveTags={tags => selected ? change(selected, 'update', { tags }) : Promise.resolve()}
       onCleanup={() => { if (selected) setCleaning(selected); setPosition(null) }}
-      onArchive={selected && actions.archive ? () => { actions.archive?.(selected); setPosition(null) } : undefined}
+      onArchive={selected && onArchive ? () => { report(onArchive(selected)); setPosition(null) } : undefined}
       onDelete={() => { if (selected) setDeleting(selected); setPosition(null) }} />
     {position && position.kind !== 'menu' && selected && <MissionPopover position={position} title={position.kind === 'tags' ? uiAttribute("编辑标签") : uiAttribute("使命队员")} onClose={() => setPosition(null)} className={position.kind === 'tags' ? 'mission-label-popover' : 'mission-members-popover'}>
       {position.kind === 'tags' ? <LabelsEditor key={selected.missionId} m={selected} catalog={catalog} onSave={tags => change(selected, 'update', { tags })}/> : <MissionRoster m={selected}/>}
@@ -536,7 +525,7 @@ export function MissionBoard({ missions, projects, loading, error, selectedId, h
       onDragStart={event => { setDraggingId(m.missionId); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', m.missionId) }}
       onDragEnd={stopDragging}
       onKeyDown={e => { held.current = false; if (e.key === 'ContextMenu' || e.key === 'F10' && e.shiftKey) { e.preventDefault(); const bounds = e.currentTarget.getBoundingClientRect(); e.currentTarget.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: bounds.left, clientY: bounds.bottom })) } }}>
-      <div className="mission-card-meta"><span>{`M-${String(m.number).padStart(3, '0')}`}</span><div className="mission-card-top-actions"><MissionRunning mission={m} pageHidden={pageHidden}/><MissionArchiveButton mission={m} /></div></div>
+      <div className="mission-card-meta"><span>{`M-${String(m.number).padStart(3, '0')}`}</span><div className="mission-card-top-actions"><MissionRunning mission={m} pageHidden={pageHidden}/></div></div>
       {mobile && <button type="button" className="mobile-context-trigger" aria-label={uiAttribute("{0}的操作", String(m.title))} onClick={event => actions.menu(m, event)}><UiText zh={"操作"} /></button>}
       <button className="mission-card-open" onClick={() => onOpen(m)}><h3>{m.title}</h3></button>
       <div className="mission-project-tags"><span className="mission-card-project" title={displayProjectPath(m.projectPath)}><NavigationIcon name="folder-open"/>{missionProject(m, projects)}</span><MissionTags tags={m.tags}/></div>

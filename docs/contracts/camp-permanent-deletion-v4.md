@@ -147,8 +147,9 @@ Renderer 为本窗口保存派生 tombstone，所有 Navigation snapshot 提交�
 Desktop Main 与 Web Host 必须先取得 Core 非 rejected 结果，再 best-effort 释放文件预览；预览失败和导航刷新失败不能
 改变 accepted 结果。正常成功不显示阶段、进度或“永久删除完成”，也不建立删除任务区。
 
-自动恢复耗尽时只显示局部、持久且可操作的通知：`删除未完成，请重试。`。重试继续原 operation；不使用全局错误横幅，
-不暴露内部阶段、错误码或残留资源明细，不把 Camp 放回正常列表。
+自动恢复耗尽时，按[通用操作提示](../ui/components/app-shell-navigation.md#通用操作提示)显示「删除未完成，请重试。」，
+提供「重试」继续原 operation。提示关闭或超时后，未解决的 operation 仍可在下次启动时再次提醒。
+Renderer 保持已删除记录的列表过滤。
 
 ## 6. SQL、Migration 与观测
 

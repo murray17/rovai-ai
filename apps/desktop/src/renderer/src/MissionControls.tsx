@@ -4,6 +4,7 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Popover from '@radix-ui/react-popover'
 import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon } from './NavigationIcon'
+import { SidebarMenuIcon } from './SidebarMenuIcon'
 import { useMobileLayout } from './MobileLayout'
 import { missionLabelColorToken } from './theme'
 import { DialogControlIcon } from './AppDialog'
@@ -175,23 +176,23 @@ export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onSt
   const [panel, setPanel] = useState<string | null>(null)
   const triggers = useRef(new Map<string, HTMLDivElement>())
   const panels = m ? [
-    {id:'status',label:uiAttribute("状态"),className:'',content:<Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem className="compact-option" value={s.id} key={s.id}><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
-    {id:'members',label:uiAttribute("查看队员"),className:'mission-members-popover',content:<MissionRoster m={m}/>},
-    {id:'lead',label:uiAttribute("队长"),className:'',content:<Menu.RadioGroup value={m.defaultLeadAgentId ?? ''} onValueChange={onLead}>{orderedMembers(m).map(id => <Menu.RadioItem className="compact-option" key={id} value={id}><Avatar id={id}/><span>{person(id).displayName}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
-    {id:'tags',label:uiAttribute("标签"),className:'mission-label-popover',content:<LabelsEditor m={m} catalog={catalog} onSave={onSaveTags}/>}
+    {id:'status',label:uiAttribute("状态"),icon:<StatusIcon status={m.status}/>,className:'',content:<Menu.RadioGroup value={m.status} onValueChange={v => onStatus(v as Status)}>{statuses.map(s => <Menu.RadioItem className="compact-option" value={s.id} key={s.id}><StatusIcon status={s.id}/><span>{s.label}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
+    {id:'members',label:uiAttribute("查看队员"),icon:<NavigationIcon name="users"/>,className:'mission-members-popover',content:<MissionRoster m={m}/>},
+    {id:'lead',label:uiAttribute("队长"),icon:<NavigationIcon name="crown"/>,className:'',content:<Menu.RadioGroup value={m.defaultLeadAgentId ?? ''} onValueChange={onLead}>{orderedMembers(m).map(id => <Menu.RadioItem className="compact-option" key={id} value={id}><Avatar id={id}/><span>{person(id).displayName}</span><Menu.ItemIndicator><Icon name="check"/></Menu.ItemIndicator></Menu.RadioItem>)}</Menu.RadioGroup>},
+    {id:'tags',label:uiAttribute("标签"),icon:<Icon name="tag"/>,className:'mission-label-popover',content:<LabelsEditor m={m} catalog={catalog} onSave={onSaveTags}/>}
   ] : []
   const currentPanel = mobile ? panels.find(item => item.id === panel) : undefined
-  function submenu(id: string, label: string, children: ReactNode, className = '') {
-    if (mobile) return <Menu.Item key={id} className="compact-option" onSelect={event => { event.preventDefault(); setPanel(id) }}><span>{label}</span><Icon name="chevron-right"/></Menu.Item>
+  function submenu({ id, label, icon, content, className }: (typeof panels)[number]) {
+    if (mobile) return <Menu.Item key={id} className="compact-option" onSelect={event => { event.preventDefault(); setPanel(id) }}>{icon}<span>{label}</span><Icon name="chevron-right"/></Menu.Item>
     return <Menu.Sub key={id} open={panel === id} onOpenChange={open => { if (!open) setPanel(current => current === id ? null : current) }}>
       <Menu.SubTrigger ref={node => { if (node) triggers.current.set(id, node); else triggers.current.delete(id) }} className="compact-option" onPointerMove={event => event.preventDefault()} onPointerLeave={event => event.preventDefault()}
         onClick={event => { event.preventDefault(); setPanel(current => current === id ? null : id) }}
         onKeyDown={event => { if (['Enter', ' ', 'ArrowRight'].includes(event.key)) { event.preventDefault(); setPanel(id) } }}>
-        <span>{label}</span><Icon name="chevron-right"/>
+        {icon}<span>{label}</span><Icon name="chevron-right"/>
       </Menu.SubTrigger>
       <Menu.Portal><Menu.SubContent className={`compact-menu mission-action-submenu ${className}`} aria-label={label} sideOffset={5} collisionPadding={10} loop
         onEscapeKeyDown={event => { event.preventDefault(); setPanel(null); requestAnimationFrame(() => triggers.current.get(id)?.focus()) }}>
-        {children}
+        {content}
       </Menu.SubContent></Menu.Portal>
     </Menu.Sub>
   }
@@ -202,12 +203,12 @@ export function MissionContextMenu({ m, position, catalog, onClose, onEdit, onSt
         else requestAnimationFrame(() => position?.origin?.isConnected && position.origin.focus())
       }}>
       {currentPanel ? <><Menu.Item className="compact-option mission-mobile-menu-back" onSelect={event => { event.preventDefault(); setPanel(null) }}><NavigationIcon name="arrow-left"/><span>{currentPanel.label}</span></Menu.Item><Menu.Separator className="sidebar-action-menu-separator"/>{currentPanel.content}</> : <>
-      <Menu.Item className="compact-option" onSelect={onEdit}><span><UiText zh={"编辑"} /></span></Menu.Item>
-      {panels.map(item => submenu(item.id, item.label, item.content, item.className))}
-      {m.cleanupAvailable && <Menu.Item className="compact-option" onSelect={onCleanup}><span><UiText zh={"清理使命 Worktree"} /></span></Menu.Item>}
+      <Menu.Item className="compact-option" onSelect={onEdit}><SidebarMenuIcon kind="edit"/><span><UiText zh={"编辑"} /></span></Menu.Item>
+      {panels.map(submenu)}
+      {m.cleanupAvailable && <Menu.Item className="compact-option" onSelect={onCleanup}><Icon name="branch"/><span><UiText zh={"清理使命 Worktree"} /></span></Menu.Item>}
       <Menu.Separator className="sidebar-action-menu-separator"/>
-      {onArchive && !m.archivedAt && <Menu.Item className="compact-option" onSelect={onArchive}><span><UiText zh="归档" /></span></Menu.Item>}
-      <Menu.Item className="compact-option mission-danger-item" onSelect={onDelete}><span><UiText zh={"删除"} /></span></Menu.Item>
+      {onArchive && !m.archivedAt && <Menu.Item className="compact-option" onSelect={onArchive}><NavigationIcon name="archive"/><span><UiText zh="归档" /></span></Menu.Item>}
+      <Menu.Item className="compact-option mission-danger-item" onSelect={onDelete}><SidebarMenuIcon kind="trash"/><span><UiText zh={"删除"} /></span></Menu.Item>
       </>}
     </Menu.Content></Menu.Portal>}
   </Menu.Root>
