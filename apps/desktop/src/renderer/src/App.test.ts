@@ -3535,7 +3535,8 @@ describe('task event projections', () => {
       onError: () => undefined
     }))
 
-    expect(markup).toContain('跳转到对话')
+    expect(markup).toContain('conversation-jump is-search')
+    expect(markup).toContain('<span>搜索</span>')
     expect(markup).toContain('新对话')
     expect(markup).toContain('设置')
     expect(markup).toContain('should-not-render')

@@ -18,7 +18,7 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'composer', name: '聚焦消息输入框', group: 'workspace', binding: 'Mod+L', editable: true },
   { id: 'latest', name: '回到最新消息', group: 'workspace', binding: null, editable: true },
   { id: 'attach', name: '添加附件', group: 'workspace', binding: null, editable: true },
-  { id: 'jump', name: '跳转到对话', group: 'navigation', binding: 'Mod+K', editable: true },
+  { id: 'jump', name: '搜索', group: 'navigation', binding: 'Mod+K', editable: true },
   { id: 'new', name: '新建对话', group: 'navigation', binding: 'Mod+N', editable: true },
   { id: 'sidebar', name: '收起／展开导航侧栏', group: 'navigation', binding: 'Mod+B' },
   { id: 'settings', name: '打开设置', group: 'navigation', binding: 'Mod+,', editable: true },

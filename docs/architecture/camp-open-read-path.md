@@ -77,8 +77,8 @@ Migration 168 只增加新水位字段并保留历史默认值；无需清理旧
 
 普通 enter 和后台 open 不再等待无关的有序请求完成。两个读取 worker 共用一条有界队列；enter 的纯读判定和投影
 在同一次 Database mutex 持有期间完成，无法确认纯读时把原请求送回 FIFO，由既有命令处理重新校验回执和
-Lead。明确依赖某次写入的读取仍在该写入回执后发起。当前没有新增只读 SQLite 连接池；分流只消除不占数据库
-锁的 FIFO 等待，若实测数据库锁成为主瓶颈再单独评估。
+Lead。明确依赖某次写入的读取仍在该写入回执后发起。会话打开继续使用同一 Database mutex，
+分流只消除不占数据库锁的 FIFO 等待。搜索请求的独立只读连接见 [Navigation Search v1](../contracts/navigation-search-v1.md)。
 
 取消、成功与失败的普通终态继续由 Domain Command Gateway 在业务事务提交后收尾文本；受控关闭和
 planned-shutdown 的直提交流程在自己的提交后调用同一入口，不在 Adapter 回调重复实现。若业务与回执已提交、
@@ -193,7 +193,7 @@ Renderer 保留连续已加载区间，用实测高度占位虚拟化视口外�
 Command/Ctrl+F in mounted ThreadWorkspace
   -> map view switches to the existing conversation surface
   -> Renderer thread.messages.find(threadId, query, selectedIndex?, visibleAnchor?)
-  -> Core exact scan in one read transaction
+  -> Core exact scan in an independent read-only snapshot outside the main queue
   -> response contains total + one target only
   -> target missing from loaded message data
        -> Renderer thread.messages.around(threadId, messageId)
@@ -202,8 +202,11 @@ Command/Ctrl+F in mounted ThreadWorkspace
   -> center target, keep find input focused, highlight visible body occurrences
 ```
 
+导航搜索的消息结果带 Thread ID、查询和消息 ID 进入。只有正式目标工作区消费意图，
+以消息 ID 为 anchor 查找。原消息失去匹配时，按查找合同选取可用落点并提示。使命桌面沿用使命入口，Mobile 整页展示。
+
 Find 不属于 Thread enter meaningful-paint 依赖，也不得预取完整历史。Renderer 的本地高亮只消费已挂载
-user/agent 正文节点；exact total、顺序和目标由 Core 响应拥有。查询、Thread 或 request generation 已变化时，
+公开正文节点；exact total、顺序和目标由 Core 响应拥有。查询、Thread 或 request generation 已变化时，
 旧 find/around 响应必须丢弃。关闭查找恢复打开前阅读位置与焦点，不修改 Draft、Inspector、Approval、
 执行台或领域已读状态。
 

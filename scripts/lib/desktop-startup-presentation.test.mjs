@@ -57,6 +57,9 @@ test('the production App presents the full-window brand loader without weakening
     if (process.env.ROVAI_PROJECT_DIRECTORIES_ONLY === '1') { assert.equal(report.cases.length, 4); return }
     assert.ok(report.cases.length >= 8)
     assert.ok(report.cases.includes('Ordinary Camp switching reads only the target row without unrelated queries'))
+    assert.ok(report.cases.includes('Navigation search applies a one-shot body hit anchor to an already active Thread'))
+    assert.ok(report.cases.includes('Navigation search fits five themes at compact and large desktop sizes'))
+    assert.ok(report.cases.includes('Navigation search continuation supports native keyboard focus and activation'))
     assert.ok(report.cases.includes('Cached Thread revisits show messages before authority returns without redundant reads, with Tasks off and on'))
     assert.ok(report.cases.includes('Actual Task disable clears incompatible caches and panels while rejecting late enabled UI'))
     assert.ok(report.cases.includes('Task capability changes during enter cannot commit the previous capability projection'))

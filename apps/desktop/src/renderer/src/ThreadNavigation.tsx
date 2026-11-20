@@ -1,4 +1,3 @@
-import { isArchiveChangeEvent } from './thread-archive'
 import { MoreMenuIcon, SidebarMenuIcon, type SidebarMenuIconKind } from './SidebarMenuIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import { TeamGlyph } from './MissionDefinitionEditor'
@@ -10,7 +9,6 @@ import { navigationThreadHasUnread } from './navigation-unread'
 import { useInterruptionAttention } from './thread-interruption-attention'
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -47,7 +45,9 @@ import {
   shouldHandlePrimaryShortcut
 } from './renderer-platform'
 import { allNavigationThreads } from './ui-model'
-import { navigationThreadSearch, startNavigationThreadLookup, type NavigationThreadLookup } from './camp-navigation-search'
+import { NavigationSearchPanel } from './NavigationSearchPanel'
+import type { NavigationSearchRow } from './camp-navigation-search'
+import { NavigationTitle } from './NavigationTitle'
 import { formatThreadTitle } from './camp-title'
 import { ProjectRenameDialog } from './ProjectRenameDialog'
 import { useNavigationCollapsed } from './NavigationShell'
@@ -59,22 +59,6 @@ import {
 import { UiText, uiAttribute } from './interface-language'
 
 export type NavigationSettingsSection = SettingsSection
-
-function NavigationTitle({ children, selected = false }: { children: string; selected?: boolean }): JSX.Element {
-  const text = useRef<HTMLSpanElement>(null)
-  const [overflow, setOverflow] = useState(false)
-  useLayoutEffect(() => {
-    const element = text.current
-    if (!element) return
-    const measure = () => setOverflow(element.scrollWidth > element.clientWidth + 1)
-    measure()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [children, selected])
-  return <span ref={text} className="truncate navigation-title" title={children} data-overflow={overflow || undefined}>{children}</span>
-}
 
 type NavigationAction = {
   kind: 'rename' | 'delete'
@@ -187,6 +171,8 @@ export function ThreadNavigation({
   onSelectProject = () => undefined,
   onCreateInProject = () => undefined,
   onThread,
+  onSearchResult,
+  searchProjectPaths,
   onTogglePin = () => undefined,
   onRemoveProject,
   onRenameProject,
@@ -240,6 +226,8 @@ export function ThreadNavigation({
   onSelectProject?(project: ProjectNavigationGroup | null): void
   onCreateInProject?(project: ProjectNavigationGroup | null): void
   onThread(thread: NavigationThreadTarget): void
+  onSearchResult?(row: NavigationSearchRow): void
+  searchProjectPaths?: readonly string[]
   onTogglePin?(kind: NavigationPin['kind'], targetKey: string, thread?: NavigationThreadItem): void | Promise<void>
   onRenameProject?(project: ProjectNavigationGroup, name: string | null): Promise<void>
   onRemoveProject(project: ProjectNavigationGroup): Promise<void>
@@ -473,14 +461,14 @@ export function ThreadNavigation({
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="calendar-clock" /></span><span className="rail-label"><UiText zh={"定时任务"} /></span>
                   </button>
                 </nav>
-                <button className="conversation-jump" type="button" onClick={() => setPaletteOpen(true)}>
-                  <span><UiText zh={"跳转到对话…"} /></span><kbd aria-hidden="true">{jumpLabel}</kbd>
+                <button className="conversation-jump is-search" type="button" onClick={() => setPaletteOpen(true)}>
+                  <NavigationIcon name="search" /><span><UiText zh="搜索" /></span><kbd aria-hidden="true">{jumpLabel}</kbd>
                 </button>
 
       <div className="navigation-scroll">
         {mobile && <header className="mobile-navigation-heading"><h2><UiText zh={"对话"} /></h2><div>
           <button className="mobile-icon-button" type="button" aria-label={uiAttribute("选择工作目录")} disabled={state !== 'ready'} onClick={onOpenProject}><NavigationIcon name="folder-open" /></button>
-          <button className="mobile-icon-button" type="button" aria-label={uiAttribute("搜索对话")} onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
+          <button className="mobile-icon-button" type="button" aria-label={uiAttribute("搜索对话、使命和消息")} onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
         </div></header>}
         {(pinnedThreads.length > 0 || pinnedProjects.length > 0) && (
           <section className="pinned-navigation" aria-labelledby="pinned-heading">
@@ -668,16 +656,17 @@ export function ThreadNavigation({
 
       {renameProject && onRenameProject && <ProjectRenameDialog project={renameProject} onClose={() => setRenameProject(null)} onSave={onRenameProject} />}
 
-      <CommandPalette
-        open={paletteOpen}
-        onOpenChange={setPaletteOpen}
-        navigation={navigation}
+      {paletteOpen && <NavigationSearchPanel
+        onClose={() => setPaletteOpen(false)}
+        projects={navigation?.projects}
+        missionProjectPaths={searchProjectPaths}
         firstRunThreadId={firstRunThreadId}
-        onThread={(thread) => {
+        onChoose={row => {
           setPaletteOpen(false)
-          onThread(thread)
+          if (onSearchResult) onSearchResult(row)
+          else onThread(row.target.thread)
         }}
-      />
+      />}
 
       <Dialog.Root open={action !== null} onOpenChange={(open) => { if (!open) closeAction() }}>
         <Dialog.Portal>
@@ -868,122 +857,6 @@ function UpdateBadgeIcon({
     return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" /></svg>
   }
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 1-5.2 3" /></svg>
-}
-
-function CommandPalette({
-  open,
-  onOpenChange,
-  navigation,
-  firstRunThreadId,
-  onThread
-}: {
-  open: boolean
-  onOpenChange(open: boolean): void
-  navigation: NavigationSnapshot | null
-  firstRunThreadId: string | null
-  onThread(thread: NavigationThreadTarget): void
-}): JSX.Element {
-  const client = useThreadClient()
-  const [query, setQuery] = useState('')
-  const [activeIndex, setActiveIndex] = useState(0)
-  const projectNameByPath = useMemo(
-    () => new Map((navigation?.projects ?? []).map((project) => [project.projectPath, project.name])),
-    [navigation]
-  )
-  const threads = useMemo(() => navigation ? allNavigationThreads(navigation) : [], [navigation])
-  const search = navigationThreadSearch(query, threads, projectNameByPath, firstRunThreadId)
-  const threadId = search.kind === 'id' ? search.threadId : null
-  const [lookup, setLookup] = useState<NavigationThreadLookup | null>(null)
-  const currentLookup = lookup?.threadId === threadId ? lookup : null
-  const loading = threadId !== null && currentLookup === null
-  const error = threadId !== null ? currentLookup?.error : null
-  const visible = search.kind === 'text'
-    ? search.threads
-    : currentLookup?.thread ? [currentLookup.thread] : []
-
-  useEffect(() => {
-    setLookup(null)
-    if (!open || threadId === null) return
-    let cancel: (() => void) | undefined
-    const refresh = () => {
-      cancel?.()
-      setLookup(null)
-      cancel = startNavigationThreadLookup(threadId, setLookup, id => client.request('navigation.findThread', { threadId: id }))
-    }
-    refresh()
-    const stopEvent = client.onEvent?.(event => {
-      if (isArchiveChangeEvent(event) && (event.params as { threadId?: string })?.threadId === threadId) refresh()
-    })
-    const stopInvalidated = client.onInvalidated?.(change => {
-      if (!change || change.resync || change.referencesChanged) refresh()
-    })
-    return () => { cancel?.(); stopEvent?.(); stopInvalidated?.() }
-  }, [client, open, threadId])
-
-  const selectedIndex = Math.min(activeIndex, Math.max(visible.length - 1, 0))
-
-  useEffect(() => {
-    if (open) {
-      setQuery('')
-      setActiveIndex(0)
-    }
-  }, [open])
-
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="command-palette" onCloseAutoFocus={(event) => event.preventDefault()}>
-          <Dialog.Title className="command-palette-title"><UiText zh={"跳转到对话"} /></Dialog.Title>
-          <Dialog.Description className="sr-only"><UiText zh={"输入对话或项目关键字，或粘贴完整会话 ID 精确查找；方向键选择，回车打开。"} /></Dialog.Description>
-          <input
-            className="command-palette-input"
-            autoFocus
-            value={query}
-            placeholder={uiAttribute("搜索对话、项目或完整会话 ID…")}
-            aria-label={uiAttribute("搜索对话")}
-            onChange={(event) => {
-              setQuery(event.target.value)
-              setActiveIndex(0)
-            }}
-            onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing) return
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setActiveIndex((index) => Math.min(index + 1, Math.max(visible.length - 1, 0)))
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setActiveIndex((index) => Math.max(index - 1, 0))
-              } else if (event.key === 'Enter' && visible[selectedIndex]) {
-                event.preventDefault()
-                onThread(visible[selectedIndex])
-              }
-            }}
-          />
-          <div className="command-palette-list" aria-label={uiAttribute("匹配的对话")} aria-busy={loading}>
-            {visible.map((thread, index) => (
-              <button
-                className={`command-palette-item ${index === selectedIndex ? 'active' : ''}`}
-                type="button"
-                key={thread.id}
-                onClick={() => onThread(thread)}
-                onMouseEnter={() => setActiveIndex(index)}
-              >
-                <NavigationTitle>{formatThreadTitle(thread, firstRunThreadId)}</NavigationTitle>
-                <small className="command-palette-project"><NavigationTitle>{thread.projectBindingKind === 'directory' ? projectNameByPath.get(thread.projectPath) ?? uiAttribute('项目') : uiAttribute("快速对话")}</NavigationTitle></small>
-              </button>
-            ))}
-            {visible.length === 0 && (
-              <p className="command-palette-empty" role="status">
-                {loading ? uiAttribute("正在查找会话…") : error ? uiAttribute(error) : uiAttribute("没有匹配的对话。")}
-              </p>
-            )}
-          </div>
-          <footer className="command-palette-footer"><span><kbd>↑ ↓</kbd><UiText zh={" 选择"} /></span><span><kbd>↵</kbd><UiText zh={" 打开"} /></span><span><kbd>Esc</kbd><UiText zh={" 关闭"} /></span></footer>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
 }
 
 function ThreadGroup({

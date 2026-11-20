@@ -291,6 +291,8 @@ const allowedMethods = new Set<CoreMethod>([
   'navigation.threads',
   'navigation.groupThreads',
   'navigation.findThread',
+  'navigation.search',
+  'navigation.searchMessages',
   'navigation.campViewed',
   'missions.workspace.cleanup',
   'missions.cleanup.list',

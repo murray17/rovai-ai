@@ -1,3 +1,4 @@
+import type { NavigationFindIntent } from './camp-navigation-search'
 import { ThreadMessageEditor } from './ThreadMessageEditor'
 import { MoreMenuIcon, SidebarMenuIcon } from './SidebarMenuIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
@@ -479,6 +480,7 @@ export function agentRunStopViewState(
 }
 
 interface ConversationFindState {
+  navigationAnchor?: NavigationFindIntent
   open: boolean
   query: string
   status: ConversationFindStatus
@@ -1650,6 +1652,8 @@ function RevealNotificationConversation({ active, onHidePreview }: { active: boo
 
 export function ThreadWorkspace({
   snapshot,
+  navigationFindIntent = null,
+  onNavigationFindConsumed,
   userAnchorNavigation,
   missionBoard = null,
   previewTabsInPane = false,
@@ -1718,6 +1722,8 @@ export function ThreadWorkspace({
   onNotifyError
 }: {
   snapshot: ThreadSnapshot
+  navigationFindIntent?: NavigationFindIntent | null
+  onNavigationFindConsumed?(intent: NavigationFindIntent): void
   userAnchorNavigation?: ThreadUserAnchorNavigation
   missionBoard?: React.ReactNode
   previewTabsInPane?: boolean
@@ -2102,6 +2108,9 @@ export function ThreadWorkspace({
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
   const conversationFindRequestGeneration = useRef(0)
+  const consumedNavigationFind = useRef<NavigationFindIntent | null>(null)
+  const conversationFindNotify = useRef(onNotify)
+  conversationFindNotify.current = onNotify
   const conversationFindDebounceTimer = useRef<number | null>(null)
   const conversationFindRestorePoint = useRef<ConversationFindRestorePoint | null>(null)
   const conversationFindOpenRef = useRef(false)
@@ -3146,7 +3155,8 @@ export function ThreadWorkspace({
     query: string,
     selectedMatchIndex: number | undefined,
     anchorMessageId: string | null,
-    generation: number
+    generation: number,
+    verifyNavigationAnchor = false
   ): Promise<void> => {
     const threadId = snapshot.thread.id
     try {
@@ -3184,7 +3194,10 @@ export function ThreadWorkspace({
         : current)
 
       const selectedMatch = result.match
-      if (!selectedMatch) return
+      if (!selectedMatch) {
+        if (verifyNavigationAnchor) conversationFindNotify.current(uiAttribute('原消息已修改或撤回，会话里没有其他匹配'))
+        return
+      }
       let target = timelineScrollRef.current?.querySelector<HTMLElement>(
         `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
       ) ?? null
@@ -3253,6 +3266,9 @@ export function ThreadWorkspace({
           }
         }
       }
+      if (verifyNavigationAnchor && selectedMatch.messageId !== anchorMessageId) {
+        conversationFindNotify.current(uiAttribute('原消息已修改或撤回，已定位到其他匹配'))
+      }
       focusConversationFindInput()
       setConversationFind((current) => current.open && current.query === query
         ? { ...current, status: 'ready', error: null }
@@ -3311,6 +3327,27 @@ export function ThreadWorkspace({
     focusConversationFindInput(true)
   }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id, anchorNavigation.navigation, runSourceNavigation.cancel, cancelReplyReveal])
 
+  useEffect(() => {
+    if (!navigationFindIntent || !workspaceEntrySnapshotReady
+      || navigationFindIntent.threadId !== snapshot.thread.id
+      || consumedNavigationFind.current === navigationFindIntent) return
+    const frame = window.requestAnimationFrame(() => {
+      consumedNavigationFind.current = navigationFindIntent
+      onNavigationFindConsumed?.(navigationFindIntent)
+      conversationFindRequestGeneration.current++
+      openConversationFind()
+      setConversationFind({
+        open: true,
+        query: navigationFindIntent.query,
+        navigationAnchor: navigationFindIntent,
+        status: 'searching',
+        snapshot: null,
+        error: null
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [navigationFindIntent, onNavigationFindConsumed, openConversationFind, snapshot.thread.id, workspaceEntrySnapshotReady])
+
   const closeConversationFind = useCallback((restore = true): void => {
     cancelConversationFindRestore()
     const generation = ++conversationFindRequestGeneration.current
@@ -3321,6 +3358,7 @@ export function ThreadWorkspace({
     setConversationFind((current) => ({
       ...current,
       open: false,
+      navigationAnchor: undefined,
       status: 'idle',
       snapshot: null,
       error: null
@@ -3422,8 +3460,9 @@ export function ThreadWorkspace({
     void requestConversationFind(
       conversationFind.query,
       conversationFind.snapshot?.selectedMatchIndex ?? undefined,
-      conversationFindRestorePoint.current?.anchor?.messageId ?? null,
-      generation
+      conversationFind.navigationAnchor?.anchorMessageId ?? conversationFindRestorePoint.current?.anchor?.messageId ?? null,
+      generation,
+      !!conversationFind.navigationAnchor && !conversationFind.snapshot
     )
   }
 
@@ -3466,10 +3505,11 @@ export function ThreadWorkspace({
       void requestConversationFind(
         conversationFind.query,
         undefined,
-        conversationFindRestorePoint.current?.anchor?.messageId ?? null,
-        generation
+        conversationFind.navigationAnchor?.anchorMessageId ?? conversationFindRestorePoint.current?.anchor?.messageId ?? null,
+        generation,
+        !!conversationFind.navigationAnchor
       )
-    }, 180)
+    }, conversationFind.navigationAnchor ? 0 : 180)
     return () => {
       if (conversationFindDebounceTimer.current !== null) {
         window.clearTimeout(conversationFindDebounceTimer.current)
@@ -3479,6 +3519,7 @@ export function ThreadWorkspace({
   }, [
     conversationFind.open,
     conversationFind.query,
+    conversationFind.navigationAnchor,
     requestConversationFind
   ])
 
@@ -5586,6 +5627,7 @@ export function ThreadWorkspace({
                         setConversationFind((current) => ({
                           ...current,
                           query: nextQuery,
+                          navigationAnchor: undefined,
                           status: pendingConversationFindStatus(nextQuery),
                           snapshot: null,
                           error: null

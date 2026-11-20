@@ -76,6 +76,16 @@ window.rovai = {
     }
   },
   request: async (method, payload) => {
+    const query = payload?.query ?? ''
+    if (method === 'navigation.search') return {
+      schemaVersion: 1, throughGlobalSequence: 1, query, truncated: false,
+      items: navigation.projects.flatMap(project => project.recentThreads)
+        .filter(thread => thread.title.includes(query))
+        .map(thread => ({ kind: 'thread', mission: null, thread, lastActivityAt: thread.lastActivityAt, match: null }))
+    }
+    if (method === 'navigation.searchMessages') {
+      return { schemaVersion: 1, throughGlobalSequence: 1, query, items: [], nextCursor: null }
+    }
     if (method === 'member.runtimeEnvironment.get') {
       const own = environment(payload.memberId,payload.adapterKind), shared = common(payload.adapterKind)
       const snapshot = { ...clone(own), common: clone(shared) }

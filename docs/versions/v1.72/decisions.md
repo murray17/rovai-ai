@@ -3,10 +3,23 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-15
+last_updated: 2026-11-20
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d90"></a>
+## V1.72-D90：导航搜索共用公开正文与会话内查找
+
+- 状态：accepted
+- 日期：2026-11-20
+- 当前权威：[Navigation Search v1](../../contracts/navigation-search-v1.md)、[App Shell 导航](../../ui/components/app-shell-navigation.md#会话搜索)。
+
+R3 实施指令确认统一名称和公开消息入口。名称与正文并行读取并按已交付的 Thread ID 去重，
+避免两个快照重算名称截断后漏掉结果。名称首批限制 50 项，正文以最近活动顺序和游标逐段读取，
+每个对象展示一条最新消息命中。现有索引支撑按会话读取正文，短中文查询直接匹配原文。
+定位沿用会话内查找现有的计数和目标协议。后台只读快照与写库锁和打开队列分开。
+扫描预算和窗口级单飞控制每页工作量，端到端延迟由并发验收记录。
 
 <a id="v1-72-d88"></a>
 ## V1.72-D88：Goose Linux x64 实测后开放 Preview

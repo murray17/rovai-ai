@@ -115,6 +115,21 @@ function Fixture(): React.JSX.Element {
   const [disabled, setDisabled] = useState(false)
   document.documentElement.dataset.rovaiPlatform = browser ? 'browser' : platform
   document.documentElement.dataset.rovaiSurface = browser ? 'web' : 'desktop'
+  const searchSnapshot = pagination?.snapshot ?? {
+    ...navigationSnapshot, projects: navigationSnapshot.projects.map(project => ({ ...project,
+      name: longLabels ? 'Rovai AI 长期协作工作区与菜单栏交互完整项目名称' : project.name,
+      recentThreads: [{ ...runningCamp, title: longLabels
+        ? '会话长标题在侧栏和搜索结果中只做末尾透明度淡出，切换宽度与短名称后重新判断是否需要截断'
+        : runningCamp.title, marker: running ? 'loading' as const : 'none' as const }] }))
+  }
+  Object.assign(window.rovai, { request: async (method: string, { query }: { query: string }) => {
+    const base = { schemaVersion: 1, throughGlobalSequence: 2, query }
+    if (method === 'navigation.searchMessages') return { ...base, items: [], nextCursor: null }
+    if (method !== 'navigation.search') throw new Error('Unexpected fixture request: ' + method)
+    const rows = [...searchSnapshot.projects.flatMap(project => project.recentThreads), ...searchSnapshot.quickChat.recentThreads]
+    return { ...base, items: rows.map(thread => ({ kind: 'thread', mission: null, match: null,
+      thread, lastActivityAt: thread.lastActivityAt })), truncated: false }
+  } })
   Object.assign(window, { navigationTest: {
     renders: () => renders, setSettings, setPlatform, setDisabled, setBrowser, navigation, target, actions, setRunning, setLongLabels,
     startPagination: () => paginationReader.refresh('explicit'), paginationReads, paginationErrors,
@@ -130,10 +145,7 @@ function Fixture(): React.JSX.Element {
   } })
   return <><WindowsApplicationMenu /><NavigationShell platform={platform} browser={browser} disabled={disabled} settings={settings} navigation={navigation} nativeWindowControls={browser ? undefined : window.rovai.windowControls}>
     <ThreadNavigation platform={platform} view={settings ? 'settings' : 'compose'} state="ready"
-      navigation={pagination?.snapshot ?? { ...navigationSnapshot, projects: navigationSnapshot.projects.map(project => ({ ...project,
-        name: longLabels ? 'Rovai AI 长期协作工作区与菜单栏交互完整项目名称' : project.name,
-        recentThreads: [{ ...runningCamp, title: longLabels ? '会话长标题在侧栏和搜索结果中只做末尾透明度淡出，切换宽度与短名称后重新判断是否需要截断' : runningCamp.title,
-          marker: running ? 'loading' : 'none' }] })) }}
+      navigation={searchSnapshot}
       groupLimits={pagination?.limits} onGroupLimitChange={pagination ? paginationReader.resizeGroup : undefined}
       pins={pagination ? [{ kind: 'project', targetKey: 'directory:/fixture/pinned', pinnedAt: '' }] : navigationPins}
       activeThreadId={pagination ? runningCamp.id : pinnedCamp.id} pendingMemoryCount={0} threadReadStates={threadReadStates}

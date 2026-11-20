@@ -692,3 +692,10 @@ html[data-mobile-web="true"] .identity-card-runtime :is(.thread-model-fields dt,
   html[data-mobile-web="true"] .camp-member-dialog .app-dialog-footer { padding-block:8px; }
   html[data-mobile-web="true"] .camp-member-search-field { margin-bottom:4px; }
 }
+
+html[data-mobile-web="true"] .command-palette.is-search { top: calc(var(--mobile-viewport-top, 0px) + 12px); }
+html[data-mobile-web="true"] .command-palette.is-search .command-palette-input { font-size: 16px; }
+html[data-mobile-web="true"] .command-palette.is-search .command-palette-list {
+  max-height: min(430px, max(44px, calc(var(--mobile-viewport-height, 100dvh) - 84px)));
+}
+html[data-mobile-web="true"] .command-palette.is-search :is(.search-result, .search-status-action) { min-height: 44px; }

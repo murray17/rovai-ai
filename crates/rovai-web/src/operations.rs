@@ -198,6 +198,10 @@ pub enum Operation {
 
     #[serde(rename = "navigation.findThread", alias = "navigation.findCamp")]
     NavigationFindCamp,
+    #[serde(rename = "navigation.search")]
+    NavigationSearch,
+    #[serde(rename = "navigation.searchMessages")]
+    NavigationSearchMessages,
     #[serde(rename = "agentRunExecution.page")]
     RunExecutionPage,
     #[serde(rename = "agentRunExecution.changes")]
@@ -563,6 +567,8 @@ impl Operation {
             Self::RuntimeStartupCheck => "runtime.startup.check",
 
             Self::NavigationFindCamp => "navigation.findCamp",
+            Self::NavigationSearch => "navigation.search",
+            Self::NavigationSearchMessages => "navigation.searchMessages",
             Self::RunExecutionPage => "agentRunExecution.page",
             Self::RunExecutionChanges => "agentRunExecution.changes",
             Self::TaskCreate => "tasks.create",

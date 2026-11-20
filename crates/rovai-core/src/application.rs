@@ -249,7 +249,13 @@ use rovai_core::{
         local_ipc::{LocalIpcListener, LocalIpcStream},
         prepare_windows_data_root,
     },
-    read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService, ThreadOpenProjection},
+    read_model::{
+        READ_MODEL_SCHEMA_VERSION, ReadModelService, ThreadOpenProjection,
+        navigation_search::{
+            self, NavigationMessageSearchParams, NavigationSearchInputError,
+            NavigationSearchParams, SearchReaders,
+        },
+    },
     runtime::{
         AgentRunCancellationCandidate, AgentRunExecution, AgentRunWorkspace,
         ArmAgentRunNetworkRecoveryCommand, BindNativeSessionCommand, CancelAgentRunCommand,
@@ -569,6 +575,15 @@ struct ErrorBody {
 }
 
 fn request_error_body(error: &anyhow::Error) -> ErrorBody {
+    if let Some(error) = error.downcast_ref::<NavigationSearchInputError>() {
+        return ErrorBody {
+            kind: "domain_rejection",
+            code: error.code().to_owned(),
+            message: error.to_string(),
+            retryable: false,
+            details: json!({}),
+        };
+    }
     if let Some(error) = error.downcast_ref::<LocalAttachmentFailure>() {
         return ErrorBody {
             kind: "domain_rejection",
@@ -841,6 +856,9 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
         "health.check"
+            | "navigation.search"
+            | "navigation.searchMessages"
+            | "camp.messages.find"
             | "projectFiles.request"
             | "projectFileReferences.resolve"
             | "runtime.status.get"
@@ -2668,8 +2686,10 @@ struct Core {
     execution_wake: crate::execution_wake::ExecutionWake,
     non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Arc<Mutex<Database>>,
+    navigation_search_readers: Arc<SearchReaders>,
     // Queue full scans independently of ordinary reads and writes.
     message_search_slot: Arc<Mutex<()>>,
+    navigation_search_slot: Arc<Mutex<()>>,
     // Always acquire before database; pure-text publication bypasses this guard.
     pasted_text_operations: Mutex<()>,
     notification_interruption_reader: Mutex<NotificationInterruptionReader>,
@@ -11641,6 +11661,35 @@ impl Core {
                     )?,
                 )?)
             }
+            "navigation.search" => {
+                let input =
+                    serde_json::from_value::<NavigationSearchParams>(request.params.clone())
+                        .map_err(|_| NavigationSearchInputError::Parameters)?
+                        .validate()?;
+                let client = request.client.clone();
+                let readers = self.navigation_search_readers.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = readers
+                        .read(|snapshot| navigation_search::search(snapshot, &client, input))?;
+                    Ok(serde_json::to_value(result)?)
+                })
+                .await?
+            }
+            "navigation.searchMessages" => {
+                let input =
+                    serde_json::from_value::<NavigationMessageSearchParams>(request.params.clone())
+                        .map_err(|_| NavigationSearchInputError::Parameters)?
+                        .validate()?;
+                let slot = self.navigation_search_slot.clone().lock_owned().await;
+                let client = request.client.clone();
+                let readers = self.navigation_search_readers.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _slot = slot;
+                    let result = readers.read(|snapshot| input.run(snapshot, &client))?;
+                    Ok(serde_json::to_value(result)?)
+                })
+                .await?
+            }
             "navigation.findCamp" => {
                 let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
@@ -12483,14 +12532,20 @@ impl Core {
             "camp.messages.find" => {
                 let params: ThreadMessageFindParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(ReadModelService.camp_messages_find(
-                    &mut database,
-                    params.camp_id.as_str(),
-                    &params.query,
-                    params.selected_match_index,
-                    params.anchor_message_id.as_deref(),
-                )?)?)
+                let readers = self.navigation_search_readers.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = readers.read(|snapshot| {
+                        ReadModelService.camp_messages_find_in_snapshot(
+                            snapshot,
+                            params.camp_id.as_str(),
+                            &params.query,
+                            params.selected_match_index,
+                            params.anchor_message_id.as_deref(),
+                        )
+                    })?;
+                    Ok(serde_json::to_value(result)?)
+                })
+                .await?
             }
             "agentRunEvidence.getContent" => {
                 let params: ExecutionEvidenceContentParams =
@@ -21875,6 +21930,8 @@ async fn run_core(
             &database,
         )),
         message_search_slot: Default::default(),
+        navigation_search_slot: Default::default(),
+        navigation_search_readers: Arc::new(SearchReaders::new(database.path())),
         database: Arc::new(Mutex::new(database)),
         pasted_text_operations: Mutex::new(()),
         subsystems: CoreSubsystems::new(),
@@ -30745,6 +30802,8 @@ mod tests {
                 NotificationInterruptionReader::for_database(&database),
             ),
             message_search_slot: Default::default(),
+            navigation_search_slot: Default::default(),
+            navigation_search_readers: Arc::new(SearchReaders::new(database.path())),
             database: Arc::new(Mutex::new(database)),
             pasted_text_operations: Mutex::new(()),
             automation_scheduler_control: RwLock::new(None),
@@ -35883,6 +35942,14 @@ done
         assert!(request_uses_independent_read_queue("navigation.camps"));
         assert!(request_uses_independent_read_queue("navigation.groupCamps"));
         assert!(request_uses_independent_read_queue("navigation.findCamp"));
+        for method in [
+            "navigation.search",
+            "navigation.searchMessages",
+            "camp.messages.find",
+        ] {
+            assert!(request_runs_outside_main_queue(method));
+            assert!(!request_uses_independent_read_queue(method));
+        }
         assert!(request_uses_independent_read_queue(
             "notifications.threadInterruptions"
         ));

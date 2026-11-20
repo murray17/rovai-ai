@@ -6,6 +6,9 @@ last_updated: 2026-11-16
 
 # 当前规范与决定理由导航
 
+导航搜索：[Navigation Search v1](../contracts/navigation-search-v1.md)、[App Shell 导航](../ui/components/app-shell-navigation.md#会话搜索)。
+名称与正文合并、分页和只读调度的取舍见 [V1.72-D90](../versions/v1.72/decisions.md#v1-72-d90)。
+
 公开执行列表的直接会话归属：[Camp Open Projection v32](../contracts/camp-open-projection-v33.md)、[Thread Runs v2](../contracts/thread-runs-v2.md)、
 [Thread Open Read Path](../architecture/camp-open-read-path.md#enter-and-refresh-flow)；取消旧公开卡片兼容、
 保留原始数据与当前单聊的取舍见 [V1.72-D75](../versions/v1.72/decisions.md#v1-72-d75)。

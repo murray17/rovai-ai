@@ -35,6 +35,92 @@ test('phone system message copy control aligns with its message surface', async 
   assert.match(mobileCss, /\.conversation-bubble\.agent \.message-actions\s*\{[^}]*margin-left: -4px;/s)
 })
 
+test('phone navigation search opens a mission message in a short viewport and a wide Web drawer', { timeout: 60_000 }, async t => {
+  if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) {
+    t.skip('Requires macOS Chrome')
+    return
+  }
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mobile-search-')))
+  const dataDir = join(fixture, 'core')
+  const skillLibraryRoot = join(dataDir, 'skills')
+  const mcpConfigPath = join(dataDir, 'mcp.json')
+  const chromeProfile = join(fixture, 'chrome')
+  console.log(JSON.stringify({ channel: 'automatic_acceptance', dataDir, skillLibraryRoot, mcpConfigPath, chromeProfile, runtime: false }))
+  const host = launchHost(process.env.ROVAI_HOST_BIN ?? join(repository, 'target/debug/rovai-host'), [
+    ...coreDataDirectoryArguments(dataDir), '--skill-library-root', skillLibraryRoot, '--mcp-config-path', mcpConfigPath
+  ], { cwd: repository })
+  let browser
+  try {
+    await within(host.ready)
+    const [member] = await host.request('members.list')
+    const created = await host.request('missions.create', { commandId: crypto.randomUUID(), command: {
+      title: '手机导航搜索使命', description: '', projectPath: '', projectBindingKind: 'quick_chat',
+      memberAgentIds: [member.agentId], defaultLeadAgentId: member.agentId, tags: []
+    } })
+    assert.equal(created.status, 'applied', JSON.stringify(created))
+    const mission = created.payload
+    const searchWord = '导航命中夹具'
+    const sent = await host.request('camp.messages.send', {
+      commandId: crypto.randomUUID(), threadId: mission.threadId,
+      content: { version: 2, segments: [{ kind: 'text', text: searchWord }] },
+      sourceAttachments: [], quotes: [], execution: null
+    })
+    assert.equal(sent.commandResult.status, 'applied', JSON.stringify(sent))
+    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: process.env.ROVAI_WEB_UI ?? join(repository, 'out/web') })
+    browser = await launchAcceptanceBrowser({ executable, args: [
+      '--headless=new', '--user-data-dir=' + chromeProfile, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', 'about:blank'
+    ] })
+    const mobile = height => browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height, deviceScaleFactor: 1, mobile: true })
+    const label = text => `[...document.querySelectorAll('button[aria-label=${JSON.stringify(text)}]')].find(button => button.getClientRects().length > 0)`
+    await mobile(844)
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+    await browser.send('Page.navigate', { url: service.origin })
+    await browser.wait('!!document.querySelector("#administrator-token")')
+    await browser.click('document.querySelector("#administrator-token")')
+    await browser.send('Input.insertText', { text: service.administratorToken })
+    await browser.click('document.querySelector(".web-login button[type=submit]")')
+    await browser.wait('document.documentElement.dataset.mobileWeb === "true" && !!' + label('打开主菜单'))
+    await browser.click(label('打开主菜单'))
+    await browser.wait('!!document.querySelector(\'#mobile-app-menu[data-state="open"]\') && !!' + label('搜索对话、使命和消息'))
+    await browser.click(label('搜索对话、使命和消息'))
+    await browser.wait('!!document.querySelector(".command-palette.is-search")')
+    await mobile(370)
+    await browser.click('document.querySelector(".command-palette-input")')
+    await browser.send('Input.insertText', { text: searchWord })
+    await browser.wait('document.querySelector(".search-result.has-snippet mark")?.textContent === ' + JSON.stringify(searchWord))
+    assert.equal(await browser.evaluate(`(() => {
+      const palette = document.querySelector('.command-palette')
+      const box = palette.getBoundingClientRect()
+      return box.left >= 0 && box.right <= innerWidth && box.bottom <= visualViewport.height
+        && parseFloat(getComputedStyle(palette.querySelector('input')).fontSize) >= 16
+    })()`), true, 'search stays within the reduced visual viewport')
+    await browser.click('document.querySelector(".search-result.has-snippet")')
+    await mobile(844)
+    await browser.wait('!!document.querySelector(".mission-full .conversation-find-current-message")'
+      + ' && document.querySelector(".conversation-find-count")?.textContent.trim() === "1 / 1"')
+    assert.equal(await browser.evaluate('document.querySelector(".conversation-find-surface input").value'), searchWord)
+
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+    await browser.wait('document.documentElement.dataset.mobileWeb === undefined && !!' + label('使命板'))
+    await browser.click(label('使命板'))
+    await browser.wait('!document.querySelector(".mission-workspace-host") && !!document.querySelector(".conversation-jump.is-search")')
+    await browser.click('document.querySelector(".conversation-jump.is-search")')
+    await browser.wait('document.activeElement.matches(".command-palette-input")')
+    await browser.send('Input.insertText', { text: searchWord })
+    await browser.wait('document.querySelector(".search-result.has-snippet mark")?.textContent === ' + JSON.stringify(searchWord))
+    await browser.click('document.querySelector(".search-result.has-snippet")')
+    await browser.wait('!!document.querySelector(".mission-drawer .conversation-find-current-message")'
+      + ' && document.querySelector(".conversation-find-count")?.textContent.trim() === "1 / 1"')
+    assert.deepEqual(browser.errors, [])
+  } finally {
+    await browser?.close()
+    await host.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir)
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 // Real Host + production Web entry. No Electron profile, Runtime, or daily data.
 test('phone workbench uses shared navigation, schedules and per-tab drafts', { timeout: 180_000 }, async t => {
   if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) { t.skip('Requires macOS Chrome; does not qualify real phones or other OSes'); return }

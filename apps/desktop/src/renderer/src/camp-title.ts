@@ -23,10 +23,21 @@ export function formatThreadTitle(thread: {
       ? uiAttribute(FIRST_RUN_CAMP_TITLE)
       : thread.title
   }
-  const labels: Partial<Record<string, string>> | undefined = CHANNEL_LABELS[source.provider]
-  const label = labels?.[source.conversationKind]
+  const label = threadChannelLabel(source)
   if (!label) return thread.title
   return getInterfaceLanguage() === 'en'
-    ? `[${uiAttribute(label)}] ${thread.title}`
+    ? `[${label}] ${thread.title}`
     : `【${label}】${thread.title}`
+}
+
+function threadChannelLabel(source: ThreadChannelSource): string {
+  const labels: Partial<Record<string, string>> = CHANNEL_LABELS[source.provider]
+  const label = labels?.[source.conversationKind]
+  return label ? uiAttribute(label) : ''
+}
+
+export function threadChannelNameMatches(query: string, matches: (label: string, query: string) => boolean): string[] {
+  return Object.entries(CHANNEL_LABELS).flatMap(([provider, labels]) =>
+    Object.entries(labels).flatMap(([kind, label]) => matches(uiAttribute(label), query) ? [`${provider}:${kind}`] : [])
+  )
 }

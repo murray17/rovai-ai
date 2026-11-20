@@ -1,3 +1,4 @@
+import type { NavigationFindIntent, NavigationSearchRow } from './camp-navigation-search'
 import { ArchiveSettings } from './ArchiveSettings'
 import { isArchiveChangeEvent, writeArchive } from './thread-archive'
 import { useMemoryCapability } from './MemoryCapabilityProvider'
@@ -318,6 +319,7 @@ type ActivateThreadOptions = {
   initializeComposerDraft?: boolean
   preserveNotificationFocus?: boolean
   missionPresentation?: 'drawer'
+  navigationFind?: NavigationFindIntent
   suppressErrors?: boolean
   stayOnOpenFailure?: boolean
   anchoredMessages?: readonly ThreadMessageView[]
@@ -1171,6 +1173,14 @@ export function BusinessApp({
   const [newConversationInitialTeamId, setNewConversationInitialTeamId] = useState<string | null>(null)
   const [newConversationInitialTeam, setNewConversationInitialTeam] = useState<Team | null>(null)
   const missionList = useMissions(client, startupStatus === 'resolved')
+  const missionSearchPaths = useMemo(
+    () => missionList.missions.filter(mission => mission.projectBindingKind === 'directory').map(mission => mission.projectPath),
+    [missionList.missions]
+  )
+  const [navigationFind, setNavigationFind] = useState<NavigationFindIntent | null>(null)
+  const consumeNavigationFind = useCallback((intent: NavigationFindIntent): void => {
+    setNavigationFind(current => current === intent ? null : current)
+  }, [])
   const [missionPresentation, setMissionPresentation] = useState<'drawer' | 'full'>('full')
   const [missionOpenRequest, setMissionOpenRequest] = useState(0)
   const [newMissionOpen, setNewMissionOpen] = useState(false)
@@ -1943,6 +1953,7 @@ export function BusinessApp({
       }
       setActiveThreadId(threadId)
       setThreadSnapshot(snapshot, entryPreview, initialComposerDraft)
+      setNavigationFind(entryPreview ? null : options.navigationFind ?? null)
       if (snapshot.thread.missionId && options.missionPresentation) {
         setMissionPresentation(options.missionPresentation)
       }
@@ -2020,7 +2031,8 @@ export function BusinessApp({
     options: ActivateThreadOptions = {}
   ): Promise<boolean> => {
     const readGeneration = threadReadGeneration.current
-    const navigate = campSnapshotEntryPreviewRef.current && activeThreadIdRef.current === threadId
+    const sameThread = viewRef.current === 'camp' && activeThreadIdRef.current === threadId
+    const navigate = sameThread && (campSnapshotEntryPreviewRef.current || options.navigationFind)
       ? desktopNavigation.replace : desktopNavigation.push
     const activated = await navigate({ kind: 'camp', threadId }, { campOptions: options, memberPrepared: options.memberPrepared })
     const state = desktopNavigation.getSnapshot()
@@ -3178,7 +3190,10 @@ export function BusinessApp({
       if (!transaction.isCurrent() || context?.onlyIf?.() === false) return
       if (target.kind === 'camp') {
         if (viewRef.current === 'camp' && activeThreadIdRef.current === target.threadId && !campSnapshotEntryPreviewRef.current) {
-          if (transaction.commit() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+          if (transaction.commit()) {
+            setNavigationFind(context?.campOptions?.navigationFind ?? null)
+            if (!context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+          }
           return
         }
         const opened = await activateThreadWithoutLeaveGuard(target.threadId, context?.campOptions ?? {}, selectionGeneration, transaction)
@@ -3190,6 +3205,7 @@ export function BusinessApp({
         lastMainTarget.current = previous.entries[previous.index] ?? { kind: 'quick_chat' }
       }
       if (!transaction.commit()) return
+      setNavigationFind(null)
       if (target.kind !== 'members' && target.kind !== 'settings') setCommonEnvironmentReturn(null)
       context?.beforeCommit?.()
       setNotificationFocus(null)
@@ -3313,6 +3329,26 @@ export function BusinessApp({
   const chooseThread = (thread: NavigationThreadTarget): void => {
     void activateThread(thread.id, { reconcileDefaultLead: thread.activationState !== 'pending' })
       .catch((nextError) => notifyError(errorMessage(nextError)))
+  }
+
+  const openSearchResult = (row: NavigationSearchRow): void => {
+    setMobileConversationDrawerOpen(false)
+    const { thread, kind } = row.target
+    if (kind === 'mission' && !missionList.missions.some(mission => mission.threadId === thread.id)) {
+      void missionList.refresh()
+    }
+    const navigationFind = row.hit
+      ? { threadId: thread.id, query: row.query, anchorMessageId: row.hit.message.id }
+      : undefined
+    void activateThread(thread.id, {
+      reconcileDefaultLead: kind === 'thread' && thread.activationState !== 'pending',
+      missionPresentation: kind === 'mission' ? 'drawer' : undefined,
+      navigationFind
+    }).then(opened => {
+      if (opened && kind === 'mission' && activeThreadIdRef.current === thread.id && viewRef.current === 'camp') {
+        setMissionOpenRequest(value => value + 1)
+      }
+    }).catch(nextError => notifyError(errorMessage(nextError)))
   }
 
   const navigateFromNotification = useCallback(async (
@@ -4641,6 +4677,8 @@ export function BusinessApp({
       })
     }}
     onThread={(target) => { setMobileConversationDrawerOpen(false); chooseThread(target) }}
+    onSearchResult={openSearchResult}
+    searchProjectPaths={missionSearchPaths}
     onExportThread={conversationExport.reader.open}
     onForkThread={thread => { void forkThread(thread.id) }}
     forkBusy={forkBusy}
@@ -4741,6 +4779,8 @@ export function BusinessApp({
               generalPreferences.executionConsolePlacement
             )}
             snapshot={visibleThreadSnapshot}
+            navigationFindIntent={navigationFind?.threadId === activeThreadId ? navigationFind : null}
+            onNavigationFindConsumed={consumeNavigationFind}
             userAnchorNavigation={userAnchorNavigationFor(activeThreadId)}
             memberCreation={memberCreationDrafts.has(activeThreadId)}
             initialComposerDraft={memberCreationDrafts.get(activeThreadId)?.draft ?? campSnapshotState.initialComposerDraft}

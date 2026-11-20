@@ -8,7 +8,7 @@ last_updated: 2026-08-18
 
 # Camp Conversation Find v1
 
-本合同定义 Desktop Renderer 在当前 Camp 内进行完整会话正文查找的精确只读接口。它不替代
+本合同定义 Desktop 与 Web Renderer 在当前 Thread 内进行完整会话正文查找的精确只读接口。它不替代
 Agent-facing [Camp History Retrieval v1](camp-history-v1.md) 中的 discovery Top-K 接口。
 
 ## Method and closed input
@@ -32,7 +32,7 @@ interface CampMessageFindParams {
 
 ## Searchable projection
 
-候选集固定为同一 Camp 中 `authorType=user|agent` 且未墓碑的 CampMessage，按
+候选集固定为同一 Camp 中 `authorType=user|agent|external_principal` 且未墓碑的 CampMessage，按
 `sequence ASC, id ASC` 排序。每条正文使用与 `CampMessageView.body` 相同的 Human Structured Content
 投影，排除 system 消息、附件名称/内容、Task、Delivery、Run/Tool output、Approval、Inspector 与地图文案。
 
@@ -64,7 +64,7 @@ interface CampMessageFindSnapshot {
 
 ## Concurrency and presentation
 
-每次调用在一个 SQLite read transaction 内冻结 `throughGlobalSequence`。Renderer 只接受当前 Camp、当前
+查找在主队列外的独立 SQLite 只读快照内冻结 `throughGlobalSequence`。Renderer 只接受当前 Camp、当前
 query 与最新 request generation 的响应；乱序响应必须丢弃。新增消息后的 exact total 允许由后续查询更新，
 不要求 find session 锁定历史快照。
 

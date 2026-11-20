@@ -123,6 +123,8 @@ export const WEB_OPERATIONS = [
   'runtime.startup.inspect',
   'runtime.startup.check',
   'navigation.findThread',
+  'navigation.search',
+  'navigation.searchMessages',
   'agentRunExecution.page',
   'agentRunExecution.changes',
   'tasks.create',
