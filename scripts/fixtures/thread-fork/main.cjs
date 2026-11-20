@@ -98,6 +98,13 @@ app.whenReady().then(async () => {
       const save = editor.querySelector('button[type=submit]')
       const time = row.querySelector('.message-action-time')
       const more = row.querySelector('.message-more-button .more-icon')
+      const recipient = editor.querySelector('.revision-default-recipient')
+      const mention = getComputedStyle(recipient.querySelector('strong'))
+      const probe = document.createElement('span')
+      probe.style.color = 'var(--mention-ink)'
+      recipient.append(probe)
+      const matchesMentionColor = mention.color === getComputedStyle(probe).color
+      probe.remove()
       return {
         actions: !!row.querySelector('.message-action-line .message-copy-button'),
         timePadding: getComputedStyle(time).paddingTop,
@@ -105,11 +112,18 @@ app.whenReady().then(async () => {
         moreFill: getComputedStyle(more).fill === getComputedStyle(more).color,
         saveHeight: save.getBoundingClientRect().height,
         saveFont: getComputedStyle(save).fontSize,
-        bubbleBorder: getComputedStyle(editor.parentElement).borderTopWidth
+        bubbleBorder: getComputedStyle(editor.parentElement).borderTopWidth,
+        recipientBetweenEditorAndActions:
+          editor.querySelector('.structured-mention-composer').getBoundingClientRect().bottom <= recipient.getBoundingClientRect().top &&
+          recipient.getBoundingClientRect().bottom <= editor.querySelector('.revision-editor-actions').getBoundingClientRect().top,
+        recipientFont: getComputedStyle(recipient).fontSize,
+        mentionWeight: mention.fontWeight,
+        matchesMentionColor
       }
     })()`)
     assert.deepEqual(editing, { actions: true, timePadding: '1px', moreWidth: 15, moreFill: true,
-      saveHeight: 28, saveFont: '11.5px', bubbleBorder: '1px' })
+      saveHeight: 28, saveFont: '11.5px', bubbleBorder: '1px',
+      recipientBetweenEditorAndActions: true, recipientFont: '11px', mentionWeight: '680', matchesMentionColor: true })
     await click(`document.querySelector('${userRow} .revision-editor .quiet-button')`)
     await wait('!document.querySelector(".revision-editor")')
     assert.equal(await run('document.querySelector("[contenteditable=true]").textContent'), '保留源草稿')

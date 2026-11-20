@@ -9761,8 +9761,8 @@ html[data-mobile-web="true"] .approval-dock.pending-dock { width: calc(100% - 24
 }
 .revision-editor .structured-mention-editor p { margin: 0; font-size: inherit; line-height: inherit; }
 .revision-editor .message-withdraw-error { overflow-wrap: anywhere; }
-.inline-edit-route { color: var(--muted); font-size: .9em; }
-.inline-edit-route span { color: var(--conversation-action-ink); }
+.revision-default-recipient { color: var(--faint); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.revision-default-recipient strong { color: var(--mention-ink); font-weight: 680; }
 .inline-edit-conflict {
   min-inline-size: 0;
   padding-block-start: 8px;

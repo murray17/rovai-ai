@@ -224,9 +224,6 @@ export function ThreadMessageEditor({
   return <form className="revision-editor" aria-label={uiAttribute('编辑消息')}
     style={contentWidth ? { '--revision-content-width': `${contentWidth}px` } as CSSProperties : undefined}
     onSubmit={event => { event.preventDefault(); void save() }}>
-    {!status.hasExplicitRecipient && defaultLead && <div className="inline-edit-route">
-      <UiText zh="默认由队长" /> <span>@{defaultLead}</span> <UiText zh="接收" />
-    </div>}
     {(retained.length > 0 || added.length > 0) && <ComposerAttachmentStrip>
       {retained.map(attachment => <AttachmentCard key={attachment.id} attachment={attachment}
         locator={{ owner: 'message', threadId, messageId: message.id, attachmentRefId: attachment.id }}
@@ -242,6 +239,9 @@ export function ThreadMessageEditor({
       ariaLabel={uiAttribute('编辑消息正文')} disabled={saving}
       onEffectiveDocumentChange={setDocument} onFileInsertionPendingChange={setPendingInsertion}
       onPasteFiles={files => { void addFiles(files) }} onSubmit={() => void save()} />
+    {!status.hasExplicitRecipient && defaultLead && <div className="revision-default-recipient">
+      <UiText zh="默认由队长" /> <strong>@{defaultLead}</strong> <UiText zh="接收" />
+    </div>}
     {conflict && <div className="inline-edit-conflict">
       {conflict.status === 'loading' && <div role="status"><UiText zh="正在读取最新内容…" /></div>}
       {conflict.status === 'error' && <div role="alert">
