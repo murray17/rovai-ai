@@ -269,7 +269,9 @@ pub(super) fn retire(db: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::Current(ref marker)
+                | DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 181
         ),
         "Ordinary redelivery failed schema admission"
     );
@@ -279,6 +281,7 @@ pub(super) fn retire(db: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn restore_requests_for_test(c: &Connection) {
+    quote_text::downgrade_edited_messages_for_test(c);
     if !c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=231)",
@@ -506,7 +509,12 @@ pub(crate) fn assert_request_upgrade(
             BEGIN SELECT RAISE(ABORT,'fixture'); END;",
         )
         .unwrap();
-        assert!(retire(database).is_err());
+        assert!(
+            retire(database)
+                .unwrap_err()
+                .to_string()
+                .contains("fixture")
+        );
         let c = database.connection();
         assert_eq!(
             c.query_row(
@@ -519,6 +527,7 @@ pub(crate) fn assert_request_upgrade(
         );
         c.execute_batch("DROP TRIGGER fail_retire").unwrap();
         retire(database).unwrap();
+        quote_text::migrate_edited_messages(database).unwrap();
         let c = database.connection();
         assert!(retired_schema_matches(c).unwrap());
         let rows=c.prepare("SELECT id,message_id FROM camp_message_delivery WHERE status='waiting' ORDER BY queue_sequence").unwrap()

@@ -19,6 +19,10 @@ Core 扩展套件首轮 1027 项通过、14 项失败、8 项忽略。修正夹�
 其余 8 项在干净的基线 `1a9fdda25` 上复现相同断言失败。12 个真实模型对照用例待确定 Judge 与运行预算。
 [继续执行合同](../../contracts/agent-run-continuation-v5.md) · [模型输入前后对照](model-context-change-ordinary-redelivery.md)
 
+r2 在同一入口将修改标记和配套提示纳入 claim 的字节预算。Migration 232 将 projection schema 升至 182。
+公共 Formatter/Manifest 45/45、Facts 14、Profile 15。旧 claim 和已物化输入按原证据恢复。
+验收覆盖实际交给 Runtime 的消息顺序、编辑字段及提示，以及旧版 claim 的恢复。
+
 ## 会话与使命归档（2026-11-19）
 
 迁移 230 在主线 schema 179 上添加归档字段和部分索引，升级至 schema 180。Core 用 Thread ID 游标分批返回摘要，界面取齐后按项目分组。见 [Thread Archive v1](../../contracts/thread-archive-v1.md)。

@@ -6,8 +6,8 @@ pub const SESSION_CHARTER_REVISION: i64 = 26;
 const NATIVE_BINDING_CHARTER_COMPATIBILITY_REVISION: i64 = 16;
 pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 44;
 pub const CONTEXT_MANIFEST_VERSION: i64 = 44;
-pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 43;
-pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 43;
+pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 45;
+pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 45;
 
 #[cfg(test)]
 pub(crate) fn native_binding_context_contract() -> Value {
@@ -57,8 +57,8 @@ mod tests {
         let compatibility = native_binding_compatibility_context_contract();
         assert_eq!(SESSION_CHARTER_REVISION, 26);
         assert_eq!(compatibility["sessionCharterRevision"], json!(16));
-        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 43);
-        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 43);
+        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 45);
+        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 45);
         assert_eq!(
             current,
             json!({

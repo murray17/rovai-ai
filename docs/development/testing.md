@@ -242,6 +242,14 @@ MCP/原生权限/取消简化继续扩展这些既有 owners：
 
 ## Rust 测试准入与退役门槛
 
+公共输入编辑标记复用 `message_mutations_regroup_ordinary_retries_and_preserve_frozen_inputs`、
+`user_continuation_reuses_waiting_inputs_and_claims_in_message_order` 和
+`active_inputs_preserve_initial_context_and_unsubmitted_sources` 的 Rust SQLite owners。
+覆盖只改附件、普通重投、插话不带标记以及消息集合变化时提示的省略。
+旧 v43 claim 物化及迁移 232 回滚扩展 `claimed_legacy_batch_keeps_its_format_after_context_upgrades`。
+领取预算沿用 `runtime_payload_capacity_selects_the_full_context_fifo_prefix_and_defaults_to_256_kib`，
+覆盖唯一已编辑消息留在下一批。未新增 Rust 测试函数。
+
 RunCard Token 总量扩展现有 `usage_core_semantics_preserve_unknown_zero_and_partial_buckets`、
 `cumulative_checkpoint_dedupes_resets_resume_and_late_terminal_batches`、分区与 parser/native reader owners，
 覆盖外部验收样本、同调用补齐、total 覆盖子集、reset/resume 和失败重试；不新增 Rust 测试函数。

@@ -36,6 +36,7 @@ struct WaitingDelivery {
     id: String,
     message_id: String,
     sequence: i64,
+    content_revision: i64,
     structured_content_json: Option<String>,
     content_digest: String,
     default_recipient_display_name: Option<String>,
@@ -681,7 +682,7 @@ fn load_waiting_prefix(
     agent_id: &str,
 ) -> Result<Vec<WaitingDelivery>> {
     let mut statement = transaction.prepare(
-        "SELECT delivery.id, message.id, message.sequence, message.structured_content_json,
+        "SELECT delivery.id, message.id, message.sequence, message.content_revision, message.structured_content_json,
                 message.content_digest, recipient.display_name
          FROM camp_message_delivery AS delivery
          JOIN camp_message AS message ON message.id = delivery.message_id
@@ -699,9 +700,10 @@ fn load_waiting_prefix(
                 id: row.get(0)?,
                 message_id: row.get(1)?,
                 sequence: row.get(2)?,
-                structured_content_json: row.get(3)?,
-                content_digest: row.get(4)?,
-                default_recipient_display_name: row.get(5)?,
+                content_revision: row.get(3)?,
+                structured_content_json: row.get(4)?,
+                content_digest: row.get(5)?,
+                default_recipient_display_name: row.get(6)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -748,7 +750,7 @@ fn select_batch_prefix(
             .iter()
             .map(|delivery| delivery.message_id.clone())
             .collect::<Vec<_>>();
-        let run_input = project_batch_run_input_for_claim(
+        let mut run_input = project_batch_run_input_for_claim(
             transaction,
             camp_id,
             camp_public_tail,
@@ -756,6 +758,17 @@ fn select_batch_prefix(
             &skill_links,
             &mut sender_names,
         )?;
+        // The projection and the frozen Run inputs use the same ordered prefix.
+        for (message, delivery) in run_input["messages"]
+            .as_array_mut()
+            .expect("batch projection contains messages")
+            .iter_mut()
+            .zip(&waiting[..count])
+        {
+            if delivery.content_revision > 1 {
+                message["edited"] = Value::Bool(true);
+            }
+        }
         let has_additional_public_messages = has_additional_public_messages(
             transaction,
             camp_id,
@@ -963,8 +976,7 @@ fn insert_batch_run(
                 message_sequence, message_content_digest,
                 context_manifest_version, default_recipient_display_name,
                 message_content_revision, uses_published_body
-            ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, content_revision, 1
-              FROM camp_message WHERE id=?4
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
             "#,
             params![
                 agent_run_id,
@@ -975,6 +987,7 @@ fn insert_batch_run(
                 delivery.content_digest,
                 PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION,
                 delivery.default_recipient_display_name,
+                delivery.content_revision,
             ],
         )?;
         let terminal_status = if error_code.is_some() {
@@ -1049,6 +1062,23 @@ mod tests {
     };
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
     use serde_json::json;
+
+    #[cfg(feature = "extended-tests")]
+    const EDITED_HISTORY_HINT: &str = "A message marked edited replaces any earlier version with the same messageId; follow its current content.";
+
+    #[cfg(feature = "extended-tests")]
+    fn runtime_section(payload: &str, section: &str) -> Value {
+        serde_json::from_str(
+            payload
+                .split_once(&format!("[{section}]\n"))
+                .unwrap()
+                .1
+                .split_once(&format!("\n[/{section}]"))
+                .unwrap()
+                .0,
+        )
+        .unwrap()
+    }
 
     struct Fixture {
         database: Database,
@@ -1667,23 +1697,24 @@ mod tests {
             ["original-a", "original-b", "later"]
         );
         let context = fixture.materialize_run(&claimed);
-        let body = context
-            .rendered_payload
-            .split("[RUN_INPUT]")
-            .nth(1)
-            .unwrap()
-            .split("[/RUN_INPUT]")
-            .next()
-            .unwrap();
-        let projected: serde_json::Value = serde_json::from_str(body).unwrap();
+        let projected = runtime_section(&context.runtime_payload, "RUN_INPUT");
+        let messages = projected["messages"].as_array().unwrap();
         assert_eq!(
-            projected["messages"]
-                .as_array()
-                .unwrap()
+            messages
                 .iter()
                 .map(|m| m["messageId"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             ["original-a", "original-b", "later"]
+        );
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.get("edited").is_none())
+        );
+        let facts = runtime_section(&context.runtime_payload, "RUN_FACTS");
+        assert_eq!(
+            facts["historyHint"],
+            "All visible messages in this Thread are in RUN_INPUT or were written by you."
         );
         let anchor: String = fixture
             .database
@@ -2067,14 +2098,38 @@ mod tests {
 
         for limited in [false, true] {
             let mut ordered = Fixture::new();
+            ordered
+                .database
+                .connection()
+                .execute(
+                    "UPDATE agent_profile SET display_name='编辑验收' WHERE id='agent_1'",
+                    [],
+                )
+                .unwrap();
             if limited {
                 ordered.use_8k_context_budget();
             }
             let a = ordered.send_user_input("agent_1", "A", None);
             let b = ordered.send_user_input("agent_1", "B", None);
+            if limited {
+                let mut update = edit(&b, 1, "agent_1", "B revised");
+                update.camp_id = ordered.camp_id.clone();
+                let command = ordered.user_command(update);
+                service
+                    .edit_camp_message(&mut ordered.database, &command, None)
+                    .unwrap();
+            }
             let old = claim_waiting_delivery_batches(&mut ordered.database, 1)
                 .unwrap()
                 .remove(0);
+            let old_claim =
+                |fixture: &Fixture| -> String {
+                    fixture.database.connection().query_row(
+                    "SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?1",
+                    [&old], |row| row.get(0),
+                ).unwrap()
+                };
+            let frozen_original = old_claim(&ordered);
             let d = if limited {
                 "d".repeat(9000)
             } else {
@@ -2110,6 +2165,33 @@ mod tests {
                     .any(|d| d.message_id == "d" && d.status == "waiting"),
                 limited
             );
+            assert_eq!(old_claim(&ordered), frozen_original);
+            let context = ordered.materialize_run(&next);
+            let input = runtime_section(&context.runtime_payload, "RUN_INPUT");
+            let messages = input["messages"].as_array().unwrap();
+            assert_eq!(messages[0]["messageId"], a);
+            assert_eq!(messages[0]["body"], "@编辑验收 A revised");
+            assert_eq!(messages[0]["edited"], true);
+            assert_eq!(
+                messages[1].get("edited"),
+                limited.then_some(&Value::Bool(true))
+            );
+            assert!(
+                messages
+                    .iter()
+                    .skip(2)
+                    .all(|message| message.get("edited").is_none())
+            );
+            let facts = runtime_section(&context.runtime_payload, "RUN_FACTS");
+            let history_hint = facts["historyHint"].as_str().unwrap();
+            assert_eq!(history_hint.matches(EDITED_HISTORY_HINT).count(), 1);
+            assert!(history_hint.ends_with(EDITED_HISTORY_HINT));
+            let pairing: (i64, i64, i64, i64) = ordered.database.connection().query_row(
+                "SELECT formatter_version,context_manifest_version,run_facts_schema_version,context_delivery_profile_version
+                FROM context_manifest WHERE id=?1",
+                [&context.manifest_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            ).unwrap();
+            assert_eq!(pairing, (45, 45, 14, 15));
         }
 
         // An attachment-only edit cancels an ordinary batch. Later edits replace
@@ -2138,6 +2220,18 @@ mod tests {
         let old = claim_waiting_delivery_batches(&mut ordinary.database, 1)
             .unwrap()
             .remove(0);
+        let claim: Value = ordinary
+            .database
+            .connection()
+            .query_row(
+                "SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?1",
+                [&old],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|claim| serde_json::from_str(&claim).unwrap())
+            .unwrap();
+        assert_eq!(claim["runInput"]["messages"][1]["messageId"], b);
+        assert_eq!(claim["runInput"]["messages"][1]["edited"], true);
         let mut command = edit(&a, 1, "agent_1", "ordinary A");
         command.camp_id = thread.clone();
         command.source_attachments = vec![attachment];
@@ -2875,8 +2969,11 @@ mod tests {
             frozen_file.clone(),
         ];
         fixture.database.connection().execute(
-            "UPDATE camp_message SET structured_content_json=?1,content_digest=?2 WHERE id='initial-steer'",
+            "UPDATE camp_message SET structured_content_json=?1,content_digest=?2,content_revision=2 WHERE id='initial-steer'",
             params![serde_json::to_string(&initial_content).unwrap(), canonical_content_digest(&initial_content).unwrap()],
+        ).unwrap();
+        fixture.database.connection().execute(
+            "UPDATE camp_message_delivery SET message_content_revision=2 WHERE message_id='initial-steer'", [],
         ).unwrap();
         let run = claim_waiting_delivery_batches(&mut fixture.database, 1)
             .unwrap()
@@ -2890,6 +2987,7 @@ mod tests {
             )
             .unwrap();
         let initial = fixture.materialize_run(&run);
+        assert!(initial.runtime_payload.contains(EDITED_HISTORY_HINT));
         let encoded_file_projection = serde_json::to_string(&frozen_file_projection).unwrap();
         assert!(
             initial
@@ -3185,6 +3283,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(projected["messages"].as_array().unwrap().len(), 1);
+        assert!(projected["messages"][0].get("edited").is_none());
+        assert!(!one_context.runtime_payload.contains(EDITED_HISTORY_HINT));
         let body = projected["messages"][0]["body"].as_str().unwrap();
         assert!(body.contains(&format!("rovai://thread/{reference_id}")));
         assert!(
@@ -6056,6 +6156,10 @@ mod tests {
         constrained.use_8k_context_budget();
         constrained.enqueue("capacity-1", &"a".repeat(5_000));
         constrained.enqueue("capacity-2", &"b".repeat(5_000));
+        constrained.database.connection().execute_batch(
+            "UPDATE camp_message SET content_revision=2 WHERE id='capacity-2';
+             UPDATE camp_message_delivery SET message_content_revision=2 WHERE message_id='capacity-2';",
+        ).unwrap();
         let run_id = claim_waiting_delivery_batches(&mut constrained.database, 100)
             .unwrap()
             .pop()
@@ -6081,6 +6185,16 @@ mod tests {
             .unwrap();
         assert_eq!(remaining, 1);
         assert_eq!(constrained.frozen_history_result(&run_id), (0, true));
+        let claim: String = constrained
+            .database
+            .connection()
+            .query_row(
+                "SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?1",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!claim.contains("A message marked edited"));
 
         let mut defaulted = Fixture::new();
         defaulted.enqueue("default-capacity-1", &"a".repeat(5_000));

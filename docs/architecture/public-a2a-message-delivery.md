@@ -8,8 +8,8 @@ last_updated: 2026-11-10
 
 # Public Thread Message、Delivery 与 AgentRun
 
-本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v30](../contracts/camp-message-send-v31.md)、
-[Message Delivery v18](../contracts/message-delivery-v18.md)、[ContextManifest v43/v44](../contracts/context-manifest-evidence-v44.md)
+本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v31](../contracts/camp-message-send-v31.md)、
+[Message Delivery v19](../contracts/message-delivery-v19.md)、[ContextManifest v45](../contracts/context-manifest-evidence-v45.md)
 与 [Camp History v18](../contracts/camp-history-v18.md)。Single Chat 不使用本主链。
 
 ## 三类事实

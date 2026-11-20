@@ -30,6 +30,7 @@ Run 停止流程。Context Builder、Formatter 和 Bootstrap 继续读取调度�
 
 用户继续后由普通投递重排。等待中的输入随消息改版或改投，被中断的批次将其余有效普通输入送回各自队列。
 每个队员按消息顺序领取，已领取的历史显示其原有冻结清单。见 [AgentRun Continuation v5](agent-run-continuation-v5.md)。
+新版普通输入按领取时的内容修订号输出可选 `edited`。见 [ContextManifest v45](context-manifest-evidence-v45.md)。
 已发生的执行效果保留，重新处理可能产生新的回复。
 
 ## OpenCode 资格与通道

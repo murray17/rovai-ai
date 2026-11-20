@@ -89,7 +89,7 @@ try {
   const binding = database.prepare('SELECT native_session_id,native_binding_generation FROM conversation WHERE camp_id=? AND agent_id=?').get(threadId, 'agent_1')
   assert.ok(binding.native_session_id)
   const manifests = () => database.prepare('SELECT context_manifest_version,formatter_version,context_delivery_profile_version,collaboration_state_included FROM context_manifest WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?) ORDER BY created_at').all(threadId)
-  assert.equal(manifests()[0].context_manifest_version, 43)
+  assert.equal(manifests()[0].context_manifest_version, 45)
   const claim = database.prepare('SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?').get(first.id)
   const frozen = JSON.parse(claim.context_json)
   assert.equal(frozen.memberIdentity.professionalResponsibilities, duties)

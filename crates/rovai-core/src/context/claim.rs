@@ -1,6 +1,8 @@
 //! One claim snapshot owns both FIFO sizing and later input assembly.
 use super::*;
 
+const EDITED_MESSAGE_HISTORY_SUFFIX: &str = " A message marked edited replaces any earlier version with the same messageId; follow its current content.";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct BootstrapContents {
@@ -186,7 +188,14 @@ impl ClaimedBatchContext {
         )?;
         selected.run_input = run_input;
         let mut facts: Value = serde_json::from_str(&selected.run_facts.payload_json)?;
-        facts["historyHint"] = json!(public_history_hint(previous_boundary, additional_messages));
+        let mut history_hint = public_history_hint(previous_boundary, additional_messages);
+        if selected.run_input["messages"]
+            .as_array()
+            .is_some_and(|messages| messages.iter().any(|message| message["edited"] == true))
+        {
+            history_hint.push_str(EDITED_MESSAGE_HISTORY_SUFFIX);
+        }
+        facts["historyHint"] = json!(history_hint);
         selected.run_facts.payload_json = serde_json::to_string(&facts)?;
         selected.run_facts.references.push(RunFactRef {
             fact: "history_hint".into(),
@@ -234,8 +243,8 @@ pub(super) fn load(connection: &Connection, run_id: &str) -> Result<Option<Claim
     // Historical inputs retain their original materializer, including databases
     // exercised at intermediate migration boundaries.
     let current: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=?1 AND context_manifest_version IN (36, 37, 38, 39, 40, 43))",
-        [run_id], |row| row.get(0),
+        "SELECT EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=?1 AND context_manifest_version IN (36, 37, 38, 39, 40, 43, ?2))",
+        params![run_id, PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION], |row| row.get(0),
     )?;
     if !current {
         return Ok(None);
