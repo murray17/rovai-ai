@@ -32,6 +32,9 @@ import { MobileSettingsLayout } from './MobileSettingsLayout'
 export { AppHeader } from './AppHeader'
 import { CurrentUserProfileProvider } from './CurrentUserProfile'
 import { readErrorMessage } from './error-message'
+import { normalizeFailure, OperationFailure, operationFailureTitle, reportOperationFailure, retryRead, sharedRejectionMessage, type OperationId } from './operation-failure'
+import { createThreadRefreshRecovery } from './thread-refresh-recovery'
+import { requestRunStop } from './run-stop'
 import { CoreSubsystemNotice } from './CoreSubsystemNotice'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -313,6 +316,7 @@ export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'missions' | 'memory' | 'settings'
 type ActivateThreadOptions = {
+  title?: string
   memberPrepared?: boolean
   reconcileDefaultLead?: boolean
   onArchived?: (message: string) => void
@@ -1063,6 +1067,10 @@ export function BusinessApp({
     () => initialAppearanceSnapshot(document.documentElement)
   )
   const appUpdates = useAppUpdates(desktop?.appUpdates ?? null)
+  const [memberReadIssue, setMemberReadIssue] = useState<string | null>(null)
+  const [pinReadIssue, setPinReadIssue] = useState<string | null>(null)
+  const [runtimeReadIssue, setRuntimeReadIssue] = useState<string | null>(null)
+  const [appearanceReadIssue, setAppearanceReadIssue] = useState<string | null>(null)
   const [health, setHealth] = useState<RuntimeStatus | null>(null)
   const [healthLoading, setHealthLoading] = useState(false)
   const [healthAttempted, setHealthAttempted] = useState(false)
@@ -1151,6 +1159,13 @@ export function BusinessApp({
     // Host reads return fresh objects, including when an invalidation was ignored.
     setGeneralPreferencesState(current => JSON.stringify(current) === JSON.stringify(snapshot) ? current : snapshot)
   }, [])
+  const readGeneralPreferences = useMemo(() => createRuntimeRefresh(async () => {
+    try {
+      setGeneralPreferences(await retryRead(() => uiPreferences.generalPreferences.get()))
+    } catch (error) {
+      reportOperationFailure('preferences.read', error)
+    }
+  }), [uiPreferences, setGeneralPreferences])
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
   const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
@@ -1197,7 +1212,12 @@ export function BusinessApp({
   const [newConversationInitialSelection, setNewConversationInitialSelection] = useState<GeneralPreferencesSnapshot['newConversationDefaults']>(null)
   const [newConversationAttention, setNewConversationAttention] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{
+    operation: OperationId; message: string; retry?: () => void
+  } | null>(null)
+  const showOperationError = useCallback((operation: OperationId, cause: unknown, retry?: () => void) => {
+    setError({ operation, message: reportOperationFailure(operation, cause).message, retry })
+  }, [])
   const [toast, setToast] = useState<AppToastValue | null>(null)
   const forkOperation = useMemo(() => new ThreadForkOperation(client, client.reeditScope), [client])
   const forkState = useSyncExternalStore(forkOperation.subscribe, forkOperation.getSnapshot, forkOperation.getSnapshot)
@@ -1212,9 +1232,11 @@ export function BusinessApp({
   const notifyError = useCallback((message: string, action?: AppToastAction): void => {
     setToast({ message, tone: 'danger', actions: action ? [action] : undefined })
   }, [])
+  const [threadRefreshToast, setThreadRefreshToast] = useState<{ threadId: string; toast: AppToastValue } | null>(null)
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
   const [runtimeRecovery, setRuntimeRecovery] = useState<ThreadRuntimeRecovery | null>(null)
   const campEventSequenceMarker = useRef(0)
+  const inFlightRunStops = useRef(new Set<string>())
   const archiveWrites = useRef(new Set<string>())
   const campSelectionGeneration = useRef(0)
   const campOpenFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1223,6 +1245,18 @@ export function BusinessApp({
   const campSnapshotEntryPreviewRef = useRef(false)
   const activeThreadIdRef = useRef<string | null>(null)
   const viewRef = useRef<View>('compose')
+  const threadRefreshRecovery = useMemo(() => createThreadRefreshRecovery({
+    isCurrent: threadId => viewRef.current === 'camp' && activeThreadIdRef.current === threadId && !shuttingDownRef.current,
+    onFailure: error => reportOperationFailure('thread.refresh', error),
+    onExhausted: (threadId, retry) => setThreadRefreshToast({
+      threadId, toast: {
+        message: uiAttribute('会话暂时没有刷新，Rovai 没有响应。'), tone: 'neutral',
+        actions: [{ label: uiAttribute('重试'), icon: 'retry', onSelect: retry }]
+      }
+    }),
+    onClear: threadId => setThreadRefreshToast(current => current?.threadId === threadId ? null : current)
+  }), [])
+  useEffect(() => () => threadRefreshRecovery.clear(), [threadRefreshRecovery, activeThreadId, view])
   const notificationFocusSequence = useRef(0)
   const notificationFocusRef = useRef<NotificationFocusTarget | null>(null)
   const notificationPresentationRef = useRef<NotificationPresentationCoordinator | null>(null)
@@ -1359,7 +1393,7 @@ export function BusinessApp({
       await afterNextPaint()
       preparation.didLeave ||= viewRef.current !== 'camp' || activeThreadIdRef.current !== leavingThreadId
     } catch (nextError) {
-      setError(uiAttribute("离开当前会话前未能完成输入操作：{0}", String(errorMessage(nextError))))
+      showOperationError('composer.leave', nextError)
       return false
     } finally {
       preparation.users -= 1
@@ -1420,7 +1454,7 @@ export function BusinessApp({
         transition
       )
     } catch (nextError) {
-      setError(uiAttribute("离开定时任务前未能保存修改：{0}", String(errorMessage(nextError))))
+      showOperationError('automation.save', nextError)
       return false
     }
   }, [])
@@ -1450,7 +1484,7 @@ export function BusinessApp({
       )
       await prepareFileEditsForQuit()
     } catch (nextError) {
-      setError(uiAttribute("退出应用前未能完成输入操作：{0}", String(errorMessage(nextError))))
+      showOperationError('app.quit', nextError)
       throw nextError
     }
   }, [])
@@ -1546,18 +1580,22 @@ export function BusinessApp({
   }, [activeThreadId, view])
 
   const memberRosterReader = useMemo(() => createMemberRosterReader(
-    () => client.request<AgentProfile[]>('members.list'),
+    () => retryRead(() => client.request<AgentProfile[]>('members.list')),
     (nextAgents) => {
       setAgents(nextAgents)
+      setMemberReadIssue(null)
       if (viewRef.current === 'members') setMemberRosterEntryReady(true)
     }
   ), [client])
-  const loadAgents = useCallback((): Promise<AgentProfile[]> => memberRosterReader.refresh(), [memberRosterReader])
+  const loadAgents = useCallback((): Promise<AgentProfile[]> => memberRosterReader.refresh().catch(error => {
+    setMemberReadIssue(reportOperationFailure('members.read', error).message)
+    throw error
+  }), [memberRosterReader])
 
   useEffect(() => {
     if (startupStatus !== 'resolved' || view !== 'members') return
     // Enter the page with its current roster; the read must not block navigation.
-    void loadAgents().catch((nextError) => setError(errorMessage(nextError)))
+    void loadAgents().catch(() => undefined)
   }, [loadAgents, startupStatus, view])
 
   const commitNavigation = useCallback((
@@ -1585,6 +1623,7 @@ export function BusinessApp({
         onRows: (rows, requestedIds) => {
           const pinnedIds = new Set(pinnedThreadIdsRef.current)
           const updatedIds = new Set(requestedIds)
+          if (requestedIds.some(id => pinnedIds.has(id))) setPinReadIssue(null)
           setPinnedThreadItems(current => [
             ...current.filter(thread => pinnedIds.has(thread.id) && !updatedIds.has(thread.id)),
             ...rows.threads.filter(thread => pinnedIds.has(thread.id) && !deletingThreadIdsRef.current.has(thread.id))
@@ -1607,9 +1646,15 @@ export function BusinessApp({
     return snapshot
   }, [navigationRefreshCoordinator])
 
-  useEffect(() => {
-    void navigationRefreshCoordinator.refreshPins().catch(nextError => setError(errorMessage(nextError)))
-  }, [navigationRefreshCoordinator, navigationPins])
+  const loadPins = useCallback(async (): Promise<void> => {
+    try {
+      await retryRead(navigationRefreshCoordinator.refreshPins)
+      setPinReadIssue(null)
+    } catch (error) {
+      setPinReadIssue(reportOperationFailure('navigation.pins.read', error).message)
+    }
+  }, [navigationRefreshCoordinator])
+  useEffect(() => { void loadPins() }, [loadPins, navigationPins])
 
   const retryThreadDeletion = useCallback((operationId: string): void => {
     const retry = (): void => {
@@ -1711,7 +1756,7 @@ export function BusinessApp({
   }, [uiPreferences, applyNavigationPreferences, legacySelectedProject, notifyError])
 
   const loadInstallations = useMemo(() => createRuntimeRefresh(async () => {
-    const next = await client.request<AdapterInstallation[]>('runtime.installations.list')
+    const next = await retryRead(() => client.request<AdapterInstallation[]>('runtime.installations.list'))
     setInstallations(next)
     return next
   }), [client])
@@ -1719,7 +1764,7 @@ export function BusinessApp({
   const loadOverview = useCallback((showLoading = false): Promise<boolean> => {
     if (showLoading) setState('loading')
     if (overviewRequest.current) return overviewRequest.current
-    setError(null)
+    setError(current => current?.operation === 'overview.read' || current?.operation === 'core.recover' ? null : current)
     const request = (async (): Promise<boolean> => {
       try {
         // Navigation is the most broadly useful Overview projection. Route-specific
@@ -1754,15 +1799,14 @@ export function BusinessApp({
           nextAgentsPromise,
           nextInstallationsPromise
         ])
-        const firstFailure = results.find(
-          (result): result is PromiseRejectedResult => result.status === 'rejected'
-        )
-        if (firstFailure) setError(errorMessage(firstFailure.reason))
-        const navigationReady = results[0]?.status === 'fulfilled'
+        const navigationReady = results[0].status === 'fulfilled'
+        if (results[0].status === 'rejected' && !navigationSnapshotRef.current) {
+          showOperationError('overview.read', results[0].reason)
+        }
         setState(navigationReady ? 'ready' : 'error')
         return navigationReady
       } catch (nextError) {
-        setError(errorMessage(nextError))
+        if (!navigationSnapshotRef.current) showOperationError('overview.read', nextError)
         setState(navigationSnapshotRef.current ? 'ready' : 'error')
         return false
       }
@@ -1772,7 +1816,7 @@ export function BusinessApp({
       if (overviewRequest.current === request) overviewRequest.current = null
     }).catch(() => undefined)
     return request
-  }, [loadAgents, loadInstallations, loadNavigation, applyNavigationPreferences, completeLegacyProjects])
+  }, [loadAgents, loadInstallations, loadNavigation, applyNavigationPreferences, completeLegacyProjects, showOperationError, uiPreferences])
 
   useEffect(() => {
     let cancelled = false
@@ -1799,12 +1843,16 @@ export function BusinessApp({
     setHealthLoading(true)
     try {
       const results = await Promise.allSettled([
-        client.request<RuntimeStatus>('runtime.status.get'),
+        retryRead(() => client.request<RuntimeStatus>('runtime.status.get')),
         loadInstallations()
       ])
       if (results[0].status === 'fulfilled') setHealth(results[0].value)
       const failure = results.find(result => result.status === 'rejected')
       if (failure?.status === 'rejected') throw failure.reason
+      setRuntimeReadIssue(null)
+    } catch (error) {
+      setRuntimeReadIssue(reportOperationFailure('runtime.read', error).message)
+      throw error
     } finally { setHealthLoading(false) }
   }), [client, loadInstallations])
 
@@ -1961,7 +2009,8 @@ export function BusinessApp({
     }
     // A preview commits navigation before the authoritative request finishes.
     // Fork recovery must preserve the current page until full opening succeeds.
-    if (previewSnapshot && !previewSnapshot.thread.archivedAt && !options.stayOnOpenFailure) {
+    const openingFromCache = previewSnapshot && !previewSnapshot.thread.archivedAt && !options.stayOnOpenFailure
+    if (openingFromCache) {
       commitThreadSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
@@ -2002,10 +2051,8 @@ export function BusinessApp({
           `[camp-open] trace=${traceId} stage=renderer_background_complete `
           + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
         )
-      })().catch((nextError) => {
-        if (selectionGeneration === campSelectionGeneration.current) {
-          setError(errorMessage(nextError))
-        }
+      })().catch(error => {
+        if (selectionGeneration === campSelectionGeneration.current) reportOperationFailure('navigation.read', error)
       })
       return true
     } catch (nextError) {
@@ -2013,18 +2060,33 @@ export function BusinessApp({
       clearThreadOpenFeedback()
       if (transaction && !transaction.isCurrent()) return false
       // A removed historical resource resolves to a real page by replacing this entry.
-      const exists = await client.request<boolean>('threads.exists', { threadId }).catch(() => true)
-      if (transaction && !transaction.isCurrent()) return false
+      const failure = normalizeFailure(nextError)
+      const exists = failure.kind === 'connection' || await client.request<boolean>('threads.exists', { threadId }).catch(() => true)
+      if (selectionGeneration !== campSelectionGeneration.current || (transaction && !transaction.isCurrent())) return false
       if (!exists && !options.stayOnOpenFailure && transaction?.commit({ kind: 'quick_chat' })) {
         setActiveThreadId(null)
         setThreadSnapshot(null)
         setView('compose')
       } else if (!options.suppressErrors) {
-        setError(errorMessage(nextError))
+        const target = navigationSnapshotRef.current && allNavigationThreads(navigationSnapshotRef.current).find(thread => thread.id === threadId)
+        const subject = options.title ?? (target ? formatThreadTitle(target) : undefined)
+        const visit = desktopNavigation.captureVisit()
+        const feedback = reportOperationFailure(openingFromCache ? 'thread.refresh' : 'thread.open', nextError, subject)
+        const action: AppToastAction = {
+          label: uiAttribute('重试'), icon: 'retry',
+          onSelect: () => {
+            if (!visit.isCurrent() || selectionGeneration !== campSelectionGeneration.current || shuttingDownRef.current) return
+            const navigate = campSnapshotEntryPreviewRef.current && activeThreadIdRef.current === threadId
+              ? desktopNavigation.replace : desktopNavigation.push
+            void navigate({ kind: 'camp', threadId }, { campOptions: options })
+          }
+        }
+        if (openingFromCache) setToast({ message: feedback.message, tone: 'neutral', actions: [action] })
+        else notifyError(feedback.message, action)
       }
       return false
     }
-  }, [clearThreadOpenFeedback, navigationRefreshCoordinator, notify, requestThreadProjection, setThreadSnapshot, showArchiveLanding, userAnchorNavigationFor])
+  }, [clearThreadOpenFeedback, client, desktopNavigation, navigationRefreshCoordinator, notify, notifyError, requestThreadProjection, setThreadSnapshot, showArchiveLanding])
 
   const activateThread = useCallback(async (
     threadId: string,
@@ -2139,41 +2201,55 @@ export function BusinessApp({
   }), [activateThread])
 
   const threadRefreshIsCurrent = useCallback((threadId: string): boolean =>
-    activeThreadIdRef.current === threadId && !deletingThreadIdsRef.current.has(threadId), [])
+    viewRef.current === 'camp' && activeThreadIdRef.current === threadId
+      && !deletingThreadIdsRef.current.has(threadId) && !shuttingDownRef.current, [])
 
   const refreshActiveThreadSnapshotOnce = useCallback(async (threadId: string): Promise<void> => {
+    const visit = desktopNavigation.captureVisit()
+    const isCurrent = () => visit.isSameVisit() && threadRefreshIsCurrent(threadId)
     let snapshot: ThreadSurfaceSnapshot
     try {
       snapshot = (await requestThreadProjection(threadId, 'open')).snapshot
     } catch (nextError) {
-      if (!threadRefreshIsCurrent(threadId)) return
+      if (!isCurrent()) return
+      if (normalizeFailure(nextError).kind === 'connection') throw nextError
       // Web invalidation can arrive before the delete receipt, or from another
       // client. Confirm removal through Core instead of treating a stale read as
       // a failed delete; a failed existence check still preserves the read error.
       const exists = await client.request<boolean>('threads.exists', { threadId }).catch(() => true)
-      if (!threadRefreshIsCurrent(threadId)) return
+      if (!isCurrent()) return
       if (!exists) {
         hideAcceptedThreadDeletion(threadId)
         return
       }
       throw nextError
     }
-    if (!threadRefreshIsCurrent(threadId)) return
+    if (!isCurrent()) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
     setThreadSnapshot(snapshot)
     setConfirmingRunIds(new Set())
-  }, [client, requestThreadProjection, setThreadSnapshot, threadRefreshIsCurrent])
+  }, [client, desktopNavigation, requestThreadProjection, setThreadSnapshot, threadRefreshIsCurrent])
 
   const activeThreadRefreshCoordinator = useMemo(
     () => createActiveThreadRefreshCoordinator(refreshActiveThreadSnapshotOnce, threadRefreshIsCurrent),
     [refreshActiveThreadSnapshotOnce, threadRefreshIsCurrent]
   )
 
-  const refreshActiveThreadSnapshot = useCallback(
-    (threadId: string): Promise<void> => activeThreadRefreshCoordinator.refresh(threadId),
-    [activeThreadRefreshCoordinator]
-  )
+  const refreshActiveThreadSnapshot = useCallback(async (threadId: string): Promise<void> => {
+    const visit = desktopNavigation.captureVisit()
+    await activeThreadRefreshCoordinator.refresh(threadId)
+    if (visit.isSameVisit() && threadRefreshIsCurrent(threadId)) threadRefreshRecovery.succeeded(threadId, 'snapshot')
+  }, [activeThreadRefreshCoordinator, desktopNavigation, threadRefreshIsCurrent, threadRefreshRecovery])
+
+  const refreshThreadInBackground = useCallback(async (threadId: string): Promise<void> => {
+    if (!threadRefreshIsCurrent(threadId) || threadRefreshRecovery.isRecovering(threadId)) return
+    const visit = desktopNavigation.captureVisit()
+    const read = () => refreshActiveThreadSnapshot(threadId)
+    await read().catch(error => {
+      if (visit.isSameVisit()) return threadRefreshRecovery.recover(threadId, 'snapshot', read, error)
+    })
+  }, [desktopNavigation, refreshActiveThreadSnapshot, threadRefreshIsCurrent, threadRefreshRecovery])
 
   useEffect(() => {
     if (!taskCapability.ready) return
@@ -2293,10 +2369,10 @@ export function BusinessApp({
   useEffect(() => {
     if (desktop) void loadStartupSnapshot()
     else {
-      void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
+      void readGeneralPreferences()
       void loadOverview(true)
     }
-  }, [desktop, loadStartupSnapshot, loadOverview, uiPreferences])
+  }, [desktop, loadStartupSnapshot, loadOverview, readGeneralPreferences])
 
   useEffect(() => {
     if (desktop) void loadOnboarding()
@@ -2323,7 +2399,7 @@ export function BusinessApp({
       expectedDefaults: generalPreferences?.newConversationDefaults ?? null
     })
       .then(setGeneralPreferences)
-      .catch((nextError) => setError(errorMessage(nextError)))
+      .catch(error => reportOperationFailure('preferences.save', error))
       .finally(() => {
         invalidatingNewConversationDefaults.current = false
         // Coalesce observations received in flight; an unchanged receipt alone never retries.
@@ -2517,10 +2593,8 @@ export function BusinessApp({
             `[camp-open] trace=${traceId} stage=renderer_background_complete source=startup `
             + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
           )
-        })().catch((nextError) => {
-          if (!cancelled && selectionGeneration === campSelectionGeneration.current) {
-            setError(errorMessage(nextError))
-          }
+        })().catch(error => {
+          if (!cancelled && selectionGeneration === campSelectionGeneration.current) reportOperationFailure('navigation.read', error)
         })
         return
       }
@@ -2610,23 +2684,30 @@ export function BusinessApp({
     completeStartup(startupSnapshot.sessionId)
   }, [completeStartup, startupRouteTarget, startupSnapshot, view])
 
-  useEffect(() => {
-    let active = true
-    const acceptSnapshot = (snapshot: AppearanceSnapshot): void => {
-      applyAppearanceSnapshot(document.documentElement, snapshot)
-      if (active) setAppearance(snapshot)
+  const appearanceReadGeneration = useRef(0)
+  const acceptAppearance = useCallback((snapshot: AppearanceSnapshot): void => {
+    appearanceReadGeneration.current += 1
+    applyAppearanceSnapshot(document.documentElement, snapshot)
+    setAppearance(snapshot)
+    setAppearanceReadIssue(null)
+  }, [])
+  const readAppearance = useCallback(async (): Promise<void> => {
+    const request = ++appearanceReadGeneration.current
+    try {
+      const snapshot = await retryRead(() => uiPreferences.appearance.get())
+      if (request === appearanceReadGeneration.current) acceptAppearance(snapshot)
+    } catch (error) {
+      if (request === appearanceReadGeneration.current) setAppearanceReadIssue(reportOperationFailure('appearance.read', error).message)
     }
-    const unsubscribe = uiPreferences.appearance.onChanged(acceptSnapshot)
-    void uiPreferences.appearance.get()
-      .then(acceptSnapshot)
-      .catch((nextError) => {
-        if (active) setError(errorMessage(nextError))
-      })
+  }, [acceptAppearance, uiPreferences])
+  useEffect(() => {
+    const unsubscribe = uiPreferences.appearance.onChanged(acceptAppearance)
+    void readAppearance()
     return () => {
-      active = false
+      appearanceReadGeneration.current += 1
       unsubscribe?.()
     }
-  }, [])
+  }, [acceptAppearance, readAppearance, uiPreferences])
 
   useEffect(() => {
     if (startupStatus !== 'resolved') return
@@ -2636,7 +2717,7 @@ export function BusinessApp({
       health !== null,
       healthAttempted
     )) return
-    void loadRuntime().catch((nextError) => setError(errorMessage(nextError)))
+    void loadRuntime().catch(() => undefined)
   }, [health, healthAttempted, loadRuntime, settingsSection, startupStatus, view])
 
   useEffect(() => {
@@ -2765,10 +2846,10 @@ export function BusinessApp({
         setMemoryRefreshKey(current => current + 1)
       }
       if (event.method === 'preferences.new_conversation_changed') {
-        void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
+        void readGeneralPreferences()
       }
       if (event.method === 'members.invalidated' && (viewRef.current === 'members' || viewRef.current === 'camp')) {
-        void loadAgents().catch((nextError) => setError(errorMessage(nextError)))
+        void loadAgents().catch(() => undefined)
       }
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
@@ -2780,7 +2861,9 @@ export function BusinessApp({
           setToast(null)
         } else if (runtimeStatus === 'crashed') {
           setState('error')
-          setError(stringField(params, 'message') ?? uiAttribute('后台服务已停止。'))
+          showOperationError('core.recover', {
+            kind: 'infrastructure_failure', code: 'core_process_exited', message: stringField(params, 'message')
+          })
         } else if (runtimeStatus === 'starting' || runtimeStatus === 'restarting') {
           campViewedAcknowledgements.current.clear()
           setOpenedNavigationRow(null)
@@ -2828,31 +2911,18 @@ export function BusinessApp({
       if (isArchiveChangeEvent(event) && params.threadId === threadId && typeof params.throughGlobalSequence === 'number') {
         campEventSequenceMarker.current = Math.max(campEventSequenceMarker.current, params.throughGlobalSequence)
       }
-      const refresh = threadId && deletingThreadIdsRef.current.has(threadId)
-        ? null
-        : refreshActiveThreadForCoreEvent(
-            event,
-            threadId,
-            activeThreadRefreshCoordinator,
-            shuttingDownRef.current
-          )
-      if (refresh && threadId) {
-        void refresh.catch((nextError) => {
-          if (threadRefreshIsCurrent(threadId)) setError(errorMessage(nextError))
-        })
-      }
+      void refreshActiveThreadForCoreEvent(event, threadId, { refresh: refreshThreadInBackground }, shuttingDownRef.current)
     })
     return () => { unsubscribe?.() }
   }, [
-    activeThreadRefreshCoordinator,
+    refreshThreadInBackground,
+    readGeneralPreferences,
     loadRuntime,
-    loadInstallations,
     loadAgents,
-    loadMemberData,
     loadOverview,
     loadThreadDeletionIssues,
     navigationRefreshCoordinator,
-    threadRefreshIsCurrent
+    showOperationError
   ])
 
   useEffect(() => {
@@ -2926,7 +2996,7 @@ export function BusinessApp({
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
-    if (client.onInvalidated || !activeThreadId || campSnapshot?.thread.id !== activeThreadId) return undefined
+    if (client.onInvalidated || shuttingDown || !activeThreadId || campSnapshot?.thread.id !== activeThreadId) return undefined
     const threadId = activeThreadId
     let memoryNoticeFloor = campEventSequenceMarker.current
     let resumeMemoryNotices = false
@@ -2938,58 +3008,66 @@ export function BusinessApp({
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setThreadSnapshot(snapshot)
       setConfirmingRunIds((current) => reconcileRunCancellationIds(current, snapshot))
+      threadRefreshRecovery.succeeded(threadId, 'snapshot')
+    }
+
+    const readEvents = async (): Promise<void> => {
+      const memoryObservation = memoryCapabilityRef.current.beginObservation()
+      const batch = await client.request<EventBatch>('events.subscribe', {
+        threadId,
+        afterGlobalSequence: campEventSequenceMarker.current,
+        limit: 250
+      })
+      if (cancelled) return
+      const capability = batch.memoryCapability !== undefined
+        ? memoryCapabilityRef.current.acceptSnapshot(batch.memoryCapability, memoryObservation)
+        : memoryCapabilityRef.current
+      const memoryResumed = resumeMemoryNotices || batch.resetRequired
+      if (memoryResumed || !capability?.enabled || !memoryCapabilityRef.current.active) {
+        memoryNoticeFloor = Math.max(memoryNoticeFloor, batch.throughGlobalSequence)
+        resumeMemoryNotices = false
+      }
+      const memoryEvents = memoryEventsForNotice(batch.events, capability, memoryCapabilityRef.current.active, memoryNoticeFloor)
+      const noticeSequence = capability?.observedThroughChangeSequence
+      const noticeBoundary = capability?.headsUpAfterGlobalSequence ?? memoryNoticeFloor
+      const reviewSequence = memoryEvents.reduce((sequence, event) => event.eventType === 'memory.hearth_review_created' ? Math.max(sequence, event.globalSequence) : sequence, 0)
+      const autoAppliedEvents = memoryEvents.filter((event) =>
+        event.eventType === 'memory.agent_created' || event.eventType === 'memory.agent_revised'
+      )
+      if (reviewSequence > 0 || autoAppliedEvents.length > 0) {
+        if (reviewSequence > 0) setMemoryReviewNotice(current => Math.max(current ?? 0, reviewSequence))
+        if (autoAppliedEvents.length > 0) {
+          setMemoryAutoNotice((current) => collectMemoryChanges(memoryChangesAfter(current, noticeBoundary), autoAppliedEvents))
+          const lastChange = collectMemoryChanges([], autoAppliedEvents).at(-1)
+          if (lastChange && lastChange.scope === null) {
+            void client.request<MemoryRecord>('memory.get', { memoryId: lastChange.memoryId })
+              .then((memory) => {
+                if (!cancelled && memoryCapabilityRef.current.active && memoryCapabilityRef.current.observedThroughChangeSequence === noticeSequence) setMemoryAutoNotice((current) => resolveMemoryChangeScope(current, lastChange.memoryId, lastChange.sequence, memory.scope))
+              })
+              .catch(() => undefined)
+          }
+        }
+      }
+      // Live content uses global memory.changed; this scoped poll only repairs gaps.
+      if (capability?.enabled && memoryCapabilityRef.current.active && memoryResumed) {
+        setMemoryRefreshKey(current => current + 1)
+      }
+      if (batch.schemaVersion !== 9 || batch.resetRequired || batch.events.length > 0) {
+        await refreshSnapshot()
+      } else {
+        campEventSequenceMarker.current = batch.nextGlobalSequence
+      }
     }
 
     const poll = async (): Promise<void> => {
       try {
-        const memoryObservation = memoryCapabilityRef.current.beginObservation()
-        const batch = await client.request<EventBatch>('events.subscribe', {
-          threadId,
-          afterGlobalSequence: campEventSequenceMarker.current,
-          limit: 250
-        })
-        if (cancelled) return
-        const capability = batch.memoryCapability !== undefined
-          ? memoryCapabilityRef.current.acceptSnapshot(batch.memoryCapability, memoryObservation)
-          : memoryCapabilityRef.current
-        const memoryResumed = resumeMemoryNotices || batch.resetRequired
-        if (memoryResumed || !capability?.enabled || !memoryCapabilityRef.current.active) {
-          memoryNoticeFloor = Math.max(memoryNoticeFloor, batch.throughGlobalSequence)
-          resumeMemoryNotices = false
-        }
-        const memoryEvents = memoryEventsForNotice(batch.events, capability, memoryCapabilityRef.current.active, memoryNoticeFloor)
-        const noticeSequence = capability?.observedThroughChangeSequence
-        const noticeBoundary = capability?.headsUpAfterGlobalSequence ?? memoryNoticeFloor
-        const reviewSequence = memoryEvents.reduce((sequence, event) => event.eventType === 'memory.hearth_review_created' ? Math.max(sequence, event.globalSequence) : sequence, 0)
-        const autoAppliedEvents = memoryEvents.filter((event) =>
-          event.eventType === 'memory.agent_created' || event.eventType === 'memory.agent_revised'
-        )
-        if (reviewSequence > 0 || autoAppliedEvents.length > 0) {
-          if (reviewSequence > 0) setMemoryReviewNotice(current => Math.max(current ?? 0, reviewSequence))
-          if (autoAppliedEvents.length > 0) {
-            setMemoryAutoNotice((current) => collectMemoryChanges(memoryChangesAfter(current, noticeBoundary), autoAppliedEvents))
-            const lastChange = collectMemoryChanges([], autoAppliedEvents).at(-1)
-            if (lastChange && lastChange.scope === null) {
-              void client.request<MemoryRecord>('memory.get', { memoryId: lastChange.memoryId })
-                .then((memory) => {
-                  if (!cancelled && memoryCapabilityRef.current.active && memoryCapabilityRef.current.observedThroughChangeSequence === noticeSequence) setMemoryAutoNotice((current) => resolveMemoryChangeScope(current, lastChange.memoryId, lastChange.sequence, memory.scope))
-                })
-                .catch(() => undefined)
-            }
-          }
-        }
-        // Live content uses global memory.changed; this scoped poll only repairs gaps.
-        if (capability?.enabled && memoryCapabilityRef.current.active && memoryResumed) {
-          setMemoryRefreshKey(current => current + 1)
-        }
-        if (batch.schemaVersion !== 9 || batch.resetRequired || batch.events.length > 0) {
-          await refreshSnapshot()
-        } else {
-          campEventSequenceMarker.current = batch.nextGlobalSequence
-        }
+        await readEvents()
+        if (!cancelled) threadRefreshRecovery.succeeded(threadId, 'events')
       } catch (nextError) {
         resumeMemoryNotices = true
-        if (!cancelled) setError(errorMessage(nextError))
+        if (!cancelled) {
+          await threadRefreshRecovery.recover(threadId, 'events', readEvents, nextError)
+        }
       } finally {
         if (!cancelled) timer = setTimeout(() => void poll(), 1_400)
       }
@@ -3000,7 +3078,7 @@ export function BusinessApp({
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [activeThreadId, campSnapshot?.thread.id, requestThreadProjection, setThreadSnapshot])
+  }, [activeThreadId, campSnapshot?.thread.id, client, requestThreadProjection, setThreadSnapshot, shuttingDown, threadRefreshRecovery])
 
   useEffect(() => client.onInvalidated?.((change) => {
     if (memoryCapabilityRef.current.active && viewRef.current !== 'memory'
@@ -3008,17 +3086,13 @@ export function BusinessApp({
     if (!change || change.resync || change.referencesChanged) campSnapshotCache.current.clear()
     campViewedAcknowledgements.current.clear()
     setOpenedNavigationRow(null)
-    void uiPreferences.generalPreferences.get().then(setGeneralPreferences).catch((e) => setError(errorMessage(e)))
+    void readGeneralPreferences()
     void loadNavigation('invalidation').catch(() => undefined)
     void loadThreadDeletionIssues().catch(() => undefined)
     const threadId = activeThreadIdRef.current
-    if (threadId && !deletingThreadIdsRef.current.has(threadId)) {
-      void activeThreadRefreshCoordinator.refresh(threadId).catch((e) => {
-        if (threadRefreshIsCurrent(threadId)) setError(errorMessage(e))
-      })
-    }
+    if (threadId) void refreshThreadInBackground(threadId)
     void loadAgents().catch(() => undefined)
-  }), [client, uiPreferences, loadNavigation, loadThreadDeletionIssues, loadAgents, activeThreadRefreshCoordinator, threadRefreshIsCurrent])
+  }), [client, readGeneralPreferences, loadNavigation, loadThreadDeletionIssues, loadAgents, refreshThreadInBackground])
 
   const chooseCurrentProject = (
     nextProject: CurrentProject,
@@ -3082,7 +3156,7 @@ export function BusinessApp({
       return 'dialog'
     } catch (nextError) {
       if (!intent.isCurrent()) return 'ignored'
-      setError(uiAttribute("默认队员设置读取失败：{0}", String(errorMessage(nextError))))
+      showOperationError('preferences.read', nextError)
       return 'ignored'
     } finally { newConversationRequestBusy.current = false }
   }
@@ -3170,7 +3244,7 @@ export function BusinessApp({
     if (viewRef.current === 'settings' || viewRef.current === 'memory') void desktopNavigation.push(section === 'memory' ? { kind: 'memory', memoryId: null } : { kind: 'settings', section })
     void uiPreferences.generalPreferences.setLastSettingsSection(section)
       .then(setGeneralPreferences)
-      .catch((nextError) => setError(errorMessage(nextError)))
+      .catch(error => showOperationError('preferences.save', error))
   }
 
   const navigateToSettings = async (section: SettingsSection): Promise<boolean> => {
@@ -3238,7 +3312,7 @@ export function BusinessApp({
       if (((viewRef.current === 'members' || (commonEnvironmentReturnRef.current && target.kind !== 'settings')) && target.kind !== 'members' || viewRef.current === 'teams' && target.kind !== 'teams') && !context?.prepared && !context?.memberPrepared) await requestMemberTransition(leave)
       else await leave()
     } catch (nextError) {
-      if (transaction.isCurrent()) setError(errorMessage(nextError))
+      if (transaction.isCurrent()) showOperationError(target.kind === 'camp' ? 'thread.open' : 'navigation.action', nextError)
     }
   }
 
@@ -3282,7 +3356,7 @@ export function BusinessApp({
       heading?.scrollIntoView({ block: 'nearest' })
       return Boolean(heading)
     } catch (nextError) {
-      setError(uiAttribute("无法打开更新内容：{0}", String(errorMessage(nextError))))
+      showOperationError('updates.open', nextError, () => void openUpdateSettings(prompt))
       return false
     }
   }
@@ -3327,8 +3401,8 @@ export function BusinessApp({
   }
 
   const chooseThread = (thread: NavigationThreadTarget): void => {
-    void activateThread(thread.id, { reconcileDefaultLead: thread.activationState !== 'pending' })
-      .catch((nextError) => notifyError(errorMessage(nextError)))
+    void activateThread(thread.id, { reconcileDefaultLead: thread.activationState !== 'pending', title: formatThreadTitle(thread) })
+      .catch(error => notifyError(reportOperationFailure('thread.open', error, formatThreadTitle(thread)).message))
   }
 
   const openSearchResult = (row: NavigationSearchRow): void => {
@@ -3343,7 +3417,7 @@ export function BusinessApp({
     void activateThread(thread.id, {
       reconcileDefaultLead: kind === 'thread' && thread.activationState !== 'pending',
       missionPresentation: kind === 'mission' ? 'drawer' : undefined,
-      navigationFind
+      navigationFind, title: formatThreadTitle(thread)
     }).then(opened => {
       if (opened && kind === 'mission' && activeThreadIdRef.current === thread.id && viewRef.current === 'camp') {
         setMissionOpenRequest(value => value + 1)
@@ -3605,8 +3679,8 @@ export function BusinessApp({
               thread ?? (navigation ? allNavigationThreads(navigation).find((item) => item.id === targetKey) : undefined)
             ].filter((item): item is NavigationThreadItem => Boolean(item)))
       }
-    } catch (nextError) {
-      setError(errorMessage(nextError))
+    } catch (error) {
+      showOperationError('navigation.pin', error)
     }
   }
 
@@ -3772,102 +3846,89 @@ export function BusinessApp({
   }
 
   const cancelAgentRun = async (run: AgentRunView): Promise<void> => {
-    const threadId = activeThreadId
-    if (!threadId || campSnapshotRef.current?.thread.id !== threadId) return
-    setError(null)
-    setConfirmingRunIds((current) => {
-      const next = new Set(current)
-      next.delete(run.id)
-      return next
-    })
-    setCancellingRunIds((current) => new Set(current).add(run.id))
+    const threadId = activeThreadIdRef.current
+    if (!threadId || campSnapshotRef.current?.thread.id !== threadId
+      || inFlightRunStops.current.has(run.id) || shuttingDownRef.current) return
+    const visit = desktopNavigation.captureVisit()
+    const isInOrigin = () => visit.isCurrent() && viewRef.current === 'camp' && !shuttingDownRef.current
+    inFlightRunStops.current.add(run.id)
+    setError(current => current?.operation === 'run.stop' ? null : current)
+    setConfirmingRunIds(current => new Set([...current].filter(id => id !== run.id)))
+    setCancellingRunIds(current => new Set(current).add(run.id))
 
-    const stopCommandId = newCommandId()
-    let result: StoredCommandResult
     try {
-      result = await client.request<StoredCommandResult>('agentRuns.cancel', {
-        commandId: stopCommandId,
-        command: {
-          threadId,
-          agentRunId: run.id,
-          expectedVersion: run.version
-        }
-      })
-    } catch {
-      setCancellingRunIds((current) => {
-        const next = new Set(current)
-        next.delete(run.id)
-        return next
-      })
-      setConfirmingRunIds((current) => new Set(current).add(run.id))
+      let result: StoredCommandResult
       try {
-        const { snapshot } = await requestThreadProjection(threadId, 'open')
-        if (activeThreadIdRef.current === threadId) {
-          campEventSequenceMarker.current = Math.max(
-            campEventSequenceMarker.current,
-            snapshot.throughGlobalSequence
-          )
-          setThreadSnapshot(snapshot)
+        result = await requestRunStop(client, threadId, run, async () => {
+          if (!isInOrigin()) return null
+          await refreshActiveThreadSnapshot(threadId)
+          if (!isInOrigin() || campSnapshotRef.current?.thread.id !== threadId || deletingThreadIdsRef.current.has(threadId)) return null
+          return campSnapshotRef.current.agentRuns.find(item => item.id === run.id)?.version ?? null
+        })
+      } catch {
+        if (isInOrigin()) {
+          setConfirmingRunIds(current => new Set(current).add(run.id))
+          try {
+            const { snapshot } = await requestThreadProjection(threadId, 'open')
+            if (isInOrigin() && snapshot.throughGlobalSequence >= campEventSequenceMarker.current) {
+              campEventSequenceMarker.current = snapshot.throughGlobalSequence
+              setThreadSnapshot(snapshot)
+              setConfirmingRunIds(current => reconcileRunCancellationIds(current, snapshot))
+            }
+          } catch {
+            // A later authoritative refresh settles the unknown stop result.
+          }
         }
-        setConfirmingRunIds((current) => reconcileRunCancellationIds(current, snapshot))
-      } catch {
-        // Keep the uncertainty projection until a later authoritative Thread refresh converges it.
+        return
       }
-      return
-    }
 
-    if (result.status === 'rejected') {
-      setCancellingRunIds((current) => {
-        const next = new Set(current)
-        next.delete(run.id)
-        return next
-      })
-      setConfirmingRunIds((current) => {
-        const next = new Set(current)
-        next.delete(run.id)
-        return next
-      })
-      try {
-        await refreshActiveThreadSnapshot(threadId)
-      } catch {
-        // The deterministic command result remains authoritative even if this refresh fails.
+      if (result.status === 'rejected') {
+        if (!isInOrigin()) return
+        if (result.code === 'agent_run.turn_cancellation_in_progress') {
+          const turnId = run.threadTurnId
+          if (turnId) setCancellingTurnIds(current => new Set(current).add(turnId))
+        } else {
+          showOperationError('run.stop', result)
+        }
+        void refreshThreadInBackground(threadId)
+        return
       }
-      setError(commandFailureMessage(result))
-      return
-    }
 
-    if (campSnapshotRef.current?.thread.id === threadId) {
-      setThreadSnapshot(applyCancellationResult(campSnapshotRef.current, result))
-    }
-    setCancellingRunIds((current) => new Set([...current].filter((id) => id !== run.id)))
-    setConfirmingRunIds((current) => new Set([...current].filter((id) => id !== run.id)))
-    try {
-      await refreshActiveThreadSnapshot(threadId)
-    } catch {
-      // Core's terminal response already clears stopping; the next poll fills in the rest.
+      if (campSnapshotRef.current?.thread.id === threadId) {
+        setThreadSnapshot(applyCancellationResult(campSnapshotRef.current, result))
+      }
+      void refreshThreadInBackground(threadId)
+    } finally {
+      inFlightRunStops.current.delete(run.id)
+      setCancellingRunIds(current => new Set([...current].filter(id => id !== run.id)))
     }
   }
 
   const changeDefaultLead = async (agentId: string): Promise<void> => {
-    if (!activeThreadId || campSnapshot?.thread.id !== activeThreadId) return
+    const threadId = activeThreadIdRef.current
+    const snapshot = campSnapshotRef.current
+    if (!threadId || snapshot?.thread.id !== threadId) return
+    const visit = desktopNavigation.captureVisit()
+    const subject = snapshot.members.find(member => member.agentId === agentId)?.displayName
     setBusy('change-default-lead')
-    setError(null)
+    setError(current => current?.operation === 'thread.lead.change' ? null : current)
     try {
       const result = await client.request<StoredCommandResult>('threads.changeDefaultLead', {
         commandId: newCommandId(),
-        command: {
-          threadId: activeThreadId,
-          successorAgentId: agentId
-        }
+        command: { threadId, successorAgentId: agentId }
       })
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      await Promise.all([
-        refreshActiveThreadSnapshot(activeThreadId),
-        navigationRefreshCoordinator.refreshThreads([activeThreadId], 'explicit')
-      ])
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-      throw nextError
+      if (result.status === 'rejected') {
+        if (visit.isSameVisit() && result.code === 'camp.default_lead_unavailable') {
+          notify(reportOperationFailure('thread.lead.change', result, subject).message)
+          void refreshThreadInBackground(threadId)
+          return
+        }
+        throw new OperationFailure(normalizeFailure(result))
+      }
+      void refreshThreadInBackground(threadId)
+      void navigationRefreshCoordinator.refreshThreads([threadId], 'explicit').catch(error => reportOperationFailure('navigation.read', error))
+    } catch (error) {
+      if (visit.isSameVisit()) showOperationError('thread.lead.change', error)
     } finally {
       setBusy(null)
     }
@@ -4218,7 +4279,7 @@ export function BusinessApp({
             )
             if (selectionGeneration === campSelectionGeneration.current) await navigationRefreshCoordinator.invalidate({ scope: 'group', threadId })
           })
-          .catch((nextError) => setError(errorMessage(nextError)))
+          .catch(error => reportOperationFailure('navigation.read', error))
       }
       return {
         ...(threadMessageId ? { threadMessageId } : {}),
@@ -4270,24 +4331,20 @@ export function BusinessApp({
     approval: ActionApprovalView,
     optionId: string
   ): Promise<void> => {
-    if (!activeThreadId) return
+    const threadId = activeThreadIdRef.current
+    if (!threadId) return
     setBusy(`action-approval-${approval.id}`)
-    setError(null)
     try {
       const result = await client.request<StoredCommandResult>('action.approvals.resolve', {
         commandId: newCommandId(),
-        threadId: activeThreadId,
+        threadId,
         approvalId: approval.id,
         expectedVersion: approval.version,
         optionId,
         reason: `用户选择智能体原生选项：${optionId}。`
       })
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      const { snapshot } = await requestThreadProjection(activeThreadId, 'open')
-      campEventSequenceMarker.current = snapshot.throughGlobalSequence
-      setThreadSnapshot(snapshot)
-    } catch (nextError) {
-      throw nextError
+      void refreshThreadInBackground(threadId)
+      if (result.status === 'rejected') throw new OperationFailure(normalizeFailure(result))
     } finally {
       setBusy(null)
     }
@@ -4360,7 +4417,7 @@ export function BusinessApp({
         const stored = await desktop.onboarding.get()
         if (stored.status === 'completed') {
           setOnboardingSnapshot(stored)
-          setError(uiAttribute("“初次集结”已保存，但当前页面还未完全打开：{0}", String(message)))
+          setError({ operation: 'thread.open', message: uiAttribute('“初次集结”已保存，请重新打开会话。') })
         } else {
           setOnboardingSnapshot(stored)
           setOnboardingError(message)
@@ -4535,8 +4592,12 @@ export function BusinessApp({
           {!shuttingDown && error && (
             <div className="error-banner" role="alert">
               <span className="error-icon" aria-hidden="true">!</span>
-              <div><strong><UiText zh={"操作未完成"} /></strong><span>{error}</span><small><UiText zh={"项目文件和已经写入的审计记录不会因此丢失。"} /></small></div>
-              <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}><UiText zh={"刷新状态"} /></button><button className="icon-button" aria-label={uiAttribute("关闭错误")} onClick={() => setError(null)}>×</button></div>
+              <div><strong>{operationFailureTitle(error.operation)}</strong><span>{error.message}</span></div>
+              <div className="error-actions">
+                {error.operation === 'overview.read' && <button className="quiet-button" type="button" onClick={() => void loadOverview()}><UiText zh="刷新状态" /></button>}
+                {error.retry && <button className="quiet-button" type="button" onClick={error.retry}><UiText zh="重试" /></button>}
+                <button className="icon-button" type="button" aria-label={uiAttribute("关闭错误")} onClick={() => setError(null)}>×</button>
+              </div>
             </div>
           )}
           {!shuttingDown && locationSaveError && (
@@ -4640,6 +4701,8 @@ export function BusinessApp({
     creatingConversation={busy === 'create-camp'}
     pins={navigationPins}
     pinnedThreadItems={pinnedThreadItems}
+    pinReadIssue={pinReadIssue}
+    onRetryPins={loadPins}
     threadReadStates={threadReadStates}
     onSetThreadUnread={setThreadUnread}
     onRevealProject={environment.revealProjectDirectory ? project => environment.revealProjectDirectory!(project.projectPath) : undefined}
@@ -4692,7 +4755,7 @@ export function BusinessApp({
     onRename={renameThread}
     onDelete={deleteThread}
     onDeleteError={(nextError) => notifyError(errorMessage(nextError))}
-    onError={(nextError) => setError(errorMessage(nextError))}
+    onError={error => showOperationError('navigation.action', error)}
   />
 
   return (
@@ -4744,6 +4807,10 @@ export function BusinessApp({
         {!startupGateVisible && view !== 'members' && view !== 'automations' && view !== 'memory' && inlineNotices}
         {!startupGateVisible && !shuttingDown && toast && (
           <AppToast toast={toast} onClose={() => setToast(current => current === toast ? null : current)} />
+        )}
+
+        {!startupGateVisible && !shuttingDown && view === 'camp' && threadRefreshToast && threadRefreshToast.threadId === activeThreadId && (
+          <AppToast toast={threadRefreshToast.toast} onClose={() => setThreadRefreshToast(current => current === threadRefreshToast ? null : current)} />
         )}
 
         {!startupGateVisible && startupStatus === 'waiting' && startupRoutePending?.kind === 'camp' && view === 'camp' && (
@@ -4944,6 +5011,9 @@ export function BusinessApp({
             onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onRuntimeLeaveGuardChange={registerRuntimeSettingsLeaveGuard}
             onReload={loadRuntime}
+            runtimeReadIssue={runtimeReadIssue}
+            appearanceReadIssue={appearanceReadIssue}
+            onReadAppearance={readAppearance}
             onAppearanceChange={changeAppearancePreferences}
           />
           </MobileSettingsLayout>
@@ -4976,7 +5046,11 @@ export function BusinessApp({
                       void desktopNavigation.push({ kind: 'settings', section: 'runtime' }, { memberPrepared: true, beforeCommit: () => setCommonEnvironmentReturn({ kind, memberId: member.agentId, memberName: member.displayName }) })
                     }}
                     agents={agents}
-                    topNotices={inlineNotices}
+                    topNotices={<>
+                      {inlineNotices}
+                      {memberReadIssue && <ReadIssue message={memberReadIssue} retry={loadAgents} />}
+                      {memberTab === 'runtime' && runtimeReadIssue && <ReadIssue message={runtimeReadIssue} retry={loadRuntime} />}
+                    </>}
                     installations={installations}
                     runtimeAvailability={health?.runtimeAvailability ?? []}
                     hostPlatform={health?.hostPlatform ?? null}
@@ -5199,6 +5273,13 @@ export function StartupRouteLoading({
 }
 
 
+function ReadIssue({ message, retry }: { message: string; retry(): Promise<unknown> }): React.JSX.Element {
+  return <div className="inline-error" role="alert">
+    <span>{message}</span>
+    <button className="quiet-button compact" type="button" onClick={() => void retry().catch(() => undefined)}><UiText zh="重试" /></button>
+  </div>
+}
+
 export function SettingsView({
   teams = [],
   preferencesApi,
@@ -5221,6 +5302,9 @@ export function SettingsView({
   commonEnvironmentReturn,
   onRuntimeLeaveGuardChange,
   onReload,
+  runtimeReadIssue,
+  appearanceReadIssue,
+  onReadAppearance,
   onAppearanceChange
 }: {
   teams?: Team[]
@@ -5244,6 +5328,9 @@ export function SettingsView({
   onRuntimeLeaveGuardChange?(guard: RuntimeStartupLeaveGuard | null): void
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
+  runtimeReadIssue?: string | null
+  appearanceReadIssue?: string | null
+  onReadAppearance?(): Promise<void>
   onAppearanceChange(preferences: AppearancePreferences): Promise<AppearanceSnapshot>
 }): React.JSX.Element {
   return (
@@ -5265,9 +5352,11 @@ export function SettingsView({
         <Activity mode={section === 'skills' ? 'visible' : 'hidden'}><NativeSkillsSettings health={health} /></Activity>
         <Activity mode={section === 'toolbox' ? 'visible' : 'hidden'}><ToolboxSettings agents={agents} /></Activity>
         <Activity mode={section === 'mcp' ? 'visible' : 'hidden'}><McpSettings agents={agents} platform={platform} /></Activity>
+        {section === 'runtime' && runtimeReadIssue && <ReadIssue message={runtimeReadIssue} retry={onReload} />}
         <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} commonEnvironmentReturn={commonEnvironmentReturn}
           active={section === 'runtime'} onLeaveGuardChange={onRuntimeLeaveGuardChange} />
         {section === 'channels' && <ChannelSettings agents={agents} />}
+        {section === 'appearance' && appearanceReadIssue && onReadAppearance && <ReadIssue message={appearanceReadIssue} retry={onReadAppearance} />}
         {section === 'appearance' && (
           <AppearanceSettings
             zoomManagedBy={zoomManagedBy}
@@ -5591,32 +5680,8 @@ export function campCreationPreflightFromAgents(
 }
 
 export function commandFailureMessage(result: StoredCommandResult): string {
-  if (result.code === 'team.conflict' || result.code === 'team.unavailable') {
-    return uiAttribute('团队已更改或不可用，请重新选择。')
-  }
-  if (result.code === 'reply_recipient_required') {
-    return uiAttribute("原作者当前不可接收，请选择其他成员。")
-  }
-  if (result.code === 'mention_target_unavailable') {
-    return uiAttribute("消息未发送：一位收件人当前不可接收，请重新选择。")
-  }
-  if (result.code === 'camp_message.invalid_reply') {
-    return uiAttribute("消息未发送：引用的消息当前不可用。请取消引用后重试。")
-  }
-  if (
-    result.code === 'camp_message.no_addressable_member'
-    || result.code === 'camp.default_lead_invariant'
-    || result.code === 'camp.no_present_members'
-  ) {
-    return uiAttribute("当前无可用队员。")
-  }
-  if (result.code === 'agent_run.runtime_not_ready') {
-    return uiAttribute("目标队员的智能体暂不可用。")
-  }
-  if (membershipConflictCode(result.code)) {
-    return uiAttribute("名册已发生变化。请重新读取最新状态后再试。")
-  }
-  return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? uiAttribute("操作未完成：{0}", String(result.code)))
+  return sharedRejectionMessage(result.code)
+    ?? localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? uiAttribute("操作未完成：{0}", String(result.code)))
 }
 
 function membershipConflictCode(code: string): boolean {

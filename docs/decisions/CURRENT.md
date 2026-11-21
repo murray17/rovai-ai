@@ -1,10 +1,12 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-16
+last_updated: 2026-11-21
 ---
 
 # 当前规范与决定理由导航
+
+操作失败的文案与恢复归[操作反馈](../ui/components/operation-feedback.md)，共享决定见 [V1.72-D91](../versions/v1.72/decisions.md#v1-72-d91)。
 
 导航搜索：[Navigation Search v1](../contracts/navigation-search-v1.md)、[App Shell 导航](../ui/components/app-shell-navigation.md#会话搜索)。
 名称与正文合并、分页和只读调度的取舍见 [V1.72-D90](../versions/v1.72/decisions.md#v1-72-d90)。

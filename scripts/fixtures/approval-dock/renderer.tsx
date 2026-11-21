@@ -1,3 +1,4 @@
+import { OperationFailure, normalizeFailure } from '../../../apps/desktop/src/renderer/src/operation-failure'
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { useRef, useState } from 'react'
@@ -53,6 +54,7 @@ let longRememberRule: () => void
 let nativeResponseDigests: () => string[]
 const rememberLabel = 'Yes, and don’t ask again for: rovai send *'
 const rememberScope = 'Bash(rovai send *)\nlocalSettings · .claude/settings.local.json'
+let approvalRejection: string | null = null
 let focusSerial = 0
 const presented: number[] = []
 
@@ -75,6 +77,7 @@ function Fixture() {
   manyOptions = () => setApprovals(previous => previous.map(item => ({ ...item, options: Array.from({ length: 12 }, (_, index) => ({ ...item.options[0], optionId: `extended-${index}`, label: `Runtime custom decision ${index + 1} with its complete native label` })) })))
   setOptionsSource = source => {
     const prefix = source === 'core' ? 'core' : 'claude'
+    setSerial(++renderSerial)
     setApprovals([{
       ...initial[0], actionSummary: '允许一次', reason: '拒绝',
       adapterKind: source === 'core' ? 'unknown' : 'claude-code-cli',
@@ -105,7 +108,7 @@ function Fixture() {
         <section className="execution-drawer"><header className="execution-drawer-header">执行台</header></section>
       </section>
       <div className="conversation-controls">
-        {(approvals.length > 0 || interactions.length > 0) && <ApprovalDock key={serial} approvals={approvals} profileById={new Map()} busy={busy}
+        <ApprovalDock key={serial} approvals={approvals} profileById={new Map()} busy={busy}
           interactions={interactions} threadId="native-fixture" conversationId={conversationId} onNotice={message => { nativeNotices.push(message) }}
           agentRuns={[{ id: 'run-native', agentId: 'native-one' }, { id: 'run-native-two', agentId: 'native-two' }]}
           onRespond={async (request, answer): Promise<NativeInteractionResult> => {
@@ -124,8 +127,18 @@ function Fixture() {
           onResolve={(approval, optionId) => {
             requests.push({ approvalId: approval.id, optionId, version: approval.version })
             setBusy(true)
-            complete = () => { setApprovals(items => items.filter(item => item.id !== approval.id)); setBusy(false) }
-          }} />}
+            return new Promise<void>((resolve, reject) => {
+              complete = () => {
+                setApprovals(items => items.filter(item => item.id !== approval.id))
+                setBusy(false)
+                if (approvalRejection) {
+                  const failure = normalizeFailure({ status: 'rejected', code: approvalRejection, payload: { message: 'backend diagnostic' } })
+                  approvalRejection = null
+                  reject(new OperationFailure(failure))
+                } else resolve()
+              }
+            })
+          }} />
         <form className="composer"><div className="composer-box">Composer remains available</div></form>
       </div>
     </div>
@@ -137,7 +150,7 @@ Object.assign(window, { approvalTest: {
   nativeScenario: (requests: NativeInteractionView[], withApprovals?: boolean, conversationId?: string | null) => nativeScenario(requests, withApprovals, conversationId),
   appendNative: (request: NativeInteractionView) => appendNative(request),
   nativeMode: (mode: typeof nativeMode) => { nativeMode = mode }, nativeFinish: () => nativeFinish(),
-  complete: () => complete(), refresh: () => refresh(), locate: (id: string) => setTarget(id),
+  complete: () => complete(), rejectApproval: (code: string) => { approvalRejection = code; complete() }, refresh: () => refresh(), locate: (id: string) => setTarget(id),
   setMobile: (value: boolean) => setMobile(value), reset: () => reset(),
   manyOptions: () => manyOptions(),
   setOptionsSource: (source: OptionsSource) => setOptionsSource(source),

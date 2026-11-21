@@ -155,6 +155,17 @@ describe('authoritative Thread navigation windows', () => {
     h.reader.dispose()
   })
 
+  it('retries the same scoped pin refill after a failed read', async () => {
+    const h = harness()
+    await h.reader.refresh('explicit')
+    h.readThreads.mockRejectedValueOnce(new Error('row read failed'))
+    await expect(h.setPins(['camp-3'])).rejects.toThrow('row read failed')
+    await h.reader.refreshPins()
+    expect(h.readThreads.mock.calls).toEqual([[['camp-3']], [['camp-3']]])
+    expect(h.visibleRows().map(row => row.id)).toEqual(['camp-1', 'camp-2', 'camp-4', 'camp-5', 'camp-6'])
+    h.reader.dispose()
+  })
+
   it('fences an expansion whose pin membership changes while the read is in flight', async () => {
     const h = harness(['camp-3', 'camp-5'])
     await h.reader.refresh('explicit')

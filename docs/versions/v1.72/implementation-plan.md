@@ -8,6 +8,18 @@ last_updated: 2026-11-21
 
 # v1.72 实施与验收
 
+## 操作反馈
+
+R2 以 PR #1133 合入点为基线实施。界面规则见[操作反馈](../../ui/components/operation-feedback.md)。
+
+- P0 已接入统一失败文案、会话布局和后台读取反馈。停止、打开会话、更换默认队长与审批使用新反馈路径。
+  `pnpm test:thread-fork` 验证五套配色下错误条与输入框、停止只补发一次、会话超时后键盘重试、
+  语言提示独立保留和队长候选离队。`pnpm test:startup-presentation` 用受控时钟验证 1、3、10 秒退避、
+  提示去重和原页恢复。`pnpm test:approval-dock` 覆盖审批终态确认及焦点，`pnpm test:desktop-bridge`
+  验证跨 IPC 的结构化失败，`pnpm test:host-web-recovery` 验证原提交恢复。侧栏与设置夹具通过。
+- P1 范围为撤回、重命名、待发送消息、分叉、定时任务、归档与 Web 退出。
+- P2 范围为团队、记忆、队员、任务、消息编辑与首次训练。分阶段收缩源码检查的旧出口名单。
+
 ## 通用提示按钮与常驻反馈（2026-11-21）
 
 按 2026-11-21 确认的交互在 `rovai/archive-toast-actions` 实施，基线为 `441cd3f14`。通用提示采用实心主操作、

@@ -14,6 +14,7 @@ Dialog、Popover 等基础原子遵守根目录 [`DESIGN.md`](../../../DESIGN.md
 |---|---|
 | [Team 工作区](team-workspace.md) | 团队创建模板、指引、名册、Custom/Team 默认配置和新对话选择 |
 | [App Shell 与统一侧栏](app-shell-navigation.md) | 一级导航、Project/Thread 投影、Quick Chat、设置入口和窗口布局 |
+| [操作反馈](operation-feedback.md) | 操作文案、页面落点、会话重试与后台读取反馈 |
 | [快捷键设置](shortcut-settings.md) | Desktop 本机快捷键、按键和侧键录制、冲突替换与发送方式 |
 | [MCP 设置](capability-settings.md) | 列表/详情、JSON 导入、编辑与队员范围选择 |
 | [Skills、工具箱与会话选择](skills-settings.md) | 原生只读页、逐队员配置与会话 `/` 候选 |
