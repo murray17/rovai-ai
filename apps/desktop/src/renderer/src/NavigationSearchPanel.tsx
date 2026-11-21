@@ -59,8 +59,8 @@ export function NavigationSearchPanel({
   const action = useRef<HTMLButtonElement>(null)
   const actionFocused = useRef(false)
   const current = state.phase === 'results'
-  const busy = !state.composing && (state.phase === 'names' || (current && state.messages === 'loading'))
-  const loadMore = current && state.messages === 'more'
+  const loadingMessages = current && (state.messages === 'loading' || state.messages === 'loadingEarlier')
+  const busy = !state.composing && (state.phase === 'names' || loadingMessages)
   const retry = state.phase === 'nameError' || (current && state.messages === 'error')
 
   useEffect(() => {
@@ -75,28 +75,31 @@ export function NavigationSearchPanel({
   useLayoutEffect(() => {
     if (actionFocused.current && !action.current) input.current?.focus({ preventScroll: true })
     const view = list.current
-    if (loadMore && view && view.scrollHeight <= view.clientHeight + 1 && !actionFocused.current) {
+    if (current && state.messages === 'more' && view
+      && view.scrollHeight <= view.clientHeight + 1 && !actionFocused.current) {
       session.more('automatic')
     }
-  }, [state, loadMore, session])
+  }, [state, current, session])
 
   let message = ''
   let actionLabel = ''
+  let statusClass = retry ? 'search-status is-error' : 'search-status'
   if (state.phase === 'names') message = state.composing ? '' : uiAttribute('正在搜索…')
   else if (state.phase === 'invalid') message = uiAttribute('搜索内容不能超过 {0} 个字符。', NAVIGATION_SEARCH_QUERY_LIMIT)
   else if (retry) {
     message = state.phase === 'nameError' ? uiAttribute('搜索失败') : uiAttribute('消息搜索失败')
     actionLabel = uiAttribute('重试')
-  } else if (state.messages === 'loading') {
-    message = state.rows.some(row => row.hit)
+  } else if (loadingMessages) {
+    message = state.messages === 'loadingEarlier'
       ? uiAttribute('正在搜索更早的消息…') : uiAttribute('正在搜索消息…')
-  } else if (loadMore) actionLabel = uiAttribute('继续搜索更早的消息')
+  } else if (state.messages === 'paused') actionLabel = uiAttribute('继续搜索更早的消息')
   else if (state.query) {
     if ([...state.query].length === 1) {
       message = state.rows.length
         ? uiAttribute('再输入 1 个字可搜索消息内容')
         : uiAttribute('没有匹配的对话或使命。再输入 1 个字可搜索消息内容')
-    } else if (!state.rows.length) {
+    } else if (!state.rows.length && (state.messages === 'done' || state.messages === 'off')) {
+      statusClass = 'command-palette-empty'
       message = isThreadId(state.query)
         ? uiAttribute('没有找到这个会话。') : uiAttribute('没有匹配的对话或使命。')
     } else if (state.truncated) message = uiAttribute('名称匹配较多，只列出最近活动的 50 个')
@@ -156,9 +159,12 @@ export function NavigationSearchPanel({
               const title = formatThreadTitle(target.thread, firstRunThreadId)
               const active = state.activeId === target.thread.id
               const snippet = hit?.snippet ?? target.match?.snippet
-              const author = hit
-                ? hit.message.authorType === 'user' ? uiAttribute('你') : hit.message.authorName || hit.message.authorId
-                : target.match?.field === 'description' ? uiAttribute('描述') : uiAttribute('标签')
+              let author = target.match?.field === 'description' ? uiAttribute('描述') : uiAttribute('标签')
+              if (hit) {
+                const { authorType, authorName } = hit.message
+                author = authorType === 'user' ? uiAttribute('你') : authorName
+                  || (authorType === 'agent' ? uiAttribute('不可用队员') : uiAttribute('用户'))
+              }
               const project = target.thread.projectBindingKind === 'directory'
                 ? projectNames.get(target.thread.projectPath) ?? projectBasename(target.thread.projectPath)
                 : uiAttribute('快速对话')
@@ -193,7 +199,7 @@ export function NavigationSearchPanel({
               </button>
             })}
           </div>
-          <div className={message || actionLabel ? 'search-status' + (retry ? ' is-error' : '') : 'sr-only'}>
+          <div className={message || actionLabel ? statusClass : 'sr-only'}>
             <span role="status">
               {busy && !state.composing && <i className="conversation-find-spinner" aria-hidden="true" />}
               {message}

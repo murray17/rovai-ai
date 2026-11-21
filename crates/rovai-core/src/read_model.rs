@@ -2590,17 +2590,8 @@ fn hydrate_message_views(
             let attachments = attachments_by_message_id
                 .remove(&row.id)
                 .unwrap_or_default();
-            let author_display_name = if row.author_type == "external_principal" {
-                transaction
-                    .query_row(
-                        "SELECT display_name FROM external_principal WHERE id = ?1",
-                        [&row.author_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?
-            } else {
-                None
-            };
+            let author_display_name =
+                load_message_author_display_name(transaction, &row.author_type, &row.author_id)?;
             let mission_start=transaction.query_row("SELECT s.mission_id,m.title,m.description FROM mission_start s JOIN mission m ON m.id=s.mission_id WHERE s.message_id=?1",[&row.id],|r|Ok(serde_json::json!({"missionId":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"description":r.get::<_,String>(2)?}))).optional()?;
             let capabilities = crate::collaboration::message_mutation::capabilities(transaction, &row.id)?;
             Ok(ThreadMessageView {
@@ -2638,6 +2629,23 @@ fn hydrate_message_views(
             })
         })
         .collect::<Result<Vec<_>>>()
+}
+
+fn load_message_author_display_name(
+    connection: &Connection,
+    author_type: &str,
+    author_id: &str,
+) -> Result<Option<String>> {
+    let sql = match author_type {
+        "agent" => "SELECT display_name FROM agent_profile WHERE id = ?1",
+        "external_principal" => "SELECT display_name FROM external_principal WHERE id = ?1",
+        _ => return Ok(None),
+    };
+    let name = connection
+        .prepare_cached(sql)?
+        .query_row([author_id], |row| row.get::<_, String>(0))
+        .optional()?;
+    Ok(name.filter(|name| !name.trim().is_empty()))
 }
 
 fn render_structured_message_content(
@@ -2733,47 +2741,6 @@ impl ConversationFindQuery {
         }
         ranges
     }
-}
-
-#[cfg(test)]
-fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize, usize)> {
-    ConversationFindQuery::new(query).ranges(value, usize::MAX)
-}
-
-#[cfg(test)]
-struct ThreadMessageFindCandidate {
-    message_id: String,
-    message_sequence: i64,
-    body: String,
-}
-
-#[cfg(test)]
-fn flatten_camp_message_find_matches(
-    mut candidates: Vec<ThreadMessageFindCandidate>,
-    query: &str,
-) -> Vec<ThreadMessageFindMatch> {
-    candidates.sort_by(|left, right| {
-        left.message_sequence
-            .cmp(&right.message_sequence)
-            .then_with(|| left.message_id.cmp(&right.message_id))
-    });
-    candidates
-        .into_iter()
-        .flat_map(|candidate| {
-            case_insensitive_scalar_match_ranges(&candidate.body, query)
-                .into_iter()
-                .enumerate()
-                .map(
-                    move |(occurrence_index, (start_offset, end_offset))| ThreadMessageFindMatch {
-                        message_id: candidate.message_id.clone(),
-                        message_sequence: candidate.message_sequence,
-                        occurrence_index: occurrence_index as i64,
-                        start_offset: start_offset as i64,
-                        end_offset: end_offset as i64,
-                    },
-                )
-        })
-        .collect()
 }
 
 fn select_camp_message_find_match(
@@ -4592,55 +4559,39 @@ fn load_events(
 #[cfg(test)]
 mod tests {
     use super::{
-        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, ThreadMessageFindCandidate,
-        case_insensitive_scalar_match_ranges, flatten_camp_message_find_matches,
+        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, ConversationFindQuery, ThreadMessageFindMatch,
         select_camp_message_find_match, validate_camp_message_find_query,
     };
 
     #[test]
     fn conversation_find_ranges_are_case_insensitive_non_overlapping_unicode_scalars() {
-        assert_eq!(
-            case_insensitive_scalar_match_ranges("A中a İ", "a"),
-            vec![(0, 1), (2, 3)]
-        );
-        assert_eq!(
-            case_insensitive_scalar_match_ranges("İstanbul", "i\u{307}"),
-            vec![(0, 1)]
-        );
-        assert_eq!(
-            case_insensitive_scalar_match_ranges("aaaa", "aa"),
-            vec![(0, 2), (2, 4)]
-        );
+        for (body, query, expected) in [
+            ("A中a İ", "a", vec![(0, 1), (2, 3)]),
+            ("İstanbul", "i\u{307}", vec![(0, 1)]),
+            ("aaaa", "aa", vec![(0, 2), (2, 4)]),
+        ] {
+            assert_eq!(
+                ConversationFindQuery::new(query).ranges(body, usize::MAX),
+                expected
+            );
+        }
     }
 
     #[test]
-    fn conversation_find_flattens_orders_selects_and_wraps_without_a_database() {
-        let matches = flatten_camp_message_find_matches(
-            vec![
-                ThreadMessageFindCandidate {
-                    message_id: "later".to_string(),
-                    message_sequence: 2,
-                    body: "NEEDLE late".to_string(),
-                },
-                ThreadMessageFindCandidate {
-                    message_id: "first".to_string(),
-                    message_sequence: 1,
-                    body: "Needle 中 needle".to_string(),
-                },
-            ],
-            "needle",
-        );
-        assert_eq!(
-            matches
-                .iter()
-                .map(|item| (
-                    item.message_id.as_str(),
-                    item.occurrence_index,
-                    item.start_offset,
-                    item.end_offset,
-                ))
-                .collect::<Vec<_>>(),
-            vec![("first", 0, 0, 6), ("first", 1, 9, 15), ("later", 0, 0, 6),]
+    fn conversation_find_selects_by_wrapped_index_or_nearest_following_anchor() {
+        let matches = [
+            ("first", 1, 0, 0, 6),
+            ("first", 1, 1, 9, 15),
+            ("later", 2, 0, 0, 6),
+        ]
+        .map(
+            |(id, sequence, occurrence, start, end)| ThreadMessageFindMatch {
+                message_id: id.to_string(),
+                message_sequence: sequence,
+                occurrence_index: occurrence,
+                start_offset: start,
+                end_offset: end,
+            },
         );
 
         for (requested, anchor, expected_index, expected_message) in [
@@ -4662,7 +4613,10 @@ mod tests {
             select_camp_message_find_match(&[], None, None),
             (None, None)
         );
+    }
 
+    #[test]
+    fn conversation_find_validates_query_by_unicode_scalar_count() {
         assert!(validate_camp_message_find_query("  ").is_err());
         assert!(
             validate_camp_message_find_query(&"中".repeat(CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS + 1))
@@ -5392,7 +5346,7 @@ mod slow_tests {
                     1,
                     "user",
                     "local_user",
-                    "Needle one NEEDLE",
+                    "Needle 中 NEEDLE",
                     None,
                 ),
                 (
@@ -5525,13 +5479,18 @@ mod slow_tests {
         assert_eq!(
             selected
                 .iter()
-                .map(|item| (item.message_id.as_str(), item.occurrence_index))
+                .map(|item| (
+                    item.message_id.as_str(),
+                    item.occurrence_index,
+                    item.start_offset,
+                    item.end_offset
+                ))
                 .collect::<Vec<_>>(),
             vec![
-                ("find-message-1", 0),
-                ("find-message-1", 1),
-                ("find-message-3", 0),
-                ("find-message-5", 0),
+                ("find-message-1", 0, 0, 6),
+                ("find-message-1", 1, 9, 15),
+                ("find-message-3", 0, 7, 13),
+                ("find-message-5", 0, 0, 6),
             ]
         );
 

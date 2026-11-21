@@ -147,6 +147,75 @@ describe('window navigation search', () => {
     second.owner.stop()
   })
 
+  it('cancels pending Enter when arrows select another row while names are pending', async () => {
+    vi.useFakeTimers()
+    const { owner, choose, readNames } = session()
+    readNames.mockResolvedValueOnce(names('旧关键词', 'old-first', 'old-second'))
+    owner.input('旧关键词')
+    await settle(200)
+
+    const newer = deferred<NavigationSearchResult>()
+    readNames.mockReturnValueOnce(newer.promise)
+    owner.input('新关键词')
+    owner.enter()
+    await settle(200)
+    expect(owner.move(1)).toBe(1)
+    expect(owner.getSnapshot().activeId).toBe('old-second')
+    newer.resolve(names('新关键词', 'new-first'))
+    await settle()
+    expect(owner.getSnapshot().activeId).toBe('new-first')
+    expect(choose).not.toHaveBeenCalled()
+    owner.enter()
+    expect(choose).toHaveBeenCalledWith(expect.objectContaining({ query: '新关键词' }))
+  })
+
+  it('exhausts the current query with no rows and no navigation when Enter is pending', async () => {
+    vi.useFakeTimers()
+    const { owner, choose, readMessages } = session()
+    const firstPage = deferred<NavigationMessageSearchPage>()
+    readMessages.mockReturnValueOnce(firstPage.promise).mockResolvedValueOnce(page('零结果', null))
+    owner.input('零结果')
+    owner.enter()
+    await settle(200)
+    expect(owner.getSnapshot().messages).toBe('loading')
+    firstPage.resolve(page('零结果', 'older'))
+    await settle()
+    expect(owner.getSnapshot().messages).toBe('more')
+    owner.more('automatic')
+    expect(owner.getSnapshot().messages).toBe('loadingEarlier')
+    await settle()
+
+    expect(owner.getSnapshot()).toMatchObject({ query: '零结果', messages: 'done', rows: [], activeId: null })
+    owner.enter()
+    owner.more('automatic')
+    expect(readMessages).toHaveBeenCalledTimes(2)
+    expect(choose).not.toHaveBeenCalled()
+    owner.stop()
+  })
+
+  it('retains the previous query rows when the new name request fails', async () => {
+    vi.useFakeTimers()
+    const { owner, choose, readNames, readMessages } = session()
+    readMessages.mockResolvedValueOnce(page('部署', null, 'old-hit'))
+      .mockResolvedValueOnce(page('灰度', null, 'new-hit'))
+    owner.input('部署')
+    await settle(200)
+    const previous = owner.getSnapshot().rows
+    readNames.mockRejectedValueOnce(new Error('read failed'))
+    owner.input('灰度')
+    owner.enter()
+    await settle(200)
+
+    expect(owner.getSnapshot()).toMatchObject({ phase: 'nameError', query: '灰度', displayedQuery: '部署' })
+    expect(owner.getSnapshot().rows).toBe(previous)
+    expect(choose).not.toHaveBeenCalled()
+    owner.choose(previous[0])
+    expect(choose).toHaveBeenCalledWith(expect.objectContaining({
+      query: '部署',
+      hit: expect.objectContaining({ message: expect.objectContaining({ id: 'message-old-hit' }) })
+    }))
+  })
+
   it('appends only new threads, retains selection, and exposes full continuation after five automatic pages', async () => {
     vi.useFakeTimers()
     const { owner, choose, readNames, readMessages } = session()
@@ -162,9 +231,10 @@ describe('window navigation search', () => {
       await settle()
     }
     owner.more('automatic')
+    owner.more('navigation')
     await settle()
     expect(readMessages).toHaveBeenCalledTimes(6)
-    expect(owner.getSnapshot().messages).toBe('more')
+    expect(owner.getSnapshot().messages).toBe('paused')
     expect(owner.getSnapshot().rows.map(row => row.target.thread.id)).toEqual(['visible-name'])
     owner.more('action')
     await settle()
@@ -172,6 +242,30 @@ describe('window navigation search', () => {
     expect(owner.getSnapshot().rows.map(row => row.target.thread.id)).toEqual(['visible-name', 'oldest'])
     expect(choose).not.toHaveBeenCalled()
     owner.stop()
+  })
+
+  it('cancels pending Enter when five empty automatic pages pause the scan', async () => {
+    vi.useFakeTimers()
+    const { owner, choose, readMessages } = session()
+    readMessages.mockImplementation(async ({ query, cursor }) => {
+      const next = Number(cursor ?? 0) + 1
+      return next <= 6 ? page(query, String(next)) : page(query, null, 'oldest')
+    })
+    owner.input('早期命中')
+    owner.enter()
+    await settle(200)
+    for (let i = 0; i < 5; i++) {
+      owner.more('automatic')
+      await settle()
+    }
+    expect(owner.getSnapshot()).toMatchObject({ messages: 'paused', rows: [] })
+    expect(choose).not.toHaveBeenCalled()
+    owner.more('action')
+    await settle()
+    expect(owner.getSnapshot()).toMatchObject({ messages: 'done', activeId: 'oldest' })
+    expect(choose).not.toHaveBeenCalled()
+    owner.enter()
+    expect(choose).toHaveBeenCalledWith(expect.objectContaining({ query: '早期命中' }))
   })
 
   it('retries a failed page with the same cursor and treats a repeated cursor as a recoverable read error', async () => {

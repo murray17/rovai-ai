@@ -611,7 +611,10 @@ async function mutateComposerDraft(
           author: {
             authorType: message.authorType === 'agent' ? 'agent' : message.authorType === 'user' ? 'user' : 'system',
             authorId: message.authorId,
-            displayName: authorMember?.displayName ?? message.authorDisplayName ?? (message.authorType === 'user' ? uiAttribute('用户') : uiAttribute('系统')),
+            displayName: authorMember?.displayName ?? message.authorDisplayName ?? (
+              message.authorType === 'agent' ? uiAttribute('不可用队员')
+                : message.authorType === 'user' ? uiAttribute('用户') : uiAttribute('系统')
+            ),
             recipientAvailability: message.authorType === 'agent'
               ? recipientAvailable ? 'available' : 'unavailable'
               : 'not_applicable'

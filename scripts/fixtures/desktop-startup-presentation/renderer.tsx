@@ -1,7 +1,7 @@
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import { shortcutDefaults } from '../../../apps/desktop/src/shared/shortcuts'
 import { EMPTY_SNAPSHOT, sanitizeSnapshot, registerNavigationProjects } from '../../../apps/desktop/src/shared/navigation-preferences-model'
-import type { GeneralPreferencesSnapshot, NavigationSnapshot, NavigationPreferencesSnapshot, NavigationMessageSearchPage, MissionRecord, ThemePreference } from '@contracts'
+import type { GeneralPreferencesSnapshot, NavigationSnapshot, NavigationPreferencesSnapshot, NavigationMessageSearchPage, NavigationSearchResult, MissionRecord, ThemePreference } from '@contracts'
 import type { ThreadCreationPreflight, CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -156,6 +156,15 @@ function typeNavigationSearch(query: string) {
   const input = document.querySelector<HTMLInputElement>('.command-palette-input')!
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, query)
   input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function resolvedThemeColor(token: string): string {
+  const probe = document.createElement('span')
+  probe.style.color = 'var(' + token + ')'
+  document.body.appendChild(probe)
+  const color = getComputedStyle(probe).color
+  probe.remove()
+  return color
 }
 
 async function advance(milliseconds: number) {
@@ -347,8 +356,67 @@ Object.assign(window, { startupTest: {
     typeNavigationSearch('更早的消息')
     await advance(250)
     for (let frame = 0; frame < 10 && !document.querySelector('.search-status-action'); frame++) await flush()
-    check(pages === 6 && document.querySelector('.search-status-action')?.textContent === '继续搜索更早的消息',
+    const action = document.querySelector('.search-status-action')
+    check(pages === 6 && action?.textContent === '继续搜索更早的消息',
       'A short result list offers manual continuation after five automatic pages')
+    const style = getComputedStyle(action)
+    check(style.fontWeight === '400' && style.color === resolvedThemeColor('--muted'),
+      'Continuation uses the quiet text treatment')
+  },
+  async checkNavigationSearchStatuses() {
+    const { items: [target] } = await requestHandlers.get('navigation.search')!({ query: '' }) as NavigationSearchResult
+    requestHandlers.set('navigation.search', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, truncated: false,
+      items: Array.from({ length: 20 }, (_, index) => ({
+        ...target, thread: { ...target.thread, id: 'scrollable-' + index }
+      }))
+    }))
+    const older = deferred<NavigationMessageSearchPage>()
+    requestHandlers.set('navigation.searchMessages', ({ query, cursor }) => cursor
+      ? older.promise : { schemaVersion: 1, throughGlobalSequence: 0, query, items: [], nextCursor: 'older-page' })
+    const scrollQuery = '可滚动名单'
+    typeNavigationSearch(scrollQuery)
+    await advance(250)
+    await flush()
+    const list = document.querySelector<HTMLElement>('.command-palette-list')!
+    check(list.scrollHeight > list.clientHeight && !document.querySelector('.search-status-action'),
+      'A scrollable list leaves continuation to scrolling')
+    list.scrollTop = list.scrollHeight
+    list.dispatchEvent(new Event('scroll'))
+    await flush()
+    check(document.querySelector('.search-status [role=status]')?.textContent === '正在搜索更早的消息…',
+      'Continuation uses the older-page copy even if the first page had no message hits')
+    older.resolve({ schemaVersion: 1, throughGlobalSequence: 0, query: scrollQuery, items: [], nextCursor: null })
+    await flush()
+
+    requestHandlers.set('navigation.search', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, items: [], truncated: false
+    }))
+    requestHandlers.set('navigation.searchMessages', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, items: [], nextCursor: null
+    }))
+    for (const [query, copy] of [
+      ['空态查找', '没有匹配的对话或使命。'],
+      ['rvcamp_01h47kvsy5fk1shh6w1g60eecf', '没有找到这个会话。']
+    ]) {
+      typeNavigationSearch(query)
+      await advance(250)
+      await flush()
+      const empty = document.querySelector('.command-palette-empty')
+      check(empty?.textContent === copy, 'An exhausted search uses the empty status')
+      const style = getComputedStyle(empty)
+      check(style.fontSize === '12px' && style.padding === '16px 14px', 'The empty status restores the original spacing')
+    }
+
+    requestHandlers.set('navigation.search', () => { throw new Error('Fixture unavailable') })
+    typeNavigationSearch('失败查找')
+    await advance(250)
+    const error = document.querySelector('.search-status.is-error')
+    const retry = error?.querySelector('button')
+    check(error && retry?.textContent === '重试', 'A failed read offers a retry')
+    const style = getComputedStyle(retry)
+    check(getComputedStyle(error).padding === '8px 14px' && Number(style.fontWeight) >= 600
+      && style.color === resolvedThemeColor('--danger'), 'Retry keeps the bold danger treatment and standard status spacing')
   },
   async layoutNavigationSearch(theme: ThemePreference) {
     const resolvedTheme = theme === 'night' || theme === 'ember' ? 'night' : 'day'

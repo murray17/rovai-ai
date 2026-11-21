@@ -12,19 +12,23 @@ last_updated: 2026-11-20
 
 按 Thread 内确认的 R3 在 `rovai/navigation-search` 实施，基线为 `85d5c5797`。Desktop 与 Web 共用搜索面板，
 名称和正文采用独立只读请求，消息命中沿现有打开会话流程进入带锚点的会话内查找。没有数据库迁移。
-协议与取舍见 [Navigation Search v1](../../contracts/navigation-search-v1.md) 和 [V1.72-D90](decisions.md#v1-72-d90)。
+R3 提案留作本地评审材料。现行协议和界面规则见 [Navigation Search v1](../../contracts/navigation-search-v1.md)
+和 [App Shell 导航](../../ui/components/app-shell-navigation.md#会话搜索)，取舍见 [V1.72-D90](decisions.md#v1-72-d90)。
+正文摘要和会话内查找按 Unicode 码点转小写，与 Core 一致。希腊词尾大写 `Σ` 因此按 `σ` 匹配。
 
-查询版本、输入法、窗口级单飞及去重续扫由 Renderer 状态测试覆盖。`read_model::navigation_search` 新增定向 SQLite 用例，
-覆盖页预算在会话中途耗尽及第 21 项跨页，原会话内查找用例无法覆盖跨会话排序与续扫。最小命令为
-`cargo test -p rovai-core --features extended-tests --lib search_pages_resume_at_the_first_unexamined_message_without_skipping_targets`。
-会话内查找在原落点与计数用例验证并发写入前后复用连接会取得不同快照。
+Renderer 状态测试覆盖查询版本、输入法、窗口级单飞、名称失败保留旧行、待执行回车取消和续扫。
+`read_model::navigation_search` 拥有名称优先级、初次集结改名后的别名失效、编号、摘要，以及 SQLite 跨会话顺序、可见性、
+正文署名与续扫。纯函数覆盖匹配矩阵，SQLite 验证第 21 项跨页、会话中途耗尽预算以及两类请求的可见范围。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib read_model::navigation_search::tests`。
+原会话内查找用例直接走生产路径，验证命中次序、字符偏移以及写入前后重用连接所见的快照。
 
-隔离 Electron 使用生产 Renderer 验证名称先出、追加正文、同一会话中带锚点定位、改删提示和真实按键续扫，
-并覆盖五套主题下的 1040×700 和 1440×920。隔离 Host 和生产 Web 在 390px 下验证公开消息搜索、
-缩短视口后打开结果，以及使命整页里的命中与计数。1440px 的生产 Web 也验证了同一使命在抽屉内定位。
-真实手机软键盘与读屏仍需设备验收。
+隔离 Electron 检查名称先出、追加正文、带锚点定位、改删提示、真实按键续扫和空态／状态行尺寸，
+并覆盖五套主题下的 1040×700 和 1440×920。隔离 Host 和生产 Web 在 390px 下用 30,001 条较新消息覆盖
+首个正文请求、五轮自动续扫、触屏继续，以及缩短视口后的使命整页定位。1440px 的抽屉验收核对了资料缺失的
+队员在结果内与时间线的署名。真实手机软键盘与读屏仍需设备验收。
 
-macOS 发布构建通过 Core stdio 在 1 万个会话、单个长会话内 5 万条公开消息的隔离数据上计时。
+R3 初次验收用 macOS 优化构建，通过 Core stdio 在 1 万个会话、单个长会话内 5 万条公开消息的隔离数据上计时。
+端到端计时包含排队、快照准备、扫描和响应开销。
 稀有词续扫 11 页定位到第一条消息。保留单页 5,000 条和 20 个会话命中，软时间预算从 R3 的 100ms 调为 45ms。
 复用空闲只读连接，每次请求重新开事务，减少并发发消息时建立连接带来的延迟。
 

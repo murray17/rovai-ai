@@ -16,7 +16,7 @@ use crate::{camp_id::ThreadId, draft_client::DraftClient};
 
 use super::{
     ConversationFindQuery, NavigationThreadTarget, PUBLIC_SEARCH_MESSAGE,
-    camp_channel_source_from_row, current_global_sequence,
+    camp_channel_source_from_row, current_global_sequence, load_message_author_display_name,
     navigation::{CLIENT_VISIBLE, GROUP_KEY, ORDER},
     project_search_message,
 };
@@ -29,6 +29,7 @@ const SCAN_LIMIT: usize = 5_000;
 const SCAN_TIME: Duration = Duration::from_millis(45);
 const QUERY_LIMIT: usize = 200;
 const MAX_IDLE_READERS: usize = 4;
+const FIRST_RUN_DEFAULT_TITLE: &str = "初次集结";
 
 pub(crate) struct SearchReaders {
     database_path: PathBuf,
@@ -468,8 +469,11 @@ fn match_name(
     {
         return Ok(Some(NameMatch::field("number")));
     }
+    let localized_first_run_title = thread.channel_source.is_none()
+        && thread.title == FIRST_RUN_DEFAULT_TITLE
+        && hints.thread_ids.contains(&thread.id);
     if matcher.first_range(&thread.title).is_some()
-        || hints.thread_ids.contains(&thread.id)
+        || localized_first_run_title
         || thread.channel_source.as_ref().is_some_and(|source| {
             hints
                 .channel_kinds
@@ -596,24 +600,9 @@ impl MessageSearch {
                         }
                         let author_type: String = row.get(2)?;
                         let author_id: String = row.get(3)?;
-                        let author_name = match author_type.as_str() {
-                            "agent" => connection
-                                .query_row(
-                                    "SELECT display_name FROM agent_profile WHERE id = ?1",
-                                    [&author_id],
-                                    |row| row.get(0),
-                                )
-                                .optional()?,
-                            "external_principal" => connection
-                                .query_row(
-                                    "SELECT display_name FROM external_principal WHERE id = ?1",
-                                    [&author_id],
-                                    |row| row.get(0),
-                                )
-                                .optional()?,
-                            _ => None,
-                        }
-                        .unwrap_or_default();
+                        let author_name =
+                            load_message_author_display_name(connection, &author_type, &author_id)?
+                                .unwrap_or_default();
                         items.push(MessageHit {
                             target: target.target(None),
                             message: MatchedMessage {
@@ -641,191 +630,486 @@ impl MessageSearch {
     }
 }
 
-#[cfg(all(test, feature = "extended-tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::read_model::ThreadChannelSource;
 
-    // A single SQLite owner exercises the actual ordered cursor and both limits,
-    // including resuming within an object whose first several batches do not match.
+    fn name_candidate(title: &str) -> Candidate {
+        Candidate {
+            thread: NavigationThreadTarget {
+                id: "thread".into(),
+                title: title.into(),
+                activation_state: "active".into(),
+                project_binding_kind: "directory".into(),
+                project_path: "/repo".into(),
+                channel_source: None,
+            },
+            mission: None,
+            last_activity_at: String::new(),
+            activity_sequence: 0,
+            description: None,
+            tags: None,
+            group_key: "directory:/repo".into(),
+        }
+    }
+
     #[test]
-    fn search_pages_resume_at_the_first_unexamined_message_without_skipping_targets() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch("
-            CREATE TABLE event_sequence(singleton INTEGER PRIMARY KEY, last_sequence INTEGER);
-            INSERT INTO event_sequence VALUES (1, 42);
-            CREATE TABLE camp(
-              id TEXT PRIMARY KEY, title TEXT, activation_state TEXT, project_binding_kind TEXT,
-              project_path TEXT, created_at TEXT, navigation_activity_at TEXT,
-              navigation_activity_sequence INTEGER, archived_at TEXT, deletion_operation_id TEXT);
-            CREATE TABLE mission(id TEXT PRIMARY KEY, camp_id TEXT UNIQUE, title TEXT,
-              number INTEGER UNIQUE, status TEXT, description TEXT, tags_json TEXT);
-            CREATE TABLE pending_camp_draft_presence(camp_id TEXT, client_id TEXT);
-            CREATE TABLE camp_composer_draft(camp_id TEXT, client_id TEXT, body TEXT, source_attachments_json TEXT);
-            CREATE TABLE prepared_attachment(camp_id TEXT, client_id TEXT);
-            CREATE TABLE channel_conversation_binding(camp_id TEXT, channel_conversation_id TEXT);
-            CREATE TABLE channel_conversation(id TEXT, provider TEXT, conversation_kind TEXT);
-            CREATE TABLE agent_profile(id TEXT, display_name TEXT);
-            CREATE TABLE external_principal(id TEXT, display_name TEXT);
-            INSERT INTO external_principal VALUES ('external', 'External Author');
-            CREATE TABLE camp_message(id TEXT PRIMARY KEY, camp_id TEXT, sequence INTEGER,
-              author_type TEXT, author_id TEXT, created_at TEXT, tombstoned_at TEXT,
-              structured_content_json TEXT, UNIQUE(camp_id, sequence));
-        ").unwrap();
-        let client = DraftClient::default();
-        let mission = ThreadId::new().to_string();
-        let pending = ThreadId::new().to_string();
-        let archived = ThreadId::new().to_string();
-        let stamp = "2026-11-20T00:00:00Z";
-        let mut ids = vec![];
-        for index in 0..55 {
+    fn navigation_mission_number_accepts_only_complete_number_syntax() {
+        for (query, expected) in [
+            ("19", Some(19)),
+            ("m19", Some(19)),
+            ("M-019", Some(19)),
+            ("#00019", Some(19)),
+            ("000000000001", Some(1)),
+            ("M-999999999", Some(999_999_999)),
+            ("M-1000000000", None),
+            ("M-000", None),
+            ("M--19", None),
+            ("#-19", None),
+            ("Ｍ１９", None),
+            ("19 seats", None),
+            ("", None),
+        ] {
+            assert_eq!(exact_mission_number(query), expected, "{query:?}");
+        }
+    }
+
+    #[test]
+    fn navigation_name_match_returns_the_highest_priority_field_and_its_snippet() {
+        let mut candidate = name_candidate("计划 19");
+        candidate.mission = Some(MissionTarget {
+            mission_id: "mission".into(),
+            number: 19,
+            status: "in_progress".into(),
+        });
+        candidate.thread.channel_source = Some(ThreadChannelSource {
+            provider: "lark".into(),
+            conversation_kind: "topic".into(),
+        });
+        candidate.description = Some("里程碑\t阶段".into());
+        candidate.tags = Some(r#"["里程碑","交付"]"#.into());
+        let no_hints = SearchHints::default();
+        let project_hint = SearchHints {
+            group_keys: vec!["directory:/repo".into()],
+            ..Default::default()
+        };
+        let channel_and_project_hints = SearchHints {
+            group_keys: vec!["directory:/repo".into()],
+            channel_kinds: vec!["lark:topic".into()],
+            ..Default::default()
+        };
+        for (query, hints, expected) in [
+            ("19", &channel_and_project_hints, Some(("number", None))),
+            ("计划", &project_hint, Some(("title", None))),
+            (
+                "Lark topic",
+                &channel_and_project_hints,
+                Some(("title", None)),
+            ),
+            ("Lark topic", &no_hints, None),
+            ("项目别名", &project_hint, Some(("project", None))),
+            ("里程碑", &project_hint, Some(("project", None))),
+            (
+                "里程碑",
+                &no_hints,
+                Some(("description", Some("里程碑\t阶段"))),
+            ),
+            ("交付", &no_hints, Some(("tag", Some("交付")))),
+            ("无匹配", &no_hints, None),
+        ] {
+            let found = match_name(
+                &candidate,
+                &ConversationFindQuery::new(query),
+                hints,
+                exact_mission_number(query),
+            )
+            .unwrap();
+            assert_eq!(
+                found
+                    .as_ref()
+                    .map(|hit| (hit.field, hit.snippet.as_deref())),
+                expected,
+                "{query:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn navigation_first_run_hint_requires_the_unchanged_title_and_thread_id() {
+        let hints = SearchHints {
+            thread_ids: vec!["thread".into()],
+            ..Default::default()
+        };
+        for (title, id, channel_bound, matched) in [
+            (FIRST_RUN_DEFAULT_TITLE, "thread", false, true),
+            ("已改名", "thread", false, false),
+            (FIRST_RUN_DEFAULT_TITLE, "other", false, false),
+            (FIRST_RUN_DEFAULT_TITLE, "thread", true, false),
+        ] {
+            let mut candidate = name_candidate(title);
+            candidate.thread.id = id.into();
+            candidate.thread.channel_source = channel_bound.then(|| ThreadChannelSource {
+                provider: "lark".into(),
+                conversation_kind: "topic".into(),
+            });
+            let found = match_name(
+                &candidate,
+                &ConversationFindQuery::new("first"),
+                &hints,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                found.map(|hit| hit.field),
+                matched.then_some("title"),
+                "{title:?} {id:?} {channel_bound}"
+            );
+        }
+    }
+
+    #[test]
+    fn navigation_snippet_keeps_the_full_match_and_raw_whitespace_at_the_cutoff() {
+        let prefix = "前".repeat(20);
+        let long_query = "界".repeat(200);
+        let body = format!("{prefix}\t{long_query} 后文");
+        assert_eq!(
+            snippet(&body, (21, 221)),
+            format!("…{}\t{long_query}…", "前".repeat(15))
+        );
+    }
+
+    #[cfg(feature = "extended-tests")]
+    mod sqlite {
+        use super::*;
+
+        const STAMP: &str = "2026-11-20T00:00:00Z";
+
+        fn database() -> Connection {
+            let connection = Connection::open_in_memory().unwrap();
+            connection.execute_batch("
+                CREATE TABLE event_sequence(singleton INTEGER PRIMARY KEY, last_sequence INTEGER);
+                INSERT INTO event_sequence VALUES (1, 42);
+                CREATE TABLE camp(
+                  id TEXT PRIMARY KEY, title TEXT, activation_state TEXT, project_binding_kind TEXT,
+                  project_path TEXT, created_at TEXT, navigation_activity_at TEXT,
+                  navigation_activity_sequence INTEGER, archived_at TEXT, deletion_operation_id TEXT);
+                CREATE TABLE mission(id TEXT PRIMARY KEY, camp_id TEXT UNIQUE, title TEXT,
+                  number INTEGER UNIQUE, status TEXT, description TEXT, tags_json TEXT);
+                CREATE TABLE pending_camp_draft_presence(camp_id TEXT, client_id TEXT);
+                CREATE TABLE camp_composer_draft(camp_id TEXT, client_id TEXT, body TEXT, source_attachments_json TEXT);
+                CREATE TABLE prepared_attachment(camp_id TEXT, client_id TEXT);
+                CREATE TABLE channel_conversation_binding(camp_id TEXT, channel_conversation_id TEXT);
+                CREATE TABLE channel_conversation(id TEXT, provider TEXT, conversation_kind TEXT);
+                CREATE TABLE agent_profile(id TEXT, display_name TEXT, profile_status TEXT);
+                CREATE TABLE external_principal(id TEXT, display_name TEXT);
+                CREATE TABLE camp_message(id TEXT PRIMARY KEY, camp_id TEXT, sequence INTEGER,
+                  author_type TEXT, author_id TEXT, created_at TEXT, tombstoned_at TEXT,
+                  structured_content_json TEXT, UNIQUE(camp_id, sequence));
+            ").unwrap();
+            connection
+        }
+
+        fn insert_thread(connection: &Connection, title: &str, activity_sequence: i64) -> String {
             let id = ThreadId::new().to_string();
             connection.execute(
-                "INSERT INTO camp VALUES (?1,'needle 19','active','directory','/repo',?2,NULL,?3,NULL,NULL)",
-                params![id, stamp, 1000 - index],
+                "INSERT INTO camp VALUES (?1,?2,'active','directory','/repo',?3,NULL,?4,NULL,NULL)",
+                params![id, title, STAMP, activity_sequence],
             ).unwrap();
-            ids.push(id);
+            id
         }
-        for (id, activation, archived_at, path) in [
-            (&mission, "active", None, "/mission"),
-            (&pending, "pending", None, "/repo"),
-            (&archived, "active", Some(stamp), "/repo"),
-        ] {
+
+        fn number_mission(connection: &Connection, camp_id: &str) {
+            connection.execute(
+                "INSERT INTO mission VALUES('mission',?1,'A mission',19,'in_progress','Mission details','[]')",
+                [camp_id],
+            ).unwrap();
+        }
+
+        fn insert_message(
+            connection: &Connection,
+            thread: &str,
+            sequence: i64,
+            author: (&str, &str),
+            body: &str,
+            deleted: bool,
+        ) {
+            let json = serde_json::json!([{"kind":"text", "text":body}]).to_string();
             connection
                 .execute(
-                    "INSERT INTO camp VALUES (?1,'extra',?2,'directory',?3,?4,NULL,0,?5,NULL)",
-                    params![id, activation, path, stamp, archived_at],
+                    "INSERT INTO camp_message VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    params![
+                        format!("{thread}-{sequence}"),
+                        thread,
+                        sequence,
+                        author.0,
+                        author.1,
+                        STAMP,
+                        deleted.then_some(STAMP),
+                        json
+                    ],
                 )
                 .unwrap();
         }
-        connection.execute(
-            "INSERT INTO mission VALUES('mission',?1,'A mission',19,'in_progress','Mission details',?2)",
-            params![mission, r#"["needle"]"#],
-        ).unwrap();
-        connection
-            .execute(
-                "INSERT INTO pending_camp_draft_presence VALUES(?1,?2)",
-                params![pending, client.id()],
-            )
-            .unwrap();
 
-        let name_request = |query: &str| {
+        fn name_request(
+            connection: &Connection,
+            client: &DraftClient,
+            query: &str,
+        ) -> NavigationSearchResult {
             let input = NavigationSearchParams {
                 query: query.to_owned(),
                 hints: None,
             }
             .validate()
             .unwrap();
-            search(&connection, &client, input).unwrap()
-        };
-        let recent = name_request("");
-        assert_eq!(recent.items.len(), 12);
-        let exact_number = name_request("19");
-        assert_eq!(exact_number.items[0].thread.id, mission);
-        assert_eq!(
-            exact_number.items[0].r#match.as_ref().unwrap().field,
-            "number"
-        );
-        assert!(exact_number.truncated);
-        assert_eq!(name_request(&pending).items[0].thread.id, pending);
-        assert!(name_request(&archived).items.is_empty());
-        let web_client = DraftClient::verified_web(&"0".repeat(64)).unwrap();
-        let pending_request = NavigationSearchParams {
-            query: pending.clone(),
-            hints: None,
+            search(connection, client, input).unwrap()
         }
-        .validate()
-        .unwrap();
-        assert!(
-            search(&connection, &web_client, pending_request)
-                .unwrap()
-                .items
-                .is_empty()
-        );
 
-        assert_eq!(name_request("needle").items.len(), 50);
-
-        let insert = |thread: &str, sequence: i64, author: &str, body: &str, deleted: bool| {
-            let json = serde_json::json!([{"kind":"text", "text":body}]).to_string();
-            connection
-                .execute(
-                    "INSERT INTO camp_message VALUES (?1,?2,?3,?4,'external',?5,?6,?7)",
-                    params![
-                        format!("{thread}-{sequence}"),
-                        thread,
-                        sequence,
-                        author,
-                        stamp,
-                        deleted.then_some(stamp),
-                        json
-                    ],
-                )
-                .unwrap();
-        };
-        let query = "needle\tΟΣ";
-        insert(&ids[0], 1, "external_principal", query, false);
-        for sequence in 2..=135 {
-            insert(&ids[0], sequence, "user", "unrelated", false);
-        }
-        insert(&ids[0], 136, "system", query, false);
-        insert(&ids[0], 137, "user", query, true);
-        for id in &ids[1..] {
-            insert(id, 1, "user", query, false);
-        }
-        insert(&mission, 1, "user", query, false);
-        insert(&archived, 1, "user", query, false);
-
-        let run = |cursor| {
+        fn message_request(query: &str, cursor: Option<String>) -> MessageSearch {
             NavigationMessageSearchParams {
                 query: query.to_owned(),
                 cursor,
             }
             .validate()
             .unwrap()
-        };
-        let collect_pages = |budget, time_up| {
-            let mut cursor = None;
-            let mut results = Vec::new();
-            for _ in 0..180 {
-                let (items, next) = run(cursor.clone())
-                    .scan(&connection, &client, budget, || time_up)
-                    .unwrap();
-                results.extend(items);
-                let Some(next) = next else { return results };
-                let next = next.encode().unwrap();
-                assert_ne!(
-                    cursor.as_deref(),
-                    Some(next.as_str()),
-                    "a nonterminal page must advance"
-                );
-                cursor = Some(next);
-            }
-            panic!("scan did not finish");
-        };
-        let full = collect_pages(SCAN_LIMIT, false);
-        let tiny = collect_pages(3, false);
-        let elapsed = collect_pages(SCAN_LIMIT, true);
-        let ids_from = |hits: &[MessageHit]| {
-            hits.iter()
-                .map(|hit| hit.target.thread.id.clone())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(ids_from(&full), [&ids[..], &[mission]].concat());
-        assert_eq!(ids_from(&tiny), ids_from(&full));
-        assert_eq!(ids_from(&elapsed), ids_from(&full));
-        assert_eq!(full[0].message.sequence, 1);
-        assert_eq!(full[0].message.author_name, "External Author");
-        assert_eq!(full[0].snippet, query);
+        }
 
-        let (_, next) = run(None).scan(&connection, &client, 3, || false).unwrap();
-        assert!(matches!(
-            (NavigationMessageSearchParams {
-                query: "another".into(),
-                cursor: Some(next.unwrap().encode().unwrap())
-            })
-            .validate(),
-            Err(NavigationSearchInputError::Cursor)
-        ));
-        let long_query = "界".repeat(200);
-        assert!(snippet(&format!("prefix {long_query} end"), (7, 207)).contains(&long_query));
+        #[test]
+        fn navigation_names_limit_recent_results_and_rank_exact_matches_before_truncation() {
+            let connection = database();
+            let client = DraftClient::default();
+            let older = insert_thread(&connection, "旧任务 19", 0);
+            let mission = insert_thread(&connection, "任务使命", 1);
+            number_mission(&connection, &mission);
+            let active: Vec<_> = (2..57)
+                .rev()
+                .map(|sequence| insert_thread(&connection, "较新的计划 19", sequence))
+                .collect();
+
+            let recent = name_request(&connection, &client, "");
+            assert_eq!(
+                recent
+                    .items
+                    .iter()
+                    .map(|item| item.thread.id.as_str())
+                    .collect::<Vec<_>>(),
+                active[..12].iter().map(String::as_str).collect::<Vec<_>>(),
+            );
+            let number = name_request(&connection, &client, "19");
+            assert_eq!(number.items.len(), 50);
+            assert_eq!(number.items[0].thread.id, mission);
+            assert_eq!(number.items[0].r#match.as_ref().unwrap().field, "number");
+            assert!(number.truncated);
+            let exact = name_request(&connection, &client, &older);
+            assert_eq!(exact.items.len(), 1);
+            assert_eq!(exact.items[0].thread.id, older);
+            assert_eq!(exact.items[0].r#match.as_ref().unwrap().field, "id");
+        }
+
+        #[test]
+        fn navigation_names_and_messages_share_thread_visibility() {
+            let connection = database();
+            let owner = DraftClient::default();
+            let visitor = DraftClient::verified_web(&"0".repeat(64)).unwrap();
+            let mission = insert_thread(&connection, "使命", 4);
+            number_mission(&connection, &mission);
+            let pending = insert_thread(&connection, "待建对话", 3);
+            let archived = insert_thread(&connection, "归档", 2);
+            let deleting = insert_thread(&connection, "删除中", 1);
+            connection
+                .execute(
+                    "UPDATE camp SET activation_state='pending' WHERE id=?1",
+                    [&pending],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE camp SET archived_at=?2 WHERE id=?1",
+                    params![archived, STAMP],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE camp SET deletion_operation_id='delete' WHERE id=?1",
+                    [&deleting],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO pending_camp_draft_presence VALUES(?1,?2)",
+                    params![pending, owner.id()],
+                )
+                .unwrap();
+            for id in [&mission, &pending, &archived, &deleting] {
+                insert_message(&connection, id, 1, ("user", "local_user"), "needle", false);
+            }
+            for (client, expected) in [
+                (&owner, vec![&mission, &pending]),
+                (&visitor, vec![&mission]),
+            ] {
+                let recent = name_request(&connection, client, "");
+                assert_eq!(
+                    recent
+                        .items
+                        .iter()
+                        .map(|target| &target.thread.id)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert!(recent.items[0].mission.is_some());
+                for id in [&pending, &archived, &deleting] {
+                    assert_eq!(
+                        name_request(&connection, client, id).items.len(),
+                        usize::from(expected.contains(&id))
+                    );
+                }
+                let (hits, next) = message_request("needle", None)
+                    .scan(&connection, client, SCAN_LIMIT, || false)
+                    .unwrap();
+                assert!(next.is_none());
+                assert_eq!(
+                    hits.iter()
+                        .map(|hit| &hit.target.thread.id)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
+
+        #[test]
+        fn navigation_message_hits_return_the_newest_public_body_and_resolved_author() {
+            let connection = database();
+            let client = DraftClient::default();
+            let external = insert_thread(&connection, "外部作者", 3);
+            let removed = insert_thread(&connection, "已移除作者", 2);
+            let unknown = insert_thread(&connection, "资料缺失", 1);
+            connection
+                .execute_batch(
+                    "
+                INSERT INTO external_principal VALUES ('external', '外部作者');
+                INSERT INTO agent_profile VALUES ('removed', '历史队员', 'removed');
+            ",
+                )
+                .unwrap();
+            let query = "needle\tΟΣ";
+            insert_message(
+                &connection,
+                &external,
+                1,
+                ("user", "local_user"),
+                query,
+                false,
+            );
+            insert_message(
+                &connection,
+                &external,
+                2,
+                ("external_principal", "external"),
+                query,
+                false,
+            );
+            insert_message(
+                &connection,
+                &external,
+                3,
+                ("system", "system"),
+                query,
+                false,
+            );
+            insert_message(
+                &connection,
+                &external,
+                4,
+                ("user", "local_user"),
+                query,
+                true,
+            );
+            insert_message(&connection, &removed, 1, ("agent", "removed"), query, false);
+            insert_message(&connection, &unknown, 1, ("agent", "missing"), query, false);
+
+            let (hits, next) = message_request(query, None)
+                .scan(&connection, &client, SCAN_LIMIT, || false)
+                .unwrap();
+            assert!(next.is_none());
+            assert_eq!(
+                hits.iter()
+                    .map(|hit| (
+                        hit.target.thread.id.as_str(),
+                        hit.message.sequence,
+                        hit.message.author_name.as_str(),
+                        hit.snippet.as_str()
+                    ))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (external.as_str(), 2, "外部作者", query),
+                    (removed.as_str(), 1, "历史队员", query),
+                    (unknown.as_str(), 1, "", query)
+                ]
+            );
+        }
+
+        // The SQL order, the 21st-hit boundary and resuming inside a Thread
+        // must agree under both deterministic record and clock budgets.
+        #[test]
+        fn search_pages_resume_at_the_first_unexamined_message_without_skipping_targets() {
+            let connection = database();
+            let client = DraftClient::default();
+            let ids: Vec<_> = (1..=25)
+                .rev()
+                .map(|sequence| insert_thread(&connection, "会话", sequence))
+                .collect();
+            let query = "needle";
+            for id in &ids {
+                insert_message(&connection, id, 1, ("user", "local_user"), query, false);
+            }
+            for sequence in 2..=135 {
+                insert_message(
+                    &connection,
+                    &ids[0],
+                    sequence,
+                    ("user", "local_user"),
+                    "unrelated",
+                    false,
+                );
+            }
+
+            let collect_pages = |budget, time_up| {
+                let mut cursor = None;
+                let mut results = Vec::new();
+                for _ in 0..180 {
+                    let (items, next) = message_request(query, cursor.clone())
+                        .scan(&connection, &client, budget, || time_up)
+                        .unwrap();
+                    results.extend(items.into_iter().map(|hit| hit.target.thread.id));
+                    let Some(next) = next else { return results };
+                    let next = next.encode().unwrap();
+                    assert_ne!(
+                        cursor.as_deref(),
+                        Some(next.as_str()),
+                        "a nonterminal page must advance"
+                    );
+                    cursor = Some(next);
+                }
+                panic!("scan did not finish");
+            };
+            let (first, cursor) = message_request(query, None)
+                .scan(&connection, &client, SCAN_LIMIT, || false)
+                .unwrap();
+            assert_eq!(first.len(), 20);
+            let cursor = cursor.unwrap();
+            assert_eq!(cursor.id, ids[20]);
+            assert!(matches!(
+                (NavigationMessageSearchParams {
+                    query: "another".into(),
+                    cursor: Some(cursor.encode().unwrap())
+                })
+                .validate(),
+                Err(NavigationSearchInputError::Cursor)
+            ));
+            for (budget, time_up) in [(SCAN_LIMIT, false), (3, false), (SCAN_LIMIT, true)] {
+                assert_eq!(collect_pages(budget, time_up), ids);
+            }
+        }
     }
 }

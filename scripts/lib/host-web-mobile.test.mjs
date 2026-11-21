@@ -3,6 +3,7 @@ import { access, cp, mkdtemp, mkdir, realpath, readFile, writeFile, rm } from 'n
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { buildHostWebParity } from '../review-host-web-parity.mjs'
@@ -35,7 +36,34 @@ test('phone system message copy control aligns with its message surface', async 
   assert.match(mobileCss, /\.conversation-bubble\.agent \.message-actions\s*\{[^}]*margin-left: -4px;/s)
 })
 
-test('phone navigation search opens a mission message in a short viewport and a wide Web drawer', { timeout: 60_000 }, async t => {
+function seedNavigationSearchBacklog(dataDir, threadId, recentKeyword) {
+  // The isolated Host owns this brand-new DB. Give the real scanner more
+  // than six 5,000-row pages before its first hit, independent of clock budgets.
+  const database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+  try {
+    database.exec('PRAGMA busy_timeout=5000; BEGIN IMMEDIATE')
+    let { sequence } = database.prepare('SELECT MAX(sequence) AS sequence FROM camp_message WHERE camp_id=?').get(threadId)
+    assert.ok(Number.isSafeInteger(sequence))
+    const insert = database.prepare('INSERT INTO camp_message (id,camp_id,sequence,author_type,author_id,body,'
+      + 'structured_content_json,address_mode,addressed_agent_ids_json,version,created_at,updated_at) '
+      + "VALUES(?,?,?,?,?,?,?,'default','[]',1,?,?)")
+    const timestamp = new Date().toISOString()
+    const filler = '独立验收数据'
+    const fillerContent = JSON.stringify([{ kind: 'text', text: filler }])
+    for (let index = 0; index < 30_000; index++) {
+      insert.run('navigation-history-' + index, threadId, ++sequence, 'user', 'local_user',
+        filler, fillerContent, timestamp, timestamp)
+    }
+    insert.run('navigation-missing-author', threadId, ++sequence, 'agent', 'agent_missing_navigation_fixture',
+      recentKeyword, JSON.stringify([{ kind: 'text', text: recentKeyword }]), timestamp, timestamp)
+    database.prepare('UPDATE camp SET last_message_sequence=? WHERE id=?').run(sequence, threadId)
+    database.exec('COMMIT')
+  } finally {
+    database.close()
+  }
+}
+
+test('phone navigation search automatically scans and opens mission hits in mobile and wide Web', { timeout: 60_000 }, async t => {
   if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) {
     t.skip('Requires macOS Chrome')
     return
@@ -60,16 +88,30 @@ test('phone navigation search opens a mission message in a short viewport and a 
     assert.equal(created.status, 'applied', JSON.stringify(created))
     const mission = created.payload
     const searchWord = '导航命中夹具'
+    const recentSearchWord = '近端作者夹具'
     const sent = await host.request('camp.messages.send', {
       commandId: crypto.randomUUID(), threadId: mission.threadId,
       content: { version: 2, segments: [{ kind: 'text', text: searchWord }] },
       sourceAttachments: [], quotes: [], execution: null
     })
     assert.equal(sent.commandResult.status, 'applied', JSON.stringify(sent))
+    seedNavigationSearchBacklog(dataDir, mission.threadId, recentSearchWord)
     const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: process.env.ROVAI_WEB_UI ?? join(repository, 'out/web') })
     browser = await launchAcceptanceBrowser({ executable, args: [
       '--headless=new', '--user-data-dir=' + chromeProfile, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', 'about:blank'
     ] })
+    const requestedCursors = []
+    let resolveNextPage
+    const stopObserving = browser.onProtocolEvent(({ method, params }) => {
+      if (method !== 'Network.requestWillBeSent') return
+      const { url, postData } = params.request
+      if (new URL(url).pathname !== '/api/v1/request' || !postData) return
+      const { operation, params: input } = JSON.parse(postData)
+      if (operation !== 'navigation.searchMessages' || input.query !== searchWord) return
+      requestedCursors.push(input.cursor ?? null)
+      resolveNextPage?.()
+      resolveNextPage = undefined
+    })
     const mobile = height => browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height, deviceScaleFactor: 1, mobile: true })
     const label = text => `[...document.querySelectorAll('button[aria-label=${JSON.stringify(text)}]')].find(button => button.getClientRects().length > 0)`
     await mobile(844)
@@ -87,7 +129,28 @@ test('phone navigation search opens a mission message in a short viewport and a 
     await mobile(370)
     await browser.click('document.querySelector(".command-palette-input")')
     await browser.send('Input.insertText', { text: searchWord })
-    await browser.wait('document.querySelector(".search-result.has-snippet mark")?.textContent === ' + JSON.stringify(searchWord))
+    const continuationButton = 'document.querySelector(".search-status-action")'
+    const paused = continuationButton + '?.textContent === "继续搜索更早的消息"'
+    const matched = 'document.querySelector(".search-result.has-snippet mark")?.textContent === ' + JSON.stringify(searchWord)
+    await browser.wait(paused)
+    assert.equal(requestedCursors.length, 6, 'one first page and five automatic continuations precede the action')
+    assert.equal(requestedCursors[0], null)
+    assert.equal(await browser.evaluate('document.querySelectorAll(".search-result").length'), 0)
+    for (let attempt = 0; attempt < 40 && !await browser.evaluate(matched); attempt++) {
+      await browser.wait(paused + ' || ' + matched)
+      if (await browser.evaluate(matched)) break
+      const nextRequest = new Promise(resolve => { resolveNextPage = resolve })
+      const point = await browser.evaluate('(() => { const box = ' + continuationButton
+        + '.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 } })()')
+      await browser.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] })
+      await browser.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await within(nextRequest)
+    }
+    await browser.wait(matched)
+    stopObserving()
+    assert.ok(requestedCursors.length > 6)
+    assert.equal(new Set(requestedCursors).size, requestedCursors.length, 'continued search advances the real cursor')
+    assert.equal(await browser.evaluate('document.activeElement.matches(".command-palette-input")'), true)
     assert.equal(await browser.evaluate(`(() => {
       const palette = document.querySelector('.command-palette')
       const box = palette.getBoundingClientRect()
@@ -107,11 +170,13 @@ test('phone navigation search opens a mission message in a short viewport and a 
     await browser.wait('!document.querySelector(".mission-workspace-host") && !!document.querySelector(".conversation-jump.is-search")')
     await browser.click('document.querySelector(".conversation-jump.is-search")')
     await browser.wait('document.activeElement.matches(".command-palette-input")')
-    await browser.send('Input.insertText', { text: searchWord })
-    await browser.wait('document.querySelector(".search-result.has-snippet mark")?.textContent === ' + JSON.stringify(searchWord))
+    await browser.send('Input.insertText', { text: recentSearchWord })
+    await browser.wait('document.querySelector(".search-result.has-snippet mark")?.textContent === ' + JSON.stringify(recentSearchWord))
+    assert.equal(await browser.evaluate('document.querySelector(".search-result-snippet strong")?.textContent'), '不可用队员：')
     await browser.click('document.querySelector(".search-result.has-snippet")')
     await browser.wait('!!document.querySelector(".mission-drawer .conversation-find-current-message")'
       + ' && document.querySelector(".conversation-find-count")?.textContent.trim() === "1 / 1"')
+    assert.equal(await browser.evaluate('document.querySelector(".conversation-find-current-message .bubble-meta strong")?.textContent'), '不可用队员')
     assert.deepEqual(browser.errors, [])
   } finally {
     await browser?.close()

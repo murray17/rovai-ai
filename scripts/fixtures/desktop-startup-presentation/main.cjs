@@ -86,6 +86,8 @@ app.whenReady().then(async () => {
   assert.equal(await searchFocus('.command-palette-input'), true)
   assert.equal(await window.webContents.executeJavaScript('!!document.querySelector(".search-status-action")'), false)
   report.cases.push('Navigation search continuation supports native keyboard focus and activation')
+  await window.webContents.executeJavaScript('window.startupTest.checkNavigationSearchStatuses()', true)
+  report.cases.push('Navigation search status layout distinguishes empty, retry and scroll-to-continue')
   await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
   })

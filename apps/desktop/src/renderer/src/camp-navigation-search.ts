@@ -28,7 +28,7 @@ interface SearchState {
   rows: readonly NavigationSearchRow[]
   activeId: string | null
   phase: 'names' | 'results' | 'nameError' | 'invalid'
-  messages: 'off' | 'loading' | 'more' | 'done' | 'error'
+  messages: 'off' | 'loading' | 'loadingEarlier' | 'more' | 'paused' | 'done' | 'error'
   truncated: boolean
   composing: boolean
 }
@@ -106,8 +106,8 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
     if (!pendingEnter || state.phase !== 'results') return
     const first = state.rows[0]
     if (first) choose(first)
-    else if (state.messages === 'done' || state.messages === 'off' || state.messages === 'error'
-      || (state.messages === 'more' && automaticPages >= AUTO_PAGE_LIMIT)) pendingEnter = false
+    else if (state.messages === 'done' || state.messages === 'off'
+      || state.messages === 'error' || state.messages === 'paused') pendingEnter = false
   }
 
   function messagePage(generation: number, query: string, after: string | null) {
@@ -138,7 +138,7 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
     update({
       rows: [...state.rows, ...added],
       activeId: state.activeId ?? added[0]?.target.thread.id ?? null,
-      messages: cursor ? 'more' : 'done'
+      messages: !cursor ? 'done' : automaticPages >= AUTO_PAGE_LIMIT ? 'paused' : 'more'
     })
     resolveEnter()
   }
@@ -186,16 +186,17 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
 
   function more(source: 'automatic' | 'navigation' | 'action'): void {
     if (state.composing || state.phase !== 'results') return
-    if (state.messages !== 'more' && !(source === 'action' && state.messages === 'error')) return
+    if (source === 'action') {
+      if (state.messages !== 'paused' && state.messages !== 'error') return
+    } else if (state.messages !== 'more') return
     if (source === 'automatic') {
-      if (automaticPages >= AUTO_PAGE_LIMIT) return
       automaticPages++
     } else {
       automaticPages = 0
     }
     const generation = version
     const after = cursor
-    update({ messages: 'loading' })
+    update({ messages: after === null ? 'loading' : 'loadingEarlier' })
     void applyMessagePage(generation, after, messagePage(generation, state.query, after))
   }
 
@@ -241,7 +242,8 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
       if (state.phase === 'results' && state.rows.length) {
         const selected = state.rows.find(row => row.target.thread.id === state.activeId) ?? state.rows[0]
         choose(selected)
-      } else if (state.phase === 'names' || (state.phase === 'results' && state.messages === 'loading')) {
+      } else if (state.phase === 'names' || (state.phase === 'results'
+        && (state.messages === 'loading' || state.messages === 'loadingEarlier' || state.messages === 'more'))) {
         pendingEnter = true
       }
     }
