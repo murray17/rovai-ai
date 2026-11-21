@@ -17,8 +17,16 @@ last_updated: 2026-11-21
 会话顶栏高 38px，间距 20px，普通顶行高 50px，间距 8px。原生鼠标点击验证了撤销归档、
 查看归档列表、打开恢复的会话和关闭提示。
 
-`pnpm typecheck` 和 `pnpm test:thread-fork` 通过。桌面集成套件中的 Composer 长文本附件布局检查
-在本分支与基线 `6e2dff9b0` 均出现测量目标从 DOM 卸载的失败。
+`pnpm typecheck` 和 `pnpm test:thread-fork` 通过。macOS 桌面集成的 28 组命令均已执行，21 组通过。
+以下 7 组的失败用例均在同一台 Mac 的原始主线基线 `6e2dff9b0` 复现。
+
+- `pnpm test:composer-input`（长文本附件布局检查的测量目标从 DOM 卸载）
+- `pnpm test:navigation-shell`
+- `pnpm test:camp-fast-layout`
+- `pnpm test:camp-open-projection`
+- `pnpm test:message-anchors`
+- `pnpm test:message-export-ui`
+- `pnpm test:member-runtime-apply`
 
 ## 导航搜索
 
