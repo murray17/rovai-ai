@@ -79,12 +79,6 @@ export function AppUpdatePrompt({
           className="quiet-button compact"
           type="button"
           disabled={busy !== null}
-          onClick={() => void run('dismiss', () => onDismiss(prompt.id))}
-        ><UiText zh={"稍后"} /></button>
-        <button
-          className="quiet-button compact"
-          type="button"
-          disabled={busy !== null}
           onClick={() => void run('details', () => onOpenDetails(prompt))}
         >{busy === 'details' ? uiAttribute("正在打开…") : uiAttribute("查看更新内容")}</button>
         <button

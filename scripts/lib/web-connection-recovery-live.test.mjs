@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { build } from 'vite'
 import { launchHost, within } from './host-test-client.mjs'
-import { launchAcceptanceBrowser } from './host-web-browser.mjs'
+import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from './runtime-camp-files-root.mjs'
 
 // Owns production WebEntry/Composer + real Rust receipts, including sends after
@@ -115,6 +115,9 @@ test('production Web retains its mounted Composer and authentication across a re
       const realFetch = window.fetch;
       window.fetch = function(url, init) {
         if (String(url).endsWith('/request') && init?.body) window.recoveryRequests.push(JSON.parse(init.body).operation);
+        if (window.failLogout && String(url).endsWith('/logout')) {
+          return Promise.resolve(Response.json({ error: { code: 'session_storage_unavailable', message: '退出未完成，请重试。' } }, { status: 503 }));
+        }
         return realFetch.call(this, url, init);
       };` })
     const recorded = message('已提交但响应丢失')
@@ -175,10 +178,74 @@ test('production Web retains its mounted Composer and authentication across a re
     assert.equal(validation.pending, 0)
     assert.equal(validation.connection, 'live')
     assert.deepEqual(validation.lostResponse, { status: 'applied', sends: 1, pending: 0, connection: 'live' })
+
+    // A reloaded upload has an intent but no File. Restore that real intent
+    // through WebEntry and verify successful recovery independently of a later error.
+    const bytes = Buffer.from('reselect this fixture file')
+    const upload = { commandId: crypto.randomUUID(), threadId, expectedRevision: 0, displayName: 'original.txt',
+      byteSize: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+    await browser.evaluate(`(() => {
+      const saved = JSON.parse(sessionStorage.getItem('rovai.web.session.v1'));
+      saved.uploads = [${JSON.stringify(upload)}];
+      sessionStorage.setItem('rovai.web.session.v1', JSON.stringify(saved));
+    })()`)
+    await browser.send('Page.reload')
+    await browser.wait(`document.querySelector('.web-offline-retry:not(:disabled)') !== null`)
+    await browser.click(`document.querySelector('.web-offline-retry')`)
+    const recoveryNotice = `document.querySelector('.app-toast[role=status]')`
+    await browser.wait(`!!${recoveryNotice} && !document.querySelector('.web-offline-dialog')`)
+    const notice = await browser.evaluate(`(() => {
+      const toast = ${recoveryNotice};
+      const shell = document.querySelector('.app-shell');
+      window.recoveryNotice = toast;
+      return {
+        mobile: document.documentElement.dataset.mobileWeb === 'true',
+        top: toast.getBoundingClientRect().top - shell.getBoundingClientRect().top,
+        mountedInShell: toast.parentElement.parentElement === shell,
+        live: toast.getAttribute('aria-live'),
+        danger: toast.classList.contains('is-danger'),
+        text: toast.querySelector('.app-toast-message').textContent,
+        controls: [...toast.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))
+      };
+    })()`)
+    assert.deepEqual(notice, { mobile: true, top: 58, mountedInShell: true, live: 'polite', danger: false,
+      text: '连接已恢复。未完成的上传需要重新选择原文件。', controls: ['关闭提示'] })
+    await browser.capture(join(output, 'live-recovery-notice-mobile.png'))
+
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
+    await browser.wait(`document.documentElement.dataset.mobileWeb !== 'true' && !!document.querySelector('.sidebar-settings-main')`)
+    await browser.click(`document.querySelector('.sidebar-settings-main')`)
+    const remoteSettings = `[...document.querySelectorAll('.settings-sidebar-menu button')].find(button => button.textContent.trim() === '远程连接')`
+    await browser.wait(`!!${remoteSettings}`)
+    await browser.click(remoteSettings)
+    await browser.wait(`document.querySelector('.remote-connection-page .quiet-button') !== null`)
+    await browser.evaluate('window.failLogout = true')
+    await browser.click(`document.querySelector('.remote-connection-page .quiet-button')`)
+    const connectionError = `document.querySelector('.app-toast.is-danger[role=alert]')`
+    await browser.wait(`!!${connectionError}`)
+    const failure = await browser.evaluate(`(() => {
+      const toast = ${connectionError};
+      return {
+        live: toast.getAttribute('aria-live'),
+        text: toast.querySelector('.app-toast-message').textContent,
+        controls: [...toast.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))
+      };
+    })()`)
+    assert.deepEqual(failure, { live: 'assertive', text: '退出未完成，请重试。', controls: ['关闭提示'] })
+    await pause(5500)
+    assert.equal(await browser.evaluate(`!!${connectionError} && ${recoveryNotice} === window.recoveryNotice`), true)
+    await browser.capture(join(output, 'live-recovery-notice-and-error.png'))
+    await browser.click(`${connectionError}.querySelector('.app-toast-close')`)
+    await browser.wait(`!${connectionError} && ${recoveryNotice} === window.recoveryNotice`)
+    await browser.click(`${recoveryNotice}.querySelector('.app-toast-close')`)
+    await browser.wait(`!document.querySelector('.app-toast-viewport')`)
     assert.deepEqual(browser.errors, [])
     await writeFile(join(output, 'live-verification.json'), JSON.stringify({ hostBinarySha256: createHash('sha256').update(await readFile(binary)).digest('hex'),
-      hostRestartVerified: true, productionWebEntry: true, runtimeExecuted: false, validation,
-      checks: ['real Host stopped', 'retry while stopped', 'original Composer DOM retained', 'draft retained', 'same Session resumes', 'reload retains draft and authentication', 'persisted unknown command recovered through Core', 'initial navigation unblocked after recovery', 'public send clears mounted and durable draft after refresh', 'recorded public send settles without dispatch', 'later public edits preserved', 'real Core rejection settles original Promise and gate', 'lost response after real commit recovered without resend'] }, null, 2))
+      hostRestartVerified: true, productionWebEntry: true, runtimeExecuted: false, validation, toasts: { notice, failure },
+      checks: ['real Host stopped', 'retry while stopped', 'original Composer DOM retained', 'draft retained', 'same Session resumes', 'reload retains draft and authentication', 'persisted unknown command recovered through Core', 'initial navigation unblocked after recovery', 'public send clears mounted and durable draft after refresh', 'recorded public send settles without dispatch', 'later public edits preserved', 'real Core rejection settles original Promise and gate', 'lost response after real commit recovered without resend', 'upload reselection is a polite notice on mobile', 'logout failure is a separate alert', 'notice and error remain until independently dismissed'] }, null, 2))
     console.log(`Live recovery evidence: ${output}`)
   } finally {
     await browser?.close(); await host?.close()

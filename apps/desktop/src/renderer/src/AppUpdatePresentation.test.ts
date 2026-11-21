@@ -32,6 +32,9 @@ describe('App update interaction presentation', () => {
     expect(styleBlock(styles, '.app-update-prompt .primary-button')).toMatch(
       /border-color:\s*var\(--conversation-action\)[^}]*color:\s*var\(--conversation-action-contrast\)[^}]*background:\s*var\(--conversation-action\)/
     )
+    const secondaryAction = styleBlock(styles, '.app-update-prompt-actions .quiet-button')
+    expect(secondaryAction).toMatch(/border-color:\s*transparent/)
+    expect(secondaryAction).toMatch(/background:\s*var\(--surface-muted\)/)
     expect(styleBlock(styles, '.app-update-prompt-actions button')).toMatch(/min-height:\s*30px/)
     expect(styleBlock(styles, '.app-update-prompt-actions button')).toMatch(/font-size:\s*10\.5px/)
   })

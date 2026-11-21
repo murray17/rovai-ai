@@ -5,6 +5,21 @@ const { join } = require('node:path')
 app.setPath('userData', process.argv[3])
 app.commandLine.appendSwitch('disable-background-networking')
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+function contrastRatio(foreground, background) {
+  const luminance = color => {
+    assert.match(color, /^(rgb\(|color\(srgb )/, `Expected computed sRGB color, got ${color}`)
+    const scale = color.startsWith('rgb(') ? 255 : 1
+    const [r, g, b] = color.match(/[\d.]+/g).slice(0, 3).map(value => {
+      const channel = Number(value) / scale
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const [dark, light] = [luminance(foreground), luminance(background)].sort((a, b) => a - b)
+  return (light + 0.05) / (dark + 0.05)
+}
+
 app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 1440, height: 920, useContentSize: true, show: false, webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
   const errors=[]
@@ -238,31 +253,157 @@ app.whenReady().then(async () => {
     await quiet()
     // Shared production portals stack independent owners and clean up in StrictMode.
     const toastGeometry=[]
+    const dangerButton = `document.querySelector('.app-toast.is-danger .app-toast-action')`
+    const measureDangerContrast = async (state, match) => {
+      await wait(`${dangerButton}.matches(${JSON.stringify(match)})
+        && ${dangerButton}.getAnimations().every(animation => animation.playState !== 'running')`)
+      const { color, background } = await run(`(() => {
+        const style = getComputedStyle(${dangerButton});
+        return { color: style.color, background: style.backgroundColor };
+      })()`)
+      const ratio = contrastRatio(color, background)
+      assert(ratio >= 4.5, `Danger action ${state} contrast is ${ratio.toFixed(2)}:1`)
+      return ratio
+    }
     for(const language of ['zh-CN','en'])for(const theme of ['day','night','horizon','classic-red','ember']) {
       window.setContentSize(1040,700)
+      window.webContents.sendInputEvent({ type: 'mouseMove', x: 1, y: 100 })
       await run(`forkQA.language(${JSON.stringify(language)});forkQA.theme(${JSON.stringify(theme)})`)
       await run('forkQA.showToasts()')
       await wait('document.querySelectorAll(".app-toast").length===2')
-      const measured=await run(`(()=>{
-        const host=document.querySelector('.app-toast-viewport'),shell=document.querySelector('.app-shell'),toasts=[...host.querySelectorAll('.app-toast')];
-        const sample=document.createElement('div');sample.style.cssText='color:var(--ink);background:var(--surface-raised)';shell.append(sample);
-        const normal=getComputedStyle(sample);const colors={ink:normal.color,surface:normal.backgroundColor};const dangerSample=document.createElement('div');dangerSample.style.cssText='color:var(--danger)';shell.append(dangerSample);colors.danger=getComputedStyle(dangerSample).color;sample.remove();dangerSample.remove();
-        const bounds=shell.getBoundingClientRect(),rows=toasts.map(t=>{const r=t.getBoundingClientRect(),message=t.querySelector('.app-toast-message').getBoundingClientRect(),action=t.querySelector('.app-toast-action'),a=action.getBoundingClientRect(),close=t.querySelector('.app-toast-close'),c=close.getBoundingClientRect(),style=getComputedStyle(t);return {top:r.top,bottom:r.bottom,center:Math.abs(r.x+r.width/2-bounds.x-bounds.width/2),inside:r.left>=bounds.left&&r.right<=bounds.right,aligned:Math.max(Math.abs(message.y+message.height/2-a.y-a.height/2),Math.abs(c.y+c.height/2-a.y-a.height/2)),actionBackground:getComputedStyle(action).backgroundColor,actionBorder:getComputedStyle(action).borderTopWidth,actionHeight:a.height,appRegion:style.getPropertyValue('-webkit-app-region'),height:r.height,closeWidth:c.width,closeHeight:c.height,svg:!!close.querySelector('svg'),closeText:close.textContent,role:t.getAttribute('role'),live:t.getAttribute('aria-live'),color:style.color,background:style.backgroundColor,pointer:style.pointerEvents}});
-        return {hosts:document.querySelectorAll('.app-toast-viewport').length,parent:host.parentElement===shell,top:rows[0].top-bounds.top,gap:rows[1].top-rows[0].bottom,rows,colors,pointer:getComputedStyle(host).pointerEvents};
+      const measured = await run(`(() => {
+        const host = document.querySelector('.app-toast-viewport');
+        const shell = document.querySelector('.app-shell');
+        const bounds = shell.getBoundingClientRect();
+        const sampleColors = (color, background) => {
+          const sample = document.createElement('div');
+          sample.style.color = color;
+          sample.style.backgroundColor = background;
+          shell.append(sample);
+          const style = getComputedStyle(sample);
+          const colors = { color: style.color, background: style.backgroundColor };
+          sample.remove();
+          return colors;
+        };
+        const colors = {
+          surface: sampleColors('var(--ink)', 'var(--surface-raised)'),
+          primary: sampleColors('var(--conversation-action-contrast)', 'var(--conversation-action)'),
+          secondary: sampleColors('var(--ink)', 'var(--surface-muted)'),
+          danger: sampleColors('var(--danger)', 'color-mix(in srgb, var(--danger) 7%, var(--surface-raised))')
+        };
+        const rows = [...host.querySelectorAll('.app-toast')].map(toast => {
+          const boundsOf = element => element.getBoundingClientRect();
+          const box = boundsOf(toast);
+          const message = boundsOf(toast.querySelector('.app-toast-message'));
+          const close = toast.querySelector('.app-toast-close');
+          const closeBox = boundsOf(close);
+          const centerY = rect => rect.y + rect.height / 2;
+          const centerX = rect => rect.x + rect.width / 2;
+          const hit = (element, x, y) => element.contains(document.elementFromPoint(x, y));
+          const verticalHit = (element, rect) => hit(element, centerX(rect), rect.top - 0.5)
+            && hit(element, centerX(rect), rect.bottom + 0.5);
+          const style = getComputedStyle(toast);
+          const actions = [...toast.querySelectorAll('.app-toast-action')].map(action => {
+            const actionBox = boundsOf(action);
+            const actionStyle = getComputedStyle(action);
+            return {
+              aligned: Math.max(Math.abs(centerY(message) - centerY(actionBox)), Math.abs(centerY(closeBox) - centerY(actionBox))),
+              height: actionBox.height,
+              width: actionBox.width,
+              hitArea: verticalHit(action, actionBox),
+              borderWidth: actionStyle.borderTopWidth,
+              borderColor: actionStyle.borderTopColor,
+              colors: { color: actionStyle.color, background: actionStyle.backgroundColor }
+            };
+          });
+          return {
+            top: box.top, bottom: box.bottom, height: box.height,
+            center: Math.abs(box.x + box.width / 2 - bounds.x - bounds.width / 2),
+            inside: box.left >= bounds.left && box.right <= bounds.right,
+            actions, appRegion: style.getPropertyValue('-webkit-app-region'),
+            closeWidth: closeBox.width, closeHeight: closeBox.height, svg: !!close.querySelector('svg'), closeText: close.textContent,
+            closeHitArea: verticalHit(close, closeBox) && hit(close, closeBox.left - 0.5, centerY(closeBox))
+              && hit(close, closeBox.right + 0.5, centerY(closeBox)),
+            role: toast.getAttribute('role'), live: toast.getAttribute('aria-live'),
+            color: style.color, background: style.backgroundColor, pointer: style.pointerEvents
+          };
+        });
+        return {
+          hosts: document.querySelectorAll('.app-toast-viewport').length, parent: host.parentElement === shell,
+          top: rows[0].top - bounds.top, gap: rows[1].top - rows[0].bottom, rows, colors,
+          pointer: getComputedStyle(host).pointerEvents
+        };
       })()`)
       assert.equal(measured.hosts,1);assert(measured.parent);assert.equal(measured.top,58);assert.equal(measured.gap,8);assert.equal(measured.pointer,'none')
-      assert(measured.rows.every(r=>r.center<1&&r.inside&&r.aligned<1&&r.height===40&&r.actionHeight===26&&r.closeWidth===26&&r.closeHeight===26&&r.svg&&r.closeText===''&&r.pointer==='auto'&&r.appRegion==='no-drag'&&r.actionBorder==='1px'&&r.actionBackground==='rgba(0, 0, 0, 0)'),JSON.stringify(measured))
+      assert(measured.rows.every(r=>r.center<1&&r.inside&&r.height===40&&r.closeWidth===26&&r.closeHeight===26&&r.closeHitArea&&r.svg&&r.closeText===''&&r.pointer==='auto'&&r.appRegion==='no-drag'),JSON.stringify(measured))
+      const actions = measured.rows.flatMap(row => row.actions.map(action => ({ ...action, role: row.role })))
+      assert(actions.every(action => action.aligned < 1 && action.height === 26 && action.width >= 28 && action.hitArea
+        && action.borderWidth === '1px' && action.borderColor === 'rgba(0, 0, 0, 0)'), JSON.stringify(measured))
+      assert.deepEqual(measured.rows[0].actions.map(action => action.colors), [measured.colors.primary, measured.colors.secondary])
+      assert.deepEqual(measured.rows[1].actions.map(action => action.colors), [measured.colors.danger])
       assert.equal(measured.rows[0].role,'status');assert.equal(measured.rows[0].live,'polite');assert.equal(measured.rows[1].role,'alert');assert.equal(measured.rows[1].live,'assertive')
-      assert.equal(measured.rows[0].color,measured.colors.ink);assert.equal(measured.rows[0].background,measured.colors.surface);assert.equal(measured.rows[1].color,measured.colors.danger)
+      assert.equal(measured.rows[0].color,measured.colors.surface.color);assert.equal(measured.rows[0].background,measured.colors.surface.background);assert.equal(measured.rows[1].color,measured.colors.danger.color)
+      const dangerContrast = { rest: await measureDangerContrast('rest', ':not(:hover, :active, :focus-visible)') }
+      for (const [index, action] of actions.entries()) {
+        const button = `document.querySelectorAll('.app-toast-action')[${index}]`
+        const point = await run(`(() => {
+          const bounds = ${button}.getBoundingClientRect();
+          return { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
+        })()`)
+        window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+        if (action.role === 'alert') dangerContrast.hover = await measureDangerContrast('hover', ':hover')
+        window.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point })
+        try {
+          await wait(`${button}.matches(':active')`)
+          assert.equal(await run(`getComputedStyle(${button}).transform`), 'none')
+          if (action.role === 'alert') dangerContrast.pressed = await measureDangerContrast('pressed', ':active')
+        } finally {
+          window.webContents.sendInputEvent({ type: 'mouseMove', x: 1, y: 100 })
+          window.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: 1, y: 100 })
+        }
+      }
       await run(`document.querySelector('.app-toast.is-danger .app-toast-action').focus()`);await key('Tab');await key('Tab',['shift'])
-      assert.notEqual(await run(`getComputedStyle(document.querySelector('.app-toast.is-danger .app-toast-action')).backgroundColor`),'rgba(0, 0, 0, 0)')
       assert.equal(await run(`document.activeElement===document.querySelector('.app-toast.is-danger .app-toast-action')`),true)
-      const name=`toast-${language}-${theme}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);toastGeometry.push({language,theme,...measured})
+      dangerContrast.focus = await measureDangerContrast('focus', ':focus-visible:not(:hover)')
+      const name=`toast-${language}-${theme}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);toastGeometry.push({language,theme,...measured,dangerContrast})
       await key('Return')
       await wait('document.querySelectorAll(".app-toast").length===1')
       await click(`document.querySelector('.app-toast-action + .app-toast-action')`);await wait('!document.querySelector(".app-toast-viewport")')
       assert.deepEqual(await run('forkQA.probeActions'),['close:danger','retry','close:neutral','view'])
     }
+    const reducedMotion = { name: 'prefers-reduced-motion', value: 'reduce' }
+    const forcedColorBorders = []
+    await window.webContents.debugger.sendCommand('Page.enable')
+    for (const scheme of ['light', 'dark']) {
+      await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
+        reducedMotion, { name: 'forced-colors', value: 'active' }, { name: 'prefers-color-scheme', value: scheme }
+      ] })
+      await run('forkQA.showToasts()')
+      await wait('document.querySelectorAll(".app-toast").length === 2 && matchMedia("(forced-colors: active)").matches')
+      const borders = await run(`[...document.querySelectorAll('.app-toast-action')].map(button => {
+        const style = getComputedStyle(button);
+        return {
+          width: style.borderTopWidth, style: style.borderTopStyle, color: style.borderTopColor,
+          background: style.backgroundColor, surface: getComputedStyle(button.closest('.app-toast')).backgroundColor
+        };
+      })`)
+      assert(borders.length > 0)
+      for (const border of borders) {
+        assert.equal(border.width, '1px')
+        assert.equal(border.style, 'solid')
+        assert(contrastRatio(border.color, border.background) >= 3, JSON.stringify(border))
+        assert(contrastRatio(border.color, border.surface) >= 3, JSON.stringify(border))
+      }
+      const name = `toast-forced-colors-${scheme}.png`
+      await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      const { data } = await window.webContents.debugger.sendCommand('Page.captureScreenshot', { format: 'png' })
+      await writeFile(join(output, name), Buffer.from(data, 'base64'))
+      screenshots.push(name)
+      forcedColorBorders.push({ scheme, borders })
+      await run('forkQA.clearToasts()')
+      await quiet()
+    }
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [reducedMotion] })
     window.webContents.setZoomFactor(2)
     await run(`forkQA.showToasts('A long conversation title '.repeat(8))`)
     await wait('document.querySelectorAll(".app-toast").length===2')
@@ -292,8 +433,68 @@ app.whenReady().then(async () => {
     assert.deepEqual(await run('forkQA.probeActions'), ['close:plain'], 'leaving resumes the remaining time')
     await quiet()
     assert.deepEqual(await run('forkQA.probeActions'), ['close:plain', 'close:error'])
+
+    await run('forkQA.showPersistentToasts()')
+    await wait('document.querySelectorAll(".app-toast").length===2')
+    await pause(5500)
+    assert.equal(await run('document.querySelectorAll(".app-toast").length'), 2)
+    assert.deepEqual(await run('forkQA.probeActions'), [])
+    assert.equal(await run('document.querySelectorAll(".app-toast[role=status] button").length'), 1)
+    assert.equal(await run('document.querySelectorAll(".app-toast[role=alert] button").length'), 1)
+    assert.equal(await run('document.querySelector(".app-toast[role=status] .app-toast-close") === null'), true)
+
+    await run(`(() => {
+      const viewport = document.querySelector('.app-toast-viewport');
+      window.toastFixture = { viewport, shell: viewport.parentElement, messages: [...viewport.children] };
+      viewport.remove();
+    })()`)
+    const retained = `document.querySelector('.app-toast-viewport') === toastFixture.viewport
+      && toastFixture.messages.every((toast, index) => toast === toastFixture.viewport.children[index])`
+    await wait(`${retained} && toastFixture.viewport.parentElement === toastFixture.shell`)
+    await run(`toastFixture.shell.classList.remove('app-shell'); toastFixture.viewport.remove()`)
+    await wait(`${retained} && toastFixture.viewport.parentElement === document.body`)
+    await run(`(() => {
+      const wrapper = document.createElement('div');
+      toastFixture.replacement = document.createElement('div');
+      toastFixture.replacement.className = 'app-shell';
+      wrapper.append(toastFixture.replacement);
+      document.body.append(wrapper);
+    })()`)
+    await wait(`${retained} && toastFixture.viewport.parentElement === toastFixture.replacement`)
+    await run('toastFixture.replacement.parentElement.hidden = true')
+    await wait(`${retained} && toastFixture.viewport.parentElement === document.body`)
+    await run(`toastFixture.shell.classList.add('app-shell'); toastFixture.replacement.parentElement.remove()`)
+    await wait(`${retained} && toastFixture.viewport.parentElement === toastFixture.shell`)
+    const retryButton = `document.querySelector('.app-toast[role=status] .app-toast-action')`
+    await run(`toastFixture.retry = ${retryButton}; toastFixture.retry.focus()`)
+    await key('Return')
+    await wait(`forkQA.languageReads() === 2 && ${retryButton}.getAttribute('aria-disabled') === 'true'
+      && ${retryButton}.closest('.app-toast').getAttribute('aria-busy') === 'true'
+      && !!document.querySelector('.app-toast-spinner')`)
+    assert.equal(await run(`document.activeElement === toastFixture.retry && ${retryButton} === toastFixture.retry`), true)
+    await key('Return')
+    await run('toastFixture.retry.click()')
+    assert.equal(await run('forkQA.languageReads()'), 2)
+    await run('forkQA.finishLanguageRead(false)')
+    await wait(`!${retryButton}.hasAttribute('aria-disabled') && !document.querySelector('.app-toast-spinner')`)
+    assert.equal(await run(`document.activeElement === toastFixture.retry && ${retryButton} === toastFixture.retry`), true)
+    assert.equal(await run(retained), true)
+    await key('Return')
+    await wait('forkQA.languageReads() === 3')
+    await run('forkQA.finishLanguageRead(true)')
+    await wait('document.querySelector(".app-toast[role=status]") === null')
+    await click(`document.querySelector('.app-toast[role=alert] .app-toast-close')`)
+    await quiet()
+    assert.deepEqual(await run('forkQA.probeActions'), ['close:until-closed'])
+    await run('forkQA.clearToasts()')
+    await wait('!document.querySelector(".app-toast-viewport")')
+    await run('forkQA.showPersistentToasts()')
+    await wait('document.querySelector(".app-toast-viewport") === toastFixture.viewport')
+    await run('forkQA.clearToasts()')
+    await wait('!document.querySelector(".app-toast-viewport")')
+
     assert.deepEqual(await run('forkQA.errors'),[]);assert.deepEqual(errors,[])
-    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,loadingTiming,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','outlined toast actions and SVG close','hover and focus pause the remaining time','inline editor stays in the message bubble with its actions','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
+    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,forcedColorBorders,loadingTiming,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','solid primary, tonal secondary and danger actions','SVG close and no movement while pressed','28px hit areas','danger text contrast in all interaction states','visible forced-color borders','persistent toasts stay until closed or resolved','language re-read preserves focus on failure and clears on success','retained portal follows replacement and hidden shells','hover and focus pause the remaining time','inline editor stays in the message bubble with its actions','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
     await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:true,output,verified:report.verified}));app.exit(0)
   }catch(error){console.error(error.stack??error);console.error(await run('JSON.stringify(forkQA.calls.slice(-12))').catch(()=>''));app.exit(1)}
 })

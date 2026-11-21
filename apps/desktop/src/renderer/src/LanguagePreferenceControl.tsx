@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { InterfaceLanguagePreference } from '@contracts'
+import { AppToast, type AppToastUntilResolved } from './AppToast'
 import { refreshInterfaceLanguage, useInterfaceLanguageSnapshot, useUiText } from './interface-language'
 
 export function LanguagePreferenceOptions({ name, className, disabled = false, onChange }: {
@@ -24,12 +25,22 @@ export function LanguagePreferenceReadNotice(): React.JSX.Element | null {
   const snapshot = useInterfaceLanguageSnapshot()
   const t = useUiText()
   const [busy, setBusy] = useState(false)
+  const message = t('语言偏好暂时无法读取，原记录已保留。')
+  const retryLabel = t('重新读取')
+  const toast = useMemo<AppToastUntilResolved>(() => ({
+    message,
+    tone: 'neutral',
+    persistence: 'until-resolved',
+    loading: busy,
+    actions: [{
+      label: retryLabel,
+      disabled: busy,
+      onSelect: () => {
+        setBusy(true)
+        void refreshInterfaceLanguage().finally(() => setBusy(false))
+      }
+    }]
+  }), [busy, message, retryLabel])
   if (!snapshot.readError) return null
-  return <aside className="language-preference-notice" role="alert">
-    <span>{t('语言偏好暂时无法读取，原记录已保留。')}</span>
-    <button type="button" className="quiet-button compact" disabled={busy} onClick={() => {
-      setBusy(true)
-      void refreshInterfaceLanguage().finally(() => setBusy(false))
-    }}>{t('重新读取')}</button>
-  </aside>
+  return <AppToast toast={toast} />
 }
