@@ -3,10 +3,30 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-20
+last_updated: 2026-11-21
 ---
 
 # v1.72 实施与验收
+
+## 通用提示跨页面对齐（2026-11-21）
+
+归档当前会话并回到新对话页时，「已归档」与会话内的提示对齐。统一位置遵循
+[通用操作提示](../../ui/components/app-shell-navigation.md#通用操作提示)，会话分叉夹具断言距 App 顶部 58px、堆叠间距 8px。
+
+隔离 macOS arm64 打包版在 Porcelain Day 和 Steel Night 均测得会话、新对话、设置、使命板的提示距 App 顶部 58px。
+会话顶栏高 38px，间距 20px，普通顶行高 50px，间距 8px。原生鼠标点击验证了撤销归档、
+查看归档列表、打开恢复的会话和关闭提示。
+
+`pnpm typecheck` 和 `pnpm test:thread-fork` 通过。macOS 桌面集成的 28 组命令均已执行，21 组通过。
+以下 7 组的失败用例均在同一台 Mac 的原始主线基线 `6e2dff9b0` 复现。
+
+- `pnpm test:composer-input`（长文本附件布局检查的测量目标从 DOM 卸载）
+- `pnpm test:navigation-shell`
+- `pnpm test:camp-fast-layout`
+- `pnpm test:camp-open-projection`
+- `pnpm test:message-anchors`
+- `pnpm test:message-export-ui`
+- `pnpm test:member-runtime-apply`
 
 ## 导航搜索
 

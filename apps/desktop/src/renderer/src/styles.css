@@ -1022,7 +1022,6 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .error-banner span { margin-top: 3px; font-size: 13px; line-height: 1.45; }
 .error-banner small { margin-top: 4px; color: var(--danger); font-size: 11px; }
 .app-toast-viewport { position: absolute; z-index: 150; top: 58px; left: 50%; display: flex; width: calc(100% - 32px); flex-direction: column; align-items: center; gap: 8px; transform: translateX(-50%); pointer-events: none; }
-.app-shell-camp > .app-toast-viewport { top: 46px; }
 .app-toast { display: inline-flex; width: max-content; max-width: min(560px, 100%); min-height: 40px; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); pointer-events: auto; -webkit-app-region: no-drag; }
 .app-toast.is-danger { border-color: color-mix(in srgb, var(--danger) 55%, var(--line-strong)); color: var(--danger); }
 .app-toast-glyph, .app-toast-glyph > .navigation-icon { display: block; width: 15px; height: 15px; flex: 0 0 15px; color: var(--muted); }

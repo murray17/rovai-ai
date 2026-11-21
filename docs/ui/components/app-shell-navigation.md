@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-11-12
+last_updated: 2026-11-21
 ---
 
 # App Shell 与统一侧栏
@@ -373,7 +373,7 @@ App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，�
 
 ## 通用操作提示
 
-AppToast 在 App 容器中水平居中，位于窗口顶行下方 8px。完整会话落在顶部 46px，其余页面落在 58px。
+AppToast 在 App 容器中水平居中，所有页面统一落在顶部 58px（普通页面 50px 顶行下方 8px，完整会话 38px 顶栏下方 20px），跨页面切换时位置不变。
 提示表面声明 `-webkit-app-region: no-drag`，使触发操作和关闭的点击排除在原生窗口拖拽之外。
 独立来源的提示纵向间隔 8px，提示外部继续支持阅读、编辑与导航。
 
