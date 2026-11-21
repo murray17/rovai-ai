@@ -88,6 +88,10 @@ app.whenReady().then(async () => {
   report.cases.push('Navigation search continuation supports native keyboard focus and activation')
   await window.webContents.executeJavaScript('window.startupTest.checkNavigationSearchStatuses()', true)
   report.cases.push('Navigation search status layout distinguishes empty, retry and scroll-to-continue')
+  await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
+  await window.webContents.executeJavaScript('window.startupTest.checkNavigationSearchPanels()', true)
+  await window.webContents.debugger.sendCommand('Emulation.clearDeviceMetricsOverride')
+  report.cases.push('Navigation search reveals a loaded hit behind file preview or reply details')
   await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
   })

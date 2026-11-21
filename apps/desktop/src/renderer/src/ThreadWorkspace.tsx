@@ -1645,11 +1645,21 @@ const EMPTY_CAMP_MESSAGES: ThreadMessageView[] = []
 const EMPTY_LIVE_RUNTIME_EVENTS: LiveRuntimeEvent[] = []
 
 // Subscribe to split geometry in this leaf so resizing does not rerender the timeline.
-function RevealNotificationConversation({ active, onHidePreview }: { active: boolean; onHidePreview?(): void }): null {
+function RevealConversation({ notificationActive, navigationActive, onHidePreview }: {
+  notificationActive: boolean
+  navigationActive: boolean
+  onHidePreview?(): void
+}): null {
   const layout = useOptionalFilePreviewLayout()
   useLayoutEffect(() => {
-    if (active && layout?.compact && layout.visible) onHidePreview?.()
-  }, [active, layout?.compact, layout?.visible, onHidePreview])
+    if (!layout?.visible || (!notificationActive && !navigationActive)) return
+    if (layout.compact) onHidePreview?.()
+    else if (navigationActive && layout.expanded) {
+      layout.cancelResize()
+      layout.setFoldPreview(null)
+      layout.setExpanded(false, false)
+    }
+  }, [notificationActive, navigationActive, layout, onHidePreview])
   return null
 }
 
@@ -3330,26 +3340,33 @@ export function ThreadWorkspace({
     focusConversationFindInput(true)
   }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id, anchorNavigation.navigation, runSourceNavigation.cancel, cancelReplyReveal])
 
+  const pendingNavigationFind = workspaceEntrySnapshotReady
+    && navigationFindIntent?.threadId === snapshot.thread.id
+    && consumedNavigationFind.current !== navigationFindIntent ? navigationFindIntent : null
+
   useEffect(() => {
-    if (!navigationFindIntent || !workspaceEntrySnapshotReady
-      || navigationFindIntent.threadId !== snapshot.thread.id
-      || consumedNavigationFind.current === navigationFindIntent) return
+    if (!pendingNavigationFind) return
     const frame = window.requestAnimationFrame(() => {
-      consumedNavigationFind.current = navigationFindIntent
-      onNavigationFindConsumed?.(navigationFindIntent)
+      // Reply details can also cover the timeline at narrow widths via CSS.
+      if (replyDetail.messageId && workspaceShellRef.current?.querySelector('.timeline-pane')?.getClientRects().length === 0) {
+        closeReplyDetails(false)
+        return
+      }
+      consumedNavigationFind.current = pendingNavigationFind
+      onNavigationFindConsumed?.(pendingNavigationFind)
       conversationFindRequestGeneration.current++
       openConversationFind()
       setConversationFind({
         open: true,
-        query: navigationFindIntent.query,
-        navigationAnchor: navigationFindIntent,
+        query: pendingNavigationFind.query,
+        navigationAnchor: pendingNavigationFind,
         status: 'searching',
         snapshot: null,
         error: null
       })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [navigationFindIntent, onNavigationFindConsumed, openConversationFind, snapshot.thread.id, workspaceEntrySnapshotReady])
+  }, [pendingNavigationFind, onNavigationFindConsumed, openConversationFind, replyDetail.messageId, closeReplyDetails])
 
   const closeConversationFind = useCallback((restore = true): void => {
     cancelConversationFindRestore()
@@ -5588,9 +5605,9 @@ export function ThreadWorkspace({
         entries={messageExport.entries} renderBody={message => renderPublicMessageBody(message, 'export', true)} onClose={messageExport.close} />
       <FilePreviewWorkspace
       >
-        <RevealNotificationConversation active={!!notificationFocus?.active
+        <RevealConversation notificationActive={!!notificationFocus?.active
           && ['camp_message', 'camp_turn', 'mission', 'task'].includes(notificationFocus.kind)}
-          onHidePreview={filePreview?.hidePane} />
+          navigationActive={!!pendingNavigationFind} onHidePreview={filePreview?.hidePane} />
         <section
           className="timeline-pane"
           tabIndex={-1}

@@ -61,6 +61,7 @@ test('the production App presents the full-window brand loader without weakening
     assert.ok(report.cases.includes('Navigation search fits five themes at compact and large desktop sizes'))
     assert.ok(report.cases.includes('Navigation search continuation supports native keyboard focus and activation'))
     assert.ok(report.cases.includes('Navigation search status layout distinguishes empty, retry and scroll-to-continue'))
+    assert.ok(report.cases.includes('Navigation search reveals a loaded hit behind file preview or reply details'))
     assert.ok(report.cases.includes('Cached Thread revisits show messages before authority returns without redundant reads, with Tasks off and on'))
     assert.ok(report.cases.includes('Actual Task disable clears incompatible caches and panels while rejecting late enabled UI'))
     assert.ok(report.cases.includes('Task capability changes during enter cannot commit the previous capability projection'))

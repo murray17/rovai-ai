@@ -17,6 +17,10 @@ function projectBasename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }
 
+function isNearListEnd(list: HTMLDivElement): boolean {
+  return list.scrollHeight - list.scrollTop - list.clientHeight <= 96
+}
+
 function highlightSnippet(text: string, query: string): ReactNode {
   const parts: ReactNode[] = []
   let previous = 0
@@ -76,7 +80,8 @@ export function NavigationSearchPanel({
     if (actionFocused.current && !action.current) input.current?.focus({ preventScroll: true })
     const view = list.current
     if (current && state.messages === 'more' && view
-      && view.scrollHeight <= view.clientHeight + 1 && !actionFocused.current) {
+      && !actionFocused.current
+      && (view.scrollHeight <= view.clientHeight + 1 || (view.scrollTop > 0 && isNearListEnd(view)))) {
       session.more('automatic')
     }
   }, [state, current, session])
@@ -150,8 +155,7 @@ export function NavigationSearchPanel({
         />
         <div ref={list} className="command-palette-list" onScroll={event => {
           if (actionFocused.current) return
-          const area = event.currentTarget
-          if (area.scrollHeight - area.scrollTop - area.clientHeight <= 96) session.more('navigation')
+          if (isNearListEnd(event.currentTarget)) session.more('navigation')
         }}>
           <div id={listId} role="listbox" aria-label={uiAttribute('搜索结果')} aria-busy={busy}>
             {state.rows.map(row => {

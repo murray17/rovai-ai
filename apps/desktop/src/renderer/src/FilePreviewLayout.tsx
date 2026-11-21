@@ -44,7 +44,7 @@ interface FilePreviewLayoutValue {
   activityMode: boolean
   expanded: boolean
   foldPreview: FoldEdge | null
-  setExpanded(expanded: boolean): void
+  setExpanded(expanded: boolean, restoreFocus?: boolean): void
   setFoldPreview(edge: FoldEdge | null): void
   rememberConversation(): void
   previewCollapse(width: number): void
@@ -95,9 +95,9 @@ export function FilePreviewLayoutProvider({
       .filter(element => element.clientWidth > 0 && element.clientHeight > 0 && (element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth))
       .map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }))
   }, [])
-  const setExpanded = useCallback((next: boolean) => {
+  const setExpanded = useCallback((next: boolean, restoreFocus = true) => {
     updateExpanded(next)
-    if (!next) requestAnimationFrame(() => {
+    if (!next && restoreFocus) requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('.file-preview-expand-toggle')?.focus({ preventScroll: true })
     })
   }, [])
