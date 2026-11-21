@@ -8,9 +8,11 @@ import { initial, agents, installations, message, navigation, now, availability 
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import { EMPTY_SNAPSHOT } from '../../../apps/desktop/src/shared/navigation-preferences-model'
 import { AppToast, type AppToastValue } from '../../../apps/desktop/src/renderer/src/AppToast'
+import { LanguagePreferenceReadNotice } from '../../../apps/desktop/src/renderer/src/LanguagePreferenceControl'
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
-import { changeInterfaceLanguage, uiAttribute } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { changeInterfaceLanguage, observeInterfaceLanguage, uiAttribute } from '../../../apps/desktop/src/renderer/src/interface-language'
+import type { InterfaceLanguageSnapshot } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/mobile.css'
 
@@ -133,8 +135,14 @@ document.body.append(probeNode)
 const probeRoot = createRoot(probeNode)
 let probeToasts: Array<AppToastValue & { id: string }> = []
 const probeActions: string[] = []
+let stopObservingLanguage: (() => void) | null = null
+let settleLanguageRead: ((snapshot: InterfaceLanguageSnapshot) => void) | null = null
+let languageReads = 0
+const languageReadError = { code: 'fixture_read_failed', message: 'Preferences unavailable', retryable: true, details: {} }
 const renderToasts = () => probeRoot.render(<StrictMode>{probeToasts.map(toast => <AppToast key={toast.id}
-  toast={toast} onClose={() => { probeActions.push(`close:${toast.id}`); probeToasts = probeToasts.filter(item => item.id !== toast.id); renderToasts() }} />)}</StrictMode>)
+  toast={toast} onClose={() => { probeActions.push(`close:${toast.id}`); probeToasts = probeToasts.filter(item => item.id !== toast.id); renderToasts() }} />)}
+  {stopObservingLanguage && <LanguagePreferenceReadNotice />}
+</StrictMode>)
 const showToasts = (message?: string) => {
   probeActions.length = 0
   probeToasts = [
@@ -157,16 +165,30 @@ const showTimedToasts = () => {
 }
 const showPersistentToasts = () => {
   probeActions.length = 0
-  probeToasts = [
-    { id: 'until-closed', message: 'Persistent connection error', tone: 'danger', persistence: 'until-closed' },
-    {
-      id: 'until-resolved', message: 'Persistent language read error', tone: 'neutral', persistence: 'until-resolved',
-      actions: [{ label: uiAttribute('重新读取'), onSelect: () => probeActions.push('read-again') }]
+  languageReads = 0
+  probeToasts = [{ id: 'until-closed', message: 'Persistent connection error', tone: 'danger', persistence: 'until-closed' }]
+  stopObservingLanguage = observeInterfaceLanguage({
+    onInterfaceLanguageChanged: () => () => undefined,
+    setInterfaceLanguagePreference: preferences.generalPreferences.setInterfaceLanguagePreference,
+    getInterfaceLanguage: () => {
+      if (++languageReads === 1) return Promise.resolve({ ...prefs, readError: languageReadError })
+      return new Promise(resolve => { settleLanguageRead = resolve })
     }
-  ]
+  })
   renderToasts()
 }
-;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts:()=>{probeToasts=[];renderToasts()},hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+const finishLanguageRead = (succeeded: boolean) => {
+  if (!settleLanguageRead) throw new Error('Expected a pending language read')
+  settleLanguageRead({ ...prefs, readError: succeeded ? null : languageReadError })
+  settleLanguageRead = null
+}
+const clearToasts = () => {
+  stopObservingLanguage?.()
+  stopObservingLanguage = null
+  probeToasts = []
+  renderToasts()
+}
+;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts,finishLanguageRead,languageReads:()=>languageReads,hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
   addAttachment:()=>{const input=document.querySelector('.camp-workspace form.composer:not(.single-chat-composer) .composer-file-input') as HTMLInputElement;const data=new DataTransfer();data.items.add(new File(['pending'],'pending.txt',{type:'text/plain'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))},attachmentPending:()=>attachmentPending,releaseAttachment:()=>releaseAttachment?.(),
   language:(value:any)=>changeInterfaceLanguage(preferences.generalPreferences,value),
   theme:(theme:any)=>applyAppearanceSnapshot(document.documentElement,{...appearance,preference:theme,resolvedTheme:['night','ember'].includes(theme)?'night':'day'})}

@@ -10,23 +10,29 @@ last_updated: 2026-11-21
 
 ## 通用提示按钮与常驻反馈（2026-11-21）
 
-按确认的 R4 在 `rovai/archive-toast-actions` 实施，基线为 `441cd3f14`。通用提示采用实心主操作、
+按 2026-11-21 确认的交互在 `rovai/archive-toast-actions` 实施，基线为 `441cd3f14`。通用提示采用实心主操作、
 色块次操作和危险色块，按下不位移。新版本卡片保留「查看更新内容」「下载更新」和右上角的关闭按钮。
-语言偏好读取失败与 Web 连接错误复用顶部提示层。提示层在启动、引导和工作区切换时移动同一个 Portal 容器，
+语言偏好读取失败与 Web 连接反馈复用顶部提示层。提示层在启动、引导和工作区切换时移动同一个 Portal 容器，
 在 Web 登录页避开隐藏的工作区。界面规则见[通用操作提示](../../ui/components/app-shell-navigation.md#通用操作提示)。
 
 会话分叉夹具在五套配色与中英文中验证按钮色、尺寸、按下位置、键盘操作、计时和提示栈。
 两类常驻提示在 5.5 秒后仍存在，移除提示层、暂时没有可见 App Shell 或替换宿主后仍保留原节点。
-绯夜危险操作的文字对比在静止时为 4.56:1，悬停和键盘焦点时为 4.27:1，符合 R4 确认的混色。
+绯夜危险操作的文字对比实测为静止 4.56:1，悬停和键盘焦点 4.85:1，按下 4.73:1。
+用浏览器实算五套配色中的文字对比。Chromium 明暗强制色模拟验证 1px 系统边框，
+命中测试验证 26px 高的按钮外观保有至少 28×28px 的点击区域。
 
 隔离 macOS 开发版使用 `pnpm dev` 对照五套配色的截图。同一条语言偏好提示保持可见，随引导页、
 启动页和主界面切换宿主。真实配置读取失败时重读显示加载态，恢复有效配置后提示消失。
+会话分叉夹具用生产语言提示重放失败和成功，验证读取期间和再次失败时保留同一个键盘焦点，
+忙碌期间按键或点击均不再发起请求。语言提示保留 polite status。
 归档、删除失败和新版本卡片以生产组件与受控数据验收，更新卡片的 ✕ 执行原有稍后处理。
 真实隔离 Host 与 390px Chrome 覆盖上传未得到确认、刷新后原文件缺失的恢复路径。
-Web 提示距 App 顶部 58px，随模拟移动视口偏移移动，等待超过 5 秒后仍可手动关闭。
+生产 Web 入口自动化验证恢复成功提示为中性 polite status，退出失败为独立的 danger alert。
+提示距 App 顶部 58px，随模拟移动视口偏移移动，两条提示在 5.5 秒后仍可各自关闭。
 
 `pnpm typecheck`、`pnpm build:web`、定向 Vitest（`AppUpdatePresentation.test.ts` 与
 `interface-language-catalog.test.ts`）、`pnpm test:thread-fork`、`pnpm test:mission-board`、
+`pnpm test:host-web-recovery`、`pnpm test:host-web-recovery-live`、
 `pnpm docs:test`、`pnpm docs:check` 及带本次基线的 `pnpm docs:check:ci` 通过。
 `pnpm test:host-web-parity` 在此分支和原始主线 `441cd3f14` 均因等待已移除的
 `.camp-execution-tooltip` 超时，该执行入口提示由 `ec29d5e41` 移除。

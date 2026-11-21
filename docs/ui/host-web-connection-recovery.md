@@ -3,7 +3,7 @@ document_type: ui-contract
 authority: web-connection-recovery-presentation
 status: accepted
 target_version: cross-version
-last_updated: 2026-10-25
+last_updated: 2026-11-21
 ---
 
 # Web 连接恢复
@@ -29,7 +29,8 @@ Desktop 托管和独立 Server 的 Web 共用一个全屏断线遮罩，宽屏�
 
 服务恢复且没有待处理提交时可自动回到原页面。有未知提交时，自动重连仅核对；
 显式按钮才可使用原提交重试。成功和明确失败释放提交中状态；业务失败保留原页面的错误反馈与草稿。
-刷新后上传内容丢失时，用现有通知提示重选原文件，避免无限锁住页面。
+连接已恢复、刷新后又缺少上传文件时，用常驻的中性通知提示重选原文件。恢复通知与连接错误各自关闭，
+公告优先级遵循[通用操作提示](components/app-shell-navigation.md#通用操作提示)。
 认证失效沿用登录页。领域边界由 [Host Web v4](../contracts/host-web-v4.md#web-断线恢复)拥有。
 
 验证入口为 `pnpm test:host-web-recovery`：独立 Chrome profile、正式传输／遮罩／Dialog 和故障注入 HTTP fixture，
@@ -39,6 +40,7 @@ Desktop 托管和独立 Server 的 Web 共用一个全屏断线遮罩，宽屏�
 `pnpm test:host-web-recovery-live` 另验正式 WebEntry／BusinessApp 和真实 Rust Host 的停止、重启、
 登录态与 Composer DOM／草稿保留，以及刷新后公共发送成功时编辑器与持久草稿同步清理、后续编辑保留。
 同一用例还用正式 ConsoleClient 验证真实 Core 明确失败的 Promise 结算，以及提交后丢响应时只读核对、零重复发送。
+它还验证 390px 下的重选文件通知、退出失败的错误提示及两条提示的独立关闭。
 运行前构建 WebUI 和 Host；
 可用 `ROVAI_HOST_BIN` 指定现有 Host 二进制，报告记录其摘要。测试自行隔离数据、Skills、MCP 与浏览器，
 不配置或调用 Runtime。`ROVAI_WEB_RECOVERY_OUTPUT` 可指定两种用例的截图与 JSON 输出目录。

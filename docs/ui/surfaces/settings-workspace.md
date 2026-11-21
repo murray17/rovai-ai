@@ -293,12 +293,13 @@ first window load and again six hours after each automatic check settles. Checki
 Only explicit user actions start download, installation and restart. A manual page check updates the shared
 snapshot but does not create a global reminder.
 
-The global reminder is a non-modal 340px surface at the lower right with the target and current versions.
+The global reminder borrows the quiet footprint of collaboration-complete attention as a non-modal 340px
+surface at the lower right with the target and current versions.
 It uses the [shared action hierarchy](../components/app-shell-navigation.md#通用操作提示) for “查看更新内容”
 and “下载更新”, with a close button to dismiss the reminder. It has no focus grab or timeout. Do not stack it
 with ordinary heads-up, dialogs, onboarding, shutdown or the same release already open in About.
-Main owns an in-memory prompt generation and exact dismiss; closing one reminder does not remove the release
-badge and the next automatic round may create another generation.
+Main owns the prompt generation and exact dismissal in memory, independently of Notification Episodes.
+The release badge remains available after dismissal and the next automatic check may create another generation.
 
 The ordinary Settings footer keeps its remembered-section behavior. When an actionable release exists, a
 separate focusable badge beside Settings deep-links to About without overwriting `lastSettingsSection`; the

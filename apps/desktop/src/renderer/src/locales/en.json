@@ -992,7 +992,6 @@
   "当前版本 v": "Current version v",
   "操作未完成，更新提醒仍然保留。": "Operation not completed; update notification remains active.",
   "稍后处理本次更新提醒": "Handle this update reminder later",
-  "稍后": "Later",
   "无法读取已保存的外观设置，当前使用默认值。": "Failed to read saved appearance settings; using defaults.",
   "保存当前设置": "Save current settings",
   "未能保存设置，已保留当前调整。": "Failed to save settings; current adjustments are retained.",

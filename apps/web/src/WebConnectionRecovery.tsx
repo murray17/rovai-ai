@@ -7,6 +7,7 @@ import { useUiText } from '../../desktop/src/renderer/src/interface-language'
 export function WebConnectionRecovery({ transport, enabled, onNotice, children }: {
   transport: ConsoleClient
   enabled: boolean
+  /** Source copy for the entry to translate with the current interface language. */
   onNotice(message: string): void
   children: ReactNode
 }) {
@@ -55,7 +56,7 @@ export function WebConnectionRecovery({ transport, enabled, onNotice, children }
     setBusy(true); setFailed(false)
     try {
       const needsFile = await transport.retryPending()
-      if (needsFile) onNotice(t('连接已恢复。未完成的上传需要重新选择原文件。'))
+      if (needsFile) onNotice('连接已恢复。未完成的上传需要重新选择原文件。')
     } catch { if (transport.authenticated) setFailed(true) }
     finally { active.current.busy = false; setBusy(false) }
   }

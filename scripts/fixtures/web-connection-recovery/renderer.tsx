@@ -8,7 +8,7 @@ import { browserMemberAvatars } from '../../../apps/web/src/member-avatars'
 import { MemberAvatar } from '../../../apps/desktop/src/renderer/src/MemberAvatar'
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { AppDialogBody, AppDialogContent, AppDialogHeader } from '../../../apps/desktop/src/renderer/src/AppDialog'
-import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { changeInterfaceLanguage, useUiText } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import type { GeneralPreferencesApi } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -69,6 +69,7 @@ function Form() {
 }
 
 function Fixture() {
+  const t = useUiText()
   const [enabled, setEnabled] = useState(false)
   const [notice, setNotice] = useState('')
   useEffect(() => { void login.then(() => setEnabled(true)) }, [])
@@ -77,7 +78,7 @@ function Fixture() {
     return transport.subscribe(() => undefined, state => observations.connections.push(state))
   }, [enabled])
   return <WebConnectionRecovery transport={transport} enabled={enabled} onNotice={setNotice}>
-    {enabled && <ThreadClientProvider client={avatarClient}><Form /></ThreadClientProvider>}{notice && <p role="alert">{notice}</p>}
+    {enabled && <ThreadClientProvider client={avatarClient}><Form /></ThreadClientProvider>}{notice && <p role="status">{t(notice)}</p>}
   </WebConnectionRecovery>
 }
 

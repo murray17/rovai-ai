@@ -76,6 +76,7 @@ function WebEntry() {
   const [scanning, setScanning] = useState(startupScanning)
   const [restoring, setRestoring] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const adapterRef = useRef<ReturnType<typeof createThreadAdapter> | null>(null)
   const preparing = useRef<Promise<void> | null>(null)
@@ -102,7 +103,9 @@ function WebEntry() {
     return () => loginTheme.removeEventListener('change', applyLoginTheme)
   }, [adapter])
   useEffect(() => transport.onAuthenticationChanged(() => {
-    setAuthenticated(transport.authenticated)
+    const isAuthenticated = transport.authenticated
+    setAuthenticated(isAuthenticated)
+    if (!isAuthenticated) setRecoveryNotice(null)
     setAuthGeneration(value => value + 1)
   }), [])
   useEffect(() => {
@@ -184,23 +187,30 @@ function WebEntry() {
     finally { setBusy(false) }
   }
   const current = adapter
-  const recoveryMessage = authenticated && error ? t(error) : null
-  const recoveryToast = useMemo<AppToastValue | null>(() => recoveryMessage === null ? null : {
-    message: recoveryMessage,
+  const errorMessage = authenticated && error ? t(error) : null
+  const noticeMessage = authenticated && recoveryNotice ? t(recoveryNotice) : null
+  const errorToast = useMemo<AppToastValue | null>(() => errorMessage === null ? null : {
+    message: errorMessage,
     tone: 'danger',
     persistence: 'until-closed'
-  }, [recoveryMessage])
+  }, [errorMessage])
+  const recoveryToast = useMemo<AppToastValue | null>(() => noticeMessage === null ? null : {
+    message: noticeMessage,
+    tone: 'neutral',
+    persistence: 'until-closed'
+  }, [noticeMessage])
   if (readyLanguageApi !== languageApi || (restoring && !current)) return <div className="language-bootstrap" aria-busy="true" />
   return <>
     <LanguagePreferenceReadNotice />
-    <WebConnectionRecovery transport={transport} enabled={authenticated} onNotice={setError}>
+    <WebConnectionRecovery transport={transport} enabled={authenticated} onNotice={setRecoveryNotice}>
       {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client}>
         <CurrentUserProfileProvider api={current.profile}>
           <BusinessApp environment={current.environment} remoteConnection={<RemoteConnectionStatus origin={transport.origin} state={authenticated ? connection : 'expired'} onLogout={() => { setError(null); void transport.logout().catch(e => setError(e instanceof Error ? e.message : '退出未完成，请重试。')) }} />} />
         </CurrentUserProfileProvider>
       </ThreadClientProvider></div>}
       {authenticated && <UploadStatus transport={transport} />}
-      {recoveryToast && <AppToast toast={recoveryToast} onClose={() => setError(null)} />}
+      {errorToast && <AppToast toast={errorToast} onClose={() => setError(null)} />}
+      {recoveryToast && <AppToast toast={recoveryToast} onClose={() => setRecoveryNotice(null)} />}
       {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
     </WebConnectionRecovery>
     {!authenticated && <WebLogin languageApi={languageApi} hostKind={hostKind}

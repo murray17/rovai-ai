@@ -1048,17 +1048,22 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 @keyframes shutdown-progress { from { transform: translateX(0); } to { transform: translateX(365%); } }
 .app-toast-message { min-width: 0; margin-inline-end: 2px; font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
 .app-toast-glyph + .app-toast-message { font-weight: 550; }
-.app-toast-action { display: inline-flex; min-height: 26px; flex: none; align-items: center; justify-content: center; gap: 4px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--conversation-action-contrast); background: var(--conversation-action); font: inherit; font-size: 11.5px; font-weight: 600; line-height: 20px; white-space: nowrap; cursor: pointer; transition: background-color 140ms ease, color 140ms ease; }
+.app-toast-action { position: relative; display: inline-flex; min-width: 28px; min-height: 26px; flex: none; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; color: var(--conversation-action-contrast); background: var(--conversation-action); font: inherit; font-size: 11.5px; font-weight: 600; line-height: 20px; white-space: nowrap; cursor: pointer; transition: background-color 140ms ease, color 140ms ease; }
+.app-toast-action::after, .app-toast-close::after { position: absolute; content: ""; }
+.app-toast-action::after { inset: -2px -1px; }
+.app-toast-close::after { inset: -1px; }
+.app-toast-action[aria-disabled="true"] { cursor: default; }
 .app-toast .app-toast-action:is(:hover, :focus-visible) { background: var(--conversation-action-hover); }
 .app-toast .app-toast-action:active { background: var(--conversation-action-hover); transform: none; }
 .app-toast .app-toast-action + .app-toast-action { margin-inline-start: -2px; color: var(--ink); background: var(--surface-muted); }
-.app-toast .app-toast-action + .app-toast-action:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--ink) 7%, var(--surface-muted)); }
+.app-toast .app-toast-action + .app-toast-action:is(:hover, :focus-visible),
+.app-update-prompt-actions .quiet-button:is(:hover, :focus-visible):not(:disabled) { background: color-mix(in srgb, var(--ink) 7%, var(--surface-muted)); }
 .app-toast .app-toast-action + .app-toast-action:active { background: color-mix(in srgb, var(--ink) 12%, var(--surface-muted)); }
 .app-toast.is-danger .app-toast-action { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--surface-raised)); }
-.app-toast.is-danger .app-toast-action:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--danger) 11%, var(--surface-raised)); }
-.app-toast.is-danger .app-toast-action:active { background: color-mix(in srgb, var(--danger) 15%, var(--surface-raised)); }
+.app-toast.is-danger .app-toast-action:is(:hover, :focus-visible) { color: color-mix(in srgb, var(--danger) 85%, var(--ink)); background: color-mix(in srgb, var(--danger) 11%, var(--surface-raised)); }
+.app-toast.is-danger .app-toast-action:active { color: color-mix(in srgb, var(--danger) 80%, var(--ink)); background: color-mix(in srgb, var(--danger) 15%, var(--surface-raised)); }
 .app-toast-action-icon { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.app-toast .app-toast-close { display: grid; width: 26px; height: 26px; min-height: 26px; flex: 0 0 26px; align-self: center; place-items: center; margin: 0; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; }
+.app-toast .app-toast-close { position: relative; display: grid; width: 26px; height: 26px; min-height: 26px; flex: 0 0 26px; align-self: center; place-items: center; margin: 0; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; }
 .app-toast-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .app-toast .app-toast-close:hover, .app-toast .app-toast-close:focus-visible { color: var(--ink); background: var(--surface-hover); }
 .app-toast .app-toast-close:active { color: var(--ink); background: var(--surface-selected); transform: none; }
@@ -8198,7 +8203,6 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 .app-update-prompt .primary-button { border-color: var(--conversation-action); color: var(--conversation-action-contrast); background: var(--conversation-action); }
 .app-update-prompt .primary-button:hover:not(:disabled) { border-color: var(--conversation-action-hover); background: var(--conversation-action-hover); }
 .app-update-prompt-actions .quiet-button { border-color: transparent; color: var(--ink); background: var(--surface-muted); }
-.app-update-prompt-actions .quiet-button:is(:hover, :focus-visible):not(:disabled) { background: color-mix(in srgb, var(--ink) 7%, var(--surface-muted)); }
 :is(.about-update-actions, .app-update-prompt-actions) button:focus-visible { outline: 2px solid var(--muted); outline-offset: 3px; }
 @media (max-height: 720px) {
   .app-update-prompt { right: 10px; bottom: 10px; }

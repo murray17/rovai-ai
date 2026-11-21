@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { InterfaceLanguagePreference } from '@contracts'
-import { AppToast, type AppToastValue } from './AppToast'
+import { AppToast, type AppToastUntilResolved } from './AppToast'
 import { refreshInterfaceLanguage, useInterfaceLanguageSnapshot, useUiText } from './interface-language'
 
 export function LanguagePreferenceOptions({ name, className, disabled = false, onChange }: {
@@ -27,13 +27,14 @@ export function LanguagePreferenceReadNotice(): React.JSX.Element | null {
   const [busy, setBusy] = useState(false)
   const message = t('语言偏好暂时无法读取，原记录已保留。')
   const retryLabel = t('重新读取')
-  const toast = useMemo<AppToastValue>(() => ({
+  const toast = useMemo<AppToastUntilResolved>(() => ({
     message,
     tone: 'neutral',
     persistence: 'until-resolved',
     loading: busy,
-    actions: busy ? undefined : [{
+    actions: [{
       label: retryLabel,
+      disabled: busy,
       onSelect: () => {
         setBusy(true)
         void refreshInterfaceLanguage().finally(() => setBusy(false))
@@ -41,5 +42,5 @@ export function LanguagePreferenceReadNotice(): React.JSX.Element | null {
     }]
   }), [busy, message, retryLabel])
   if (!snapshot.readError) return null
-  return <AppToast toast={toast} onClose={() => undefined} />
+  return <AppToast toast={toast} />
 }

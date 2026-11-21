@@ -3,17 +3,29 @@ import { createPortal } from 'react-dom'
 import { uiAttribute } from './interface-language'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 
-export type AppToastAction = { label: string; icon?: 'open' | 'retry'; onSelect(): void }
+export type AppToastAction = { label: string; icon?: 'open' | 'retry'; disabled?: boolean; onSelect(): void }
 
-export type AppToastValue = {
+type AppToastContent = {
   message: string
   tone: 'neutral' | 'danger'
   icon?: NavigationIconName
   actions?: readonly [AppToastAction] | readonly [AppToastAction, AppToastAction]
   loading?: boolean
-  /** Persistent toasts have no timer. The owner clears an until-resolved toast. */
-  persistence?: 'until-closed' | 'until-resolved'
 }
+
+export type AppToastValue = AppToastContent & {
+  /** Keep the close button and skip the timer. */
+  persistence?: 'until-closed'
+}
+
+export type AppToastUntilResolved = AppToastContent & {
+  /** Only the owner removes the toast. There is no timer or close button, and actions keep it open. */
+  persistence: 'until-resolved'
+}
+
+type AppToastProps =
+  | { toast: AppToastValue; onClose(): void }
+  | { toast: AppToastUntilResolved; onClose?: never }
 
 const viewports = new WeakMap<Document, { element: HTMLDivElement; observer: MutationObserver; users: number }>()
 
@@ -31,7 +43,12 @@ function useToastViewport(): HTMLDivElement | null {
     if (!entry) {
       const element = document.createElement('div')
       element.className = 'app-toast-viewport'
-      const observer = new MutationObserver(() => placeToastViewport(document, element))
+      const observer = new MutationObserver(() => {
+        const host = element.parentElement
+        // Streaming updates within a visible shell do not change the portal host.
+        if (host?.isConnected && host.classList.contains('app-shell') && !host.closest('[hidden]')) return
+        placeToastViewport(document, element)
+      })
       entry = { element, observer, users: 0 }
       viewports.set(document, entry)
     }
@@ -52,20 +69,13 @@ function useToastViewport(): HTMLDivElement | null {
   return viewport
 }
 
-export function AppToast({
-  toast,
-  onClose
-}: {
-  toast: AppToastValue
-  onClose(): void
-}): React.JSX.Element {
+export function AppToast({ toast, onClose }: AppToastProps): React.JSX.Element {
   const viewport = useToastViewport()
   const [hovered, setHovered] = useState(false)
   const [focusedControl, setFocusedControl] = useState<HTMLElement | null>(null)
   const surface = useRef<HTMLDivElement>(null)
   const clock = useRef<{ toast: AppToastValue; remaining: number } | null>(null)
-  const closeOnTimeout = useEffectEvent(onClose)
-  const canClose = toast.persistence !== 'until-resolved'
+  const closeOnTimeout = useEffectEvent(() => onClose?.())
 
   useLayoutEffect(() => {
     if (!viewport || toast.loading || toast.persistence) return
@@ -99,8 +109,9 @@ export function AppToast({
       {toast.loading && <svg className="app-toast-spinner" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M10 3a7 7 0 0 1 7 7" /></svg>}
       {!toast.loading && toast.icon && <span className="app-toast-glyph"><NavigationIcon name={toast.icon} /></span>}
       <span className="app-toast-message">{toast.message}</span>
-      {toast.actions?.map(action => <button key={action.label} className="app-toast-action" type="button" onClick={() => {
-        if (canClose) onClose()
+      {toast.actions?.map(action => <button key={action.label} className="app-toast-action" type="button" aria-disabled={action.disabled || undefined} onClick={() => {
+        if (action.disabled) return
+        onClose?.()
         action.onSelect()
       }}>
         <span>{action.label}</span>
@@ -108,7 +119,7 @@ export function AppToast({
           <path d={action.icon === 'open' ? 'M3.5 8h9m-3.5-3.5L12.5 8 9 11.5' : 'M12.7 6A5 5 0 1 0 13 9M12.7 6V2.8M12.7 6H9.5'} />
         </svg>}
       </button>)}
-      {canClose && <button className="icon-button app-toast-close" type="button" aria-label={uiAttribute('关闭提示')} title={uiAttribute('关闭提示')} onClick={onClose}>
+      {onClose && <button className="icon-button app-toast-close" type="button" aria-label={uiAttribute('关闭提示')} title={uiAttribute('关闭提示')} onClick={onClose}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
       </button>}
     </div>, viewport
