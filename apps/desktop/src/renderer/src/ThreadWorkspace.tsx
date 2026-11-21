@@ -1,3 +1,4 @@
+import type { NavigationFindIntent } from './camp-navigation-search'
 import { ThreadMessageEditor } from './ThreadMessageEditor'
 import { MoreMenuIcon, SidebarMenuIcon } from './SidebarMenuIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
@@ -479,6 +480,7 @@ export function agentRunStopViewState(
 }
 
 interface ConversationFindState {
+  navigationAnchor?: NavigationFindIntent
   open: boolean
   query: string
   status: ConversationFindStatus
@@ -609,7 +611,10 @@ async function mutateComposerDraft(
           author: {
             authorType: message.authorType === 'agent' ? 'agent' : message.authorType === 'user' ? 'user' : 'system',
             authorId: message.authorId,
-            displayName: authorMember?.displayName ?? message.authorDisplayName ?? (message.authorType === 'user' ? uiAttribute('用户') : uiAttribute('系统')),
+            displayName: authorMember?.displayName ?? message.authorDisplayName ?? (
+              message.authorType === 'agent' ? uiAttribute('不可用队员')
+                : message.authorType === 'user' ? uiAttribute('用户') : uiAttribute('系统')
+            ),
             recipientAvailability: message.authorType === 'agent'
               ? recipientAvailable ? 'available' : 'unavailable'
               : 'not_applicable'
@@ -1640,16 +1645,28 @@ const EMPTY_CAMP_MESSAGES: ThreadMessageView[] = []
 const EMPTY_LIVE_RUNTIME_EVENTS: LiveRuntimeEvent[] = []
 
 // Subscribe to split geometry in this leaf so resizing does not rerender the timeline.
-function RevealNotificationConversation({ active, onHidePreview }: { active: boolean; onHidePreview?(): void }): null {
+function RevealConversation({ notificationActive, navigationActive, onHidePreview }: {
+  notificationActive: boolean
+  navigationActive: boolean
+  onHidePreview?(): void
+}): null {
   const layout = useOptionalFilePreviewLayout()
   useLayoutEffect(() => {
-    if (active && layout?.compact && layout.visible) onHidePreview?.()
-  }, [active, layout?.compact, layout?.visible, onHidePreview])
+    if (!layout?.visible || (!notificationActive && !navigationActive)) return
+    if (layout.compact) onHidePreview?.()
+    else if (navigationActive && layout.expanded) {
+      layout.cancelResize()
+      layout.setFoldPreview(null)
+      layout.setExpanded(false, false)
+    }
+  }, [notificationActive, navigationActive, layout, onHidePreview])
   return null
 }
 
 export function ThreadWorkspace({
   snapshot,
+  navigationFindIntent = null,
+  onNavigationFindConsumed,
   userAnchorNavigation,
   missionBoard = null,
   previewTabsInPane = false,
@@ -1718,6 +1735,8 @@ export function ThreadWorkspace({
   onNotifyError
 }: {
   snapshot: ThreadSnapshot
+  navigationFindIntent?: NavigationFindIntent | null
+  onNavigationFindConsumed?(intent: NavigationFindIntent): void
   userAnchorNavigation?: ThreadUserAnchorNavigation
   missionBoard?: React.ReactNode
   previewTabsInPane?: boolean
@@ -2102,6 +2121,9 @@ export function ThreadWorkspace({
   const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
   const conversationFindRequestGeneration = useRef(0)
+  const consumedNavigationFind = useRef<NavigationFindIntent | null>(null)
+  const conversationFindNotify = useRef(onNotify)
+  conversationFindNotify.current = onNotify
   const conversationFindDebounceTimer = useRef<number | null>(null)
   const conversationFindRestorePoint = useRef<ConversationFindRestorePoint | null>(null)
   const conversationFindOpenRef = useRef(false)
@@ -3146,7 +3168,8 @@ export function ThreadWorkspace({
     query: string,
     selectedMatchIndex: number | undefined,
     anchorMessageId: string | null,
-    generation: number
+    generation: number,
+    verifyNavigationAnchor = false
   ): Promise<void> => {
     const threadId = snapshot.thread.id
     try {
@@ -3184,7 +3207,10 @@ export function ThreadWorkspace({
         : current)
 
       const selectedMatch = result.match
-      if (!selectedMatch) return
+      if (!selectedMatch) {
+        if (verifyNavigationAnchor) conversationFindNotify.current(uiAttribute('原消息已修改或撤回，会话里没有其他匹配'))
+        return
+      }
       let target = timelineScrollRef.current?.querySelector<HTMLElement>(
         `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
       ) ?? null
@@ -3253,6 +3279,9 @@ export function ThreadWorkspace({
           }
         }
       }
+      if (verifyNavigationAnchor && selectedMatch.messageId !== anchorMessageId) {
+        conversationFindNotify.current(uiAttribute('原消息已修改或撤回，已定位到其他匹配'))
+      }
       focusConversationFindInput()
       setConversationFind((current) => current.open && current.query === query
         ? { ...current, status: 'ready', error: null }
@@ -3311,6 +3340,34 @@ export function ThreadWorkspace({
     focusConversationFindInput(true)
   }, [conversationFind.open, focusConversationFindInput, snapshot.thread.id, anchorNavigation.navigation, runSourceNavigation.cancel, cancelReplyReveal])
 
+  const pendingNavigationFind = workspaceEntrySnapshotReady
+    && navigationFindIntent?.threadId === snapshot.thread.id
+    && consumedNavigationFind.current !== navigationFindIntent ? navigationFindIntent : null
+
+  useEffect(() => {
+    if (!pendingNavigationFind) return
+    const frame = window.requestAnimationFrame(() => {
+      // Reply details can also cover the timeline at narrow widths via CSS.
+      if (replyDetail.messageId && workspaceShellRef.current?.querySelector('.timeline-pane')?.getClientRects().length === 0) {
+        closeReplyDetails(false)
+        return
+      }
+      consumedNavigationFind.current = pendingNavigationFind
+      onNavigationFindConsumed?.(pendingNavigationFind)
+      conversationFindRequestGeneration.current++
+      openConversationFind()
+      setConversationFind({
+        open: true,
+        query: pendingNavigationFind.query,
+        navigationAnchor: pendingNavigationFind,
+        status: 'searching',
+        snapshot: null,
+        error: null
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [pendingNavigationFind, onNavigationFindConsumed, openConversationFind, replyDetail.messageId, closeReplyDetails])
+
   const closeConversationFind = useCallback((restore = true): void => {
     cancelConversationFindRestore()
     const generation = ++conversationFindRequestGeneration.current
@@ -3321,6 +3378,7 @@ export function ThreadWorkspace({
     setConversationFind((current) => ({
       ...current,
       open: false,
+      navigationAnchor: undefined,
       status: 'idle',
       snapshot: null,
       error: null
@@ -3422,8 +3480,9 @@ export function ThreadWorkspace({
     void requestConversationFind(
       conversationFind.query,
       conversationFind.snapshot?.selectedMatchIndex ?? undefined,
-      conversationFindRestorePoint.current?.anchor?.messageId ?? null,
-      generation
+      conversationFind.navigationAnchor?.anchorMessageId ?? conversationFindRestorePoint.current?.anchor?.messageId ?? null,
+      generation,
+      !!conversationFind.navigationAnchor && !conversationFind.snapshot
     )
   }
 
@@ -3466,10 +3525,11 @@ export function ThreadWorkspace({
       void requestConversationFind(
         conversationFind.query,
         undefined,
-        conversationFindRestorePoint.current?.anchor?.messageId ?? null,
-        generation
+        conversationFind.navigationAnchor?.anchorMessageId ?? conversationFindRestorePoint.current?.anchor?.messageId ?? null,
+        generation,
+        !!conversationFind.navigationAnchor
       )
-    }, 180)
+    }, conversationFind.navigationAnchor ? 0 : 180)
     return () => {
       if (conversationFindDebounceTimer.current !== null) {
         window.clearTimeout(conversationFindDebounceTimer.current)
@@ -3479,6 +3539,7 @@ export function ThreadWorkspace({
   }, [
     conversationFind.open,
     conversationFind.query,
+    conversationFind.navigationAnchor,
     requestConversationFind
   ])
 
@@ -5544,9 +5605,9 @@ export function ThreadWorkspace({
         entries={messageExport.entries} renderBody={message => renderPublicMessageBody(message, 'export', true)} onClose={messageExport.close} />
       <FilePreviewWorkspace
       >
-        <RevealNotificationConversation active={!!notificationFocus?.active
+        <RevealConversation notificationActive={!!notificationFocus?.active
           && ['camp_message', 'camp_turn', 'mission', 'task'].includes(notificationFocus.kind)}
-          onHidePreview={filePreview?.hidePane} />
+          navigationActive={!!pendingNavigationFind} onHidePreview={filePreview?.hidePane} />
         <section
           className="timeline-pane"
           tabIndex={-1}
@@ -5586,6 +5647,7 @@ export function ThreadWorkspace({
                         setConversationFind((current) => ({
                           ...current,
                           query: nextQuery,
+                          navigationAnchor: undefined,
                           status: pendingConversationFindStatus(nextQuery),
                           snapshot: null,
                           error: null

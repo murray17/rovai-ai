@@ -11,6 +11,8 @@ last_updated: 2026-10-12
 Core 在 SQLite 事务内返回侧栏权威状态；事件只声明读取范围。排序仍只由已发布的用户或
 external_principal 消息推进。查看、重命名、队员消息和 Run 终态不改变用户活动排序。
 
+导航搜索使用独立的 [Navigation Search v1](navigation-search-v1.md) 读取，沿用这里的客户端可见性和用户活动字段。
+
 ## Read scopes
 
 | 接口 | 请求 | 权威返回与范围 |

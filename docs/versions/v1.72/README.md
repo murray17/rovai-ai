@@ -6,10 +6,16 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-19
+last_updated: 2026-11-20
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 导航搜索
+
+⌘K / Ctrl+K 搜索对话、使命及其公开消息，并从消息结果进入会话内查找定位。
+当前边界见 [Navigation Search v1](../../contracts/navigation-search-v1.md)，取舍和验证见
+[V1.72-D90](decisions.md#v1-72-d90)及[实施记录](implementation-plan.md#导航搜索)。
 
 ## 会话与使命归档（2026-11-19）
 

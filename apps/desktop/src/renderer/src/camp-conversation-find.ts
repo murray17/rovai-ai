@@ -38,7 +38,7 @@ export function conversationFindRanges(text: string, query: string): Conversatio
     sourceOffset += character.length
   }
   const foldedText = foldedTextParts.join('')
-  const foldedQuery = query.toLowerCase()
+  const foldedQuery = Array.from(query, character => character.toLowerCase()).join('')
   if (!foldedQuery || foldedQuery.length > foldedText.length) return []
 
   const ranges: ConversationFindRange[] = []

@@ -1,17 +1,17 @@
 //! Navigation reads saved Camp facts. Historical events are used only by migration v175.
 use super::*;
 
-const GROUP_KEY: &str = "CASE WHEN camp.project_binding_kind = 'directory' THEN 'directory:' || camp.project_path ELSE 'quick-chat' END";
-const VISIBLE: &str = r#"
+pub(super) const GROUP_KEY: &str = "CASE WHEN camp.project_binding_kind = 'directory' THEN 'directory:' || camp.project_path ELSE 'quick-chat' END";
+pub(super) const CLIENT_VISIBLE: &str = r#"
     camp.deletion_operation_id IS NULL
-    AND NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id = camp.id)
     AND (camp.activation_state = 'active'
       OR EXISTS(SELECT 1 FROM pending_camp_draft_presence d WHERE d.camp_id = camp.id AND d.client_id = ?1)
       OR EXISTS(SELECT 1 FROM camp_composer_draft d WHERE d.camp_id = camp.id AND d.client_id = ?1
                 AND (length(trim(d.body)) > 0 OR d.source_attachments_json <> '[]'))
       OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id AND client_id = ?1))
 "#;
-const ORDER: &str = "COALESCE(camp.navigation_activity_at, camp.created_at) DESC, camp.navigation_activity_sequence DESC, camp.id";
+const ORDINARY_THREAD: &str = "NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id = camp.id)";
+pub(super) const ORDER: &str = "COALESCE(camp.navigation_activity_at, camp.created_at) DESC, camp.navigation_activity_sequence DESC, camp.id";
 
 fn load_rows(
     tx: &Transaction<'_>,
@@ -37,7 +37,7 @@ fn load_rows(
         LEFT JOIN camp_view_state v ON v.camp_id = camp.id
         LEFT JOIN channel_conversation_binding binding ON binding.camp_id = camp.id
         LEFT JOIN channel_conversation channel ON channel.id = binding.channel_conversation_id
-        WHERE {predicate} AND {VISIBLE}
+        WHERE {predicate} AND {CLIENT_VISIBLE} AND {ORDINARY_THREAD}
         ORDER BY {ORDER} LIMIT ?3 OFFSET ?4
     "#
     );
@@ -110,7 +110,7 @@ pub(super) fn navigation_group_count(
     key: &str,
 ) -> Result<usize> {
     Ok(tx.query_row(
-        &format!("SELECT COUNT(*) FROM camp WHERE {GROUP_KEY} = ?2 AND {VISIBLE} AND camp.archived_at IS NULL"),
+        &format!("SELECT COUNT(*) FROM camp WHERE {GROUP_KEY} = ?2 AND {CLIENT_VISIBLE} AND {ORDINARY_THREAD} AND camp.archived_at IS NULL"),
         params![client.id(), key],
         |row| row.get::<_, i64>(0),
     )? as usize)
@@ -147,7 +147,7 @@ pub(super) fn load_navigation_groups(
         "?2 IS NULL".into()
     };
     let mut statement = tx.prepare(&format!(
-        "SELECT {GROUP_KEY}, COUNT(*) FROM camp WHERE {filter} AND {VISIBLE} AND camp.archived_at IS NULL GROUP BY {GROUP_KEY}"
+        "SELECT {GROUP_KEY}, COUNT(*) FROM camp WHERE {filter} AND {CLIENT_VISIBLE} AND {ORDINARY_THREAD} AND camp.archived_at IS NULL GROUP BY {GROUP_KEY}"
     ))?;
     let groups = statement
         .query_map(

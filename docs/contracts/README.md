@@ -66,6 +66,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 - [Thread Replies v1（当前）](thread-replies-v1.md)：单回复锚点形成平铺链，完整链分页与只读缓存。
 
+- [Navigation Search v1（当前）](navigation-search-v1.md)：名称与公开消息、客户端提示、正文续扫和可见性。
 - [Navigation Read v1（当前）](navigation-read-v1.md)：单会话、单分组、完整摘要快照，观察水位内已读确认与局部失效。
 - [Input History v2（当前）](input-history-v3.md)：公共/单聊从现有消息生成本轮固定内容、同步导航与草稿预览。
 - [Message Reedit v2（当前）](message-reedit-v3.md)：客户端两分钟撤回文字副本、原命令回放、容量与清理、确认回填。
@@ -339,7 +340,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v2（历史）](camp-open-projection-v2.md) | v1 methods/window 不变；AgentRun 独立取消请求事实、Camp Open schema 2 与 Read Model schema 31；不含 Runtime 模型观测 |
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Skill Content Preview v1（历史）](skill-content-preview-v1.md) | 旧 Library Revision 或导入候选的只读内容合同；当前原生 Skill 原址预览见 Skills Rebuild v1 |
-| [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
+| [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 与 Web 当前 Thread 的公开正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [File Preview v24](file-preview-v24.md) | 当前项目 UTF-8 文本编辑、共享 Host 手动保存、摘要冲突及窗口草稿保留 |
 | [File Preview v25（历史）](file-preview-v25.md) | 项目浏览首版；offset 分页与逐文件登记由 v26 替代 |
 | [File Preview v28（当前）](file-preview-v28.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |

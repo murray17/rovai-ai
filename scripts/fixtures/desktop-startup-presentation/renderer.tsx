@@ -1,16 +1,17 @@
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import { shortcutDefaults } from '../../../apps/desktop/src/shared/shortcuts'
 import { EMPTY_SNAPSHOT, sanitizeSnapshot, registerNavigationProjects } from '../../../apps/desktop/src/shared/navigation-preferences-model'
-import type { GeneralPreferencesSnapshot, NavigationSnapshot, NavigationPreferencesSnapshot, MissionRecord } from '@contracts'
-import type { ThreadCreationPreflight, CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
+import type { GeneralPreferencesSnapshot, NavigationSnapshot, NavigationPreferencesSnapshot, NavigationMessageSearchPage, NavigationSearchResult, MissionRecord, ThemePreference } from '@contracts'
+import type { ThreadCreationPreflight, CoreEvent, DesktopStartupSnapshot, HealthStatus, OnboardingSnapshot, ResolvedFilePreview, RestorableLocation, RovaiApi, SupervisorSnapshot } from '@contracts'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { App } from '../../../apps/desktop/src/renderer/src/App'
 import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
 import { NewConversationDialog } from '../../../apps/desktop/src/renderer/src/NewConversationDialog'
 import { STARTUP_LOADING_EXIT_MS, StartupLoadingCanvas } from '../../../apps/desktop/src/renderer/src/StartupLoadingCanvas'
+import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
-import { initial as runFixture, run as runTemplate } from '../host-web-parity/data'
+import { initial as runFixture, message as fixtureMessage, run as runTemplate } from '../host-web-parity/data'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const threadId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
@@ -50,6 +51,8 @@ let supervisor: SupervisorSnapshot
 let appearanceTheme: 'day' | 'night' = 'day'
 let captureNavigation: (theme: 'day' | 'night', collapsed: boolean, setup?: () => void) => Promise<unknown>
 let captureStoppedThread: (theme: 'day' | 'night') => Promise<void>
+let prepareNavigationSearch: () => Promise<void>
+let checkNavigationSearchPanels: () => Promise<void>
 
 function starting(): SupervisorSnapshot {
   return {
@@ -149,6 +152,21 @@ function check(value: unknown, message: string): asserts value {
 }
 const frames = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 async function flush() { await frames(); check(errors.length === 0, errors.join('\n')) }
+
+function typeNavigationSearch(query: string) {
+  const input = document.querySelector<HTMLInputElement>('.command-palette-input')!
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, query)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function resolvedThemeColor(token: string): string {
+  const probe = document.createElement('span')
+  probe.style.color = 'var(' + token + ')'
+  document.body.appendChild(probe)
+  const color = getComputedStyle(probe).color
+  probe.remove()
+  return color
+}
 
 async function advance(milliseconds: number) {
   const end = now + milliseconds
@@ -330,6 +348,106 @@ Object.assign(window, { startupTest: {
 
   captureNavigation: (theme: 'day' | 'night', collapsed: boolean) => captureNavigation(theme, collapsed),
   captureStoppedThread: (theme: 'day' | 'night') => captureStoppedThread(theme),
+  prepareNavigationSearch: () => prepareNavigationSearch(),
+  checkNavigationSearchPanels: () => checkNavigationSearchPanels(),
+  async exhaustNavigationSearchPages() {
+    let pages = 0
+    requestHandlers.set('navigation.searchMessages', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, items: [], nextCursor: ++pages < 7 ? String(pages) : null
+    }))
+    typeNavigationSearch('更早的消息')
+    await advance(250)
+    for (let frame = 0; frame < 10 && !document.querySelector('.search-status-action'); frame++) await flush()
+    const action = document.querySelector('.search-status-action')
+    check(pages === 6 && action?.textContent === '继续搜索更早的消息',
+      'A short result list offers manual continuation after five automatic pages')
+    const style = getComputedStyle(action)
+    check(style.fontWeight === '400' && style.color === resolvedThemeColor('--muted'),
+      'Continuation uses the quiet text treatment')
+  },
+  async checkNavigationSearchStatuses() {
+    const { items: [target] } = await requestHandlers.get('navigation.search')!({ query: '' }) as NavigationSearchResult
+    requestHandlers.set('navigation.search', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, truncated: false,
+      items: Array.from({ length: 20 }, (_, index) => ({
+        ...target, thread: { ...target.thread, id: 'scrollable-' + index }
+      }))
+    }))
+    const older = deferred<NavigationMessageSearchPage>()
+    const scrollQuery = '可滚动名单'
+    const cursors: Array<string | null> = []
+    requestHandlers.set('navigation.searchMessages', ({ query, cursor }) => {
+      cursors.push(cursor)
+      if (cursor === 'older-page') return older.promise
+      return {
+        schemaVersion: 1, throughGlobalSequence: 0, query,
+        nextCursor: cursor ? null : 'older-page',
+        items: cursor ? [{
+          target, snippet: scrollQuery,
+          message: { id: 'older-hit', sequence: 1, authorType: 'user', authorId: 'user', authorName: '', createdAt: '' }
+        }] : []
+      }
+    })
+    typeNavigationSearch(scrollQuery)
+    await advance(250)
+    await flush()
+    const list = document.querySelector<HTMLElement>('.command-palette-list')!
+    check(list.scrollHeight > list.clientHeight && cursors.length === 1 && !document.querySelector('.search-status-action'),
+      'A scrollable list leaves continuation to scrolling')
+    list.scrollTop = list.scrollHeight - list.clientHeight - 60
+    list.dispatchEvent(new Event('scroll'))
+    await flush()
+    check(document.querySelector('.search-status [role=status]')?.textContent === '正在搜索更早的消息…',
+      'Continuation uses the older-page copy even if the first page had no message hits')
+    older.resolve({ schemaVersion: 1, throughGlobalSequence: 0, query: scrollQuery, items: [], nextCursor: 'after-empty-page' })
+    await flush()
+    await flush()
+    check(cursors.join(',') === ',older-page,after-empty-page'
+      && document.querySelector('.search-result.has-snippet mark')?.textContent === scrollQuery,
+      'A scrollable list continues from an empty page without a second scroll')
+
+    requestHandlers.set('navigation.search', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, items: [], truncated: false
+    }))
+    requestHandlers.set('navigation.searchMessages', ({ query }) => ({
+      schemaVersion: 1, throughGlobalSequence: 0, query, items: [], nextCursor: null
+    }))
+    for (const [query, copy] of [
+      ['空态查找', '没有匹配的对话或使命。'],
+      ['rvcamp_01h47kvsy5fk1shh6w1g60eecf', '没有找到这个会话。']
+    ]) {
+      typeNavigationSearch(query)
+      await advance(250)
+      await flush()
+      const empty = document.querySelector('.command-palette-empty')
+      check(empty?.textContent === copy, 'An exhausted search uses the empty status')
+      const style = getComputedStyle(empty)
+      check(style.fontSize === '12px' && style.padding === '16px 14px', 'The empty status restores the original spacing')
+    }
+
+    requestHandlers.set('navigation.search', () => { throw new Error('Fixture unavailable') })
+    typeNavigationSearch('失败查找')
+    await advance(250)
+    const error = document.querySelector('.search-status.is-error')
+    const retry = error?.querySelector('button')
+    check(error && retry?.textContent === '重试', 'A failed read offers a retry')
+    const style = getComputedStyle(retry)
+    check(getComputedStyle(error).padding === '8px 14px' && Number(style.fontWeight) >= 600
+      && style.color === resolvedThemeColor('--danger'), 'Retry keeps the bold danger treatment and standard status spacing')
+  },
+  async layoutNavigationSearch(theme: ThemePreference) {
+    const resolvedTheme = theme === 'night' || theme === 'ember' ? 'night' : 'day'
+    applyAppearanceSnapshot(document.documentElement, { ...DEFAULT_APPEARANCE, preference: theme, resolvedTheme })
+    await flush()
+    const palette = document.querySelector('.command-palette')!
+    const box = palette.getBoundingClientRect()
+    const mark = palette.querySelector('mark')!
+    check(document.documentElement.dataset.themeId === theme && box.width === 540
+      && box.top === 96 && box.bottom <= innerHeight, 'Search fits the current desktop theme and viewport')
+    check(getComputedStyle(mark).backgroundColor !== 'rgba(0, 0, 0, 0)' && mark.textContent === '定位词',
+      'Search highlights the continuous text match in the current theme')
+    return { width: innerWidth, height: innerHeight }
+  },
   async run() {
     const cases: string[] = []
     await reset(null, false)
@@ -639,6 +757,10 @@ Object.assign(window, { startupTest: {
         projectBindingKind: 'quick_chat', projectPath: '/fixture/quick-chat', defaultLead: null, marker: 'none',
         lastActivityAt: stamp, lastActivityGlobalSequence: 0, latestCompletionGlobalSequence: 0, version: 1 }))
     } })
+    requestHandlers.set('navigation.search', ({ query }) => ({ schemaVersion: 1, query, throughGlobalSequence: 0,
+      items: (responses.get('navigation.snapshot') as NavigationSnapshot).quickChat.recentThreads.map(thread => ({
+        kind: 'thread', mission: null, match: null, thread, lastActivityAt: thread.lastActivityAt
+      })), truncated: false }))
     requestHandlers.set('navigation.threads', ({ threadIds }) => ({ throughGlobalSequence: 0, groupKeys: ['quick-chat'],
       threads: (responses.get('navigation.snapshot') as NavigationSnapshot).quickChat.recentThreads.filter(camp => threadIds.includes(camp.id)) }))
     responses.set('navigation.threadViewed', { changed: false, navigation: { throughGlobalSequence: 0, groupKeys: ['quick-chat'], threads: [] } })
@@ -768,6 +890,58 @@ Object.assign(window, { startupTest: {
     check(!switchCalls.some(method => ['navigation.snapshot', 'navigation.groupThreads', 'missions.list', 'skills.candidates', 'navigation.threadViewed'].includes(method)),
       'An ordinary read Camp switch must not read the sidebar, Missions or Skill directories, or acknowledge again')
     check(switchCalls.includes('navigation.threads'), 'Camp switching validates only the target navigation row')
+    const navigationFindRequests: { threadId: string; query: string; anchorMessageId: string }[] = []
+    const threads = (responses.get('navigation.snapshot') as NavigationSnapshot).quickChat.recentThreads
+    const currentThread = threads.find(thread => thread.id === 'B')!
+    const nameThread = threads.find(thread => thread.id === 'A')!
+    const searchNames = ({ query }: { query: string }) => ({
+      query, schemaVersion: 1, throughGlobalSequence: 0, truncated: false,
+      items: [{ kind: 'thread', thread: nameThread, mission: null, match: null, lastActivityAt: stamp }]
+    })
+    const searchMessages = (query: string, messageId = 'edited-hit'): NavigationMessageSearchPage => ({
+      query, schemaVersion: 1, throughGlobalSequence: 0, nextCursor: null,
+      items: [{
+        target: { kind: 'thread', thread: currentThread, mission: null, match: null, lastActivityAt: stamp },
+        message: { id: messageId, sequence: 1, authorId: 'user', authorType: 'user', authorName: '', createdAt: stamp },
+        snippet: '定位词'
+      }]
+    })
+    const bodyPage = deferred<NavigationMessageSearchPage>()
+    requestHandlers.set('navigation.search', searchNames)
+    requestHandlers.set('navigation.searchMessages', () => bodyPage.promise)
+    requestHandlers.set('thread.messages.find', input => {
+      navigationFindRequests.push(input)
+      return { threadId: input.threadId, query: input.query, schemaVersion: 1, throughGlobalSequence: 0,
+        totalMatchCount: 0, selectedMatchIndex: null, match: null }
+    })
+    await shortcut('k')
+    typeNavigationSearch('定位词')
+    await advance(250); await flush(); await flush()
+    const firstSearchRow = document.querySelector('.command-palette [role="option"]')
+    check(firstSearchRow?.textContent?.includes('导航会话 A') && !document.querySelector('.search-result.has-snippet'),
+      'The name result is available while its body search is still pending')
+    bodyPage.resolve(searchMessages('定位词'))
+    await flush()
+    check(document.querySelector('.search-result.has-snippet')?.textContent?.includes('导航会话 B'),
+      'Navigation search shows the body hit for the current Thread')
+    check(firstSearchRow === document.querySelector('.command-palette [role="option"]'),
+      'Appended message hits preserve the first visible and selected row')
+    document.querySelector<HTMLButtonElement>('.search-result.has-snippet')!.click()
+    await flush(); await advance(50); await flush()
+    check(navigationFindRequests.length === 1 && navigationFindRequests[0].threadId === 'B'
+      && navigationFindRequests[0].query === '定位词' && navigationFindRequests[0].anchorMessageId === 'edited-hit',
+      'Opening a body hit in the current Thread consumes its search intent exactly once')
+    check(document.querySelector<HTMLInputElement>('.conversation-find-surface input')?.value === '定位词'
+      && document.body.textContent?.includes('原消息已修改或撤回'), 'A missing hit keeps the Find box open and reports the changed anchor')
+    cases.push('Navigation search applies a one-shot body hit anchor to an already active Thread')
+    document.querySelector<HTMLButtonElement>('.conversation-find-surface button.close')?.click()
+    await flush()
+    requestHandlers.delete('navigation.searchMessages')
+    requestHandlers.delete('thread.messages.find')
+    requestHandlers.set('navigation.search', ({ query }) => ({ schemaVersion: 1, query, throughGlobalSequence: 0,
+      items: (responses.get('navigation.snapshot') as NavigationSnapshot).quickChat.recentThreads.map(thread => ({
+        kind: 'thread', mission: null, match: null, thread, lastActivityAt: thread.lastActivityAt
+      })), truncated: false }))
     cases.push('Ordinary Camp switching reads only the target row without unrelated queries')
     const skillReadStart = calls.filter(method => method === 'skills.candidates').length
     const editor = document.querySelector<HTMLElement>('.structured-mention-editor')!
@@ -871,6 +1045,91 @@ Object.assign(window, { startupTest: {
       const dot = document.querySelector<HTMLElement>('[data-thread-id="A"] .camp-unread-dot')
       check(!dot, 'The stopped Thread must not acquire an unread dot in ' + theme)
       await flush()
+    }
+
+    prepareNavigationSearch = async () => {
+      await captureNavigation('day', false, () => {
+        requestHandlers.set('navigation.search', searchNames)
+        requestHandlers.set('navigation.searchMessages', ({ query }) => searchMessages(query))
+      })
+      await shortcut('k')
+      typeNavigationSearch('定位词')
+      await advance(250); await flush()
+      check(document.querySelector('.search-result.has-snippet'), 'Search shows a message snippet for theme checks')
+    }
+
+    checkNavigationSearchPanels = async () => {
+      const query = '定位词'
+      const hit = fixtureMessage(1, query + '\n\n[fixture.txt](docs/fixture.txt)', 'agent')
+      const reply = { ...fixtureMessage(2, '回复内容', 'user'), replyToThreadMessageId: hit.id }
+      const file: ResolvedFilePreview = {
+        handleId: 'search-preview', reopenToken: 'search-preview', previewKey: 'search-preview',
+        displayPath: 'docs/fixture.txt', fileName: 'fixture.txt', pathPresentation: 'project_relative',
+        size: 7, mime: 'text/plain', extension: '.txt', kind: 'text', hasExternalUpdate: false,
+        contentGeneration: 'search-preview', contentVersion: { size: 7, mtimeMs: 1 }, capabilities: ['read']
+      }
+      await captureNavigation('day', false, () => {
+        campRequest = id => {
+          const projection = campProjection(id)
+          return id === currentThread.id ? { ...projection, messages: [hit, reply],
+            coverage: { ...projection.coverage, messages: { loadedCount: 2, totalCount: 2, omittedCount: 0,
+              complete: true, hasEarlier: false, oldestLoadedSequence: 1, newestLoadedSequence: 2 } } } : projection
+        }
+        responses.set('filePreview.bindThread', undefined)
+        responses.set('filePreview.updateRetention', undefined)
+        responses.set('filePreview.release', undefined)
+        responses.set('filePreview.open', { ok: true, value: { kind: 'file_preview', file } })
+        responses.set('filePreview.readText', { ok: true, value: { text: 'fixture',
+          contentGeneration: file.contentGeneration, contentVersion: file.contentVersion } })
+        requestHandlers.set('navigation.search', searchNames)
+        requestHandlers.set('navigation.searchMessages', ({ query }) => searchMessages(query, hit.id))
+        requestHandlers.set('thread.messages.find', ({ threadId, query }) => ({
+          threadId, query, schemaVersion: 1, throughGlobalSequence: 0, totalMatchCount: 1, selectedMatchIndex: 0,
+          match: { messageId: hit.id, messageSequence: hit.sequence, occurrenceIndex: 0, startOffset: 0, endOffset: [...query].length }
+        }))
+        requestHandlers.set('thread.messages.replies', ({ threadId, messageId }) => ({
+          threadId, messageId, schemaVersion: 1, throughGlobalSequence: 0, rootMessageId: hit.id,
+          sourceAvailable: true, replyCount: 1, hasEarlier: false, hasLater: false, messages: [hit, reply], runAnchorMessageIds: []
+        }))
+      })
+      const click = async (selector: string) => {
+        const control = document.querySelector<HTMLElement>(selector)
+        check(control?.getClientRects().length, 'Missing visible control: ' + selector)
+        control.click()
+        await flush()
+      }
+      const revealHit = async (panel: string) => {
+        await shortcut('k')
+        typeNavigationSearch(query)
+        await advance(250)
+        await click('.search-result.has-snippet')
+        const hitVisibleAndFocused = () => {
+          const match = document.querySelector(`.timeline-pane [data-message-id="${hit.id}"].conversation-find-current-message`)
+          const input = document.querySelector<HTMLInputElement>('.conversation-find-surface input')
+          return match?.getClientRects().length && input?.value === query && input === document.activeElement
+        }
+        for (let frame = 0; frame < 5 && !hitVisibleAndFocused(); frame++) await advance(50)
+        check(hitVisibleAndFocused(), 'Navigation search reveals and focuses the loaded hit from ' + panel)
+        await click('.conversation-find-surface button.close')
+      }
+      const timeline = document.querySelector('.timeline-pane')!
+      await click('.timeline-pane .markdown-file-reference')
+      await click('.file-preview-expand-toggle[aria-pressed=false]')
+      check(!timeline.getClientRects().length, 'The expanded file preview covers the conversation')
+      await revealHit('an expanded file preview')
+      check(document.querySelector('.file-preview-expand-toggle[aria-pressed=false]'),
+        'The expanded file preview returns to the split without closing its tab')
+      await revealHit('a regular file preview split')
+      check(document.querySelector('.file-preview-expand-toggle[aria-pressed=false]'),
+        'A regular file preview split stays open after navigation search')
+      await click('.timeline-pane .reply-parent-quote')
+      check(document.querySelector('.reply-detail-panel'), 'The reply details open from the conversation')
+      if (timeline.getClientRects().length) await click('.reply-detail-expand')
+      check(!timeline.getClientRects().length, 'The full-width reply details cover the conversation')
+      await revealHit('full-width reply details')
+      check(!document.querySelector('.reply-detail-panel'), 'Reply details close when they cover the hit')
+      await click('.timeline-pane .markdown-file-reference')
+      await click('.file-preview-tab-close')
     }
 
     // Hold the authority response so cached navigation is a behavioral assertion,

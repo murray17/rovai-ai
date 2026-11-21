@@ -1105,6 +1105,60 @@ export interface NavigationThreadItem extends ArchiveMetadata {
 export type NavigationThreadTarget = Pick<NavigationThreadItem,
   'id' | 'title' | 'channelSource' | 'activationState' | 'projectBindingKind' | 'projectPath'>
 
+export interface NavigationSearchHints {
+  groupKeys?: string[]
+  channelKinds?: string[]
+  threadIds?: string[]
+}
+
+export interface NavigationSearchRequest {
+  query: string
+  hints?: NavigationSearchHints
+}
+
+export interface NavigationMessageSearchRequest {
+  query: string
+  cursor?: string | null
+}
+
+export type NavigationSearchTarget = {
+  thread: NavigationThreadTarget
+  lastActivityAt: string
+  match: { field: 'id' | 'number' | 'title' | 'project' | 'description' | 'tag'; snippet: string | null } | null
+} & (
+  | { kind: 'thread'; mission: null }
+  | { kind: 'mission'; mission: { missionId: string; number: number; status: MissionStatus } }
+)
+
+export interface NavigationSearchResult {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  query: string
+  items: NavigationSearchTarget[]
+  truncated: boolean
+}
+
+export interface NavigationMessageHit {
+  target: NavigationSearchTarget
+  message: {
+    id: string
+    sequence: number
+    authorType: 'user' | 'agent' | 'external_principal'
+    authorId: string
+    authorName: string
+    createdAt: string
+  }
+  snippet: string
+}
+
+export interface NavigationMessageSearchPage {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  query: string
+  items: NavigationMessageHit[]
+  nextCursor: string | null
+}
+
 export interface NavigationThreadGroup {
   totalCount: number
   recentThreads: NavigationThreadItem[]
@@ -4688,6 +4742,8 @@ export type CoreMethod =
   | 'navigation.threads'
   | 'navigation.groupThreads'
   | 'navigation.findThread'
+  | 'navigation.search'
+  | 'navigation.searchMessages'
   | 'navigation.campViewed'
   | 'threads.create'
   | 'threads.fork'

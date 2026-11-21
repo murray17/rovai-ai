@@ -31,7 +31,7 @@ export function campMessageAuthorLabel(message: ThreadMessageView, memberById: R
   // Channel admission is Owner-only; this label does not change the stored author.
   if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
   if (message.authorType === 'system') return uiAttribute('系统')
-  return memberById.get(message.authorId)?.displayName ?? message.authorId
+  return memberById.get(message.authorId)?.displayName ?? message.authorDisplayName ?? uiAttribute('不可用队员')
 }
 export function createMessageExportEntry(message: ThreadMessageView, context: {
   memberById: ReadonlyMap<string, ThreadMemberView>; names: ReadonlyMap<string, string>

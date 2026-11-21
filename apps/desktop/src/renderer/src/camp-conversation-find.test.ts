@@ -7,6 +7,10 @@ import {
 } from './camp-conversation-find'
 
 describe('conversation find helpers', () => {
+  it('folds the query and source by Unicode scalar, including Greek final sigma', () => {
+    expect(conversationFindRanges('ΟΣ', 'ΟΣ')).toEqual([{ start: 0, end: 2 }])
+  })
+
   it('finds case-insensitive, non-overlapping UTF-16 ranges for the DOM', () => {
     expect(conversationFindRanges('Needle NEEDLE', 'needle')).toEqual([
       { start: 0, end: 6 },

@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-shortcut-settings
 status: accepted
-last_updated: 2026-10-30
+last_updated: 2026-11-20
 ---
 
 # 快捷键设置
@@ -24,6 +24,7 @@ Enter 保存、Esc 取消；未收到候选时不常驻 Esc 提示。失焦或�
 
 执行/队员/单聊/任务默认为主修饰键 + 1/2/3/4。文件区显隐保留标签和阅读位置；执行台显隐保留选择与阅读位置；
 聚焦/附件/最新位置使用当前会话或单聊区域。文件查找与会话查找保持各自状态。
+「搜索」使用 `jump` 动作和已保存的绑定，默认主修饰键 + K，打开[会话搜索](app-shell-navigation.md#会话搜索)。
 侧键默认不绑定，只在用户明确保存后启用。
 
 发送方式提供 Enter 与主修饰键 + Enter。Desktop 公屏和单聊删除常驻输入框发送说明，发送按钮使用动态 tooltip、

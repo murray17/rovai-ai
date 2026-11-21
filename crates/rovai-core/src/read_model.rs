@@ -32,6 +32,7 @@ use crate::{
 mod navigation;
 use navigation::*;
 pub(crate) mod archive;
+pub(crate) mod navigation_search;
 mod replies;
 mod user_anchors;
 pub use replies::{ReplyPage, ReplyPageParams};
@@ -52,6 +53,8 @@ pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 const CAMP_MESSAGE_AROUND_RADIUS: i64 = 20;
 const CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS: usize = 512;
+const PUBLIC_SEARCH_MESSAGE: &str =
+    "tombstoned_at IS NULL AND author_type IN ('user', 'agent', 'external_principal')";
 const CAMP_OPEN_TASK_LIMIT: i64 = 100;
 const CAMP_OPEN_MESSAGE_LIMIT: i64 = 20;
 const CAMP_OPEN_DELIVERY_LIMIT: i64 = 200;
@@ -1479,7 +1482,8 @@ impl ReadModelService {
         })
     }
 
-    pub fn camp_messages_find(
+    #[cfg(all(test, feature = "slow-tests"))]
+    fn camp_messages_find(
         &self,
         database: &mut Database,
         camp_id: &str,
@@ -1487,67 +1491,68 @@ impl ReadModelService {
         selected_match_index: Option<i64>,
         anchor_message_id: Option<&str>,
     ) -> Result<ThreadMessageFindSnapshot> {
-        validate_camp_message_find_query(query)?;
-
         let transaction = database.connection_mut().transaction()?;
-        let through_global_sequence = current_global_sequence(&transaction)?;
-        load_camp(&transaction, camp_id)?.context("Thread does not exist")?;
+        self.camp_messages_find_in_snapshot(
+            &transaction,
+            camp_id,
+            query,
+            selected_match_index,
+            anchor_message_id,
+        )
+    }
+
+    pub(crate) fn camp_messages_find_in_snapshot(
+        &self,
+        connection: &Connection,
+        camp_id: &str,
+        query: &str,
+        selected_match_index: Option<i64>,
+        anchor_message_id: Option<&str>,
+    ) -> Result<ThreadMessageFindSnapshot> {
+        validate_camp_message_find_query(query)?;
+        let through_global_sequence = current_global_sequence(connection)?;
+        load_camp(connection, camp_id)?.context("Thread does not exist")?;
         let anchor_sequence = match anchor_message_id {
-            Some(message_id) => transaction
+            Some(message_id) => connection
                 .query_row(
-                    r#"
-                    SELECT sequence
-                    FROM camp_message
-                    WHERE camp_id = ?1
-                      AND id = ?2
-                      AND tombstoned_at IS NULL
-                    "#,
+                    "SELECT sequence FROM camp_message
+                     WHERE camp_id = ?1 AND id = ?2 AND tombstoned_at IS NULL",
                     params![camp_id, message_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?,
             None => None,
         };
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT id, sequence, structured_content_json
-            FROM camp_message
-            WHERE camp_id = ?1
-              AND tombstoned_at IS NULL
-              AND author_type IN ('user', 'agent', 'external_principal')
-            ORDER BY sequence ASC, id ASC
-            "#,
-        )?;
-        let rows = statement
-            .query_map([camp_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(statement);
 
-        let mut candidates = Vec::<ThreadMessageFindCandidate>::new();
-        for (message_id, message_sequence, structured_content_json) in rows {
-            let content =
-                serde_json::from_str::<StructuredThreadMessageContent>(&structured_content_json)
-                    .map(normalize_content)
-                    .context("ThreadMessage Structured Content is invalid")?;
-            let body = render_structured_message_content(&transaction, &content)?;
-            candidates.push(ThreadMessageFindCandidate {
-                message_id,
-                message_sequence,
-                body,
-            });
+        let mut statement = connection.prepare(&format!(
+            "SELECT id, sequence, structured_content_json FROM camp_message
+             WHERE camp_id = ?1 AND {PUBLIC_SEARCH_MESSAGE}
+             ORDER BY sequence ASC, id ASC"
+        ))?;
+        let mut rows = statement.query([camp_id])?;
+        let matcher = ConversationFindQuery::new(query);
+        let mut matches = Vec::new();
+        while let Some(row) = rows.next()? {
+            let body = project_search_message(connection, row.get_ref(2)?.as_str()?)?;
+            let ranges = matcher.ranges(&body, usize::MAX);
+            if ranges.is_empty() {
+                continue;
+            }
+            let message_id: String = row.get(0)?;
+            let message_sequence = row.get(1)?;
+            matches.extend(ranges.into_iter().enumerate().map(
+                |(occurrence_index, (start_offset, end_offset))| ThreadMessageFindMatch {
+                    message_id: message_id.clone(),
+                    message_sequence,
+                    occurrence_index: occurrence_index as i64,
+                    start_offset: start_offset as i64,
+                    end_offset: end_offset as i64,
+                },
+            ));
         }
-
-        let matches = flatten_camp_message_find_matches(candidates, query);
         let total_match_count = matches.len() as i64;
         let (normalized_selected_index, selected_match) =
             select_camp_message_find_match(&matches, selected_match_index, anchor_sequence);
-        transaction.commit()?;
 
         Ok(ThreadMessageFindSnapshot {
             schema_version: CAMP_MESSAGE_FIND_SCHEMA_VERSION,
@@ -1921,7 +1926,7 @@ fn project_display_name(project_path: &str) -> String {
         .to_string()
 }
 
-fn current_global_sequence(transaction: &Transaction<'_>) -> Result<i64> {
+fn current_global_sequence(transaction: &Connection) -> Result<i64> {
     transaction
         .query_row(
             "SELECT last_sequence FROM event_sequence WHERE singleton = 1",
@@ -2022,7 +2027,7 @@ fn message_coverage(messages: &[ThreadMessageView], total_count: i64) -> ThreadO
     }
 }
 
-fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<ThreadView>> {
+fn load_camp(transaction: &Connection, camp_id: &str) -> Result<Option<ThreadView>> {
     transaction
         .query_row(
             r#"
@@ -2585,17 +2590,8 @@ fn hydrate_message_views(
             let attachments = attachments_by_message_id
                 .remove(&row.id)
                 .unwrap_or_default();
-            let author_display_name = if row.author_type == "external_principal" {
-                transaction
-                    .query_row(
-                        "SELECT display_name FROM external_principal WHERE id = ?1",
-                        [&row.author_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?
-            } else {
-                None
-            };
+            let author_display_name =
+                load_message_author_display_name(transaction, &row.author_type, &row.author_id)?;
             let mission_start=transaction.query_row("SELECT s.mission_id,m.title,m.description FROM mission_start s JOIN mission m ON m.id=s.mission_id WHERE s.message_id=?1",[&row.id],|r|Ok(serde_json::json!({"missionId":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"description":r.get::<_,String>(2)?}))).optional()?;
             let capabilities = crate::collaboration::message_mutation::capabilities(transaction, &row.id)?;
             Ok(ThreadMessageView {
@@ -2635,6 +2631,23 @@ fn hydrate_message_views(
         .collect::<Result<Vec<_>>>()
 }
 
+fn load_message_author_display_name(
+    connection: &Connection,
+    author_type: &str,
+    author_id: &str,
+) -> Result<Option<String>> {
+    let sql = match author_type {
+        "agent" => "SELECT display_name FROM agent_profile WHERE id = ?1",
+        "external_principal" => "SELECT display_name FROM external_principal WHERE id = ?1",
+        _ => return Ok(None),
+    };
+    let name = connection
+        .prepare_cached(sql)?
+        .query_row([author_id], |row| row.get::<_, String>(0))
+        .optional()?;
+    Ok(name.filter(|name| !name.trim().is_empty()))
+}
+
 fn render_structured_message_content(
     transaction: &Transaction<'_>,
     content: &[crate::camp_content::StructuredThreadMessageSegment],
@@ -2666,66 +2679,68 @@ fn fold_with_source_offsets(value: &str) -> (Vec<char>, Vec<usize>) {
     (folded, source_offsets)
 }
 
-fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize, usize)> {
-    let (folded_value, source_offsets) = fold_with_source_offsets(value);
-    let (folded_query, _) = fold_with_source_offsets(query);
-    if folded_query.is_empty() || folded_query.len() > folded_value.len() {
-        return Vec::new();
-    }
+fn project_search_message(connection: &Connection, structured_content: &str) -> Result<String> {
+    let content = serde_json::from_str::<StructuredThreadMessageContent>(structured_content)
+        .map(normalize_content)
+        .context("ThreadMessage Structured Content is invalid")?;
+    render_current_plain_text(connection, &content)
+}
 
-    let mut ranges = Vec::<(usize, usize)>::new();
-    let mut folded_offset = 0;
-    while folded_offset + folded_query.len() <= folded_value.len() {
-        if folded_value[folded_offset..folded_offset + folded_query.len()] == folded_query {
-            let start_offset = source_offsets[folded_offset];
-            let end_offset = source_offsets[folded_offset + folded_query.len() - 1] + 1;
-            let does_not_overlap = match ranges.last() {
-                Some((_, previous_end)) => start_offset >= *previous_end,
-                None => true,
-            };
-            if does_not_overlap {
-                ranges.push((start_offset, end_offset));
-            }
-            folded_offset += folded_query.len();
-        } else {
-            folded_offset += 1;
+struct ConversationFindQuery {
+    folded: Vec<char>,
+    ascii: Option<String>,
+}
+
+impl ConversationFindQuery {
+    fn new(query: &str) -> Self {
+        Self {
+            folded: query.chars().flat_map(char::to_lowercase).collect(),
+            ascii: query.is_ascii().then(|| query.to_ascii_lowercase()),
         }
     }
-    ranges
-}
 
-struct ThreadMessageFindCandidate {
-    message_id: String,
-    message_sequence: i64,
-    body: String,
-}
+    fn first_range(&self, value: &str) -> Option<(usize, usize)> {
+        self.ranges(value, 1).into_iter().next()
+    }
 
-fn flatten_camp_message_find_matches(
-    mut candidates: Vec<ThreadMessageFindCandidate>,
-    query: &str,
-) -> Vec<ThreadMessageFindMatch> {
-    candidates.sort_by(|left, right| {
-        left.message_sequence
-            .cmp(&right.message_sequence)
-            .then_with(|| left.message_id.cmp(&right.message_id))
-    });
-    candidates
-        .into_iter()
-        .flat_map(|candidate| {
-            case_insensitive_scalar_match_ranges(&candidate.body, query)
-                .into_iter()
-                .enumerate()
-                .map(
-                    move |(occurrence_index, (start_offset, end_offset))| ThreadMessageFindMatch {
-                        message_id: candidate.message_id.clone(),
-                        message_sequence: candidate.message_sequence,
-                        occurrence_index: occurrence_index as i64,
-                        start_offset: start_offset as i64,
-                        end_offset: end_offset as i64,
-                    },
-                )
-        })
-        .collect()
+    fn ranges(&self, value: &str, limit: usize) -> Vec<(usize, usize)> {
+        if self.folded.is_empty() {
+            return Vec::new();
+        }
+        if let Some(query) = &self.ascii
+            && value.is_ascii()
+        {
+            return value
+                .to_ascii_lowercase()
+                .match_indices(query)
+                .take(limit)
+                .map(|(start, matched)| (start, start + matched.len()))
+                .collect();
+        }
+
+        let (folded_value, source_offsets) = fold_with_source_offsets(value);
+        let mut ranges = Vec::<(usize, usize)>::new();
+        let mut folded_offset = 0;
+        while folded_offset + self.folded.len() <= folded_value.len() {
+            if folded_value[folded_offset..folded_offset + self.folded.len()] == self.folded {
+                let start = source_offsets[folded_offset];
+                let end = source_offsets[folded_offset + self.folded.len() - 1] + 1;
+                if ranges
+                    .last()
+                    .is_none_or(|(_, previous_end)| start >= *previous_end)
+                {
+                    ranges.push((start, end));
+                    if ranges.len() == limit {
+                        break;
+                    }
+                }
+                folded_offset += self.folded.len();
+            } else {
+                folded_offset += 1;
+            }
+        }
+        ranges
+    }
 }
 
 fn select_camp_message_find_match(
@@ -4544,55 +4559,39 @@ fn load_events(
 #[cfg(test)]
 mod tests {
     use super::{
-        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, ThreadMessageFindCandidate,
-        case_insensitive_scalar_match_ranges, flatten_camp_message_find_matches,
+        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, ConversationFindQuery, ThreadMessageFindMatch,
         select_camp_message_find_match, validate_camp_message_find_query,
     };
 
     #[test]
     fn conversation_find_ranges_are_case_insensitive_non_overlapping_unicode_scalars() {
-        assert_eq!(
-            case_insensitive_scalar_match_ranges("A中a İ", "a"),
-            vec![(0, 1), (2, 3)]
-        );
-        assert_eq!(
-            case_insensitive_scalar_match_ranges("İstanbul", "i\u{307}"),
-            vec![(0, 1)]
-        );
-        assert_eq!(
-            case_insensitive_scalar_match_ranges("aaaa", "aa"),
-            vec![(0, 2), (2, 4)]
-        );
+        for (body, query, expected) in [
+            ("A中a İ", "a", vec![(0, 1), (2, 3)]),
+            ("İstanbul", "i\u{307}", vec![(0, 1)]),
+            ("aaaa", "aa", vec![(0, 2), (2, 4)]),
+        ] {
+            assert_eq!(
+                ConversationFindQuery::new(query).ranges(body, usize::MAX),
+                expected
+            );
+        }
     }
 
     #[test]
-    fn conversation_find_flattens_orders_selects_and_wraps_without_a_database() {
-        let matches = flatten_camp_message_find_matches(
-            vec![
-                ThreadMessageFindCandidate {
-                    message_id: "later".to_string(),
-                    message_sequence: 2,
-                    body: "NEEDLE late".to_string(),
-                },
-                ThreadMessageFindCandidate {
-                    message_id: "first".to_string(),
-                    message_sequence: 1,
-                    body: "Needle 中 needle".to_string(),
-                },
-            ],
-            "needle",
-        );
-        assert_eq!(
-            matches
-                .iter()
-                .map(|item| (
-                    item.message_id.as_str(),
-                    item.occurrence_index,
-                    item.start_offset,
-                    item.end_offset,
-                ))
-                .collect::<Vec<_>>(),
-            vec![("first", 0, 0, 6), ("first", 1, 9, 15), ("later", 0, 0, 6),]
+    fn conversation_find_selects_by_wrapped_index_or_nearest_following_anchor() {
+        let matches = [
+            ("first", 1, 0, 0, 6),
+            ("first", 1, 1, 9, 15),
+            ("later", 2, 0, 0, 6),
+        ]
+        .map(
+            |(id, sequence, occurrence, start, end)| ThreadMessageFindMatch {
+                message_id: id.to_string(),
+                message_sequence: sequence,
+                occurrence_index: occurrence,
+                start_offset: start,
+                end_offset: end,
+            },
         );
 
         for (requested, anchor, expected_index, expected_message) in [
@@ -4614,7 +4613,10 @@ mod tests {
             select_camp_message_find_match(&[], None, None),
             (None, None)
         );
+    }
 
+    #[test]
+    fn conversation_find_validates_query_by_unicode_scalar_count() {
         assert!(validate_camp_message_find_query("  ").is_err());
         assert!(
             validate_camp_message_find_query(&"中".repeat(CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS + 1))
@@ -5344,7 +5346,7 @@ mod slow_tests {
                     1,
                     "user",
                     "local_user",
-                    "Needle one NEEDLE",
+                    "Needle 中 NEEDLE",
                     None,
                 ),
                 (
@@ -5477,13 +5479,18 @@ mod slow_tests {
         assert_eq!(
             selected
                 .iter()
-                .map(|item| (item.message_id.as_str(), item.occurrence_index))
+                .map(|item| (
+                    item.message_id.as_str(),
+                    item.occurrence_index,
+                    item.start_offset,
+                    item.end_offset
+                ))
                 .collect::<Vec<_>>(),
             vec![
-                ("find-message-1", 0),
-                ("find-message-1", 1),
-                ("find-message-3", 0),
-                ("find-message-5", 0),
+                ("find-message-1", 0, 0, 6),
+                ("find-message-1", 1, 9, 15),
+                ("find-message-3", 0, 7, 13),
+                ("find-message-5", 0, 0, 6),
             ]
         );
 
@@ -5493,7 +5500,7 @@ mod slow_tests {
 
     #[test]
     fn conversation_find_returns_one_selected_match_from_the_transactional_high_water() {
-        let (mut database, directory) = crate::test_support::fresh_schema_database_fast();
+        let (mut database, directory) = crate::test_support::fresh_schema_database();
         let created = CollaborationService::default()
             .create_camp(
                 &mut database,
@@ -5543,14 +5550,25 @@ mod slow_tests {
         }
         transaction.commit().unwrap();
 
-        let snapshot = ReadModelService
-            .camp_messages_find(
-                &mut database,
+        let readers = navigation_search::SearchReaders::new(database.path());
+        let find = |connection: &Connection| {
+            ReadModelService.camp_messages_find_in_snapshot(
+                connection,
                 camp_id,
                 "needle",
                 None,
                 Some("find-snapshot-2"),
             )
+        };
+        let snapshot = readers
+            .read(|connection| {
+                assert_eq!(current_global_sequence(connection)?, expected_high_water);
+                database.connection().execute(
+                    "UPDATE camp_message SET tombstoned_at = '2026-08-18T01:00:00Z' WHERE id = 'find-snapshot-2'",
+                    [],
+                )?;
+                find(connection)
+            })
             .unwrap();
         assert_eq!(snapshot.through_global_sequence, expected_high_water);
         assert_eq!(snapshot.total_match_count, 3);
@@ -5565,7 +5583,11 @@ mod slow_tests {
                 end_offset: 12,
             })
         );
+        let refreshed = readers.read(find).unwrap();
+        assert_eq!(refreshed.total_match_count, 2);
+        assert_eq!(refreshed.r#match.unwrap().message_id, "find-snapshot-1");
 
+        drop(readers);
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

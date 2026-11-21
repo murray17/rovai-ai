@@ -180,22 +180,26 @@ Desktop 导航快捷键由[快捷键设置](shortcut-settings.md)统一分发，
 
 ## 会话搜索
 
-菜单栏项目名、菜单栏会话名和会话搜索结果中的名称共用单行纯淡化：只有实际溢出时才在末尾 12px
-逐渐降低透明度，不模糊字形，不追加省略号；短名称完整显示。名称变化、当前会话字重和可用宽度变化后
-重新判断溢出。完整文字留在 DOM 与原生 title 中，保留按钮的可访问名称；强制颜色模式或不支持遮罩时
-回退省略号。搜索结果的项目名最多占行宽的 32%，给会话标题保留空间。顶部会话标题及其项目面包屑沿用原样。
+侧栏「搜索」与 ⌘K / Ctrl+K 打开同一 Radix Dialog。保留 jump 快捷键 ID 和自定义绑定。
+弹窗默认宽 540px，顶部留 96px，圆角 12px。输入框承担可见提示，读屏保留弹窗标题和操作说明。
+使用现有中性选中态和语义 Token。名称采用导航行的单行淡化，项目名最多占行宽 32%。
+使命行带状态、编号和标题。消息行带作者、单行关键词摘要和消息时间。描述、标签命中显示对应摘要。
 
-`CommandOrControl K` 的普通文字输入继续在已加载会话的标题和项目名中忽略大小写过滤，最多显示 12 项。
-去掉首尾空白后，只有通过共享 `isThreadId` 完整校验的输入才进入 ID 精确查询；ID 保持 canonical 小写，
-不补全片段、不转换大小写，也不在未命中时回退到标题搜索。
+空输入显示最近活动。停 200ms 读取名称和正文，名称先显示，正文按 Thread ID 去重后追加。
+结果与产生它的查询绑定。回车只打开当前版本，尚无当前结果时可等第一处命中。输入变化、IME 开始、方向键改选或本轮等待结束会撤销待执行回车。
+IME 开始同时撤销未发请求。已显示的旧行仍按自身查询打开。正文单飞范围为窗口。
 
-完整 ID 经短暂防抖调用 Desktop `navigation.findThread({ threadId })`；Core 再通过 `ThreadId` 校验，按
-ID 等值读取，返回单个 `NavigationThreadTarget`（ID、标题、渠道来源、激活状态、项目绑定类型和路径）或
-`null`。该路径覆盖未进入最近五条列表的旧会话，不加载消息或聚合活动历史，不改变已读状态。
-Active Thread 和带当前 Desktop 客户端 presence 的 Pending Thread 可被查询；空 Pending Thread 与不存在的 ID 返回无结果。
+滚动接近底部或方向键到列表末尾时续页。列表不足一屏，或续页后列表仍停在接近底部的位置时，最多连续自动续五次。
+达到上限且尚有后续页时显示「继续搜索更早的消息」。
+点击后重新开始五次自动续扫。首个正文请求显示「正在搜索消息…」，有游标的请求显示「正在搜索更早的消息…」。
+加载、无匹配、短查询、截断和可重试错误在列表外呈现。Tab 在输入框和状态动作间循环，按钮触发或消失后回到输入框。
+搜索结束后无结果的文字为 12px，上下留白 16px。一般状态行内边距为 8px 14px。
+续扫按钮使用常规字重的 `--muted`，悬停时用 `--ink`。重试使用加粗的 `--danger`。
+方向键管理 listbox 选项，输入框通过 aria-activedescendant 表达选中项。Esc 关闭弹窗。
 
-查询期间显示加载反馈，失败与未命中分别呈现；修改输入或关闭搜索后丢弃旧请求结果。方向键选择和回车
-打开沿用现有会话激活入口。普通文字输入不会调用 ID 查询，标题过滤与 ID 查找互斥。
+名称结果走现有对话或使命打开流程。消息结果在正式打开后先恢复被遮住的会话消息区，再填入会话内查找并定位。
+已显示消息区的预览分栏可以继续使用。目标已变更时提示并保留查找栏。
+接口和可见性见 [Navigation Search v1](../../contracts/navigation-search-v1.md)。
 
 ## Quick Chat 与 Project 分组
 
@@ -394,7 +398,8 @@ AppToast 在 App 容器中水平居中，位于窗口顶行下方 8px。完整�
 
 ## Jump search and overlay closure
 
-⌘K / Ctrl+K opens the title/project search or exact lookup by a complete Thread ID, with a small “跳转到对话” title, neutral selected result and “↑ ↓ 选择　↵ 打开　Esc 关闭” footer. Search input has no focus underline or frame; arrows and Enter retain their behavior and respect IME composition. Closing sidebar menus, rename/delete/removal dialogs or settings does not force focus back to the entry button, including after pin mutations; Escape in Project/Thread menus follows the return-to-row rule above. Shared DOM focus for keyboard input and menu navigation remains available.
+⌘K / Ctrl+K opens [navigation search](#会话搜索). Closing sidebar menus, rename/delete/removal dialogs or settings
+does not force focus back to the entry button. Escape in Project/Thread menus follows the return-to-row rule above.
 
 ## Web 导航适配
 

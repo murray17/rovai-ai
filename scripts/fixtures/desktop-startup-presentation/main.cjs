@@ -57,6 +57,41 @@ app.whenReady().then(async () => {
     }
   }
   window.webContents.debugger.attach('1.3')
+  await window.webContents.executeJavaScript('window.startupTest.prepareNavigationSearch()', true)
+  for (const [width, height] of [[1040, 700], [1440, 920]]) {
+    await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+      const layout = await window.webContents.executeJavaScript(`window.startupTest.layoutNavigationSearch(${JSON.stringify(theme)})`, true)
+      assert.deepEqual(layout, { width, height })
+      writeFileSync(join(dirname(userData), `navigation-search-${theme}-${width}x${height}.png`), (await window.webContents.capturePage()).toPNG())
+    }
+  }
+  await window.webContents.debugger.sendCommand('Emulation.clearDeviceMetricsOverride')
+  report.cases.push('Navigation search fits five themes at compact and large desktop sizes')
+  await window.webContents.executeJavaScript('window.startupTest.exhaustNavigationSearchPages()', true)
+  const searchKey = async (key, windowsVirtualKeyCode, modifiers = 0, text) => {
+    const command = (type, extra) => window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type, key, code: key, windowsVirtualKeyCode, modifiers, ...extra
+    })
+    await command('keyDown', text ? { text, unmodifiedText: text } : {})
+    await command('keyUp')
+  }
+  const searchFocus = selector => window.webContents.executeJavaScript(`document.activeElement.matches(${JSON.stringify(selector)})`)
+  await searchKey('Tab', 9)
+  assert.equal(await searchFocus('.search-status-action'), true)
+  await searchKey('Tab', 9, 8)
+  assert.equal(await searchFocus('.command-palette-input'), true)
+  await searchKey('Tab', 9)
+  await searchKey('Enter', 13, 0, '\r')
+  assert.equal(await searchFocus('.command-palette-input'), true)
+  assert.equal(await window.webContents.executeJavaScript('!!document.querySelector(".search-status-action")'), false)
+  report.cases.push('Navigation search continuation supports native keyboard focus and activation')
+  await window.webContents.executeJavaScript('window.startupTest.checkNavigationSearchStatuses()', true)
+  report.cases.push('Navigation search status layout distinguishes empty, retry and scroll-to-continue')
+  await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
+  await window.webContents.executeJavaScript('window.startupTest.checkNavigationSearchPanels()', true)
+  await window.webContents.debugger.sendCommand('Emulation.clearDeviceMetricsOverride')
+  report.cases.push('Navigation search reveals a loaded hit behind file preview or reply details')
   await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
   })
