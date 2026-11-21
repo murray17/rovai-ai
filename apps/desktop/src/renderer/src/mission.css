@@ -88,11 +88,9 @@
 .mission-status-menu { min-width: 180px; }.mission-project-menu { min-width: 160px; }.mission-menu-label { padding: 6px 10px 8px; color: var(--faint); font-size: 11px; }
 .mission-history-row { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }.mission-history-row p { margin: 0 0 4px; }.mission-history-row time { color: var(--faint); font-size: 11px; }.mission-history-row strong { font-weight: 500; color: var(--ink); }
 .mission-dispatch h3 { margin: 0 0 10px; font-size: 14px; }.mission-dispatch p { color: var(--muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }.mission-dispatch small { color: var(--faint); font-size: 11px; }
-.mission-toast { position: fixed; z-index: 600; left: 50%; bottom: 22px; transform: translateX(-50%); max-width: min(540px,calc(100vw - 40px)); border: 1px solid var(--line-strong); border-radius: 8px; padding: 9px 15px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-float); font-size: 12px; line-height: 1.6; animation: mission-toast-in 140ms ease-out; }
-@keyframes mission-toast-in { from { opacity: 0; transform: translate(-50%,4px); } to { opacity: 1; transform: translate(-50%,0); } }
 @media(max-width:1190px) { .mission-toolbar { gap: 6px; padding-inline: 16px; }.mission-topbar { padding-inline: 16px; }.mission-board-scroll { padding-inline: 16px; }.mission-board { gap: 10px; }.mission-board-card { padding-inline: 10px; }.mission-card-presence { margin-inline: -10px; padding-inline: 10px; }.mission-search { width: 150px; }.mission-list td,.mission-list th { padding-inline: 5px; } }
 @media(max-width:960px) { .mission-board { grid-template-columns: repeat(2,minmax(0,1fr)); }.mission-toolbar { flex-wrap: wrap; flex-basis: auto; }.mission-search { width: 130px; }.mission-list th:nth-child(3),.mission-list td:nth-child(3) { display: none; }.mission-list th:first-child { width: 35%; }.mission-list th:nth-child(5) { width: 22%; } }
-@media(prefers-reduced-motion:reduce) { .mission-board-card { transition: none; }.mission-toast { animation: none; } }
+@media(prefers-reduced-motion:reduce) { .mission-board-card { transition: none; } }
 .mission-board-content > * { width: 100%; max-width: none; margin-inline: 0; }
 @media(min-width:1800px) { .mission-board-scroll > .mission-board,.mission-board-scroll > .mission-list { max-width: 1680px; margin-inline: auto; }.mission-toolbar { padding-inline: max(24px,calc((100% - 1680px)/2)); } }
 

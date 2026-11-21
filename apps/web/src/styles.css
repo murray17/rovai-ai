@@ -85,7 +85,6 @@ html[data-motion-preference="reduce"] .web-login-submit { transition: none; }
 
 .navigation-browser-control { position: absolute; z-index: 25; left: 12px; top: 5px; }
 html[data-rovai-surface="web"] .navigation-collapsed > .topbar { padding-left: 54px; }
-.web-recovery-error { position: fixed; z-index: 90; bottom: 16px; left: 16px; max-width: min(520px, calc(100vw - 32px)); padding: 12px; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; }
 
 /* Settings has no native window chrome; the brand occupies the top row. */
 html[data-rovai-surface="web"] .settings-navigation-mode .unified-sidebar-drag { display: none; }

@@ -1,7 +1,7 @@
 import { browserAuthStorage } from './auth-storage'
 import { acquireTabRecovery } from './tab-recovery'
 import { takeLoginTicket } from './login-ticket'
-import { StrictMode, useEffect, useState, useRef } from 'react'
+import { StrictMode, useEffect, useMemo, useState, useRef } from 'react'
 import { RemoteConnectionStatus } from '../../desktop/src/renderer/src/RemoteConnectionStatus'
 import { HostWorkspacePicker } from './HostWorkspacePicker'
 import { WebLogin } from './WebLogin'
@@ -13,6 +13,7 @@ import { observeInterfaceLanguage, useUiText } from '../../desktop/src/renderer/
 import { LanguagePreferenceReadNotice } from '../../desktop/src/renderer/src/LanguagePreferenceControl'
 import type { InterfaceLanguageApi, WorkspaceSelection } from '@contracts'
 import { createRoot } from 'react-dom/client'
+import { AppToast, type AppToastValue } from '../../desktop/src/renderer/src/AppToast'
 import { BusinessApp } from '../../desktop/src/renderer/src/BusinessApp'
 import { ThreadClientProvider } from '../../desktop/src/renderer/src/camp-client'
 import { CurrentUserProfileProvider } from '../../desktop/src/renderer/src/CurrentUserProfile'
@@ -183,6 +184,12 @@ function WebEntry() {
     finally { setBusy(false) }
   }
   const current = adapter
+  const recoveryMessage = authenticated && error ? t(error) : null
+  const recoveryToast = useMemo<AppToastValue | null>(() => recoveryMessage === null ? null : {
+    message: recoveryMessage,
+    tone: 'danger',
+    persistence: 'until-closed'
+  }, [recoveryMessage])
   if (readyLanguageApi !== languageApi || (restoring && !current)) return <div className="language-bootstrap" aria-busy="true" />
   return <>
     <LanguagePreferenceReadNotice />
@@ -193,7 +200,7 @@ function WebEntry() {
         </CurrentUserProfileProvider>
       </ThreadClientProvider></div>}
       {authenticated && <UploadStatus transport={transport} />}
-      {authenticated && error && <div className="web-recovery-error" role="alert">{t(error)}<button type="button" className="quiet-button compact" onClick={() => setError(null)}>{t('关闭')}</button></div>}
+      {recoveryToast && <AppToast toast={recoveryToast} onClose={() => setError(null)} />}
       {workspaceChoice && <HostWorkspacePicker transport={transport} onSelect={finishWorkspace} />}
     </WebConnectionRecovery>
     {!authenticated && <WebLogin languageApi={languageApi} hostKind={hostKind}

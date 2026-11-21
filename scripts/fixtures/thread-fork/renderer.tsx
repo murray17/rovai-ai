@@ -155,7 +155,18 @@ const showTimedToasts = () => {
   ]
   renderToasts()
 }
-;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,probeActions,clearToasts:()=>{probeToasts=[];renderToasts()},hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+const showPersistentToasts = () => {
+  probeActions.length = 0
+  probeToasts = [
+    { id: 'until-closed', message: 'Persistent connection error', tone: 'danger', persistence: 'until-closed' },
+    {
+      id: 'until-resolved', message: 'Persistent language read error', tone: 'neutral', persistence: 'until-resolved',
+      actions: [{ label: uiAttribute('重新读取'), onSelect: () => probeActions.push('read-again') }]
+    }
+  ]
+  renderToasts()
+}
+;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts:()=>{probeToasts=[];renderToasts()},hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
   addAttachment:()=>{const input=document.querySelector('.camp-workspace form.composer:not(.single-chat-composer) .composer-file-input') as HTMLInputElement;const data=new DataTransfer();data.items.add(new File(['pending'],'pending.txt',{type:'text/plain'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))},attachmentPending:()=>attachmentPending,releaseAttachment:()=>releaseAttachment?.(),
   language:(value:any)=>changeInterfaceLanguage(preferences.generalPreferences,value),
   theme:(theme:any)=>applyAppearanceSnapshot(document.documentElement,{...appearance,preference:theme,resolvedTheme:['night','ember'].includes(theme)?'night':'day'})}
