@@ -407,6 +407,13 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toContain('.run-pulse-inspector .run-pulse-list::-webkit-scrollbar { display: none; }')
   })
 
+  it('reserves the settings sidebar gutter and reveals its thumb on hover or keyboard focus', () => {
+    expect(css).toMatch(/\.settings-sidebar-menu\s*\{[^}]*scrollbar-gutter: stable/)
+    expect(css).toMatch(/\.settings-sidebar-menu::-webkit-scrollbar-thumb\s*\{[^}]*background-color: transparent/)
+    expect(css).toMatch(/\.unified-sidebar:is\(:hover, :has\(:focus-visible\)\) \.settings-sidebar-menu::-webkit-scrollbar-thumb\s*\{[^}]*background-color: var\(--scrollbar-thumb\)/)
+    expect(css).toMatch(/html:not\(\[data-mobile-web="true"\]\) \.settings-content \.settings-panel::-webkit-scrollbar-track\s*\{[^}]*margin: 50px 0 8px/)
+  })
+
   it('gives every page a controlled drag region and compacts only the Windows sidebar inset', () => {
     expect(css).toContain(`.content.compose-content,
 .content.settings-content,

@@ -3332,7 +3332,8 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="设置分类"')
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('返回 App')
-    expect(markup).toContain('应用级偏好与本机能力')
+    expect(markup).not.toContain('应用级偏好与本机能力')
+    expect(markup).not.toContain('settings-sidebar-title')
     expect(markup.match(/class="settings-sidebar-group"/g)).toHaveLength(3)
     const applicationHeading = '<h2 id="settings-sidebar-group-application" class="settings-sidebar-group-title">应用</h2>'
     const capabilitiesHeading = '<h2 id="settings-sidebar-group-capabilities" class="settings-sidebar-group-title">能力</h2>'

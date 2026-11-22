@@ -244,8 +244,7 @@ html[data-mobile-web="true"] :is(.file-preview-tab-activate, .file-preview-tab-c
 /* Root pages retain their real forms and leave guards, with one reading pane at a time. */
 html[data-mobile-web="true"] .settings-sidebar-navigation { padding: 0 16px 20px; overflow-y: auto; }
 html[data-mobile-web="true"] .settings-sidebar-heading { padding: 16px 4px 0; }
-html[data-mobile-web="true"] :is(.settings-sidebar-back, .settings-sidebar-title > span) { display: none; }
-html[data-mobile-web="true"] .settings-sidebar-title strong { font-size: 24px; }
+html[data-mobile-web="true"] .settings-sidebar-back { display: none; }
 html[data-mobile-web="true"] .settings-sidebar-menu button { display: flex; width: 100%; min-height: 48px; padding: 10px 8px; gap: 14px; font-size: 14px; }
 html[data-mobile-web="true"] .settings-sidebar-menu button > span { flex: 0 0 22px; }
 html[data-mobile-web="true"] .settings-sidebar-menu .navigation-icon { width: 20px; height: 20px; }

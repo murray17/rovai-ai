@@ -23,7 +23,11 @@ preference, detected availability, editable source and current effective state.
 ## Shared composition
 
 Settings replaces the common 270px App rail with the grouped settings navigation defined by
-[`app-shell-navigation.md`](../components/app-shell-navigation.md). Every category
+[`app-shell-navigation.md`](../components/app-shell-navigation.md). Back to App is the entire fixed
+rail header. The category list follows without a divider and scrolls as one column. Its stable
+gutter sits in the rail's right padding, keeping rows aligned with Back to App. Show the thumb while
+the pointer hovers over the rail or a control in it has keyboard focus. The content scrollbar track
+starts below the window drag strip and ends 8px above the lower window corner. Every category
 uses the shared borderless header, a direct title/description and page-specific actions. Appearance,
 Reminder and Agent Runtime use a solid content plane without a decorative top edge, gradient wash or
 header divider. Agent Runtime uses a centered `1040px` title/body track;
