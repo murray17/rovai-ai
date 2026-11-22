@@ -18,8 +18,8 @@ export class OperationFailure extends Error {
 
 const connectionCopy: ReadonlyMap<string, () => string> = new Map([
   ['core_request_timeout', () => uiAttribute('Rovai 暂时没有响应，请重试。')],
-  ['full_core_shutting_down', () => uiAttribute('Rovai 正在退出，这次操作没有完成。')],
-  ['shutdown', () => uiAttribute('Rovai 正在退出，这次操作没有完成。')],
+  ['full_core_shutting_down', () => uiAttribute('Rovai 正在退出。')],
+  ['shutdown', () => uiAttribute('Rovai 正在退出。')],
   ['full_core_unavailable', () => uiAttribute('Rovai 还在启动，请稍后重试。')],
   ['full_core_startup_refused', () => uiAttribute('Rovai 还在启动，请稍后重试。')]
 ])
@@ -57,6 +57,8 @@ const operationNames = {
   'run.stop': () => uiAttribute('停止'),
   'thread.open': () => uiAttribute('打开会话'),
   'thread.refresh': () => uiAttribute('刷新会话'),
+  'thread.rename': () => uiAttribute('重命名对话'),
+  'thread.delete': () => uiAttribute('删除对话'),
   'thread.lead.change': () => uiAttribute('更换默认队长'),
   'approval.resolve': () => uiAttribute('提交审批'),
   'overview.read': () => uiAttribute('刷新状态'),
@@ -84,6 +86,11 @@ export interface FailureFeedback {
   outcome: 'failed' | 'stale' | 'gone' | 'resolved' | 'connection'
 }
 
+interface FailureFeedbackOptions {
+  subject?: string
+  presentation?: 'standalone' | 'detail'
+}
+
 const failed = (message: string): FailureFeedback => ({ message, tone: 'danger', outcome: 'failed' })
 const changed = (message: string, outcome: 'stale' | 'gone' | 'resolved'): FailureFeedback =>
   ({ message, tone: 'neutral', outcome })
@@ -104,6 +111,16 @@ const sharedCopy: ReadonlyMap<string, () => string> = new Map([
   ['camp.member_not_active', () => uiAttribute('名册已发生变化。请重新读取最新状态后再试。')]
 ])
 
+const threadActionRejectionCopy: ReadonlyMap<string, () => string> = new Map([
+  ['camp.name_too_long', () => uiAttribute('对话名称最多 80 个字符。')],
+  ['camp.rename_user_required', () => uiAttribute('只有用户可以重命名对话。')],
+  ['mission.use_mission_update', () => uiAttribute('请在使命页面修改名称。')],
+  ['camp.pending_activation_required', () => uiAttribute('请发送第一条消息后再重命名。')],
+  ['camp.delete_user_required', () => uiAttribute('只有用户可以删除对话。')],
+  ['camp.deletion_retry_user_required', () => uiAttribute('只有用户可以重试删除。')],
+  ['camp.workspace_cleanup_pending', () => uiAttribute('工作区正在清理，请稍后重试。')]
+])
+
 export function sharedRejectionMessage(code: string | null): string | undefined {
   return code ? sharedCopy.get(code)?.() : undefined
 }
@@ -112,14 +129,25 @@ export function operationFailureTitle(operation: OperationId): string {
   return uiAttribute('{0}未完成', operationNames[operation]())
 }
 
-export function failureFeedback(operation: OperationId, failure: NormalizedFailure, subject?: string): FailureFeedback {
+export function failureFeedback(
+  operation: OperationId,
+  failure: NormalizedFailure,
+  { subject, presentation = 'standalone' }: FailureFeedbackOptions = {}
+): FailureFeedback {
   const { code, kind } = failure
   if (operation === 'run.stop') {
     if (code === 'command.version_conflict') return changed(uiAttribute('执行状态刚刚更新，请再点一次停止。'), 'stale')
     if (code === 'agent_run.turn_cancellation_in_progress') return changed(uiAttribute('正在停止…'), 'resolved')
   }
-  if (operation === 'thread.open' && code === 'core_request_timeout' && subject) {
+  if (operation === 'thread.open' && kind === 'connection' && code === 'core_request_timeout' && subject && presentation === 'standalone') {
     return { message: uiAttribute('没能打开「{0}」，Rovai 暂时没有响应。', subject), tone: 'danger', outcome: 'connection' }
+  }
+  if ((operation === 'thread.rename' || operation === 'thread.delete') && kind === 'rejection' && code) {
+    if (code === 'camp.not_found') return changed(uiAttribute('这个会话已被删除。'), 'gone')
+    if (code === 'camp.deletion_in_progress') return changed(uiAttribute('对话正在删除。'), 'gone')
+    if (code === 'camp.deletion_not_found') return changed(uiAttribute('找不到这次删除的记录。'), 'gone')
+    const reason = threadActionRejectionCopy.get(code)?.()
+    if (reason) return failed(reason)
   }
   if (operation === 'thread.lead.change' && code === 'camp.default_lead_unavailable') {
     return changed(uiAttribute('{0}已不在当前会话，队长没有更换。', subject ?? uiAttribute('该队员')), 'gone')
@@ -136,8 +164,11 @@ export function failureFeedback(operation: OperationId, failure: NormalizedFailu
   const shared = sharedRejectionMessage(code)
   if (shared) return failed(shared)
   if (kind === 'connection') {
+    const reason = (code && connectionCopy.get(code)?.()) || uiAttribute('Rovai 后台暂时不可用，请稍后重试。')
     return {
-      message: (code && connectionCopy.get(code)?.()) || uiAttribute('Rovai 后台暂时不可用，请稍后重试。'),
+      message: operation === 'thread.open' && subject && presentation === 'standalone'
+        ? uiAttribute('没能打开「{0}」。{1}', subject, reason)
+        : reason,
       tone: 'danger',
       outcome: 'connection'
     }
@@ -146,13 +177,15 @@ export function failureFeedback(operation: OperationId, failure: NormalizedFailu
     return changed(uiAttribute('内容刚刚有变化，请再试一次。'), 'stale')
   }
   if (code?.endsWith('.not_found') && subject) return changed(uiAttribute('「{0}」已不存在。', subject), 'gone')
-  return failed(uiAttribute('{0}未完成，请重试。', operationNames[operation]()))
+  return failed(presentation === 'detail'
+    ? uiAttribute('请重试。')
+    : uiAttribute('{0}未完成，请重试。', operationNames[operation]()))
 }
 
-export function reportOperationFailure(operation: OperationId, error: unknown, subject?: string): FailureFeedback {
+export function reportOperationFailure(operation: OperationId, error: unknown, options?: FailureFeedbackOptions): FailureFeedback {
   const failure = normalizeFailure(error)
   console.warn('[operation-failure]', operation, failure.code, failure.raw)
-  return failureFeedback(operation, failure, subject)
+  return failureFeedback(operation, failure, options)
 }
 
 /** Only call with reads. A failed mutation must be resolved by its receipt owner. */
