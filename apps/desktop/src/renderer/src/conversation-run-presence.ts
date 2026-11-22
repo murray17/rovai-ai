@@ -1,5 +1,5 @@
 import type { AgentRunView, ThreadMessageView } from '@contracts'
-import { agentRunIsStarting, agentRunPresentation, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
+import { agentRunIsStarting, agentRunStatus, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
 import { uiAttribute } from './interface-language'
 import { localizedExecutionStepTitle } from './execution-step-language'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
@@ -32,6 +32,7 @@ function eligibleConversationRuns(runs: readonly AgentRunView[], continuedRunIds
 export interface RunPresencePreview {
   kind: 'narration' | 'command' | 'status' | 'error'
   text: string
+  label?: string
   iconKind?: ActivityIconKind
 }
 
@@ -154,18 +155,12 @@ export function formatRunPresenceDuration(seconds: number): string {
   return uiAttribute('{0}秒', s)
 }
 
-export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = [], name = run.agentId): RunPresencePreview {
-  if (run.status === 'failed') {
-    if (run.failure?.code === 'context_payload_too_large') {
-      return { kind: 'error', text: uiAttribute('输入内容过大 · 查看详情') }
-    }
-    const disconnected = run.failure?.code === 'runtime_network_interrupted'
-      || run.failure?.code === 'runtime_disconnected'
-    return { kind: 'error', text: disconnected ? uiAttribute('连接中断 · 查看原因') : uiAttribute('执行中断 · 查看原因') }
+export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = [], name = run.agentId, status = agentRunStatus(run)): RunPresencePreview {
+  if (status.word !== '执行中') return {
+    kind: run.status === 'failed' ? 'error' : 'status',
+    label: uiAttribute(status.word),
+    text: status.reason ? uiAttribute(status.reason) : ''
   }
-  if (!['queued', 'running', 'waiting'].includes(run.status)) return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
-  if (run.cancelRequestedAt) return { kind: 'status', text: uiAttribute('正在停止…') }
-  if (run.status === 'waiting' || run.failure?.code === 'runtime_network_interrupted') return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
   const initializing = agentRunIsStarting(run)
   // ACP can acknowledge the input only at prompt completion. Current-epoch
   // activity already describes what is happening, without changing that ACK.
@@ -181,5 +176,5 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
   }
   if (latest?.kind === 'narration') return { kind: 'narration', text: currentNarrationLine(latest.body) }
   if (initializing) return { kind: 'status', text: uiAttribute('启动中…') }
-  return { kind: 'status', text: progress.runtimeThinkingTitle || fallbackText(run.id, 'working', name) }
+  return { kind: 'status', text: progress.runtimeThinkingTitle || (run.status === 'waiting' ? uiAttribute('执行中') : fallbackText(run.id, 'working', name)) }
 }

@@ -655,7 +655,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Gather v3（历史）](gather-v3.md) | v2 lifecycle/limits 不变；Completion Input 使用 `agent_v1` request/captured 投影、projected digest 与 schema v3 |
 | [Gather v2（历史）](gather-v2.md) | v1 lifecycle 加当前代最后 captured result、独立回传限额、完整 request 与 completion input v2 |
 | [Gather v1（历史）](gather-v1.md) | GatherRecord/Item、Default Lead 接受、持久 capture/Barrier、completion snapshot/FIFO 与旧 capture budget/input v1 |
-| [Message Delivery v19（当前）](message-delivery-v19.md) | OpenCode 2.2.7／2.x ACP Steer、精确拒绝、有界收尾及原生 Session 连续性 |
+| [Message Delivery v20（当前）](message-delivery-v20.md) | 插话核对资格、原执行轮与投递阶段 |
+| [Message Delivery v19](message-delivery-v19.md) | OpenCode 2.2.7／2.x ACP Steer、精确拒绝、有界收尾及原生 Session 连续性 |
 | [Message Delivery v18（历史）](message-delivery-v18.md) | Pi／Kiro／ZCode 入队即确认接收，消费与工具边界独立 |
 | [Message Delivery v17（历史）](message-delivery-v17.md) | Claude 受管执行内回执、启动期待插话与终态独立结算 |
 | [Message Delivery v16（历史）](message-delivery-v16.md) | Core 统一 Steer 版本资格、TRAE CN、接收语义与未知不重发 |
@@ -727,7 +728,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Execution Record Storage v3（当前）](execution-record-storage-v3.md) | 新操作去掉同结果重复 diff、预览总预算、独立摘要减少进度正文写入；旧格式保持 |
 | [Execution Record Storage v2（历史）](execution-record-storage-v2.md) | 新操作与活动共用一行、小字段兼容读取、按需 diff，保留旧格式与 v1 回收 |
 | [Execution Record Storage v1（历史）](execution-record-storage-v1.md) | 新操作独立输入／结果、按页组合预览、旧格式收尾与会话删除 Blob 候选登记 |
-| [Run Process Detail Surface v59（当前）](run-process-detail-surface-v59.md) | 公开取消执行条与继续入口按状态判断，不再按取消原因筛选 |
+| [Run Process Detail Surface v60（当前）](run-process-detail-surface-v60.md) | 公开会话状态词、执行行与回执分工、执行卡状态位和继续图标 |
+| [Run Process Detail Surface v59](run-process-detail-surface-v59.md) | 公开取消执行条与继续入口按状态判断，不再按取消原因筛选 |
 | [Run Process Detail Surface v58（历史）](run-process-detail-surface-v58.md) | 原生子代理平铺普通 command、来源隔离、机器人图标与稳定更新 |
 | [Run Process Detail Surface v57（历史）](run-process-detail-surface-v57.md) | 手动停止保留静态执行条与最终耗时，继续／重试图标入口，受理续做后持久收起 |
 | [Run Process Detail Surface v56（历史）](run-process-detail-surface-v56.md) | 启动文案统一、Delivery 准备／排队简化、中性停止反馈；仅改展示，图标保留在时间线上 |

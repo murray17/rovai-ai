@@ -14,7 +14,7 @@ it('keeps an input rejection inspectable with zero evidence and no inline hint o
       summary: '输入内容过大', detail: '本次完整输入超过执行容量，未开始执行。已保存的队员资料和已提交消息保留。请精简当前输入或专业职责后重新提交；若需精简本对话已固定的团队指引，请使用精简后的指引新建对话并重新提交。', retryable: false
     } })
   const timeline = renderTimeline(snapshot([rejected], false, false))
-  expect(timeline).toContain('输入内容过大 · 查看详情')
+  expect(timeline).toContain('执行失败，内容过长，查看执行过程')
   expect(timeline).not.toContain('请改用文件附件')
   expect(timeline).not.toContain('run-presence-resume')
   const disclosure = renderToStaticMarkup(createElement(RunExecutionDisclosure, {

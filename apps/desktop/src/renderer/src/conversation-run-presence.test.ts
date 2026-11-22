@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunView, ThreadMessageView } from '@contracts'
 import { conversationRunPresenceTimeline, formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview } from './conversation-run-presence'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
-import { buildLiveExecutionProgress, type LiveRuntimeEvent } from './ui-model'
+import { agentRunStatus, buildLiveExecutionProgress, type LiveRuntimeEvent } from './ui-model'
 import { changeInterfaceLanguage } from './interface-language'
 import type { GeneralPreferencesApi } from '@contracts'
 
@@ -22,6 +22,55 @@ const project = (runs: AgentRunView[], timeline: ThreadConversationTimelineItem[
 const order = (runs: AgentRunView[], timeline: ThreadConversationTimelineItem[]) => project(runs, timeline).map(item => item.id)
 const slots = (runs: AgentRunView[], timeline: ThreadConversationTimelineItem[] = [], ready = true) =>
   project(runs, timeline, ready).flatMap(item => item.kind === 'run_presence' ? [[item.slot.run.id, item.slot.continuation]] : [])
+
+describe('public Thread run status', () => {
+  const context = run('current')
+  const failure = (code: string) => ({ code } as NonNullable<AgentRunView['failure']>)
+  it.each([
+    ['approval', '需要你处理', '等你批准'], ['user_input', '需要你处理', '等你回答'],
+    ['network_recovery_blocked', '需要你处理', '自动恢复已停止'], ['delivery_unknown', '需要你处理', '未确认送达'],
+    ['recovery_blocked', '需要你处理', '结果无法确认'], ['network_recovery', '正在恢复', '网络重连中'],
+    ['runtime_recovery', '正在恢复', '恢复上次执行'], ['runtime_delivery_recovery', '正在恢复', '恢复上次执行']
+  ])('explains waiting reason %s', (waitReason, word, reason) => {
+    expect(agentRunStatus({ ...context, status: 'waiting', waitReason })).toEqual({ word, reason, tone: 'attention' })
+  })
+  it.each(['action_execution', 'runtime_delivery', 'context_compaction', 'skill_projection_drain',
+    'unknown_action_outcome', 'runtime_initializing', 'future_reason', 'constructor', null])(
+    'keeps automatic or unfamiliar wait %s in progress', waitReason => {
+      expect(agentRunStatus({ ...context, status: 'waiting', waitReason })).toEqual({ word: '执行中', reason: null, tone: 'info' })
+    })
+  it('honors pending actions, cancellation and terminal precedence', () => {
+    const network = { ...context, failure: failure('runtime_network_interrupted') }
+    expect(agentRunStatus(network).reason).toBe('网络重连中')
+    expect(agentRunStatus(network, { pendingQuestion: true }).reason).toBe('等你回答')
+    expect(agentRunStatus(network, { pendingApproval: true, pendingQuestion: true }).reason).toBe('等你批准')
+    expect(agentRunStatus(network, { cancelling: true, pendingApproval: true }).word).toBe('正在停止…')
+    expect(agentRunStatus({ ...network, status: 'succeeded' }, { cancelling: true }).word).toBe('已完成')
+    expect(agentRunStatus({ ...context, status: 'cancelled', terminalReasonCode: 'planned_shutdown_cancelled' }))
+      .toEqual({ word: '已停止', reason: '应用已退出', tone: 'neutral' })
+  })
+  it.each([
+    ['runtime_network_interrupted','网络中断'], ['runtime_authentication_required','认证未通过'], ['runtime_rate_limited','请求太频繁'],
+    ['runtime_quota_exceeded','额度不足'], ['runtime_server_overloaded','服务繁忙'], ['runtime_model_unavailable','模型不可用'],
+    ['runtime_permission_denied','没有访问权限'], ['runtime_execution_timeout','运行超时'], ['context_payload_too_large','内容过长'],
+    ['runtime_turn_failed','查看原因']
+  ])('explains public failure %s', (code, reason) => {
+    expect(agentRunStatus({ ...context, status: 'failed', failure: failure(code) })).toEqual({ word: '执行失败', reason, tone: 'danger' })
+  })
+  it.each([
+    ['runtime_not_configured','未设置智能体'], ['runtime_configuration_invalid','智能体设置不完整'],
+    ['adapter_installation_missing','找不到所选智能体'], ['adapter_installation_disabled','所选智能体已停用'],
+    ['runtime_configuration_adapter_mismatch','权限设置不匹配'], ['runtime_permission_adapter_mismatch','权限设置不匹配'],
+    ['conversation_runtime_override_unsupported','会话设置不受支持'], ['runtime_adapter_not_implemented','当前系统不支持'],
+    ['runtime_permission_future','权限设置无效'], ['runtime_model_future','模型设置无效'],
+    ['member_away','队员不可用'], ['member_removed','队员不可用'], ['agent_unavailable','队员不可用'], ['unknown',null]
+  ])('preserves terminal reason %s without promising absent details', (terminalReasonCode, reason) => {
+    expect(agentRunStatus({ ...context, status: 'failed', terminalReasonCode: terminalReasonCode as AgentRunView['terminalReasonCode'], executionEvidenceCount: 0 }).reason).toBe(reason)
+  })
+  it('opens recorded evidence for an unknown terminal outcome', () => {
+    expect(agentRunStatus({ ...context, status: 'failed', terminalReasonCode: null, cancelRequestedAt: 'now', executionEvidenceCount: 1 }).reason).toBe('查看原因')
+  })
+})
 
 describe('conversation Run presence', () => {
   it('pins parallel Runs before their own send and advances only the successful sender', () => {
@@ -120,7 +169,7 @@ describe('conversation Run presence', () => {
       run('private','',{invocationKind:'single_chat'}),run('done','',{status:'succeeded'}),
       run('stopped','',{status:'cancelled'}),run('approval','alice',{status:'waiting',waitReason:'approval'})]
     expect(slots(runs)).toEqual([['approval',false],['queued',false]])
-    expect(runPresencePreview(runs[5]).text).toBe('等待审批')
+    expect(runPresencePreview(runs[5]).text).toBe('等你批准')
   })
 
   it.each([null, 'user_requested_agent_run_stop', 'app_shutdown_cancel_all', 'planned_shutdown_cancelled',
@@ -161,7 +210,7 @@ describe('conversation Run presence', () => {
       runtimeKind: 'codex-cli', origin: 'rovai', phase: 'execution', code: 'context_payload_too_large',
       summary: '输入内容过大', detail: null, retryable: false
     } } as AgentRunView
-    expect(runPresencePreview(rejected)).toEqual({ kind: 'error', text: '输入内容过大 · 查看详情' })
+    expect(runPresencePreview(rejected)).toEqual({ kind: 'error', label: '执行失败', text: '内容过长' })
     expect(order([rejected, { ...next, status: 'succeeded' }], [message(1, null), message(2, 'next')]))
       .toEqual(['message-1', 'run-presence:failed', 'message-2'])
     expect(slots([rejected], [], false)).toEqual([])
@@ -184,7 +233,7 @@ describe('conversation Run presence', () => {
       payload:{item:{id:'command',type:'commandExecution',command:'pnpm typecheck',status:'inProgress'}}} as LiveRuntimeEvent)
     expect(runPresencePreview(run('a'),events)).toMatchObject({kind:'command',text:'pnpm typecheck',iconKind:'terminal'})
     expect(runPresencePreview(run('a','alice',{status:'failed'}),events).kind).toBe('error')
-    expect(runPresencePreview(run('a','alice',{cancelRequestedAt:'now'}),events)).toEqual({kind:'status',text:'正在停止…'})
+    expect(runPresencePreview(run('a','alice',{cancelRequestedAt:'now'}),events)).toEqual({kind:'status',label:'正在停止…',text:''})
   })
 
   it('keeps the current line start stable as a long narration grows', () => {
@@ -240,10 +289,10 @@ describe('conversation Run presence', () => {
     expect(runPresencePreview(initializing, [{ ...text, payload: { itemId: 'text', delta: '  ' } }]).text).toEqual(connecting)
     // A reconnect can still have earlier evidence; it must describe the new initialization.
     expect(runPresencePreview({ ...initializing, executionEpoch: 2 }, [text, command]).text).toEqual(connecting)
-    expect(runPresencePreview({ ...initializing, cancelRequestedAt: 'now' }, [text, command]).text).toBe('正在停止…')
-    expect(runPresencePreview({ ...initializing, status: 'cancelled', cancelRequestedAt: 'now' }, [text, command]).text).toBe('已停止')
+    expect(runPresencePreview({ ...initializing, cancelRequestedAt: 'now' }, [text, command]).label).toBe('正在停止…')
+    expect(runPresencePreview({ ...initializing, status: 'cancelled', cancelRequestedAt: 'now' }, [text, command]).label).toBe('已停止')
     expect(runPresencePreview({ ...initializing, status: 'failed' }, [text, command]).kind).toBe('error')
-    expect(runPresencePreview({ ...initializing, status: 'waiting', waitReason: 'approval' }, [text, command]).text).toBe('等待审批')
+    expect(runPresencePreview({ ...initializing, status: 'waiting', waitReason: 'approval' }, [text, command]).text).toBe('等你批准')
   })
 })
 

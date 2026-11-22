@@ -929,6 +929,7 @@ pub struct MessageDeliveryView {
     pub requested_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_delivery_status: Option<String>,
+    pub can_reconcile: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_sequence: Option<i64>,
     pub id: String,
@@ -2892,7 +2893,18 @@ fn load_message_deliveries(
                  current_delivery.recipient_membership_version_at_admission,
                  message.source_agent_run_id,
                  current_delivery.queue_sequence,
-                 message.sequence AS message_sequence
+                 message.sequence AS message_sequence,
+                 CASE WHEN current_delivery.requested_mode = 'steer' AND message.author_type = 'user'
+                   THEN EXISTS (
+                     SELECT 1 FROM context_manifest AS m
+                     JOIN runtime_input_delivery AS i ON i.context_manifest_id = m.id
+                     JOIN agent_run AS target ON target.id = i.agent_run_id
+                     JOIN runtime_input_delivery AS initial ON initial.agent_run_id = i.agent_run_id
+                       AND initial.execution_epoch = i.execution_epoch AND initial.input_kind = 'start'
+                     WHERE m.source_delivery_id = current_delivery.id AND i.input_kind = 'steer'
+                       AND i.status = 'delivery_unknown' AND target.runtime_adapter_kind = 'codex-cli'
+                       AND initial.native_input_id IS NOT NULL
+                   ) ELSE 0 END AS can_reconcile
           FROM camp_message_delivery AS current_delivery
           JOIN camp_message AS message ON message.id = current_delivery.message_id
           LEFT JOIN agent_run AS source_run
@@ -2933,7 +2945,8 @@ fn load_message_deliveries(
                  legacy_delivery.recipient_membership_version_at_admission,
                  legacy_delivery.source_agent_run_id,
                  legacy_delivery.queue_sequence,
-                 (SELECT sequence FROM camp_message WHERE id=legacy_delivery.message_id) AS message_sequence
+                 (SELECT sequence FROM camp_message WHERE id=legacy_delivery.message_id) AS message_sequence,
+                 0 AS can_reconcile
           FROM message_delivery AS legacy_delivery
           WHERE legacy_delivery.camp_id = ?1
             AND legacy_delivery.delivery_kind IN ('public_a2a', 'gather_completion')
@@ -2957,7 +2970,8 @@ fn load_message_deliveries(
                recipient_membership_version_at_admission, source_agent_run_id, message_sequence,
                (SELECT requested_mode FROM camp_message_delivery d WHERE d.id=projected_delivery.id),
                (SELECT i.status FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
-                WHERE m.source_delivery_id=projected_delivery.id ORDER BY i.input_sequence DESC LIMIT 1)
+                WHERE m.source_delivery_id=projected_delivery.id ORDER BY i.input_sequence DESC LIMIT 1),
+               can_reconcile
         FROM projected_delivery
         ORDER BY
           CASE
@@ -3032,6 +3046,7 @@ fn load_message_deliveries(
                 message_sequence: row.get(30)?,
                 requested_mode: row.get(31)?,
                 input_delivery_status: row.get(32)?,
+                can_reconcile: row.get(33)?,
                 id: row.get(0)?,
                 message_id: row.get(1)?,
                 camp_turn_id: row.get(2)?,
@@ -4695,7 +4710,10 @@ mod tests {
             ALTER TABLE camp_message_delivery ADD COLUMN source_kind TEXT DEFAULT 'message';
             ALTER TABLE camp_message_delivery ADD COLUMN requested_mode TEXT DEFAULT 'start';
             CREATE TABLE context_manifest(id TEXT, source_delivery_id TEXT);
-            CREATE TABLE runtime_input_delivery(context_manifest_id TEXT, status TEXT, input_sequence INTEGER, dispatch_started_at TEXT);
+            CREATE TABLE runtime_input_delivery(context_manifest_id TEXT, status TEXT, input_sequence INTEGER, dispatch_started_at TEXT,
+                agent_run_id TEXT, execution_epoch INTEGER, input_kind TEXT, native_input_id TEXT);
+            ALTER TABLE agent_run ADD COLUMN runtime_adapter_kind TEXT;
+            ALTER TABLE agent_run ADD COLUMN status TEXT DEFAULT 'running';
         "#).unwrap();
         let transaction = connection.transaction().unwrap();
         // Full Snapshot and bounded Camp-open use the same projection with different ordering.
@@ -4725,9 +4743,13 @@ mod tests {
         }
         transaction
             .execute_batch(
-                "UPDATE camp_message_delivery SET requested_mode='steer' WHERE id='user-current';
+                "UPDATE camp_message_delivery SET requested_mode='steer', claimed_agent_run_id='target' WHERE id='user-current';
+            INSERT INTO agent_run (id, runtime_adapter_kind) VALUES ('target','codex-cli');
             INSERT INTO context_manifest VALUES('steer-manifest','user-current');
-            INSERT INTO runtime_input_delivery(context_manifest_id, status, input_sequence) VALUES('steer-manifest','delivery_unknown',1);",
+            INSERT INTO runtime_input_delivery(context_manifest_id,status,input_sequence,agent_run_id,execution_epoch,input_kind)
+                VALUES ('steer-manifest','delivery_unknown',1,'target',2,'steer');
+            INSERT INTO runtime_input_delivery(agent_run_id,execution_epoch,input_kind,native_input_id)
+                VALUES ('target',1,'start','older-turn'),('target',2,'start',NULL);",
             )
             .unwrap();
         let pending = super::load_message_deliveries(&transaction, "camp", None).unwrap();
@@ -4737,9 +4759,41 @@ mod tests {
             pending.input_delivery_status.as_deref(),
             Some("delivery_unknown")
         );
+        assert!(!pending.can_reconcile);
+        let eligible = || {
+            super::load_message_deliveries(&transaction, "camp", Some(10))
+                .unwrap()
+                .into_iter()
+                .find(|d| d.id == "user-current")
+                .unwrap()
+                .can_reconcile
+        };
+        transaction.execute("UPDATE runtime_input_delivery SET native_input_id='turn' WHERE input_kind='start' AND execution_epoch=2", []).unwrap();
+        assert!(eligible());
+        transaction
+            .execute("UPDATE agent_run SET status='failed' WHERE id='target'", [])
+            .unwrap();
+        assert!(
+            eligible(),
+            "late evidence can be checked after the run ends"
+        );
+        transaction
+            .execute(
+                "UPDATE agent_run SET runtime_adapter_kind='pi' WHERE id='target'",
+                [],
+            )
+            .unwrap();
+        assert!(!eligible());
+        transaction
+            .execute(
+                "UPDATE agent_run SET runtime_adapter_kind='codex-cli' WHERE id='target'",
+                [],
+            )
+            .unwrap();
         transaction
             .execute("UPDATE runtime_input_delivery SET status='accepted'", [])
             .unwrap();
+        assert!(!eligible());
         let accepted = super::load_message_deliveries(&transaction, "camp", Some(10)).unwrap();
         assert_eq!(
             accepted

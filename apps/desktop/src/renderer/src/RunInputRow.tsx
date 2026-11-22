@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useId, useRef } from 'react'
 import type { RunInputDisplayItem } from '../../shared/execution-presentation'
 import { useExecutionRetainedState } from './ExecutionVirtualList'
 import { CommandExpandCue, handleToolResultKeyDown } from './ExecutionToolGroup'
+import { RunInputIcon } from './ExecutionIcons'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { UiText, useUiText } from './interface-language'
 import { messageClockTime } from './ui-model'
@@ -13,7 +14,7 @@ export const RunInputSourceContext = createContext<{
 } | null>(null)
 
 type BodyState = { status: 'idle' | 'loading' | 'ready' | 'unavailable'; text?: string }
-const labels = { pending: '待插话', sending: '发送中', accepted: '运行时已接收', delivery_unknown: '待核对', not_accepted: '未送达', queued: '已转排队', unavailable: '原消息不可用' }
+const labels = { pending: '待发送', sending: '发送中', accepted: '已收到', delivery_unknown: '未确认送达', not_accepted: '未送达', queued: '已转为排队', unavailable: '原消息不可用' }
 const shapes = { pending: 'queued', sending: 'running', accepted: 'completed', delivery_unknown: 'waiting', not_accepted: 'failed', queued: 'queued', unavailable: 'recorded' }
 
 /** An input uses the command row's disclosure grammar, but never counts as a tool. */
@@ -32,7 +33,7 @@ export function RunInputRow({ input, runId, itemKey }: { input: RunInputDisplayI
   const status = t(sourceDeleted ? '原消息已删除' : labels[inputStatus])
   const shape = shapes[inputStatus]
   const preview = available ? input.preview.replace(/\s+/gu, ' ').trim() : ''
-  const title = [t('插话'), inputStatus !== 'accepted' ? status : '', preview].filter(Boolean).join(' · ')
+  const title = [t('插话'), ['pending', 'sending', 'accepted'].includes(inputStatus) ? '' : status, preview].filter(Boolean).join(' · ')
 
   useEffect(() => {
     if (!available) {
@@ -54,7 +55,7 @@ export function RunInputRow({ input, runId, itemKey }: { input: RunInputDisplayI
     <summary ref={summaryRef} className="tool-call-summary" aria-expanded={expanded}
       aria-label={t('用户插话，{0}，{1}', status, preview)}>
       <span className="tool-call-icon" data-icon-domain="input" aria-hidden="true">
-        <svg viewBox="0 0 16 16" focusable="false"><path d="M3 3.5h10v7H7l-3.5 2v-2H3z"/><path d="M5.5 6h5M5.5 8h3"/></svg>
+        <RunInputIcon />
       </span>
       <span className="command-copy"><span className="tool-call-title" title={title}>{title}</span><CommandExpandCue /></span>
       <span className={`tool-call-state status-${shape}`} role="img" aria-label={status} title={status}><ExecutionStatusGlyph status={shape} /></span>

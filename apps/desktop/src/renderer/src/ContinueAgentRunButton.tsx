@@ -62,6 +62,8 @@ export function ContinueAgentRunButton({ threadId, agentRunId, onError, appearan
   return <button className={appearance === 'icon' ? 'execution-continue' : 'run-presence-resume'} type="button" title={label}
     aria-label={label} aria-busy={busy || undefined} disabled={busy}
     onClick={() => void submit()}>
-    <DialogControlIcon name="refresh" />
+    {appearance === 'continue' && !busy
+      ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg>
+      : <DialogControlIcon name="refresh" />}
   </button>
 }

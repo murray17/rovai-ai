@@ -7,6 +7,7 @@ import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { verifyRunStatus } from './run-status-cases.mjs'
 import { verifyRunSources } from './run-presence-source-cases.mjs'
 
 test('production conversation presence matches the continuous execution bar and durable retry recovery', {timeout:180_000}, async t => {
@@ -503,6 +504,7 @@ try {
       assert.equal(await b.evaluate(`document.querySelector('${row} time').dateTime`),stoppedTime)
       assert.equal(await b.evaluate(`document.querySelector('${row} .run-presence-resume').textContent`),'')
       assert.equal(await b.evaluate(`document.querySelector('${row} .run-presence-resume').title`),'继续执行')
+      assert.equal(await b.evaluate(`document.querySelector('${row} .run-presence-resume path').getAttribute('d')`),'m8 5 11 7-11 7Z')
       assert.equal(await b.evaluate(`!!document.querySelector('${row} .run-presence-spinner, ${row} .run-presence-stop, [data-interrupted-run-id="run-alice"]')`),false)
       assert.deepEqual(await b.evaluate('__presence.getState().snapshot.messages.map(m=>m.id)'),stoppedMessages)
     }
@@ -553,9 +555,10 @@ try {
   }
 
   await scenario('failed',2)
-  assert.equal(await mainReceiptLabel(),'执行失败')
+  assert.equal(await mainReceiptLabel(),null)
   assert.equal(await b.evaluate('document.querySelector(".run-presence-line").querySelectorAll("button").length'),2)
   assert.equal(await b.evaluate('document.querySelector(".run-presence-resume").getAttribute("aria-label")'),'重试')
+  assert.equal(await b.evaluate('document.querySelector(".run-presence-resume path").getAttribute("d")'),'M16.5 4.5v5h-5M16.5 9.5a6.5 6.5 0 1 0-1.8 5')
   assert.equal(await b.evaluate('document.querySelector(".run-presence-resume").textContent'),'')
   assert.equal(await b.evaluate('Array.from(document.querySelectorAll("button")).some(e=>e.textContent.includes("重新发送"))'),false)
   await b.capture(join(out,'failed.png'));await b.click('.run-presence-open');await settle()
@@ -583,10 +586,8 @@ try {
   assert.equal(retryRuns[1].agentId,beforeRetry.source.agentId)
   assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),1)
   assert.equal(await b.evaluate('document.querySelector(".conversation-run-presence").dataset.presenceRun'),retryRunId)
-  assert.equal(await mainReceiptLabel(),'处理中 1')
-  await b.click(mainReceipt); await settle()
-  assert.match(await b.evaluate('document.querySelector(".user-message-receipt-menu").innerText'),/处理中/)
-  await b.click('.user-message-receipt-menu .user-message-receipt-recipient button'); await settle()
+  assert.equal(await mainReceiptLabel(),null)
+  await b.click('.conversation-run-presence .run-presence-open'); await settle()
   assert.equal(await b.evaluate('document.querySelector(".execution-drawer [data-agent-run-id][aria-current=step]")?.dataset.agentRunId'),retryRunId)
   await b.key('Escape'); await settle()
   assert.deepEqual(await b.evaluate('__presence.getState().snapshot.messages.map(m=>m.id)'),beforeRetry.messages)
@@ -611,10 +612,10 @@ try {
   assert.equal(accepted.deliveries.length,1);assert.equal(accepted.deliveries[0].status,'waiting');assert.equal(accepted.deliveries[0].target,null)
   for (const theme of ['day','night','horizon','classic-red','ember']) {
     await b.evaluate(`__presence.setTheme('${theme}')`); await settle()
-    assert.equal(await mainReceiptLabel(),'待处理 1')
+    assert.equal(await mainReceiptLabel(),'排队中')
     assert.equal(await b.evaluate(`document.querySelector('${mainReceipt}').classList.contains('is-failed')`),false)
     await b.click(mainReceipt); await settle()
-    assert.match(await b.evaluate('document.querySelector(".user-message-receipt-menu").innerText'),/待处理/)
+    assert.match(await b.evaluate('document.querySelector(".user-message-receipt-menu").innerText'),/排队中/)
     assert.equal(await b.evaluate('document.documentElement.scrollWidth>innerWidth'),false)
     await b.capture(join(out,`retry-receipt-waiting-${theme}.png`))
     await b.key('Escape'); await settle()
@@ -634,21 +635,21 @@ try {
   await b.wait('!window.__presenceReloadPending && !!window.__presence && !!document.querySelector(".composer-box")')
   assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),0)
   assert.deepEqual(await waiting(),accepted)
-  assert.equal(await mainReceiptLabel(),'待处理 1')
+  assert.equal(await mainReceiptLabel(),'排队中')
   await b.capture(join(out,'accepted-retry-after-reload.png'))
   await b.evaluate('__presence.controls.holdDispatch=false')
   await b.wait('document.querySelector(".conversation-run-presence")?.dataset.presenceState === "running"')
   const successor = await b.evaluate('document.querySelector(".conversation-run-presence").dataset.presenceRun')
   assert.notEqual(successor,'run-alice')
-  assert.equal(await mainReceiptLabel(),'处理中 1')
+  assert.equal(await mainReceiptLabel(),null)
   await b.evaluate(`__presence.failRun(${JSON.stringify(successor)});__presence.controls.holdDispatch=true`); await settle()
-  assert.equal(await mainReceiptLabel(),'执行失败')
+  assert.equal(await mainReceiptLabel(),null)
   assert.equal(await b.evaluate('document.querySelector(".conversation-run-presence").dataset.presenceRun'),successor)
   await b.click('.run-presence-resume'); await settle()
   assert.equal(await b.evaluate('__presence.controls.continueAttempts.at(-1).command.agentRunId'),successor)
   assert.equal(await b.evaluate('document.querySelectorAll(".conversation-run-presence").length'),0)
   assert.equal((await waiting()).deliveries.length,2)
-  assert.equal(await mainReceiptLabel(),'待处理 1')
+  assert.equal(await mainReceiptLabel(),'排队中')
   report.interactions.push('User receipts follow accepted, running, successful and failed continuation attempts, retain the latest execution link, and recover after reload across all five themes')
   report.interactions.push('accepted Retry remains hidden while dispatch is held, through stale cached entry preview, sidebar navigation/remount and full reload; exactly one waiting Delivery; a failed successor retries only that new Run')
 
@@ -899,6 +900,8 @@ try {
 
   assert.deepEqual(b.errors,[])
   Object.assign(report,{result:'passed',errors:b.errors})
+  await verifyRunStatus(b, root, out)
+  report.interactions.push('R5 receipt stages, automatic wait and pending Pi request, five theme contrasts, recovery failure and 390px historical card')
   await writeFile(join(out,'verification.json'),JSON.stringify(report,null,2))
   console.log(JSON.stringify({result:report.result,states:report.scenarios.length,viewports:report.viewports.length,interactions:report.interactions},null,2))
 } catch(error) {

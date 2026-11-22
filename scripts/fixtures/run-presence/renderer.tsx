@@ -74,7 +74,7 @@ function Workbench() {
     return { ...DEFAULT_APPEARANCE, preference, resolvedTheme: resolveThemeMode(preference, matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day') }
   })
   const theme = appearance.resolvedTheme
-  const setTheme = (value: 'day' | 'night') => setAppearance(current => ({ ...current, preference: value, resolvedTheme: value }))
+  const setTheme = (value: Exclude<AppearanceSnapshot['preference'], 'system'>) => setAppearance(current => ({ ...current, preference: value, resolvedTheme: resolveThemeMode(value, current.resolvedTheme) }))
   const [inspector, setInspector] = useState<any>(null)
   const [detailHost, setDetailHost] = useState<HTMLElement | null>(null)
   const [placement, setPlacement] = useState<any>('inspector')
@@ -129,7 +129,7 @@ function Workbench() {
       showReplyCase: model.showReplyCase.bind(model), editReply: model.editReply, withdrawReply: model.withdrawReply,
       showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline, deleteSteerTimelineSource: model.deleteSteerTimelineSource,
       appendHistoryMessage: model.appendHistoryMessage, emitCoreEvent: model.emitCoreEvent,
-      showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setRunCanContinue: model.setRunCanContinue, setHistoryModel: model.setHistoryModel, setMemberAvailability: model.setMemberAvailability,
+      showStatusCase: model.showStatusCase.bind(model), showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setRunCanContinue: model.setRunCanContinue, setHistoryModel: model.setHistoryModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot
         const ids = [...document.querySelectorAll<HTMLElement>('[data-message-id]')].map(e => e.dataset.messageId)
@@ -186,7 +186,7 @@ function Workbench() {
             onVisibleNotificationSources={params.has('virtualHistory') ? sources => model.controls.visibleSources.push(sources) : undefined}
             openCoverage={params.has('windowed') ? openCoverage : null} projectName="rovai-ai" agents={profiles.map((profile, index) => index === 0 ? { ...profile, ...identityFields } : profile) as any}
             installations={installations as any} initialComposerDraft={state.draft} busy={state.busy}
-            onSend={model.send} onWithdrawMessage={model.withdrawMessage} onReconcileDelivery={async () => 'delivery_unknown'} onChangeLead={model.changeLead} onTasksChanged={async () => {}}
+            onSend={model.send} onWithdrawMessage={model.withdrawMessage} onRespondInteraction={model.answerQuestion} onReconcileDelivery={async () => 'delivery_unknown'} onChangeLead={model.changeLead} onTasksChanged={async () => {}}
             onResolveApproval={() => {}} stopping={false} onCancelAgentRun={model.cancel}
             executionPlacement={placement} onExecutionPlacementChange={async next => { setPlacement(next); return next }}
             worldMapEnabled={false} inspectorVisible={inspector !== null} inspectorTab={inspector ?? 'members'}

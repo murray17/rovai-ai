@@ -824,14 +824,15 @@ app.whenReady().then(async () => {
           assert.equal(await run(`(() => { const probe = document.createElement('span'); probe.style.color = 'var(--danger)'; document.body.append(probe);
             const color = getComputedStyle(probe).color; probe.remove(); return color })()`), geometry.stopColor, 'Stop is red before button hover')
           assert.ok(geometry.card.right - geometry.stop.right >= 9, 'Sticky actions retain the right inset')
-          // The same identity path/stroke is used in the entry, receipt and the active placement.
+          // Run identity belongs to the entry and the active execution surface.
+          assert.equal(await run('document.querySelector(".user-message-receipt.is-progress") === null'), true)
           const icons = await run(`(() => {
-            const selectors = ['.camp-execution-entry > svg:not(.camp-execution-orbits)', '.user-message-receipt.is-progress svg',
+            const selectors = ['.camp-execution-entry > svg:not(.camp-execution-orbits)',
               '${placement === 'right' ? '.file-preview-execution-icon' : placement === 'bottom' ? '.run-pulse-bottom-caption svg' : '.camp-detail-heading > svg'}']
             return selectors.map(selector => document.querySelector(selector)).filter(Boolean).map(icon => ({
               viewBox: icon.getAttribute('viewBox'), path: icon.querySelector('path')?.getAttribute('d'), stroke: getComputedStyle(icon).strokeWidth }))
           })()`)
-          assert.ok(icons.length === (placement === 'bottom' ? 2 : 3) && icons.every(icon => icon.viewBox === '0 0 24 24'
+          assert.ok(icons.length === (placement === 'bottom' ? 1 : 2) && icons.every(icon => icon.viewBox === '0 0 24 24'
             && icon.path === 'M3 12h4l3-8 4 16 3-8h4' && icon.stroke === '1.65px'), JSON.stringify(icons))
           await capture(`title-${placement}-${theme}-${width}`)
         }

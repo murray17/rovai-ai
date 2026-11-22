@@ -315,41 +315,73 @@ export function agentRunPresentation(
   }
 }
 
-export function agentRunStateTag(
-  run: Pick<AgentRunView, 'status' | 'waitReason'>
-    & Partial<Pick<AgentRunView, 'terminalReasonCode' | 'failure'>>,
-  cancelling = false
-): { tag: string; tone: 'brand' | 'attention' | 'success' | 'danger' | 'neutral' } {
-  if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
-    return { tag: '正在停止', tone: 'neutral' }
+const failureReasons = new Map(Object.entries({
+  runtime_network_interrupted: '网络中断',
+  runtime_authentication_required: '认证未通过',
+  runtime_rate_limited: '请求太频繁',
+  runtime_quota_exceeded: '额度不足',
+  runtime_server_overloaded: '服务繁忙',
+  runtime_model_unavailable: '模型不可用',
+  runtime_permission_denied: '没有访问权限',
+  runtime_execution_timeout: '运行超时',
+  context_payload_too_large: '内容过长'
+}))
+
+const terminalReasons = new Map(Object.entries({
+  runtime_not_configured: '未设置智能体',
+  runtime_configuration_invalid: '智能体设置不完整',
+  adapter_installation_missing: '找不到所选智能体',
+  adapter_installation_disabled: '所选智能体已停用',
+  runtime_configuration_adapter_mismatch: '权限设置不匹配',
+  runtime_permission_adapter_mismatch: '权限设置不匹配',
+  conversation_runtime_override_unsupported: '会话设置不受支持',
+  runtime_adapter_not_implemented: '当前系统不支持',
+  member_away: '队员不可用',
+  member_removed: '队员不可用',
+  agent_unavailable: '队员不可用'
+}))
+
+const attentionReasons = new Map(Object.entries({
+  approval: '等你批准',
+  user_input: '等你回答',
+  network_recovery_blocked: '自动恢复已停止',
+  delivery_unknown: '未确认送达',
+  recovery_blocked: '结果无法确认'
+}))
+
+export type AgentRunStatus = {
+  word: string
+  reason: string | null
+  tone: SemanticStatus['tone']
+}
+
+/** Public Thread presentation. Channel cards retain their own established wording. */
+export function agentRunStatus(
+  run: Pick<AgentRunView, 'status' | 'waitReason' | 'cancelRequestedAt' | 'terminalReasonCode' | 'failure' | 'executionEvidenceCount'>,
+  { cancelling = false, pendingApproval = false, pendingQuestion = false } = {}
+): AgentRunStatus {
+  if (run.status === 'succeeded') return { word: '已完成', reason: null, tone: 'success' }
+  if (run.status === 'cancelled') return {
+    word: '已停止', reason: run.terminalReasonCode === 'planned_shutdown_cancelled' ? '应用已退出' : null, tone: 'neutral'
   }
-  if (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted') {
-    return { tag: 'RECOVERING', tone: 'attention' }
+  if (run.status === 'failed') {
+    const code = run.terminalReasonCode ?? ''
+    const reason = failureReasons.get(run.failure?.code ?? '') ?? terminalReasons.get(code)
+      ?? (code.startsWith('runtime_permission_') ? '权限设置无效' : code.startsWith('runtime_model_') ? '模型设置无效' : null)
+      ?? (run.failure || run.executionEvidenceCount > 0 ? '查看原因' : null)
+    return { word: '执行失败', reason, tone: 'danger' }
   }
-  if (agentRunIsStarting(run)) return { tag: 'STARTING', tone: 'neutral' }
-  if (run.status === 'running') return { tag: 'RUNNING', tone: 'brand' }
-  if (run.status === 'succeeded') return { tag: 'DONE', tone: 'success' }
-  if (run.terminalReasonCode === 'runtime_interrupted') {
-    return { tag: 'INTERRUPTED', tone: 'neutral' }
+  if (cancelling || run.cancelRequestedAt) return { word: '正在停止…', reason: null, tone: 'neutral' }
+  const waitReason = run.status === 'waiting' ? run.waitReason : null
+  const attention = pendingApproval ? '等你批准' : pendingQuestion ? '等你回答' : attentionReasons.get(waitReason ?? '')
+  if (attention) return { word: '需要你处理', reason: attention, tone: 'attention' }
+  if (waitReason === 'network_recovery' || (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted')) {
+    return { word: '正在恢复', reason: '网络重连中', tone: 'attention' }
   }
-  if (run.status === 'failed') return { tag: 'FAILED', tone: 'danger' }
-  if (run.status === 'cancelled') {
-    return run.terminalReasonCode === 'planned_shutdown_cancelled'
-      ? { tag: 'STOPPED', tone: 'neutral' }
-      : { tag: 'CANCELLED', tone: 'neutral' }
+  if (waitReason === 'runtime_recovery' || waitReason === 'runtime_delivery_recovery') {
+    return { word: '正在恢复', reason: '恢复上次执行', tone: 'attention' }
   }
-  return {
-    tag: run.waitReason === 'approval'
-      ? 'WAITING APPROVAL'
-      : run.waitReason === 'recovery_blocked' || run.waitReason === 'network_recovery_blocked'
-        ? 'REVIEW'
-        : 'WAITING',
-    tone: run.waitReason === 'delivery_unknown'
-      || run.waitReason === 'recovery_blocked'
-      || run.waitReason === 'network_recovery_blocked'
-      ? 'danger'
-      : 'attention'
-  }
+  return { word: '执行中', reason: null, tone: 'info' }
 }
 
 export function agentRunWaitDetail(waitReason: string | null): string | null {
