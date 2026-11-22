@@ -806,10 +806,6 @@ export function SettingsSidebarNavigation<Section extends string>({
           <span aria-hidden="true"><NavigationIcon name="arrow-left" /></span>
           <strong><UiText zh={"返回 App"} /></strong>
         </button>
-        <div className="settings-sidebar-title">
-          <strong><UiText zh={"设置"} /></strong>
-          <span><UiText zh={"应用级偏好与本机能力"} /></span>
-        </div>
       </div>
       <nav className="settings-sidebar-menu" aria-label={uiAttribute("设置页面")}>
         {groups.map((group) => {
