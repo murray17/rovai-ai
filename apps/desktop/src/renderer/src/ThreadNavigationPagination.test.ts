@@ -38,7 +38,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function harness(pinnedThreadIds: string[] = []) {
+function harness(pinnedThreadIds: string[] = [], getActiveThread?: () => NavigationThreadItem | null) {
   let rows = Array.from({ length: 18 }, (_, index) => thread(index + 1))
   let current: NavigationSnapshot | null = null
   let limits: NavigationGroupLimits = {}
@@ -60,7 +60,7 @@ function harness(pinnedThreadIds: string[] = []) {
     limits = nextLimits
   })
   const onRows = vi.fn()
-  const reader = createNavigationWindowReader(read, commit, { readThreads, getPinnedThreadIds: () => pinnedThreadIds, onRows })
+  const reader = createNavigationWindowReader(read, commit, { readThreads, getPinnedThreadIds: () => pinnedThreadIds, getActiveThread, onRows })
   return {
     reader, read, readThreads, commit, onRows,
     visibleRows: () => current ? navigationGroupWindow(current.projects[0], limits['directory:/repo'] ?? 5, new Set(pinnedThreadIds)).threads : [],
@@ -111,6 +111,57 @@ describe('authoritative Thread navigation windows', () => {
       expect(markup.match(/data-thread-id="camp-3"/g)).toHaveLength(1)
       expect(markup.match(/data-thread-id="quick-camp-5"/g)).toHaveLength(1)
     }
+    h.reader.dispose()
+  })
+
+  it('reveals one active row without counting it as a page or duplicating a pin', () => {
+    const rows = Array.from({ length: 9 }, (_, index) => thread(index + 1))
+    const window = (totalCount: number, limit: number, active: NavigationThreadItem, pins: string[] = []) =>
+      navigationGroupWindow({ totalCount, recentThreads: rows.slice(0, Math.min(totalCount, limit + pins.length)) },
+        limit, new Set(pins), active, pins.length)
+    expect(window(9, 5, rows[8])).toEqual({ threads: [...rows.slice(0, 5), rows[8]], windowCount: 5, hasMore: true })
+    expect(window(9, 15, rows[8])).toEqual({ threads: rows, windowCount: 9, hasMore: false })
+    expect(window(6, 5, rows[5])).toEqual({ threads: rows.slice(0, 6), windowCount: 5, hasMore: false })
+    expect(window(7, 5, rows[5], [rows[6].id]).hasMore).toBe(false)
+    expect(window(9, 5, rows[8], [rows[8].id]).threads).toEqual(rows.slice(0, 5))
+    expect(window(9, 5, { ...rows[8], archivedAt: '2026-11-22T00:00:00Z' }).threads).toEqual(rows.slice(0, 5))
+  })
+
+  it('rechecks the active ID only outside the refreshed prefix and shares the pin request', async () => {
+    let active: NavigationThreadItem | null = thread(9)
+    const h = harness(['camp-18'], () => active)
+    await h.reader.refresh('explicit')
+    expect(h.readThreads.mock.calls).toEqual([[['camp-18', 'camp-9']]])
+    h.readThreads.mockClear()
+    await h.reader.refreshGroups(['quick-chat'], 'explicit')
+    expect(h.readThreads).not.toHaveBeenCalled()
+    await h.reader.refreshGroups(['directory:/repo'], 'explicit')
+    expect(h.readThreads.mock.calls).toEqual([[['camp-9']]])
+    h.readThreads.mockClear()
+    await h.reader.resizeGroup('directory:/repo', 15)
+    expect(h.readThreads).not.toHaveBeenCalled()
+    active = thread(18)
+    await h.reader.refresh('explicit')
+    expect(h.readThreads.mock.calls).toEqual([[['camp-18']]])
+    active = null
+    h.readThreads.mockClear()
+    await h.reader.refreshGroups(['directory:/repo'], 'explicit')
+    expect(h.readThreads).not.toHaveBeenCalled()
+    h.reader.dispose()
+  })
+
+  it('retains the current out-of-window watermark and withdraws only on a fresh empty read', async () => {
+    const active = thread(9)
+    const h = harness([], () => active)
+    await h.reader.refresh('explicit')
+    h.reader.acceptRows({ throughGlobalSequence: 10, groupKeys: ['directory:/repo'], threads: [active] })
+    h.onRows.mockClear()
+    h.readThreads.mockResolvedValueOnce({ throughGlobalSequence: 9, groupKeys: [], threads: [] })
+    await h.reader.refresh('explicit')
+    expect(h.onRows).not.toHaveBeenCalled()
+    h.readThreads.mockResolvedValueOnce({ throughGlobalSequence: 11, groupKeys: [], threads: [] })
+    await h.reader.refresh('explicit')
+    expect(h.onRows).toHaveBeenCalledWith({ throughGlobalSequence: 11, groupKeys: [], threads: [] }, [active.id])
     h.reader.dispose()
   })
 

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: desktop-navigation-refresh
 authority: desktop-navigation-invalidation-and-refresh-boundaries
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-11-22
 ---
 
 # Desktop Navigation Refresh 架构
@@ -74,7 +74,10 @@ Sidecar 已保存的 Project 顺序仍按下文的本机偏好规则保持稳定
 
 默认每组 5 条，查看更多增加 10；Core 在 SQL 中限定目标组和 LIMIT，返回该组完整前 N 条与准确总数。
 不先加载所有 NavigationThreadItem 再在内存分组截断。完整快照跨组的查询只取得目录/计数元数据。
-置顶会话按 ID 批量取得，不遍历分页。完整恢复同时核对窗口外的置顶项；普通切换只读目标 ID。
+完整恢复按 ID 批量核对置顶项。当前普通会话位于新快照的原始前缀之外时，将其 ID 合入同一批次。
+只刷新分组时，限于当前会话所属组，已随组定位读取且水位足够的摘要直接复用。普通切换只读目标 ID。
+补显行优先使用快照中的摘要，包括置顶补位读到的行。等待失效重读期间保留上次确认的摘要，
+收到水位有效的归档或缺行结果时撤掉对应补显。离开当前会话后，旧响应不能恢复它的补显。
 
 展示窗口按未置顶会话计数。Renderer 以“展示数量 + 本机置顶会话 ID 数量”读取有界原始前缀，
 先排除置顶再截取展示数量；Core 总数与原始行保持原义。该前缀足以补满展示窗口，或证明剩余行均已展示／置顶，

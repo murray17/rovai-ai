@@ -6,10 +6,15 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-21
+last_updated: 2026-11-22
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 侧栏补显当前会话
+
+从归档、搜索、历史记录或启动恢复打开窗口外的普通会话时，侧栏在所属组末尾补显并就近定位一次。
+交互取舍与验收见 [V1.72-D92](decisions.md#v1-72-d92)及[实施记录](implementation-plan.md#侧栏补显当前会话)。
 
 ## 操作反馈
 

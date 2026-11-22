@@ -120,6 +120,7 @@ import { composerDocumentToStructuredContent } from './composer-document'
 import { clearLocalThreadComposerDraft } from './camp-composer-local-store'
 import {
   ThreadNavigation,
+  type NavigationRowReveal,
   type NavigationSettingsSection
 } from './ThreadNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
@@ -1210,6 +1211,12 @@ export function BusinessApp({
   if (boardMission || displayedMission.current?.threadId !== activeThreadId || view !== 'camp') displayedMission.current = boardMission
   const activeMission = boardMission ?? displayedMission.current
   const missionThread = !!activeMission || !!(campSnapshot?.thread.id === activeThreadId && campSnapshot?.thread.missionId)
+  const sidebarThread = view === 'camp' && !missionThread && campSnapshot?.thread.id === activeThreadId
+    && !campSnapshotState.entryPreview && !campSnapshot.thread.archivedAt ? campSnapshot.thread : null
+  const sidebarThreadRef = useRef(sidebarThread)
+  sidebarThreadRef.current = sidebarThread
+  const sidebarThreadId = sidebarThread?.id ?? null
+  const activeRowReveal = useMemo<NavigationRowReveal>(() => ({ status: 'pending' }), [sidebarThreadId, mobile])
   const missionDrawer = !mobile && view === 'camp' && !!activeMission && missionPresentation === 'drawer'
   const [newConversationOpen, setNewConversationOpen] = useState(false)
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
@@ -1266,6 +1273,9 @@ export function BusinessApp({
   const notificationPresentationRef = useRef<NotificationPresentationCoordinator | null>(null)
   const campViewedAcknowledgements = useRef(new Map<string, number>())
   const [openedNavigationRow, setOpenedNavigationRow] = useState<NavigationThreadItem | null>(null)
+  useEffect(() => {
+    setOpenedNavigationRow(current => current?.id === sidebarThreadId ? current : null)
+  }, [sidebarThreadId])
   const pinnedThreadIdsRef = useRef<string[]>([])
   pinnedThreadIdsRef.current = navigationPins.filter(pin => pin.kind === 'camp').map(pin => pin.targetKey)
   const navigationSnapshotRef = useRef<NavigationSnapshot | null>(null)
@@ -1624,6 +1634,7 @@ export function BusinessApp({
         initiallyVisible: document.visibilityState !== 'hidden',
         readThreads: (threadIds) => client.request<NavigationThreadRows>('navigation.threads', { threadIds }),
         getPinnedThreadIds: () => pinnedThreadIdsRef.current,
+        getActiveThread: () => sidebarThreadRef.current,
         onRows: (rows, requestedIds) => {
           const pinnedIds = new Set(pinnedThreadIdsRef.current)
           const updatedIds = new Set(requestedIds)
@@ -1632,8 +1643,11 @@ export function BusinessApp({
             ...current.filter(thread => pinnedIds.has(thread.id) && !updatedIds.has(thread.id)),
             ...rows.threads.filter(thread => pinnedIds.has(thread.id) && !deletingThreadIdsRef.current.has(thread.id))
           ])
-          const activeRow = rows.threads.find(thread => thread.id === activeThreadIdRef.current)
-          if (activeRow) setOpenedNavigationRow(activeRow)
+          const id = sidebarThreadRef.current?.id
+          if (id && updatedIds.has(id)) {
+            const activeRow = rows.threads.find(thread => thread.id === id)
+            setOpenedNavigationRow(activeRow && !activeRow.archivedAt && !deletingThreadIdsRef.current.has(id) ? activeRow : null)
+          }
         },
         onError: () => setNavigationState('error')
       }
@@ -3097,7 +3111,6 @@ export function BusinessApp({
       && (!change || change.resync || change.memoryContentChanged)) setMemoryRefreshKey(current => current + 1)
     if (!change || change.resync || change.referencesChanged) campSnapshotCache.current.clear()
     campViewedAcknowledgements.current.clear()
-    setOpenedNavigationRow(null)
     void readGeneralPreferences()
     void loadNavigation('invalidation').catch(() => undefined)
     void loadThreadDeletionIssues().catch(() => undefined)
@@ -4702,7 +4715,10 @@ export function BusinessApp({
     navigation={displayNavigation}
     groupLimits={navigationGroupLimits}
     onGroupLimitChange={navigationRefreshCoordinator.resizeGroup}
-    activeThreadId={activeThreadId}
+    activeThreadId={sidebarThreadId}
+    activeRowReveal={activeRowReveal}
+    canLocateActiveRow={navigationPreferences !== null && (!drawer || mobileConversationDrawerOpen)}
+    openedNavigationRow={openedNavigationRow}
     firstRunThreadId={firstRunThreadId}
     openingThreadId={openingThreadId}
     currentProjectKey={currentProjectKey}

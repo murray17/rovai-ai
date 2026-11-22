@@ -57,11 +57,15 @@ import { useNavigationCollapsed } from './NavigationShell'
 import {
   NAVIGATION_INITIAL_VISIBLE_CAMPS,
   NAVIGATION_MORE_CAMPS_STEP,
+  navigationGroupKey,
   type NavigationGroupLimits
 } from './navigation-window-reader'
 import { UiText, uiAttribute } from './interface-language'
 
 export type NavigationSettingsSection = SettingsSection
+
+/** One positioning request per visit, including across mobile drawer mounts. */
+export interface NavigationRowReveal { status: 'pending' | 'expanding' | 'done' }
 
 type NavigationAction = {
   kind: 'rename' | 'delete'
@@ -124,12 +128,19 @@ export function navigationPaginationControls(
 export function navigationGroupWindow(
   group: NavigationThreadGroup,
   limit: number,
-  pinnedThreadIds: ReadonlySet<string>
-): { threads: NavigationThreadItem[]; hasMore: boolean } {
+  pinnedThreadIds: ReadonlySet<string>,
+  activeRow?: NavigationThreadItem,
+  pinnedInGroup = 0
+): { threads: NavigationThreadItem[]; windowCount: number; hasMore: boolean } {
   const unpinned = group.recentThreads.filter(thread => !pinnedThreadIds.has(thread.id))
+  const threads = unpinned.slice(0, limit)
+  const windowCount = threads.length
+  if (activeRow && group.totalCount > 0 && !activeRow.archivedAt && !pinnedThreadIds.has(activeRow.id)
+    && !threads.some(thread => thread.id === activeRow.id)) threads.push(activeRow)
+  const pinnedCount = Math.max(pinnedInGroup, group.recentThreads.length - unpinned.length)
   return {
-    threads: unpinned.slice(0, limit),
-    hasMore: unpinned.length > limit || group.recentThreads.length < group.totalCount
+    threads, windowCount,
+    hasMore: threads.length < group.totalCount - pinnedCount
   }
 }
 
@@ -144,6 +155,9 @@ export function ThreadNavigation({
   groupLimits = {},
   onGroupLimitChange = async () => undefined,
   activeThreadId,
+  openedNavigationRow,
+  activeRowReveal,
+  canLocateActiveRow = true,
   firstRunThreadId = null,
   openingThreadId = null,
   currentProjectKey = 'quick-chat',
@@ -201,6 +215,9 @@ export function ThreadNavigation({
   groupLimits?: NavigationGroupLimits
   onGroupLimitChange?(groupKey: string, limit: number): Promise<void>
   activeThreadId: string | null
+  openedNavigationRow?: NavigationThreadItem | null
+  activeRowReveal?: NavigationRowReveal
+  canLocateActiveRow?: boolean
   firstRunThreadId?: string | null
   openingThreadId?: string | null
   currentProjectKey?: string
@@ -252,6 +269,7 @@ export function ThreadNavigation({
   const mobile = useMobileLayout()
   const collapsed = useNavigationCollapsed()
   const navigationCollapsed = !mobile && collapsed
+  const navigationScroll = useRef<HTMLDivElement>(null)
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<NavigationAction>(null)
@@ -296,8 +314,15 @@ export function ThreadNavigation({
     .filter((pin) => pin.kind === 'project')
     .flatMap((pin) => projectByKey.get(pin.targetKey) ?? [])
   const quickChatTotalCount = navigation?.quickChat.totalCount ?? 0
+  const activeRow = activeThreadId
+    ? campById.get(activeThreadId) ?? (openedNavigationRow?.id === activeThreadId ? openedNavigationRow : undefined)
+    : undefined
+  const activeGroupKey = activeRow && !activeRow.archivedAt ? navigationGroupKey(activeRow) : null
+  const activeGroupPins = activeGroupKey
+    ? pinnedThreads.filter(thread => navigationGroupKey(thread) === activeGroupKey).length : 0
   const groupWindow = (groupKey: string, group: NavigationThreadGroup) => navigationGroupWindow(
-    group, groupLimits[groupKey] ?? NAVIGATION_INITIAL_VISIBLE_CAMPS, pinnedThreadIds
+    group, groupLimits[groupKey] ?? NAVIGATION_INITIAL_VISIBLE_CAMPS, pinnedThreadIds,
+    groupKey === activeGroupKey ? activeRow : undefined, groupKey === activeGroupKey ? activeGroupPins : 0
   )
   const quickChatWindow = groupWindow('quick-chat', navigation?.quickChat ?? { recentThreads: [], totalCount: 0 })
   const updateBadge = appUpdateBadgePresentation(updateSnapshot)
@@ -346,6 +371,42 @@ export function ThreadNavigation({
       collapseGroupThreads(groupKey)
     }
   }
+
+  // Ignore the drawer's initial restoration. A subsequent scroll while the
+  // row read is pending belongs to the user (including keys and scrollbar drag).
+  useEffect(() => {
+    const list = navigationScroll.current
+    if (!activeThreadId || !activeRowReveal || !list) return
+    const initialTop = list.scrollTop
+    const onScroll = (): void => { if (list.scrollTop !== initialTop) activeRowReveal.status = 'done' }
+    list.addEventListener('scroll', onScroll)
+    return () => list.removeEventListener('scroll', onScroll)
+  }, [activeRowReveal, activeThreadId])
+
+  // A row read or an expanded group may arrive in a later commit.
+  useEffect(() => {
+    if (!activeRowReveal || activeRowReveal.status === 'done' || !activeThreadId) return
+    if (navigationCollapsed) {
+      activeRowReveal.status = 'done'
+      return
+    }
+    const list = navigationScroll.current
+    if (!canLocateActiveRow || !activeGroupKey || !list?.clientHeight) return
+    const row = list.querySelector<HTMLElement>('.camp-nav-row.selected')
+    if (row) {
+      activeRowReveal.status = 'done'
+      const bounds = list.getBoundingClientRect()
+      const target = row.getBoundingClientRect()
+      if (target.top < bounds.top) list.scrollTop += target.top - bounds.top
+      else if (target.bottom > bounds.bottom) list.scrollTop += target.bottom - bounds.bottom
+    } else if (activeRowReveal.status === 'pending' && !pinnedThreadIds.has(activeThreadId)
+      && collapsedProjectGroups.has(activeGroupKey) && (activeGroupKey === 'quick-chat' || projectByKey.has(activeGroupKey))) {
+      activeRowReveal.status = 'expanding'
+      toggleProjectGroup(activeGroupKey)
+    }
+  })
+
+  const cancelRowReveal = (): void => { if (activeRowReveal) activeRowReveal.status = 'done' }
 
   const togglePin = async (
     kind: NavigationPin['kind'],
@@ -498,7 +559,10 @@ export function ThreadNavigation({
                   <NavigationIcon name="search" /><span><UiText zh="搜索" /></span><kbd aria-hidden="true">{jumpLabel}</kbd>
                 </button>
 
-      <div className="navigation-scroll">
+      <div className="navigation-scroll" ref={navigationScroll} onWheel={cancelRowReveal} onTouchMove={cancelRowReveal}
+        onClickCapture={event => {
+          if (event.target instanceof Element && event.target.closest('.project-select-row, .camp-pagination-actions')) cancelRowReveal()
+        }}>
         {mobile && <header className="mobile-navigation-heading"><h2><UiText zh={"对话"} /></h2><div>
           <button className="mobile-icon-button" type="button" aria-label={uiAttribute("选择工作目录")} disabled={state !== 'ready'} onClick={onOpenProject}><NavigationIcon name="folder-open" /></button>
           <button className="mobile-icon-button" type="button" aria-label={uiAttribute("搜索对话、使命和消息")} onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
@@ -540,8 +604,7 @@ export function ThreadNavigation({
                 pinTargetKey={project.projectKey}
                 label={project.name}
                 totalCount={project.totalCount}
-                threads={window.threads}
-                hasMore={window.hasMore}
+                {...window}
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingMore={loadingGroups.has(groupKey)}
                 activeThreadId={activeThreadId}
@@ -589,8 +652,7 @@ export function ThreadNavigation({
                 pinTargetKey={project.projectKey}
                 label={project.name}
                 totalCount={project.totalCount}
-                threads={window.threads}
-                hasMore={window.hasMore}
+                {...window}
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingMore={loadingGroups.has(groupKey)}
                 activeThreadId={activeThreadId}
@@ -629,8 +691,7 @@ export function ThreadNavigation({
             groupKey="quick-chat"
             label={uiAttribute("快速对话")}
             totalCount={quickChatTotalCount}
-            threads={quickChatWindow.threads}
-            hasMore={quickChatWindow.hasMore}
+            {...quickChatWindow}
             projectExpanded={!collapsedProjectGroups.has('quick-chat')}
             loadingMore={loadingGroups.has('quick-chat')}
             activeThreadId={activeThreadId}
@@ -926,6 +987,7 @@ function ThreadGroup({
   label,
   totalCount,
   threads,
+  windowCount,
   hasMore,
   projectExpanded,
   loadingMore,
@@ -961,6 +1023,7 @@ function ThreadGroup({
   label: string
   totalCount: number
   threads: NavigationThreadItem[]
+  windowCount: number
   hasMore: boolean
   projectExpanded: boolean
   loadingMore: boolean
@@ -1023,7 +1086,7 @@ function ThreadGroup({
   }
   const pressMenu = useNavigationPressMenu(!!pinTargetKey && projectMenuItems.length > 0)
   const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-  const paginationControls = navigationPaginationControls(threads.length, hasMore)
+  const paginationControls = navigationPaginationControls(windowCount, hasMore)
   return (
     <section className="camp-nav-group" data-group={groupKey}>
       <div className={`project-heading-row ${currentProject ? 'current-project' : ''}`} data-menu-open={pressMenu.open || undefined}

@@ -1,10 +1,12 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-21
+last_updated: 2026-11-22
 ---
 
 # 当前规范与决定理由导航
+
+侧栏补显当前会话、启动恢复和就近滚动见 [App Shell 导航](../ui/components/app-shell-navigation.md#导航投影新鲜度)。窗口与定位的取舍见 [V1.72-D92](../versions/v1.72/decisions.md#v1-72-d92)。
 
 操作失败的文案与恢复归[操作反馈](../ui/components/operation-feedback.md)，共享决定见 [V1.72-D91](../versions/v1.72/decisions.md#v1-72-d91)。
 
