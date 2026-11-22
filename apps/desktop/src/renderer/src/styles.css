@@ -174,13 +174,14 @@ html[data-rovai-platform="win32"] .app-shell {
   -webkit-app-region: drag;
 }
 
+:root { --window-drag-strip-height: 50px; }
 .window-drag-strip {
   z-index: 2;
   grid-column: 2;
   grid-row: 1;
   width: 100%;
   min-width: 0;
-  height: 50px;
+  height: var(--window-drag-strip-height);
   background: transparent;
   -webkit-app-region: drag;
 }
@@ -5197,8 +5198,7 @@ body:has(.composer-image-attachment[data-context-open="true"]) .image-action-not
   border-top: 3px solid var(--brand);
   background: var(--home-surface);
 }
-/* Start the track below the 50px .window-drag-strip. */
-html:not([data-mobile-web="true"]) .settings-content .settings-panel::-webkit-scrollbar-track { margin: 50px 0 8px; }
+html:not([data-mobile-web="true"]) .settings-content .settings-panel::-webkit-scrollbar-track { margin: var(--window-drag-strip-height) 0 8px; }
 .settings-panel { min-width: 0; padding: 20px 22px 36px; }
 .settings-panel > * { max-width: 980px; margin-right: auto; margin-left: auto; }
 

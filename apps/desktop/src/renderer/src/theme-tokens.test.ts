@@ -411,7 +411,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.settings-sidebar-menu\s*\{[^}]*scrollbar-gutter: stable/)
     expect(css).toMatch(/\.settings-sidebar-menu::-webkit-scrollbar-thumb\s*\{[^}]*background-color: transparent/)
     expect(css).toMatch(/\.unified-sidebar:is\(:hover, :has\(:focus-visible\)\) \.settings-sidebar-menu::-webkit-scrollbar-thumb\s*\{[^}]*background-color: var\(--scrollbar-thumb\)/)
-    expect(css).toMatch(/html:not\(\[data-mobile-web="true"\]\) \.settings-content \.settings-panel::-webkit-scrollbar-track\s*\{[^}]*margin: 50px 0 8px/)
+    expect(css).toMatch(/html:not\(\[data-mobile-web="true"\]\) \.settings-content \.settings-panel::-webkit-scrollbar-track\s*\{[^}]*margin: var\(--window-drag-strip-height\) 0 8px/)
   })
 
   it('gives every page a controlled drag region and compacts only the Windows sidebar inset', () => {
@@ -419,7 +419,8 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
 .content.settings-content,
 .content.members-content,
 .content.memory-content { grid-row: 1 / -1; }`)
-    expect(css).toMatch(/\.window-drag-strip\s*\{[^}]*width: 100%[^}]*height: 50px[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(/:root\s*\{\s*--window-drag-strip-height: 50px;/)
+    expect(css).toMatch(/\.window-drag-strip\s*\{[^}]*width: 100%[^}]*height: var\(--window-drag-strip-height\)[^}]*-webkit-app-region: drag/)
     expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 34px 28px 24px/)
     expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0(?![^}]*-webkit-app-region: drag)/)
     expect(css).toMatch(/\.memory-header-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
