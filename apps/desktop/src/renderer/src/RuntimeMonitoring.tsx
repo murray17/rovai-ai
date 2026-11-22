@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { RuntimeUsageChart, USAGE_CHART_SERIES } from './RuntimeUsageChart'
 import { readErrorMessage } from './error-message'
@@ -275,11 +276,11 @@ export function RuntimeMonitoring({
         description={uiAttribute("汇总智能体实际报告的 Token、Cache 与成本；未报告字段显示为未知。")}
         aside={(
           <>
-            <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading}>
-              {loading ? uiAttribute("正在刷新…") : uiAttribute("刷新")}
+            <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading} aria-busy={loading}>
+              <BusyLabel busy={loading}>{uiAttribute("刷新")}</BusyLabel>
             </button>
-            <button className="primary-button" type="button" onClick={() => void exportData()} disabled={loading || exporting}>
-              {exporting ? uiAttribute("正在导出…") : uiAttribute("导出 JSON")}
+            <button className="primary-button" type="button" onClick={() => void exportData()} disabled={loading || exporting} aria-busy={exporting}>
+              <BusyLabel busy={exporting}>{uiAttribute("导出 JSON")}</BusyLabel>
             </button>
           </>
         )}

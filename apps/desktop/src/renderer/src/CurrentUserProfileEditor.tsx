@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -138,7 +139,9 @@ export const CurrentUserProfileEditor = forwardRef<CurrentUserProfileEditorHandl
         <div className="profile-avatar-copy">
           <span className="profile-field-label"><UiText zh={"个人头像"} /></span>
           <div className="profile-avatar-actions">
-            <button className="quiet-button compact" type="button" disabled={disabled} onClick={() => void loadImage()}>{readingImage ? uiAttribute("正在读取…") : uiAttribute("更换头像")}</button>
+            <button className="quiet-button compact" type="button" disabled={disabled} aria-busy={readingImage} onClick={() => void loadImage()}>
+              <BusyLabel busy={readingImage}>{uiAttribute("更换头像")}</BusyLabel>
+            </button>
             {draft.avatarDataUrl && <button className="profile-text-button" type="button" disabled={disabled} onClick={() => changeDraft({ avatarDataUrl: null })}><UiText zh={"恢复默认"} /></button>}
           </div>
           <small><UiText zh={"PNG 或 JPG，至少 256×256 px，最大 10 MB"} /></small>
@@ -159,7 +162,9 @@ export const CurrentUserProfileEditor = forwardRef<CurrentUserProfileEditorHandl
           {status === 'saving' ? uiAttribute("正在保存…") : status === 'error' ? uiAttribute("保存失败，更改已保留。请重试。") : dirty ? uiAttribute("有未保存的更改") : status === 'saved' ? <><DialogControlIcon name="check"/><UiText zh={"已保存"} /></> : uiAttribute("当前资料已保存")}
         </span>
         {dirty && <button className="profile-text-button" type="button" disabled={disabled} onClick={discard}><UiText zh={"放弃更改"} /></button>}
-        <button className="member-editor-primary member-editor-save" aria-label={status === 'error' ? uiAttribute("重试保存个人资料") : uiAttribute("保存个人资料")} type="submit" disabled={!dirty || disabled || Boolean(fieldError)}><DialogControlIcon name="save"/>{status === 'saving' ? uiAttribute("正在保存…") : status === 'error' ? uiAttribute("重试保存") : uiAttribute("保存")}</button>
+        <button className="member-editor-primary member-editor-save" aria-label={status === 'error' ? uiAttribute("重试保存个人资料") : uiAttribute("保存个人资料")} type="submit" disabled={!dirty || disabled || Boolean(fieldError)} aria-busy={status === 'saving'}>
+          <BusyLabel busy={status === 'saving'}><DialogControlIcon name="save"/>{status === 'error' ? uiAttribute("重试保存") : uiAttribute("保存")}</BusyLabel>
+        </button>
       </div>
     </form>
     <Dialog.Root open={Boolean(cropSource)} onOpenChange={open => !open && closeCrop()}>
@@ -169,7 +174,12 @@ export const CurrentUserProfileEditor = forwardRef<CurrentUserProfileEditorHandl
           <div className="profile-crop-heading"><Dialog.Title><UiText zh={"调整头像"} /></Dialog.Title><Dialog.Close asChild><button className="profile-text-button profile-icon-close" aria-label={uiAttribute("关闭头像裁剪")} disabled={cropBusy}><DialogControlIcon name="close"/></button></Dialog.Close></div>
           <Dialog.Description id="profile-crop-description"><UiText zh={"调整图片位置，让主体落在圆形区域内。"} /></Dialog.Description>
           {cropSource && crop && <MemberAvatarCropper sourceUrl={cropSource.sourceUrl} sourceWidth={cropSource.width} sourceHeight={cropSource.height} value={crop} onChange={setCrop} disabled={cropBusy}/>}
-          <div className="profile-crop-footer"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={cropBusy}><UiText zh={"取消"} /></button></Dialog.Close><button className="primary-button" type="button" disabled={cropBusy} onClick={() => void applyCrop()}>{cropBusy ? uiAttribute("正在处理…") : uiAttribute("使用此头像")}</button></div>
+          <div className="profile-crop-footer">
+            <Dialog.Close asChild><button className="quiet-button" type="button" disabled={cropBusy}><UiText zh={"取消"} /></button></Dialog.Close>
+            <button className="primary-button" type="button" disabled={cropBusy} aria-busy={cropBusy} onClick={() => void applyCrop()}>
+              <BusyLabel busy={cropBusy}>{uiAttribute("使用此头像")}</BusyLabel>
+            </button>
+          </div>
         </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>

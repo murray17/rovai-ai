@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import type { NavigationFindIntent, NavigationSearchRow } from './camp-navigation-search'
 import { ArchiveSettings } from './ArchiveSettings'
 import { isArchiveChangeEvent, writeArchive } from './thread-archive'
@@ -935,9 +936,10 @@ export function BootstrapShell({
               className="quiet-button"
               type="button"
               disabled={busy !== null}
+              aria-busy={busy === 'diagnostics'}
               onClick={() => void exportDiagnostics()}
             >
-              {busy === 'diagnostics' ? uiAttribute("正在导出…") : uiAttribute("导出诊断")}
+              <BusyLabel busy={busy === 'diagnostics'}>{uiAttribute("导出诊断")}</BusyLabel>
             </button>
           </div>
           {actionError && (
@@ -5190,8 +5192,8 @@ function StartupRecoveryActions({ onRetry, onExportDiagnostics }: {
   }
   return <div className="startup-route-actions">
     <button className="primary-button" type="button" onClick={onRetry}><UiText zh={"重新打开"} /></button>
-    {onExportDiagnostics && <button className="quiet-button" type="button" disabled={exporting} onClick={() => void exportDiagnostics()}>
-      {exporting ? uiAttribute("正在导出…") : uiAttribute("导出诊断")}
+    {onExportDiagnostics && <button className="quiet-button" type="button" disabled={exporting} aria-busy={exporting} onClick={() => void exportDiagnostics()}>
+      <BusyLabel busy={exporting}>{uiAttribute("导出诊断")}</BusyLabel>
     </button>}
     {exportError && <p role="alert"><UiText zh={"暂时无法导出诊断，请重试。"} /></p>}
   </div>
@@ -5298,8 +5300,8 @@ function ThreadPreferencesFeedback({ failed, retry }: { failed: boolean; retry()
     {failed
       ? <p role="alert"><UiText zh={"会话设置暂时无法读取。"} /></p>
       : <p role="status"><UiText zh={"正在读取会话设置…"} /></p>}
-    {failed && <button className="quiet-button" type="button" aria-disabled={retrying || undefined} onClick={retryPreferences}>
-      <UiText zh={retrying ? '正在读取…' : '重试'} />
+    {failed && <button className="quiet-button" type="button" aria-disabled={retrying || undefined} aria-busy={retrying} onClick={retryPreferences}>
+      <BusyLabel busy={retrying}><UiText zh={'重试'} /></BusyLabel>
     </button>}
   </section>
 }

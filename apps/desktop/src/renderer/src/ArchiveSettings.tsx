@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ArchiveItem, ArchiveKind, DeleteThreadCommand, MissionRecord } from '@contracts'
 import { projectDirectoryName } from '../../shared/project-display-name'
@@ -305,10 +306,13 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
       <button type="button" className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh="取消" /></button>
       <button type="button" className="compact-primary archive-delete-confirm"
         disabled={busy || Boolean(item.missionId)}
+        aria-busy={busy}
         onClick={() => {
           setError(null)
           void onDelete().catch(error => setError(readErrorMessage(error)))
-        }}><UiText zh={busy ? '正在删除…' : '删除'} /></button>
+        }}>
+        <BusyLabel busy={busy}><UiText zh={'删除'} /></BusyLabel>
+      </button>
     </>}>
     <p>{item.title}</p>
     {item.missionId ? <p role={error ? 'alert' : 'status'}>{error ?? uiAttribute('正在读取关联工作区…')}

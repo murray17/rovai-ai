@@ -47,32 +47,86 @@ app.whenReady().then(async () => {
     }
     assert.ok(current.labels.includes('修复登录态恢复问题'), 'Local Camp has no prefix')
     assert.ok(current.title.startsWith('【飞书话题】'))
-    assert.deepEqual(current.long, { clipped: true, ellipsis: 'ellipsis' })
+    assert.deepEqual(current.long, { clipped: true, faded: true })
     assert.equal(current.overflow, false)
     await capture('channel-names-day-1040')
-    await run('document.querySelector(\'[data-sidebar-menu-target="thread:fixture-camp-1"]\').focus()')
-    await key('ArrowDown')
-    await waitFor('document.activeElement?.classList.contains("sidebar-action-menu-item")')
-    await key('ArrowDown')
-    await waitFor('document.activeElement?.textContent.trim() === "重命名"')
-    current = await key('Enter')
-    await waitFor('Boolean(document.querySelector("#rename-camp-title"))')
+    const openRename = async () => {
+      await run('document.querySelector(\'[data-sidebar-menu-target="thread:fixture-camp-1"]\').focus()')
+      await key('ArrowDown')
+      await waitFor('document.activeElement?.classList.contains("sidebar-action-menu-item")')
+      await key('ArrowDown')
+      await waitFor('document.activeElement?.textContent.trim() === "重命名"')
+      await key('Enter')
+      await waitFor('Boolean(document.querySelector("#rename-camp-title"))')
+    }
+    await openRename()
     current = await state()
     assert.equal(current.rename, '完善账号自动续期', 'Rename input excludes the display prefix')
     await click('#rename-camp-title')
     await run('document.querySelector("#rename-camp-title").select()')
     await window.webContents.insertText('OAuth 登录问题')
+    await run(`(() => {
+      window.renameExit = null
+      const dialog = document.querySelector('.camp-action-dialog')
+      const observer = new MutationObserver(() => {
+        if (dialog.dataset.state !== 'closed') return
+        window.renameExit = {
+          title: dialog.querySelector('.app-dialog-title').textContent,
+          value: dialog.querySelector('input').value,
+          button: dialog.querySelector('button[type="submit"]').textContent,
+          spinner: getComputedStyle(dialog.querySelector('.busy-label-spinner')).opacity,
+          duration: getComputedStyle(dialog).animationDuration
+        }
+        observer.disconnect()
+      })
+      observer.observe(dialog, { attributes: true, attributeFilter: ['data-state'] })
+    })()`)
     await click('.camp-action-dialog button[type="submit"]')
-    await waitFor('!document.querySelector("#rename-camp-title")')
+    await waitFor('namingTest.renamePending() && getComputedStyle(document.querySelector(".camp-action-dialog .busy-label-spinner")).opacity === "1"')
+    await run('namingTest.releaseRename()')
+    await waitFor('!document.querySelector(".camp-action-dialog, .app-dialog-overlay.app-dialog-exits")')
+    assert.deepEqual(await run('window.renameExit'), {
+      title: '重命名对话', value: 'OAuth 登录问题', button: '保存名称', spinner: '1', duration: '0.11s'
+    })
     current = await state()
     assert.deepEqual(current.saved, [{ id: 'fixture-camp-1', title: 'OAuth 登录问题' }])
     assert.ok(current.labels.includes('【飞书私聊】OAuth 登录问题'))
     assert.equal(current.errors, '')
+    const closeWithinTwoFrames = () => run(`(async () => {
+      const dialog = document.querySelector('.camp-action-dialog')
+      const overlay = document.querySelector('.app-dialog-overlay.app-dialog-exits')
+      dialog.querySelector('.quiet-button').click()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      return !dialog.isConnected && !overlay.isConnected
+    })()`)
+    await openRename()
+    await run('document.documentElement.dataset.mobileWeb = "true"')
+    assert.equal(await closeWithinTwoFrames(), true, 'Mobile Web closes without an exit animation')
+    await run('delete document.documentElement.dataset.mobileWeb')
+    await openRename()
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
+    assert.equal(await closeWithinTwoFrames(), true, 'Reduced motion closes without an exit animation')
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
     await run('document.documentElement.dataset.theme = "night"')
     await capture('channel-names-night-1040')
+    await openRename()
     window.webContents.setZoomFactor(2)
+    await state()
+    assert.equal(await run(`(() => {
+      const button = document.querySelector('.camp-action-dialog button[type="submit"]')
+      const label = button.querySelector('.busy-label-content')
+      const range = document.createRange()
+      range.selectNodeContents(label)
+      const text = range.getBoundingClientRect()
+      const bounds = button.getBoundingClientRect()
+      return range.getClientRects().length === 1 && text.left >= bounds.left && text.right <= bounds.right
+    })()`), true, 'The confirmation label stays on one line inside its button at 200% zoom')
+    await run('document.querySelector(".camp-action-dialog .quiet-button").click()')
+    await waitFor('!document.querySelector(".camp-action-dialog")')
     current = await state()
-    assert.deepEqual(current.long, { clipped: true, ellipsis: 'ellipsis' })
+    assert.deepEqual(current.long, { clipped: true, faded: true })
     await capture('channel-names-night-200-percent')
     console.log(JSON.stringify({ ok: true, sourceCount: 5, saved: current.saved }))
     window.webContents.debugger.detach()

@@ -836,6 +836,35 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .icon-button { display: grid; width: 32px; padding: 0; place-items: center; border: 0; background: transparent; font-size: 18px; }
 .icon-button:hover:not(:disabled) { background: var(--surface-muted); }
 
+/* The label owns the button's dimensions. The spinner is overlaid after 150ms. */
+.busy-label { position: relative; display: inline-grid; min-width: 0; max-width: 100%; gap: inherit; }
+.busy-label-content { display: inline-flex; min-width: 0; align-items: center; justify-content: center; gap: inherit; }
+.busy-label-spinner { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; pointer-events: none; }
+:root button > .busy-label > .busy-label-spinner > svg {
+  display: block; width: 14px; height: 14px; margin: 0;
+  color: inherit; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round;
+}
+.busy-label[data-busy] > .busy-label-content { opacity: 0; transition: opacity 90ms ease-in 150ms; }
+.busy-label[data-busy] > .busy-label-spinner { opacity: 1; transition: opacity 120ms ease-out 150ms; }
+.busy-label[data-busy] > .busy-label-spinner > svg { animation: busy-label-turn 900ms linear 150ms infinite; }
+@keyframes busy-label-turn { to { transform: rotate(360deg); } }
+
+:root button[aria-busy="true"]:has(> .busy-label) { opacity: 1; cursor: progress; }
+:is(form, .app-dialog, .compact-dialog, .revision-editor-actions, .app-update-prompt):has(.busy-label[data-busy])
+  :is(button, input, textarea, select):disabled {
+  transition: opacity 120ms ease-out 150ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .busy-label[data-busy] > :is(.busy-label-content, .busy-label-spinner),
+  :is(form, .app-dialog, .compact-dialog, .revision-editor-actions, .app-update-prompt):has(.busy-label[data-busy])
+    :is(button, input, textarea, select):disabled {
+    transition-duration: 0ms;
+  }
+}
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .busy-label[data-busy] > .busy-label-spinner > svg { animation: none; }
+}
+
 .bootstrap-shell {
   display: grid;
   width: 100%;
@@ -5069,7 +5098,6 @@ body:has(.composer-image-attachment[data-context-open="true"]) .image-action-not
 .diagnostics-state p { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.6; }
 .diagnostics-state-error > span:first-child { color: var(--danger); background: var(--danger-soft); }
 .diagnostics-spinner { display: inline-block; width: 14px; height: 14px; flex: 0 0 14px; border: 2px solid color-mix(in srgb, currentColor 28%, transparent); border-top-color: currentColor; border-radius: 50%; animation: diagnostics-spin 850ms linear infinite; }
-.primary-button .diagnostics-spinner { margin-right: 7px; vertical-align: -2px; }
 @keyframes diagnostics-spin { to { transform: rotate(360deg); } }
 .diagnostics-running, .diagnostics-recovery, .diagnostics-notice { display: flex; gap: 10px; align-items: center; padding: 10px 13px; border: 0; border-radius: 10px; color: var(--info); background: var(--info-soft); }
 .diagnostics-running > div, .diagnostics-recovery > div, .diagnostics-notice > div { display: grid; min-width: 0; gap: 2px; }
@@ -5909,7 +5937,7 @@ html:not([data-mobile-web="true"]) .settings-content .settings-panel::-webkit-sc
 .channel-row-action:hover:not(:disabled) { background: var(--brand-soft); }
 .channel-row-action.is-danger { color: var(--danger); }
 .channel-row-action.is-danger:hover:not(:disabled) { background: var(--danger-soft); }
-.channel-row-action:disabled { color: var(--faint); cursor: default; opacity: 1; }
+.channel-row-action:disabled:not([aria-busy="true"]) { color: var(--faint); cursor: default; opacity: 1; }
 .channel-member-bots-empty { display: grid; min-height: 96px; align-content: center; justify-items: center; gap: 5px; padding: 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); text-align: center; }
 .channel-member-bots-empty strong { color: var(--ink); font-size: 11.5px; }
 .channel-member-bots-empty span { font-size: 10px; }
@@ -6476,6 +6504,16 @@ html:not([data-mobile-web="true"]) .settings-content .settings-panel::-webkit-sc
 @keyframes app-dialog-in {
   from { opacity: 0; transform: translate(-50%, calc(-50% + 7px)) scale(.992); }
 }
+.dialog-overlay.app-dialog-exits[data-state="closed"] { animation: app-dialog-overlay-out 110ms ease-in both; }
+.dialog-content.app-dialog.app-dialog-exits[data-state="closed"] { animation: app-dialog-out 110ms ease-in both; }
+@keyframes app-dialog-overlay-out { to { opacity: 0; } }
+@keyframes app-dialog-out { to { opacity: 0; transform: translate(-50%, calc(-50% + 4px)) scale(.992); } }
+@media (prefers-reduced-motion: reduce) {
+  .dialog-overlay.app-dialog-exits[data-state="closed"],
+  .dialog-content.app-dialog.app-dialog-exits[data-state="closed"] { animation: none; }
+}
+html[data-mobile-web="true"] .dialog-overlay.app-dialog-exits[data-state="closed"],
+html[data-mobile-web="true"] .dialog-content.app-dialog.app-dialog-exits[data-state="closed"] { animation: none; }
 .app-dialog-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .app-dialog-form { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; }
 .app-dialog-footer { flex: 0 0 auto; }
@@ -9207,6 +9245,13 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 :root[data-motion-preference="reduce"] *,
 :root[data-motion-preference="reduce"] *::before,
 :root[data-motion-preference="reduce"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+/* Keep the busy delay when the app's motion preference removes the fade. */
+:root[data-motion-preference="reduce"] :is(
+  .busy-label[data-busy] > .busy-label-content,
+  .busy-label[data-busy] > .busy-label-spinner,
+  :is(form, .app-dialog, .compact-dialog, .revision-editor-actions, .app-update-prompt):has(.busy-label[data-busy])
+    :is(button, input, textarea, select):disabled
+) { transition: opacity 0ms linear 150ms !important; }
 :root[data-motion-preference="reduce"] :is(.shutdown-progress-track, .bootstrap-migration-progress) i { left: 31%; }
 
 .file-preview-patch-line { grid-template-columns: 4em 4em minmax(max-content, 1fr); }
@@ -9824,6 +9869,14 @@ html[data-mobile-web="true"] .approval-dock.pending-dock { width: calc(100% - 24
 .revision-editor-actions > :is(.quiet-button, .primary-button) { min-height: 28px; padding: 0 8px; font-size: 11.5px; white-space: nowrap; }
 .revision-editor-actions > .quiet-button { background: transparent; }
 .revision-editor-actions > .quiet-button:hover:not(:disabled) { background: var(--surface-hover); }
+
+html.message-edit-transition::view-transition-old(root),
+html.message-edit-transition::view-transition-new(root) { animation-duration: 150ms; }
+::view-transition-old(message-edit-out) { animation: message-edit-out 90ms ease-in both; }
+::view-transition-new(message-edit-in) { animation: message-edit-in 150ms ease-out 60ms both; }
+@keyframes message-edit-out { to { opacity: 0; } }
+@keyframes message-edit-in { from { opacity: 0; } }
+
 html[data-mobile-web="true"] .conversation-bubble.user:has(.revision-editor) { width: 100%; max-width: 100%; }
 html[data-mobile-web="true"] .conversation-bubble.user .message-surface:has(.revision-editor) { max-width: min(100%, var(--conversation-user-message-max-width)); }
 html[data-mobile-web="true"] .revision-editor { --revision-content-width: 240px; width: clamp(min(210px, 63cqw), var(--revision-content-width), 68cqw); }

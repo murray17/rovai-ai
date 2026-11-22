@@ -13,7 +13,8 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain('aria-controls="new-camp-optional-panel"')
     expect(component).toContain('placeholder={uiAttribute("输入名称...")}')
     expect(component).toContain('nameInputRef.current?.focus()')
-    expect(component).toContain('{busy ? uiAttribute("正在新建…") : uiAttribute("新建")}')
+    expect(component).toContain('aria-busy={busy}')
+    expect(component).toContain('<BusyLabel busy={busy}>{uiAttribute("新建")}</BusyLabel>')
   })
 
   it('uses an avatar radio menu whose candidates remain the currently selected available members', () => {

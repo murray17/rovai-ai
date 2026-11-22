@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
@@ -404,11 +405,10 @@ export function McpSettings({
               type="button"
               className="primary-button"
               disabled={busy !== null || !selectedImports}
+              aria-busy={busy === 'import'}
               onClick={commitImport}
             >
-              {busy === 'import'
-                ? uiAttribute("正在导入…")
-                : uiAttribute("导入{0}", String(selectedImports ? uiAttribute(" {0} 项", String(selectedImports)) : ''))}
+              <BusyLabel busy={busy === 'import'}>{uiAttribute("导入{0}", String(selectedImports ? uiAttribute(" {0} 项", String(selectedImports)) : ''))}</BusyLabel>
             </button>
           </div>
         </header>
@@ -455,14 +455,13 @@ export function McpSettings({
               disabled={
                 disabled || concealed || (selected ? !drafts[selected.serverId] : !newJson?.trim())
               }
+              aria-busy={busy === 'save'}
               onClick={save}
             >
-              <DialogControlIcon name={selected ? 'save' : 'plus'} />
-              {busy === 'save'
-                ? uiAttribute("正在保存…")
-                : selected
-                  ? uiAttribute("保存")
-                  : uiAttribute("添加 MCP")}
+              <BusyLabel busy={busy === 'save'}>
+                <DialogControlIcon name={selected ? 'save' : 'plus'} />
+                {selected ? uiAttribute("保存") : uiAttribute("添加 MCP")}
+              </BusyLabel>
             </button>
             {selected && (
               <>

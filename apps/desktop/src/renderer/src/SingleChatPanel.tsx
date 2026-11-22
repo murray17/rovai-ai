@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useShortcutAction, useShortcuts } from './ShortcutProvider'
 import { shouldSendComposerKey } from '../../shared/shortcuts'
 import { useThreadClient } from './camp-client'
@@ -1765,8 +1766,8 @@ export function SingleChatPanel({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
         <span className="single-chat-private-label"><LockGlyph /><UiText zh={"仅你可见"} /></span>
-        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || returningPending || ending} aria-label={selectedMember ? uiAttribute("结束与{0}的单聊", String(selectedMember.displayName)) : uiAttribute("结束单聊")} onClick={requestEnd}>
-          {ending ? uiAttribute("结束中…") : uiAttribute("结束")}
+        <button className="single-chat-end-button" type="button" disabled={!snapshot || !currentTargetReady || returningPending || ending} aria-busy={ending && !endTarget} aria-label={selectedMember ? uiAttribute("结束与{0}的单聊", String(selectedMember.displayName)) : uiAttribute("结束单聊")} onClick={requestEnd}>
+          <BusyLabel busy={ending && !endTarget}>{uiAttribute("结束")}</BusyLabel>
         </button>
       </div>
 
@@ -1996,7 +1997,9 @@ export function SingleChatPanel({
           </AppDialogBody>
           <AppDialogFooter>
             <Dialog.Close asChild><button className="quiet-button" type="button" data-dialog-autofocus disabled={ending}><UiText zh={"取消"} /></button></Dialog.Close>
-            <button className="danger-button" type="button" disabled={ending || !endTarget} onClick={() => endTarget && void endConversation(endTarget)}>{ending ? uiAttribute("结束中…") : uiAttribute("结束")}</button>
+            <button className="danger-button" type="button" disabled={ending || !endTarget} aria-busy={ending} onClick={() => endTarget && void endConversation(endTarget)}>
+              <BusyLabel busy={ending}>{uiAttribute("结束")}</BusyLabel>
+            </button>
           </AppDialogFooter>
         </AppDialogContent>
       </Dialog.Portal>

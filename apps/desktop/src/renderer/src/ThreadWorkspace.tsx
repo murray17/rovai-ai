@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { reportOperationFailure } from './operation-failure'
 import type { NavigationFindIntent } from './camp-navigation-search'
 import { ThreadMessageEditor } from './ThreadMessageEditor'
@@ -63,6 +64,7 @@ import { UserMessageAnchors } from './UserMessageAnchors'
 import { useThreadUserAnchors } from './useThreadUserAnchors'
 import { mergeNavigationMessages, type ThreadUserAnchorNavigation } from './thread-user-anchor-navigation'
 import { prefersReducedMotion } from './reduced-motion'
+import { useClosingSnapshot } from './use-closing-snapshot'
 import { isFileFindTarget, useOptionalFileFind } from './FilePreviewFind'
 import { readErrorMessage } from './error-message'
 import { collapsedMessageProjection } from './conversation-message-collapse'
@@ -72,7 +74,7 @@ import { usePublicMessageLayout } from './usePublicMessageLayout'
 import { useRunLiveEvents } from './useRunLiveEvents'
 import { TimelineVirtualList, PUBLIC_TIMELINE_VIRTUAL_THRESHOLD, type TimelineVirtualListHandle } from './TimelineVirtualList'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Popover from '@radix-ui/react-popover'
@@ -1926,11 +1928,14 @@ export function ThreadWorkspace({
   } | null>(null)
   const [messageEdit, setMessageEdit] = useState<{ id: string; contentWidth?: number } | null>(null)
   const editingMessageId = messageEdit?.id
-  const deletingMessage = messageRemoval?.kind === 'delete'
   const [deliveryMode, setDeliveryMode] = useState<'start' | 'steer'>('steer')
   useEffect(() => setDeliveryMode('steer'), [snapshot.thread.id])
   const [withdrawingMessageId, setWithdrawingMessageId] = useState<string | null>(null)
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null)
+  const removalOpen = messageRemoval !== null
+  const removalView = useClosingSnapshot(removalOpen, { messageRemoval, withdrawingMessageId, withdrawalError })
+  const deletingMessage = removalView.messageRemoval?.kind === 'delete'
+  const removalBusy = removalView.withdrawingMessageId !== null
   const [reeditMessageId, setReeditMessageId] = useState<string | null>(null)
   const [reeditError, setReeditError] = useState<string | null>(null)
   useEffect(() => {
@@ -5445,6 +5450,41 @@ export function ThreadWorkspace({
     setMessageEdit({ id: messageId, contentWidth })
   }
 
+  const closeMessageEditorAfterSave = async (messageId: string): Promise<void> => {
+    const close = (): void => setMessageEdit(current => current?.id === messageId ? null : current)
+    const root = document.documentElement
+    if (typeof document.startViewTransition !== 'function' || prefersReducedMotion()
+      || root.classList.contains('message-edit-transition')) {
+      close()
+      return
+    }
+
+    const row = () => timelineScrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
+    const before = row()?.querySelector<HTMLElement>('.message-surface > .message-bubble:has(> .revision-editor)')
+    if (!before) {
+      close()
+      return
+    }
+
+    before.style.viewTransitionName = 'message-edit-out'
+    root.classList.add('message-edit-transition')
+    let after: HTMLElement | null | undefined
+    const transition = document.startViewTransition(() => {
+      flushSync(close)
+      after = row()?.querySelector<HTMLElement>('.message-surface > .message-bubble[data-message-quote-body]')
+      if (after) after.style.viewTransitionName = 'message-edit-in'
+    })
+    const clearNames = (): void => {
+      root.classList.remove('message-edit-transition')
+      before.style.removeProperty('view-transition-name')
+      after?.style.removeProperty('view-transition-name')
+    }
+    void transition.ready.catch(() => undefined)
+    void transition.finished.then(clearNames, clearNames)
+    // Keep the editor busy until its old frame has been captured and the new content committed.
+    await transition.updateCallbackDone.catch(close)
+  }
+
   const renderMessageEditor = (message: ThreadMessageView): JSX.Element => {
     const defaultLead = snapshot.members.find(member => member.agentId === snapshot.thread.defaultLeadAgentId)
     return <ThreadMessageEditor key={message.id} message={message} threadId={snapshot.thread.id}
@@ -5456,7 +5496,10 @@ export function ThreadWorkspace({
         onNeedSkills: () => refreshSkillCatalogRef.current?.()
       }}
       onCancel={() => setMessageEdit(null)}
-      onSaved={async () => { await messageMutationCommitted(); setMessageEdit(current => current?.id === message.id ? null : current) }} />
+      onSaved={async () => {
+        await messageMutationCommitted()
+        await closeMessageEditorAfterSave(message.id)
+      }} />
   }
 
   const messageDeleteAction = (message: ThreadMessageView): (() => void) | undefined =>
@@ -7136,7 +7179,7 @@ export function ThreadWorkspace({
         </Dialog.Portal>
       </Dialog.Root>
       <Dialog.Root
-        open={messageRemoval !== null}
+        open={removalOpen}
         onOpenChange={(open) => {
           if (!open && !withdrawingMessageId) {
             setMessageRemoval(null)
@@ -7145,23 +7188,23 @@ export function ThreadWorkspace({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
-          <AppDialogContent className="message-withdraw-dialog" tone="danger" width="compact">
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay app-dialog-exits" />
+          <AppDialogContent className="message-withdraw-dialog" tone="danger" width="compact" exitMotion inert={!removalOpen}>
             <AppDialogHeader
               icon="warning"
               title={deletingMessage ? uiAttribute('删除这条消息？') : uiAttribute('撤回这条消息？')}
               description={deletingMessage ? uiAttribute('这条消息将被永久删除。') : uiAttribute('所有接收队员尚未领取，可直接撤回。')}
-              closeDisabled={withdrawingMessageId !== null}
+              closeDisabled={removalBusy}
             />
-            {withdrawalError && <AppDialogBody>
-              <p className="message-withdraw-error" role="alert">{withdrawalError}</p>
+            {removalView.withdrawalError && <AppDialogBody>
+              <p className="message-withdraw-error" role="alert">{removalView.withdrawalError}</p>
             </AppDialogBody>}
             <AppDialogFooter>
               <button
                 className="quiet-button"
                 type="button"
                 aria-label={uiAttribute("取消")}
-                disabled={withdrawingMessageId !== null}
+                disabled={removalBusy}
                 onClick={() => {
                   setMessageRemoval(null)
                   setWithdrawalError(null)
@@ -7171,11 +7214,12 @@ export function ThreadWorkspace({
                 className="danger-button"
                 type="button"
                 aria-label={deletingMessage ? uiAttribute("确认删除消息") : uiAttribute("确认撤回消息")}
-                disabled={withdrawingMessageId !== null}
+                disabled={removalBusy}
+                aria-busy={removalBusy}
                 onClick={() => void confirmMessageRemoval()}
-              >{deletingMessage
-                ? withdrawingMessageId ? uiAttribute('正在删除…') : uiAttribute('删除')
-                : withdrawingMessageId ? uiAttribute('正在撤回…') : uiAttribute('撤回')}</button>
+              >
+                <BusyLabel busy={removalBusy}>{uiAttribute(deletingMessage ? '删除' : '撤回')}</BusyLabel>
+              </button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -8853,14 +8897,16 @@ function UserMessageDeliveryReceipt({
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
                 <span><strong>{displayName}</strong><small>{statusLabel}</small></span>
-                {status === 'unknown' && delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
+                {status === 'unknown' && delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} aria-busy={checking === delivery.id} onClick={async () => {
                   setChecking(delivery.id); setCheckResult(null)
                   try {
                     const status = await onReconcile(delivery.id)
                     if (status !== 'accepted') setCheckResult(uiAttribute('暂未确认送达'))
                   } catch { setCheckResult(uiAttribute('暂时无法核对')) }
                   finally { setChecking(null) }
-                }}>{checking === delivery.id ? uiAttribute('正在核对…') : uiAttribute('核对结果')}</button> : run && <DropdownMenu.Item asChild>
+                }}>
+                  <BusyLabel busy={checking === delivery.id}>{uiAttribute('核对结果')}</BusyLabel>
+                </button> : run && <DropdownMenu.Item asChild>
                   <button type="button" onClick={(event) => onOpenExecution(run, event.currentTarget)}><UiText zh={"查看执行"} /></button>
                 </DropdownMenu.Item>}
               </div>
@@ -9677,8 +9723,11 @@ function ThreadMembersPanel({
                 className="primary-button conversation-primary-button"
                 type="button"
                 disabled={selectedCandidateIds.size === 0 || addSubmitting}
+                aria-busy={addSubmitting}
                 onClick={() => void submitAddMembers()}
-              >{addSubmitting ? uiAttribute("正在邀请…") : uiAttribute("邀请队员{0}", String(selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''))}</button>
+              >
+                <BusyLabel busy={addSubmitting}>{uiAttribute("邀请队员{0}", String(selectedCandidateIds.size > 0 ? ` · ${selectedCandidateIds.size}` : ''))}</BusyLabel>
+              </button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -9755,8 +9804,11 @@ function ThreadMembersPanel({
                 className="danger-button"
                 type="button"
                 disabled={removeSubmitting || removalPreviewState.status !== 'ready' || !removalPreviewState.preview.removable}
+                aria-busy={removeSubmitting}
                 onClick={() => void submitRemoveMember()}
-              >{removeSubmitting ? uiAttribute("正在移出…") : uiAttribute("移出当前会话")}</button>
+              >
+                <BusyLabel busy={removeSubmitting}>{uiAttribute("移出当前会话")}</BusyLabel>
+              </button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -12348,8 +12400,8 @@ function TaskPanelEditor({
               <AppDialogFooter>
                 <small className="task-draft-note"><UiText zh={"关闭后保留本次草稿"} /></small>
                 <button className="quiet-button" type="button" disabled={submitting} onClick={closeEditor}><UiText zh={"收起"} /></button>
-                <button className="primary-button conversation-primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy || (mode === 'edit' && (terminal || !selectedTask))}>
-                  {submitting ? uiAttribute("正在保存…") : mode === 'create' ? uiAttribute("新建") : uiAttribute("保存")}
+                <button className="primary-button conversation-primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy || (mode === 'edit' && (terminal || !selectedTask))} aria-busy={submitting}>
+                  <BusyLabel busy={submitting}>{mode === 'create' ? uiAttribute("新建") : uiAttribute("保存")}</BusyLabel>
                 </button>
               </AppDialogFooter>
             </form>
@@ -12369,7 +12421,9 @@ function TaskPanelEditor({
             </AppDialogBody>
             <AppDialogFooter>
               <button className="quiet-button" type="button" disabled={submitting} onClick={() => setCancelOpen(false)}><UiText zh={"取消"} /></button>
-              <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy || terminal} onClick={() => void submitCancel()}>{submitting ? uiAttribute("正在取消…") : uiAttribute("取消任务")}</button>
+              <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy || terminal} aria-busy={submitting} onClick={() => void submitCancel()}>
+                <BusyLabel busy={submitting}>{uiAttribute("取消任务")}</BusyLabel>
+              </button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>

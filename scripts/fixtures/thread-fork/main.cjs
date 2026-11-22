@@ -249,8 +249,46 @@ app.whenReady().then(async () => {
     await mkdir(output, { recursive: true })
     await writeFile(join(output, 'inline-message-editor.png'), (await window.webContents.capturePage()).toPNG())
     screenshots.push('inline-message-editor.png')
-    await click(`document.querySelector('${userRow} .revision-editor button[type=submit]')`)
+    const saveSelector = `${userRow} .revision-editor button[type=submit]`
+    const save = `document.querySelector('${saveSelector}')`
+    const saveSpinner = `${save}.querySelector('.busy-label-spinner')`
+    const editorCancel = `document.querySelector('${userRow} .revision-editor-actions .quiet-button')`
+    const measureSave = () => run(`(() => {
+      const save = ${save}
+      const cancel = ${editorCancel}
+      const bounds = save.getBoundingClientRect()
+      const { color, backgroundColor, opacity } = getComputedStyle(save)
+      return { x: bounds.x, width: bounds.width, cancelX: cancel.getBoundingClientRect().x,
+        color, backgroundColor, opacity, label: save.textContent.trim() }
+    })()`)
+    const readySave = await measureSave()
+    assert.equal(readySave.label, '保存')
+    await run('forkQA.holdEdit()')
+    await click(save)
+    await wait(`forkQA.editPending() && ${save}.getAttribute('aria-busy') === 'true'`)
+    assert.equal(await run(`${save}.disabled && ${editorCancel}.disabled`), true)
+    assert.deepEqual(await measureSave(), readySave, 'Busy keeps the pressed button and its peer in place')
+    assert.deepEqual(await run(`[
+      getComputedStyle(${save}.querySelector('.busy-label-content')).transitionDelay,
+      getComputedStyle(${saveSpinner}).transitionDelay,
+      getComputedStyle(${editorCancel}).transitionDelay
+    ]`), ['0.15s', '0.15s', '0.15s'])
+    await wait(`getComputedStyle(${saveSpinner}).opacity === '1'`)
+    assert.equal(await run(`getComputedStyle(${saveSpinner}.querySelector('svg')).width`), '14px')
+    await run('forkQA.releaseEdit(false)')
+    await wait(`!!document.querySelector('${userRow} .revision-editor [role=alert]') && !${save}.disabled`)
+    assert.equal(await run(`${save}.textContent.trim()`), '保存')
+    assert.equal(await run(`getComputedStyle(${save}.querySelector('.busy-label-content')).opacity`), '1')
+    assert.match(await run(`document.querySelector('${userRow} .revision-editor [contenteditable=true]').textContent`), /更新/)
+    assert.equal(await run('!!document.querySelector(".public-message-edited")'), false)
+
+    await run('forkQA.holdEdit()')
+    await click(save)
+    await wait('forkQA.editPending()')
+    await run('forkQA.releaseEdit(true)')
     await wait('!document.querySelector(".revision-editor") && !!document.querySelector(".public-message-edited")')
+    await wait('!document.documentElement.classList.contains("message-edit-transition")')
+    assert.equal(await run(`document.querySelector('${userRow} .message-bubble').style.viewTransitionName`), '')
     assert.equal(await run('forkQA.calls.find(c => c.method === "thread.messages.edit").params.command.expectedContentRevision'), 1)
     assert.match(await run(`document.querySelector('${userRow} .message-bubble').textContent`), /更新/)
     await run('forkQA.language("en")')

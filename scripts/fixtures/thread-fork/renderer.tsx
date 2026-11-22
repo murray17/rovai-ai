@@ -58,6 +58,8 @@ let releaseFork: (()=>void) | undefined
 let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false, rejectFork = false
 let timeoutThread: string | null = null
 let stopConflicts = 0
+let holdEdit = false
+let resolveEdit: ((applied: boolean) => void) | undefined
 let releaseAttachment:(()=>void)|undefined, attachmentPending=false
 const client = {...model.client,composerAttachments:{...model.client.composerAttachments,
   prepare:async(_thread:string,_revision:number,file:File)=>{attachmentPending=true;await new Promise<void>(resolve=>{releaseAttachment=resolve});attachmentPending=false;return {id:crypto.randomUUID(),sourcePath:'/fixture/'+file.name,displayName:file.name,kind:'file',fileCount:1,mediaType:'text/plain',byteSize:file.size,previewKind:'none',availability:'unknown'}},
@@ -105,6 +107,12 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
       return { ...applied(), code: 'agent_run.cancelled', payload: { agentRunId: currentRun.id, status: currentRun.status } }
     }
     if (method === 'thread.messages.edit') {
+      if (holdEdit) {
+        holdEdit = false
+        const accepted = await new Promise<boolean>(resolve => { resolveEdit = resolve })
+        resolveEdit = undefined
+        if (!accepted) return { ...applied(), status: 'rejected', code: 'fixture_edit_rejected' }
+      }
       const target = value.messages.find((message: any) => message.id === command.messageId)
       target.content = structuredClone(command.content.segments)
       target.body = target.content.map((segment: any) => segment.text ?? '').join('')
@@ -227,6 +235,9 @@ const clearToasts = () => {
   renderToasts()
 }
 ;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts,finishLanguageRead,languageReads:()=>languageReads,hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+  holdEdit: () => { holdEdit = true },
+  editPending: () => resolveEdit !== undefined,
+  releaseEdit: (applied: boolean) => resolveEdit?.(applied),
   generalPreferenceReads: () => generalPreferenceReads,
   finishPreferenceRetry: () => finishPreferenceRetry?.(),
   timeoutOpen: (threadId: string) => { timeoutThread = threadId },

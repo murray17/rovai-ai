@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { MissionTeamPicker } from './MissionTeamPicker'
 import { TeamPicker, TeamAvatarSummary } from './TeamPicker'
 import { rejectedMissionMemberIds } from './useMissions'
@@ -513,7 +514,9 @@ export function NewConversationDialog({
                   <div className="mission-editor-tools"><MissionAttachmentButton onClick={() => missionEditorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/><MissionMentionButton onClick={() => missionEditorRef.current?.startMention()} disabled={busy}/></div>
                   <div className="mission-editor-footer-actions"><Dialog.Close asChild><button className="compact-cancel" type="button" disabled={busy}><UiText zh={"取消"} /></button></Dialog.Close>
                     <div className="mission-create-split">
-                      <button className="compact-primary" type="submit" value="save" disabled={submissionBlocked}>{busy ? uiAttribute("正在新建…") : pendingMentionIds.length ? uiAttribute("邀请并新建") : uiAttribute("新建")}</button>
+                      <button className="compact-primary" type="submit" value="save" disabled={submissionBlocked} aria-busy={busy}>
+                        <BusyLabel busy={busy}>{pendingMentionIds.length ? uiAttribute("邀请并新建") : uiAttribute("新建")}</BusyLabel>
+                      </button>
                       <button ref={startSubmitRef} type="submit" value="start" hidden disabled={submissionBlocked}/>
                       <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="compact-primary mission-create-options" type="button" aria-label={uiAttribute("新建使命选项")} disabled={submissionBlocked}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button></DropdownMenu.Trigger>
                         <DropdownMenu.Portal><DropdownMenu.Content className="compact-menu" align="end" sideOffset={6}>
@@ -525,7 +528,9 @@ export function NewConversationDialog({
                 </footer>
               : <footer className="compact-footer">
                   <Dialog.Close asChild><button className="compact-cancel" type="button" disabled={busy}><UiText zh={"取消"} /></button></Dialog.Close>
-                  <button className="compact-primary" type="submit" value="save" disabled={submissionBlocked}>{busy ? uiAttribute("正在新建…") : uiAttribute("新建")}</button>
+                  <button className="compact-primary" type="submit" value="save" disabled={submissionBlocked} aria-busy={busy}>
+                    <BusyLabel busy={busy}>{uiAttribute("新建")}</BusyLabel>
+                  </button>
                 </footer>}
           </form>
         </Dialog.Content>

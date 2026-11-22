@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { MemberEnvironmentEditor, useMemberEnvironment } from './MemberEnvironmentEditor'
 import type { MemberEnvironmentEdit } from './member-environment'
 import { MobileBack, useMobileLayout } from './MobileLayout'
@@ -928,9 +929,9 @@ const MemberEditor = forwardRef<
                 </AppDialogBody>
                 <AppDialogFooter>
                   {(!removal.preview.removable || error) && (
-                    <button className="quiet-button" type="button" disabled={busy !== null}
+                    <button className="quiet-button" type="button" disabled={busy !== null} aria-busy={busy === 'remove-preview'}
                       onClick={() => void refreshRemovalPreview()}>
-                      {busy === 'remove-preview' ? uiAttribute('正在读取…') : uiAttribute('重新读取影响')}
+                      <BusyLabel busy={busy === 'remove-preview'}>{uiAttribute('重新读取影响')}</BusyLabel>
                     </button>
                   )}
                   <Dialog.Close
@@ -946,9 +947,10 @@ const MemberEditor = forwardRef<
                       removal.confirmationName !== removal.displayName ||
                       busy !== null
                     }
+                    aria-busy={busy === 'remove'}
                     onClick={() => void confirmRemoval().catch(() => undefined)}
                   >
-                    {busy === 'remove' ? uiAttribute("正在移除…") : uiAttribute("永久移除队员")}
+                    <BusyLabel busy={busy === 'remove'}>{uiAttribute("永久移除队员")}</BusyLabel>
                   </button>
                 </AppDialogFooter>
               </>
@@ -1429,11 +1431,12 @@ export const MemberRuntimeForm = forwardRef<
               className="member-editor-primary member-editor-save"
               aria-label={uiAttribute("保存运行配置")}
               disabled={!canSave || (busy !== null || submitting)}
+              aria-busy={busy === 'runtime' || busy === 'runtime-clear'}
             >
-              <DialogControlIcon name="save" />
-              {busy === 'runtime' || busy === 'runtime-clear'
-                ? uiAttribute("正在保存…")
-                : uiAttribute("保存")}
+              <BusyLabel busy={busy === 'runtime' || busy === 'runtime-clear'}>
+                <DialogControlIcon name="save" />
+                {uiAttribute("保存")}
+              </BusyLabel>
             </button>
           </div>
         </div>
@@ -1550,15 +1553,14 @@ export function RuntimeInstallationsPanel({
           <button
             className="quiet-button"
             disabled={rescanning || (health !== null && !hasEnabledRuntime)}
+            aria-busy={rescanning}
             onClick={() => void rescan()}
           >
-            {rescanning
-              ? uiAttribute("正在重新检测…")
-              : health === null
+            <BusyLabel busy={rescanning}>
+              {health === null || hasEnabledRuntime
                 ? uiAttribute("重新检测")
-                : hasEnabledRuntime
-                  ? uiAttribute("重新检测")
-                  : uiAttribute("当前平台尚无可检测的智能体")}
+                : uiAttribute("当前平台尚无可检测的智能体")}
+            </BusyLabel>
           </button>
         }
       />
@@ -1622,10 +1624,8 @@ export function RuntimeInstallationsPanel({
                   onClick={() => setExpanded(isOpen ? null : { runtimeKind, mode: mode ?? 'install' })}
                 >
                   {isOpen ? uiAttribute("收起") : mode === 'login' ? uiAttribute("登录指南") : uiAttribute("安装指南")}<DialogControlIcon name="chevron" />
-                </button> : <button type="button" className="quiet-button runtime-product-check" disabled={checking || !allowed} onClick={() => void checkProduct(runtimeKind)}>
-                  {checking
-                    ? uiAttribute("正在检查…")
-                    : allowed ? uiAttribute("检查状态") : uiAttribute("不可检查")}<DialogControlIcon name="refresh" />
+                </button> : <button type="button" className="quiet-button runtime-product-check" disabled={checking || !allowed} aria-busy={checking} onClick={() => void checkProduct(runtimeKind)}>
+                  <BusyLabel busy={checking}>{allowed ? uiAttribute("检查状态") : uiAttribute("不可检查")}<DialogControlIcon name="refresh" /></BusyLabel>
                 </button>}
                 <button type="button" className="quiet-button runtime-product-settings" aria-label={uiAttribute("{0} 启动设置", String(adapterLabel(runtimeKind)))}
                   title={uiAttribute("启动设置")} disabled={checking || !allowed} onClick={() => setSettingsRuntime(runtimeKind)}><DialogControlIcon name="settings" /></button>

@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import type { MemberAvatarCrop } from '@contracts'
 import { useThreadClient } from './camp-client'
@@ -101,7 +102,10 @@ export function MemberAvatarEditor({ value, open, disabled, returnFocusRef, onCh
             <div className="avatar-picker-upload-area" aria-busy={busy}>
               <span className="avatar-picker-upload-glyph"><AppDialogGlyph name="image" /></span>
               <button ref={uploadButton} className="member-editor-primary avatar-picker-upload" type="button" title={uiAttribute('支持 PNG、JPEG 和 GIF')}
-                disabled={disabled || busy} onClick={() => void upload()} aria-live="polite">{uiAttribute(busy ? '正在处理头像…' : '上传头像')}</button>
+                disabled={disabled || busy}
+                aria-busy={busy} onClick={() => void upload()} aria-live="polite">
+                <BusyLabel busy={busy}>{uiAttribute('上传头像')}</BusyLabel>
+              </button>
             </div>
             <div className="avatar-picker-presets">
               <button className="avatar-picker-preset-toggle" type="button" disabled={disabled || busy} aria-expanded={presetsOpen}

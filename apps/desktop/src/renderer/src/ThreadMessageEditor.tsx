@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from 'react'
 import type { LocalAttachmentSourceView, StoredCommandResult, ThreadMessageAroundSnapshot, ThreadMessageView } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
@@ -284,7 +285,7 @@ export function ThreadMessageEditor({
         <UiText zh="取消" />
       </button>
       <button className="primary-button conversation-primary-action" type="submit" disabled={!canSubmit || conflict !== null} aria-busy={saving}>
-        {saving ? uiAttribute('正在保存…') : uiAttribute('保存')}
+        <BusyLabel busy={saving}>{uiAttribute('保存')}</BusyLabel>
       </button>
     </div>
   </form>

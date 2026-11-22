@@ -8011,7 +8011,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(markup).toMatch(/<button[^>]*aria-label="保存运行配置"[^>]*disabled=""/)
+    expect(markup).toMatch(/<button[^>]*aria-label="保存运行配置"[^>]*disabled=""[^>]*aria-busy="true"/)
   })
 
   it('shows a selected Runtime as checking without leaking discovery stages', () => {
@@ -8194,7 +8194,7 @@ describe('task event projections', () => {
     expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(visibleProductRuntimes(health.hostPlatform, health.runtimePlatformAdmission).length)
     expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(visibleProductRuntimes(health.hostPlatform, health.runtimePlatformAdmission).length - 2)
     expect(markup.match(/检查状态/g)).toHaveLength(visibleProductRuntimes(health.hostPlatform, health.runtimePlatformAdmission).length - 2)
-    expect(markup).not.toContain('runtime-product-check" disabled="">正在检查…')
+    expect(markup).not.toMatch(/<button[^>]*class="quiet-button runtime-product-check"[^>]*aria-busy="true"/)
     expect(markup).toContain('Claude Code 登录指南')
     expect(markup).toContain('Antigravity 安装指南')
     expect(markup).toContain('aria-expanded="false"')

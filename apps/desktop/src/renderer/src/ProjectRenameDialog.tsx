@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ProjectNavigationGroup } from '@contracts'
@@ -68,7 +69,9 @@ export function ProjectRenameDialog({ project, onClose, onSave }: {
               }}><UiText zh={"使用目录名"} /></button>
             : undefined}>
             <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}><UiText zh={"取消"} /></button></Dialog.Close>
-            <button className="primary-button conversation-primary-button" type="submit" disabled={Boolean(validationError) || busy}>{busy ? uiAttribute("保存中…") : uiAttribute("保存名称")}</button>
+            <button className="primary-button conversation-primary-button" type="submit" disabled={Boolean(validationError) || busy} aria-busy={busy}>
+              <BusyLabel busy={busy}>{uiAttribute("保存名称")}</BusyLabel>
+            </button>
           </AppDialogFooter>
         </form>
       </AppDialogContent>

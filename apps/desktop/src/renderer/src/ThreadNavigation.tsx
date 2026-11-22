@@ -1,3 +1,5 @@
+import { BusyLabel } from './BusyLabel'
+import { useClosingSnapshot } from './use-closing-snapshot'
 import { MoreMenuIcon, SidebarMenuIcon, type SidebarMenuIconKind } from './SidebarMenuIcon'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import { TeamGlyph } from './MissionDefinitionEditor'
@@ -255,6 +257,9 @@ export function ThreadNavigation({
   const [renameTitle, setRenameTitle] = useState('')
   const [renameProject, setRenameProject] = useState<ProjectNavigationGroup | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
+  const actionOpen = action !== null
+  const { action: displayedAction, actionBusy: displayedBusy, renameTitle: displayedTitle } =
+    useClosingSnapshot(actionOpen, { action, actionBusy, renameTitle })
   const [paletteOpen, setPaletteOpen] = useState(false)
   const loadingGroupsRef = useRef<Set<string>>(new Set())
   const navigationThreads = useMemo(
@@ -676,56 +681,64 @@ export function ThreadNavigation({
         }}
       />}
 
-      <Dialog.Root open={action !== null} onOpenChange={(open) => { if (!open) closeAction() }}>
+      <Dialog.Root open={actionOpen} onOpenChange={(open) => { if (!open) closeAction() }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay app-dialog-exits" />
           <AppDialogContent
             className="camp-action-dialog"
-            tone={action?.kind === 'delete' || action?.kind === 'remove_project' ? 'danger' : 'brand'}
+            exitMotion
+            inert={!actionOpen}
+            tone={displayedAction?.kind === 'delete' || displayedAction?.kind === 'remove_project' ? 'danger' : 'brand'}
           >
-            {action?.kind === 'rename' ? (
+            {displayedAction?.kind === 'rename' ? (
               <>
                 <AppDialogHeader
                   title={uiAttribute("重命名对话")}
                   description={uiAttribute("仅更新侧栏中的对话名称。项目归属、队员、消息与活动顺序保持不变。")}
                   icon="pencil"
-                  closeDisabled={actionBusy}
-            hideDescription
+                  closeDisabled={displayedBusy}
+                  hideDescription
                 />
                 <form className="app-dialog-form" onSubmit={(event) => void submitRename(event)}>
                   <AppDialogBody>
-                    <label className="field-label" htmlFor="rename-camp-title"><UiText zh={"对话名称"} /><input id="rename-camp-title" autoFocus data-dialog-autofocus value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={actionBusy} /></label>
+                    <label className="field-label" htmlFor="rename-camp-title"><UiText zh={"对话名称"} /><input id="rename-camp-title" autoFocus data-dialog-autofocus value={displayedTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={displayedBusy} /></label>
                   </AppDialogBody>
                   <AppDialogFooter>
-                    <Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}><UiText zh={"取消"} /></button></Dialog.Close>
-                    <button className="primary-button conversation-primary-button" type="submit" disabled={!renameTitle.trim() || actionBusy}>{actionBusy ? uiAttribute("保存中…") : uiAttribute("保存名称")}</button>
+                    <Dialog.Close asChild><button className="quiet-button" type="button" disabled={displayedBusy}><UiText zh={"取消"} /></button></Dialog.Close>
+                    <button className="primary-button conversation-primary-button" type="submit" disabled={!displayedTitle.trim() || displayedBusy} aria-busy={displayedBusy}>
+                      <BusyLabel busy={displayedBusy}>{uiAttribute("保存名称")}</BusyLabel>
+                    </button>
                   </AppDialogFooter>
                 </form>
               </>
-            ) : action?.kind === 'delete' ? (
+            ) : displayedAction?.kind === 'delete' ? (
               <>
                 <AppDialogHeader
                   title={uiAttribute("删除对话？")}
                   description={uiAttribute("会一并删除此对话保存的附件，包含已编辑内容。原始工作区文件和外部引用文件不受影响。")}
                   icon="trash"
-                  closeDisabled={actionBusy}
+                  closeDisabled={displayedBusy}
                 />
                 <AppDialogFooter>
-                  <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}><UiText zh={"取消"} /></button></Dialog.Close>
-                  <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? uiAttribute("正在删除…") : uiAttribute("删除")}</button>
+                  <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={displayedBusy}><UiText zh={"取消"} /></button></Dialog.Close>
+                  <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={displayedBusy} aria-busy={displayedBusy}>
+                    <BusyLabel busy={displayedBusy}>{uiAttribute("删除")}</BusyLabel>
+                  </button>
                 </AppDialogFooter>
               </>
-            ) : action?.kind === 'remove_project' ? (
+            ) : displayedAction?.kind === 'remove_project' ? (
               <>
                 <AppDialogHeader
-                  title={uiAttribute("从侧栏移除“{0}”？", String(action.project.name))}
+                  title={uiAttribute("从侧栏移除“{0}”？", String(displayedAction.project.name))}
                   description={uiAttribute("文件、会话记录和正在进行的执行都会保留。重新选择同一目录即可恢复显示。")}
                   icon="folder"
-                  closeDisabled={actionBusy}
+                  closeDisabled={displayedBusy}
                 />
                 <AppDialogFooter>
-                  <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}><UiText zh={"取消"} /></button></Dialog.Close>
-                  <button className="danger-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={actionBusy}>{actionBusy ? uiAttribute("正在移除…") : uiAttribute("移除")}</button>
+                  <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={displayedBusy}><UiText zh={"取消"} /></button></Dialog.Close>
+                  <button className="danger-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={displayedBusy} aria-busy={displayedBusy}>
+                    <BusyLabel busy={displayedBusy}>{uiAttribute("移除")}</BusyLabel>
+                  </button>
                 </AppDialogFooter>
               </>
             ) : null}

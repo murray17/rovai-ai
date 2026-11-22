@@ -463,7 +463,7 @@ app
         for (const [field, value] of Object.entries(guidance)) {
           assert.equal(await run(`window.memberFixture.profiles()[0][${JSON.stringify(field)}]`), value)
         }
-        await wait(`document.querySelector('${active}.member-identity-form button[type=submit]').disabled && !document.querySelector('${active}.member-identity-form button[type=submit]').textContent.includes('正在保存')`)
+        await wait(`document.querySelector('${active}.member-identity-form button[type=submit]').disabled && document.querySelector('${active}.member-identity-form button[type=submit]').getAttribute('aria-busy') !== 'true'`)
       }
     )
     await check(
@@ -655,7 +655,7 @@ app
         await run(`window.memberFixture.catalogScenario({ hold: true, refreshStatus: 'completed', rejectCodes: ['runtime_model_catalog_refresh_required'] }); window.memberFixture.calls.splice(0); window.memberFixture.catalogCalls.splice(0)`)
         await saveRuntime()
         await wait('window.memberFixture.catalogCalls.length === 1')
-        assert.equal(await run(`document.querySelector('${active}.member-runtime-form').textContent.includes('正在保存')`), true)
+        assert.equal(await run(`!!document.querySelector('${active}.member-runtime-form button[aria-busy="true"]')`), true)
         assert.equal(await run(`!!document.querySelector('${active}.member-runtime-form [role=alert]')`), false)
         assert.deepEqual(await run('window.memberFixture.profiles()[0].runtimeConfiguration'), draft)
         await run(`document.querySelector('${active}.member-runtime-form').requestSubmit()`)

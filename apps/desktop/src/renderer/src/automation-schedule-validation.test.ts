@@ -36,7 +36,7 @@ describe('scheduled task input validation', () => {
     }))
     expect(html).toContain('aria-invalid="true"')
     expect(html).toContain('分钟需在 0–59 之间，当前填写为 600。')
-    expect(html).toMatch(/type="submit" disabled="">保存/)
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""[^>]*aria-busy="false">[^<]*<span class="busy-label"><span class="busy-label-content">保存<\/span>/)
   })
 })
 

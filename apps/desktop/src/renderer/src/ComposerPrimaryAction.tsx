@@ -52,7 +52,7 @@ export function ComposerPrimaryAction({
             )}
       </span>
       {action === 'send' && invite && <span className="composer-primary-action-label">
-        {busy ? uiAttribute('正在邀请…') : uiAttribute('邀请并发送')}
+        {uiAttribute('邀请并发送')}
       </span>}
     </button>
   )

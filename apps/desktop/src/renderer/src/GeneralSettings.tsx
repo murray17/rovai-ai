@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { TeamPicker, TeamMemberPicker, TeamAvatarSummary } from './TeamPicker'
 import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
@@ -402,9 +403,10 @@ export function GeneralSettings({
                   className="primary-button compact"
                   type="button"
                   disabled={!preferences || defaultsBusy || !defaultsDirty || Boolean(defaultsDraftError)}
+                  aria-busy={defaultsBusy}
                   onClick={() => void saveNewConversationDefaults()}
                 >
-                  <DialogControlIcon name="save" />{defaultsBusy ? uiAttribute("正在保存…") : uiAttribute("保存")}
+                  <BusyLabel busy={defaultsBusy}><DialogControlIcon name="save" />{uiAttribute("保存")}</BusyLabel>
                 </button>
               </div>
 
@@ -525,9 +527,10 @@ export function GeneralSettings({
               className="quiet-button"
               type="button"
               disabled={resetBusy || !resetCapability?.canReset}
+              aria-busy={resetBusy}
               onClick={() => void resetWindow()}
             >
-              {resetBusy ? uiAttribute("正在重置…") : uiAttribute("重置窗口")}
+              <BusyLabel busy={resetBusy}>{uiAttribute("重置窗口")}</BusyLabel>
             </button>
             {resetBlockedByFullscreen && <p className="general-inline-status"><UiText zh={"请先退出全屏，再重置窗口大小与位置"} /></p>}
             {resetError && (
@@ -571,8 +574,8 @@ export function GeneralSettings({
           </AppDialogBody>
           <AppDialogFooter>
             <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={oneClickBusy}><UiText zh={"取消"} /></button></Dialog.Close>
-            <button className="primary-button" type="button" disabled={oneClickBusy} onClick={() => void confirmOneClickEnabled()}>
-              {oneClickBusy ? uiAttribute("正在开启…") : uiAttribute("开启")}
+            <button className="primary-button" type="button" disabled={oneClickBusy} aria-busy={oneClickBusy} onClick={() => void confirmOneClickEnabled()}>
+              <BusyLabel busy={oneClickBusy}>{uiAttribute("开启")}</BusyLabel>
             </button>
           </AppDialogFooter>
         </AppDialogContent>

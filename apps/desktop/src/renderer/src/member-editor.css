@@ -1204,7 +1204,7 @@
 .member-editor-save-row .member-editor-cancel:disabled { visibility: hidden; }
 .member-editor-save { color: var(--conversation-action-contrast); background: var(--conversation-action); }
 .member-editor-save:is(:hover, :active):not(:disabled) { background: var(--conversation-action-hover); transform: none; }
-.member-editor-save:disabled { color: var(--muted); background: var(--surface-muted); }
+.member-editor-save:disabled:not([aria-busy="true"]) { color: var(--muted); background: var(--surface-muted); }
 .member-editor-runtime .member-editor-section-heading { align-items: flex-start; }
 @container member-editor (min-width: 780px) {
   .member-editor-identity, .member-editor-runtime { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: 24px; }

@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useId, useRef, useState, type JSX } from 'react'
 import { createPortal } from 'react-dom'
 import * as Popover from '@radix-ui/react-popover'
@@ -222,13 +223,15 @@ export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onA
   }, [ownerKey])
   if (!candidate || disabled) return null
   return createPortal(<div className="message-quote-selection-toolbar" style={{ left: position.x, top: position.y }}>
-    <button type="button" disabled={busy} onPointerDown={(event) => event.preventDefault()} onClick={() => {
+    <button type="button" disabled={busy} aria-busy={busy} onPointerDown={(event) => event.preventDefault()} onClick={() => {
       if (busy || !candidate.root.isConnected || candidate.root.dataset.quoteOwner !== ownerKey) return
       setBusy(true); setError(null)
       void latest.current.onAdd(candidate.selection).then(() => {
         dismissed.current = candidate.range; setCandidate(null)
       }).catch((nextError: unknown) => setError(quoteErrorMessage(nextError))).finally(() => setBusy(false))
-    }}><QuoteGlyph />{busy ? uiAttribute("引用中…") : uiAttribute("引用")}</button>
+    }}>
+      <BusyLabel busy={busy}><QuoteGlyph />{uiAttribute("引用")}</BusyLabel>
+    </button>
     {error && <div className="message-quote-selection-error" role="alert">{error}</div>}
   </div>, document.body)
 }

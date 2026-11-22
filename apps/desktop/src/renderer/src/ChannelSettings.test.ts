@@ -168,7 +168,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('assets/channel-logos/feishu.svg')
     expect(markup).not.toContain('默认沿用队员名称与头像')
     expect(markup).toContain('disabled="" title="飞书渠道宿主尚未接入"')
-    expect(markup).toContain('>等待连接</button>')
+    expect(markup).toMatch(/class="channel-row-action" type="button" disabled="" aria-busy="false"><span class="busy-label"><span class="busy-label-content">等待连接<\/span>/)
   })
 
   it('opens DingTalk as a selectable provider and exposes its saved management facts', () => {
@@ -330,7 +330,7 @@ describe('Channel settings', () => {
     expect(markup).toContain('target="_blank"')
     expect(markup).toContain('rel="noreferrer noopener"')
     expect(markup).toContain('>飞书管理</a>')
-    expect(markup).toContain('>重新发布</button>')
+    expect(markup).toContain('<span class="busy-label-content">重新发布</span>')
     expect(markup).not.toContain('Owner 身份待核验')
     expect(markup).not.toContain('会话接入')
     expect(markup).not.toContain('2 个待选择')
