@@ -1166,6 +1166,16 @@ Object.assign(window, { startupTest: {
         campRequest = cachedProjection
       })
       check(displayed('B'), 'The cache scenario starts with real message content in B')
+      const currentRow = () => document.querySelector('#global-navigation .camp-nav-row.selected [aria-current="page"]')
+        ?.closest<HTMLElement>('[data-thread-id]')?.dataset.threadId
+      await clickNavigation('新对话', '#global-navigation button')
+      check(document.querySelector('.new-camp-dialog') && currentRow() === 'B', 'The dialog preserves its underlying Thread')
+      await clickNavigation('取消', '.new-camp-dialog button')
+      check(!document.querySelector('.new-camp-dialog') && currentRow() === 'B', 'Cancelling keeps the same selection')
+      await back(); await back()
+      check(document.querySelector('.compose-content') && !document.querySelector('#global-navigation .camp-nav-row.selected'),
+        'Returning to the Quick Chat home clears the sidebar selection')
+      await forward(); await forward()
       for (const enabled of [false, true]) {
         if (enabled) {
           await publishTasks(true)
@@ -1177,6 +1187,7 @@ Object.assign(window, { startupTest: {
           const before = calls.length
           await clickNavigation('导航会话 ' + id, '.camp-nav-open')
           check(displayed(id), 'A revisit must display cached messages before authority returns; tasks=' + enabled)
+          check(currentRow() === id, 'The in-window preview must immediately identify the current Thread')
           check(calls.slice(before).filter(method => method === 'threads.enter').length === 1,
             'A cached revisit still verifies authority exactly once')
           check(!calls.slice(before).includes('threads.open'), 'Ordinary switching must not add a capability refresh')
@@ -1272,8 +1283,11 @@ Object.assign(window, { startupTest: {
       for (const [method, handler] of navigationHandlers) requestHandlers.set(method, handler)
       responses.set('navigationPreferences.get', { ...EMPTY_SNAPSHOT, registeredProjects: paths,
         projectOrder: paths.map(path => 'directory:' + path), legacyProjectsSynced: true })
-      const projection = campProjection(id)
-      campRequest = () => ({ ...projection, thread: { ...projection.thread, projectBindingKind: 'directory', projectPath: path } })
+      const projectProjection = (threadId: string) => {
+        const projection = campProjection(threadId)
+        return { ...projection, thread: { ...projection.thread, projectBindingKind: 'directory' as const, projectPath: path } }
+      }
+      campRequest = projectProjection
       requestHandlers.set('navigation.snapshot', ({ groupLimits }) => ({ schemaVersion: 4, throughGlobalSequence: 1,
         quickChat: { totalCount: 0, recentThreads: [] }, projects: [{ projectPath: path, projectKey: key, name: 'restored',
           lastActivityAt: stamp, lastActivityGlobalSequence: 1, totalCount: rows.length, recentThreads: rows.slice(0, groupLimits?.[key] ?? 5) }] }))
@@ -1309,11 +1323,60 @@ Object.assign(window, { startupTest: {
       await resync()
       check(selected.textContent?.includes(rows[8].title) && list.scrollTop === 0,
         'Resync must refresh the current row while preserving a manual scroll')
+
+      const sidebar = document.querySelector<HTMLElement>('#global-navigation')!
+      const currentPages = () => [...sidebar.querySelectorAll('[aria-current="page"]')]
+      const heading = group.querySelector<HTMLButtonElement>('.project-select-row')!
+      const otherProject = sidebar.querySelector<HTMLButtonElement>(`[data-group="directory:${paths[0]}"] .project-select-row`)!
+      await clickNavigation('团队')
+      check(group.querySelector('.camp-nav-row.selected') === selected && list.scrollTop === 0
+        && currentPages().length === 1 && currentPages()[0].getAttribute('aria-label') === '团队',
+      'Teams keeps the supplemental selection and scroll position, and owns the current page')
+      rows[8].title = '在团队页更新的标题'
+      await resync()
+      check(selected.textContent?.includes(rows[8].title) && currentPages().length === 1
+        && currentPages()[0].getAttribute('aria-label') === '团队', 'The selected Thread stays fresh on Teams')
+      heading.click(); await flush()
+      await back()
+      check(group.querySelectorAll('.camp-nav-row')[5]?.contains(currentPages()[0]) && currentPages().length === 1,
+        'Returning from Teams starts a new visit and expands the selected group')
+
+      for (const gesture of ['scroll', 'collapse'] as const) {
+        group.querySelector<HTMLButtonElement>('.camp-nav-open')!.click(); await flush(); await flush()
+        const authority = deferred<ReturnType<typeof projectProjection>>()
+        campRequest = threadId => threadId === id ? authority.promise : projectProjection(threadId)
+        await back()
+        const previewRow = group.querySelector<HTMLElement>('.camp-nav-row.selected')
+        check(previewRow?.dataset.threadId === id && group.querySelectorAll('.camp-nav-row')[5] === previewRow
+          && currentPages().length === 1 && previewRow.contains(currentPages()[0]),
+        'The cached off-window Thread is current and visible before the authority read resolves')
+        if (gesture === 'scroll') {
+          list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }))
+          list.scrollTop = 0
+        } else {
+          heading.click(); await flush()
+          otherProject.click(); await flush()
+          check(currentPages().length === 0, 'A manually collapsed current group has no current-page marker')
+        }
+        const confirmed = projectProjection(id)
+        confirmed.thread.title = '正式会话 ' + gesture
+        authority.resolve(confirmed)
+        await flush(); await flush()
+        check(document.querySelector('.camp-topbar h1')?.textContent === confirmed.thread.title,
+          'The authoritative Thread must replace its preview after a manual ' + gesture)
+        check(gesture === 'scroll' ? list.scrollTop === 0
+          : !group.querySelector('.camp-nav-row') && otherProject.getAttribute('aria-current') === 'true',
+          'Confirming the preview must respect the manual ' + gesture)
+        campRequest = projectProjection
+      }
+      await clickNavigation('团队')
+      heading.click(); await flush()
       rows.pop()
       await resync()
       check(!group.querySelector('.camp-nav-row.selected') && group.querySelectorAll('.camp-nav-row').length === 5,
-        'An authoritative empty by-ID result must withdraw the supplemental row')
+        'An authoritative empty by-ID result must withdraw the supplemental row on Teams')
       cases.push('Desktop cold restore locates the unpinned off-screen active row once and preserves it through pagination')
+      cases.push('Cached and off-page Thread selection respects current-page ownership, manual scrolling and folding')
     }
 
     // Use the real startup restore and workspace gates: the Thread is ready
@@ -1357,6 +1420,7 @@ Object.assign(window, { startupTest: {
       await flush(); await advance(0); await flush(); await advance(STARTUP_LOADING_EXIT_MS)
       const placeholder = () => document.querySelector<HTMLElement>('.camp-content > .mission-section-empty')
       check(placeholder()?.textContent?.includes('正在读取使命'), 'Mission restore must wait for the separate mission list')
+      check(!document.querySelector('#global-navigation .camp-nav-row.selected'), 'A Mission cannot select an ordinary Thread row')
       check(!document.querySelector('.workspace-shell') && unread && acknowledgements.length === 0,
         'Loading mission content cannot acknowledge its interruption')
       if (outcome === 'failed') {

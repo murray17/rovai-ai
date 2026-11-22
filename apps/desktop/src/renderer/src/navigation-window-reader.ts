@@ -33,7 +33,7 @@ const emptyRead = (): PendingRead => ({ all: false, threads: new Set(), groups: 
 /** One owner for the window, three read scopes; no event replay or page cache. */
 export function createNavigationWindowReader(
   read: (request: NavigationSnapshotRequest) => Promise<NavigationSnapshot>,
-  commit: (snapshot: NavigationSnapshot, groupLimits: NavigationGroupLimits) => void,
+  commit: (snapshot: NavigationSnapshot, groupLimits: NavigationGroupLimits, selectedPrefixRow?: NavigationThreadItem) => void,
   options: NavigationRefreshCoordinatorOptions & {
     readThreads(threadIds: string[]): Promise<NavigationThreadRows>
     getPinnedThreadIds?(): string[]
@@ -146,12 +146,14 @@ export function createNavigationWindowReader(
         : undefined
       const rowIds = new Set([...scope.threads, ...(scope.all ? pinnedThreadIds : [])])
       const active = options.getActiveThread?.()
+      let selectedPrefixRow: NavigationThreadItem | undefined
       if (next && active && (scope.all || scope.groups.has(navigationGroupKey(active)))) {
         const group = active.projectBindingKind === 'directory'
           ? next.projects.find(project => project.projectKey === navigationGroupKey(active))
           : next.quickChat
         const alreadyRead = groupRows && scope.groupThreads.has(active.id) && groupRows.throughGlobalSequence >= next.throughGlobalSequence
-        if (!alreadyRead && !group?.recentThreads.some(thread => thread.id === active.id)) {
+        selectedPrefixRow = group?.recentThreads.find(thread => thread.id === active.id)
+        if (!alreadyRead && !selectedPrefixRow) {
           rowIds.add(active.id)
         }
       }
@@ -175,7 +177,7 @@ export function createNavigationWindowReader(
           projects: [...snapshot.projects.filter(group => !scope.groups.has(group.projectKey)), ...next.projects] }
         rememberRows([next.quickChat.recentThreads, ...next.projects.map(group => group.recentThreads)].flat(), next.throughGlobalSequence)
         displayed = windows
-        commit(snapshot, displayed)
+        commit(snapshot, displayed, selectedPrefixRow)
       }
       if (groupRows) applyRows(groupRows, [...scope.groupThreads])
       if (rows) applyRows(rows, ids)

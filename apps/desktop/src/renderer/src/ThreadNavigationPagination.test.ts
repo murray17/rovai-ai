@@ -150,6 +150,17 @@ describe('authoritative Thread navigation windows', () => {
     h.reader.dispose()
   })
 
+  it('confirms a selected prefix row from its window without another ID read', async () => {
+    const active = thread(2)
+    const h = harness([], () => active)
+    await h.reader.refresh('explicit')
+    expect(h.commit).toHaveBeenLastCalledWith(expect.anything(), {}, active)
+    await h.reader.refreshGroups(['quick-chat'], 'explicit')
+    expect(h.commit).toHaveBeenLastCalledWith(expect.anything(), {}, undefined)
+    expect(h.readThreads).not.toHaveBeenCalled()
+    h.reader.dispose()
+  })
+
   it('retains the current out-of-window watermark and withdraws only on a fresh empty read', async () => {
     const active = thread(9)
     const h = harness([], () => active)

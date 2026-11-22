@@ -41,6 +41,7 @@ import {
   applyCancellationResult,
   AppHeader,
   CAMP_OPEN_FEEDBACK_DELAY_MS,
+  type CachedThreadSnapshot,
   ControlledShutdownOverlay,
   SHUTDOWN_FEEDBACK_DELAY_MS,
   WindowDragStrip,
@@ -845,18 +846,25 @@ describe('Thread snapshot cache', () => {
     const snapshot = (threadId: string): ThreadSnapshot => ({
       thread: { id: threadId }
     } as ThreadSnapshot)
-    const cache = new Map<string, ThreadSnapshot>()
+    const cache = new Map<string, CachedThreadSnapshot>()
     const first = snapshot('camp-1')
     const second = snapshot('camp-2')
     const third = snapshot('camp-3')
 
     rememberThreadSnapshot(cache, first, 2)
     rememberThreadSnapshot(cache, second, 2)
+    const row = { id: first.thread.id } as NavigationSnapshot['quickChat']['recentThreads'][number]
+    cache.get(first.thread.id)!.navigationRow = row
+    rememberThreadSnapshot(cache, first, 2)
     expect(recentThreadSnapshot(cache, 'camp-1')).toBe(first)
+    expect(cache.get(first.thread.id)?.navigationRow).toBe(row)
     rememberThreadSnapshot(cache, third, 2)
 
     expect([...cache.keys()]).toEqual(['camp-1', 'camp-3'])
     expect(recentThreadSnapshot(cache, 'camp-2')).toBeNull()
+    rememberThreadSnapshot(cache, second, 2)
+    rememberThreadSnapshot(cache, first, 2)
+    expect(cache.get(first.thread.id)?.navigationRow).toBeNull()
   })
 
   it('adapts the bounded open projection without restoring heavy history', () => {
