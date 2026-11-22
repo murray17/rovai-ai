@@ -63,7 +63,7 @@ test('sidebar exports complete history through the existing preview without chan
       console.log(`Checking sidebar export entry: ${method}`)
       await openMenu(method)
       const labels = await b.evaluate('[...document.querySelectorAll(".sidebar-action-menu-item")].map(e=>e.textContent.trim())')
-      assert.deepEqual(labels, ['置顶', '标记未读', '重命名', '复制会话 ID', '导出', '删除'])
+      assert.deepEqual(labels, ['置顶', '标记未读', '重命名', '复制会话 ID', '导出', '归档', '删除'])
       await chooseExport(); await ready(6)
       assert.equal(await b.evaluate('document.querySelectorAll(".message-export-dialog").length'), 1)
       await close()

@@ -314,6 +314,7 @@ export function ThreadNavigation({
     .filter((pin) => pin.kind === 'project')
     .flatMap((pin) => projectByKey.get(pin.targetKey) ?? [])
   const quickChatTotalCount = navigation?.quickChat.totalCount ?? 0
+  const currentThreadId = view === 'camp' ? activeThreadId : null
   const activeRow = activeThreadId
     ? campById.get(activeThreadId) ?? (openedNavigationRow?.id === activeThreadId ? openedNavigationRow : undefined)
     : undefined
@@ -584,6 +585,7 @@ export function ThreadNavigation({
                 readState={threadReadStates[thread.id]}
                 onSetUnread={onSetThreadUnread ? (unread) => setThreadUnread(thread, unread) : undefined}
                 active={thread.id === activeThreadId}
+                current={thread.id === currentThreadId}
                 opening={thread.id === openingThreadId}
                 pinned
                 onTogglePin={() => void togglePin('camp', thread.id, thread)}
@@ -608,6 +610,7 @@ export function ThreadNavigation({
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingMore={loadingGroups.has(groupKey)}
                 activeThreadId={activeThreadId}
+                currentThreadId={currentThreadId}
                 firstRunThreadId={firstRunThreadId}
                 openingThreadId={openingThreadId}
                 currentProject={currentProjectKey === project.projectKey}
@@ -656,6 +659,7 @@ export function ThreadNavigation({
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingMore={loadingGroups.has(groupKey)}
                 activeThreadId={activeThreadId}
+                currentThreadId={currentThreadId}
                 firstRunThreadId={firstRunThreadId}
                 openingThreadId={openingThreadId}
                 currentProject={currentProjectKey === project.projectKey}
@@ -695,6 +699,7 @@ export function ThreadNavigation({
             projectExpanded={!collapsedProjectGroups.has('quick-chat')}
             loadingMore={loadingGroups.has('quick-chat')}
             activeThreadId={activeThreadId}
+            currentThreadId={currentThreadId}
             firstRunThreadId={firstRunThreadId}
             openingThreadId={openingThreadId}
             currentProject={currentProjectKey === 'quick-chat'}
@@ -992,6 +997,7 @@ function ThreadGroup({
   projectExpanded,
   loadingMore,
   activeThreadId,
+  currentThreadId,
   firstRunThreadId,
   openingThreadId,
   currentProject,
@@ -1028,6 +1034,7 @@ function ThreadGroup({
   projectExpanded: boolean
   loadingMore: boolean
   activeThreadId: string | null
+  currentThreadId: string | null
   firstRunThreadId: string | null
   openingThreadId: string | null
   currentProject: boolean
@@ -1135,6 +1142,7 @@ function ThreadGroup({
             readState={threadReadStates[thread.id]}
             onSetUnread={onSetThreadUnread ? (unread) => onSetThreadUnread(thread, unread) : undefined}
             active={thread.id === activeThreadId}
+            current={thread.id === currentThreadId}
             opening={thread.id === openingThreadId}
             pinned={false}
             onTogglePin={() => onToggleThreadPin(thread)}
@@ -1164,6 +1172,7 @@ function ThreadRow({
   onSetUnread,
   firstRunThreadId,
   active,
+  current,
   opening,
   pinned,
   onTogglePin,
@@ -1179,6 +1188,7 @@ function ThreadRow({
   onSetUnread?(unread: boolean): void
   firstRunThreadId: string | null
   active: boolean
+  current: boolean
   opening: boolean
   pinned: boolean
   onTogglePin(): void
@@ -1253,7 +1263,7 @@ function ThreadRow({
         {...pressMenu.rowProps}
         className="camp-nav-open"
         type="button"
-        aria-current={active ? 'page' : undefined}
+        aria-current={current ? 'page' : undefined}
         aria-busy={opening || undefined}
         aria-label={`${title}${unreadLabel ? `，${unreadLabel}` : ''}${opening ? uiAttribute("，正在打开") : thread.marker === 'loading' ? uiAttribute("，正在运行") : ''}`}
         title={`${title}${hasUnread ? uiAttribute(" · 未读") : ''}${opening ? uiAttribute(" · 正在打开") : loadingStatus ? uiAttribute(" · 正在运行") : ''}`}

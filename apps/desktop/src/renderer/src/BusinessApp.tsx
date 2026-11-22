@@ -434,20 +434,27 @@ type ThreadSurfaceSnapshot = ThreadSnapshot & {
   openCoverage?: ThreadOpenProjection['coverage']
 }
 
+export interface CachedThreadSnapshot {
+  snapshot: ThreadSurfaceSnapshot
+  navigationRow: NavigationThreadItem | null
+}
+
 const CAMP_SNAPSHOT_CACHE_LIMIT = 5
 export const CAMP_OPEN_FEEDBACK_DELAY_MS = 400
 
 export function rememberThreadSnapshot(
-  cache: Map<string, ThreadSurfaceSnapshot>,
+  cache: Map<string, CachedThreadSnapshot>,
   snapshot: ThreadSurfaceSnapshot,
   limit = CAMP_SNAPSHOT_CACHE_LIMIT
 ): void {
-  cache.delete(snapshot.thread.id)
+  const id = snapshot.thread.id
+  const navigationRow = cache.get(id)?.navigationRow ?? null
+  cache.delete(id)
   if (limit <= 0) {
     cache.clear()
     return
   }
-  cache.set(snapshot.thread.id, snapshot)
+  cache.set(id, { snapshot, navigationRow })
   while (cache.size > limit) {
     const oldestThreadId = cache.keys().next().value
     if (oldestThreadId === undefined) break
@@ -456,14 +463,14 @@ export function rememberThreadSnapshot(
 }
 
 export function recentThreadSnapshot(
-  cache: Map<string, ThreadSurfaceSnapshot>,
+  cache: Map<string, CachedThreadSnapshot>,
   threadId: string
 ): ThreadSurfaceSnapshot | null {
-  const snapshot = cache.get(threadId) ?? null
-  if (!snapshot) return null
+  const entry = cache.get(threadId)
+  if (!entry) return null
   cache.delete(threadId)
-  cache.set(threadId, snapshot)
-  return snapshot
+  cache.set(threadId, entry)
+  return entry.snapshot
 }
 
 export function campActivationPreview<T extends ThreadSnapshot>(
@@ -1211,12 +1218,15 @@ export function BusinessApp({
   if (boardMission || displayedMission.current?.threadId !== activeThreadId || view !== 'camp') displayedMission.current = boardMission
   const activeMission = boardMission ?? displayedMission.current
   const missionThread = !!activeMission || !!(campSnapshot?.thread.id === activeThreadId && campSnapshot?.thread.missionId)
-  const sidebarThread = view === 'camp' && !missionThread && campSnapshot?.thread.id === activeThreadId
-    && !campSnapshotState.entryPreview && !campSnapshot.thread.archivedAt ? campSnapshot.thread : null
-  const sidebarThreadRef = useRef(sidebarThread)
-  sidebarThreadRef.current = sidebarThread
-  const sidebarThreadId = sidebarThread?.id ?? null
-  const activeRowReveal = useMemo<NavigationRowReveal>(() => ({ status: 'pending' }), [sidebarThreadId, mobile])
+  const selectedThread = view !== 'compose' && !missionThread && campSnapshot?.thread.id === activeThreadId
+    && !campSnapshot.thread.archivedAt ? campSnapshot.thread : null
+  const selectedThreadRef = useRef(selectedThread)
+  selectedThreadRef.current = selectedThread
+  const selectedThreadId = selectedThread?.id ?? null
+  const visitThreadId = view === 'camp' ? selectedThreadId : null
+  const activeRowReveal = useMemo<NavigationRowReveal | undefined>(
+    () => visitThreadId ? { status: 'pending' } : undefined, [visitThreadId, mobile]
+  )
   const missionDrawer = !mobile && view === 'camp' && !!activeMission && missionPresentation === 'drawer'
   const [newConversationOpen, setNewConversationOpen] = useState(false)
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
@@ -1250,8 +1260,9 @@ export function BusinessApp({
   const inFlightRunStops = useRef(new Set<string>())
   const archiveWrites = useRef(new Set<string>())
   const campSelectionGeneration = useRef(0)
+  const verifyingPreview = useRef<{ generation: number; projectChosen: boolean } | null>(null)
   const campOpenFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const campSnapshotCache = useRef(new Map<string, ThreadSurfaceSnapshot>())
+  const campSnapshotCache = useRef(new Map<string, CachedThreadSnapshot>())
   const campSnapshotRef = useRef<ThreadSurfaceSnapshot | null>(null)
   const campSnapshotEntryPreviewRef = useRef(false)
   const activeThreadIdRef = useRef<string | null>(null)
@@ -1274,8 +1285,8 @@ export function BusinessApp({
   const campViewedAcknowledgements = useRef(new Map<string, number>())
   const [openedNavigationRow, setOpenedNavigationRow] = useState<NavigationThreadItem | null>(null)
   useEffect(() => {
-    setOpenedNavigationRow(current => current?.id === sidebarThreadId ? current : null)
-  }, [sidebarThreadId])
+    setOpenedNavigationRow(current => current?.id === selectedThreadId ? current : null)
+  }, [selectedThreadId])
   const pinnedThreadIdsRef = useRef<string[]>([])
   pinnedThreadIdsRef.current = navigationPins.filter(pin => pin.kind === 'camp').map(pin => pin.targetKey)
   const navigationSnapshotRef = useRef<NavigationSnapshot | null>(null)
@@ -1614,8 +1625,14 @@ export function BusinessApp({
 
   const commitNavigation = useCallback((
     nextNavigation: NavigationSnapshot,
-    groupLimits: NavigationGroupLimits
+    groupLimits: NavigationGroupLimits,
+    selectedPrefixRow?: NavigationThreadItem
   ): void => {
+    // A cold restore can confirm the selected row entirely from the window.
+    if (selectedPrefixRow) {
+      const cached = campSnapshotCache.current.get(selectedPrefixRow.id)
+      if (cached) cached.navigationRow = selectedPrefixRow
+    }
     const visibleNavigation = navigationWithoutDeletedThreads(
       nextNavigation,
       deletingThreadIdsRef.current
@@ -1634,7 +1651,7 @@ export function BusinessApp({
         initiallyVisible: document.visibilityState !== 'hidden',
         readThreads: (threadIds) => client.request<NavigationThreadRows>('navigation.threads', { threadIds }),
         getPinnedThreadIds: () => pinnedThreadIdsRef.current,
-        getActiveThread: () => sidebarThreadRef.current,
+        getActiveThread: () => selectedThreadRef.current,
         onRows: (rows, requestedIds) => {
           const pinnedIds = new Set(pinnedThreadIdsRef.current)
           const updatedIds = new Set(requestedIds)
@@ -1643,10 +1660,14 @@ export function BusinessApp({
             ...current.filter(thread => pinnedIds.has(thread.id) && !updatedIds.has(thread.id)),
             ...rows.threads.filter(thread => pinnedIds.has(thread.id) && !deletingThreadIdsRef.current.has(thread.id))
           ])
-          const id = sidebarThreadRef.current?.id
-          if (id && updatedIds.has(id)) {
-            const activeRow = rows.threads.find(thread => thread.id === id)
-            setOpenedNavigationRow(activeRow && !activeRow.archivedAt && !deletingThreadIdsRef.current.has(id) ? activeRow : null)
+          const visibleRows = new Map(rows.threads
+            .filter(thread => !thread.archivedAt && !deletingThreadIdsRef.current.has(thread.id))
+            .map(thread => [thread.id, thread]))
+          for (const id of requestedIds) {
+            const row = visibleRows.get(id) ?? null
+            const cached = campSnapshotCache.current.get(id)
+            if (cached) cached.navigationRow = row
+            if (id === selectedThreadRef.current?.id) setOpenedNavigationRow(row)
           }
         },
         onError: () => setNavigationState('error')
@@ -2005,9 +2026,14 @@ export function BusinessApp({
       initialComposerDraft: ThreadComposerDraftView | null = null
     ): void => {
       if (transaction && !transaction.commit()) return
-      const snapshotProject = currentProjectForThread(snapshot.thread)
-      setCurrentProject(snapshotProject)
-      persistCurrentProject(snapshotProject)
+      if (entryPreview) verifyingPreview.current = { generation: selectionGeneration, projectChosen: false }
+      const preview = verifyingPreview.current
+      if (preview?.generation !== selectionGeneration || !preview.projectChosen) {
+        const snapshotProject = currentProjectForThread(snapshot.thread)
+        setCurrentProject(snapshotProject)
+        persistCurrentProject(snapshotProject)
+      }
+      if (!entryPreview) verifyingPreview.current = null
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       if (!options.preserveNotificationFocus) {
         setNotificationFocus(null)
@@ -3548,7 +3574,7 @@ export function BusinessApp({
           }
           const availableSnapshot = campSnapshotRef.current?.thread.id === action.threadId
             ? campSnapshotRef.current
-            : campSnapshotCache.current.get(action.threadId) ?? null
+            : campSnapshotCache.current.get(action.threadId)?.snapshot ?? null
           const run = await resolveNotificationAgentRun(client, action.threadId, action.agentRunId, availableSnapshot)
           if (!run) {
             result = {
@@ -4706,6 +4732,7 @@ export function BusinessApp({
     )
   }
 
+  const cachedNavigationRow = selectedThreadId ? campSnapshotCache.current.get(selectedThreadId)?.navigationRow : null
   const renderNavigation = (drawer = false): React.JSX.Element => <ThreadNavigation
     navigationId={drawer ? 'mobile-conversation-navigation' : 'global-navigation'}
     platform={client.platform}
@@ -4715,10 +4742,10 @@ export function BusinessApp({
     navigation={displayNavigation}
     groupLimits={navigationGroupLimits}
     onGroupLimitChange={navigationRefreshCoordinator.resizeGroup}
-    activeThreadId={sidebarThreadId}
+    activeThreadId={selectedThreadId}
     activeRowReveal={activeRowReveal}
-    canLocateActiveRow={navigationPreferences !== null && (!drawer || mobileConversationDrawerOpen)}
-    openedNavigationRow={openedNavigationRow}
+    canLocateActiveRow={!campSnapshotState.entryPreview && navigationPreferences !== null && (!drawer || mobileConversationDrawerOpen)}
+    openedNavigationRow={openedNavigationRow?.id === selectedThreadId ? openedNavigationRow : cachedNavigationRow}
     firstRunThreadId={firstRunThreadId}
     openingThreadId={openingThreadId}
     currentProjectKey={currentProjectKey}
@@ -4747,7 +4774,14 @@ export function BusinessApp({
     onSettingsBack={closeSettings}
     onOpenProject={() => { setMobileConversationDrawerOpen(false); void openProject() }}
     onSelectProject={(project) => {
-      cancelPendingThreadActivation()
+      // A cached visit already owns the page. Folding a group can change the
+      // selected project while its Thread is still waiting for verification.
+      const preview = verifyingPreview.current
+      if (preview?.generation === campSelectionGeneration.current && campSnapshotEntryPreviewRef.current) {
+        preview.projectChosen = true
+      } else {
+        cancelPendingThreadActivation()
+      }
       chooseCurrentProject(
         project
           ? { kind: 'directory', projectPath: project.projectPath }

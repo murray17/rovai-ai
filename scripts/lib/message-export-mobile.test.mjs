@@ -26,7 +26,7 @@ test('MobileUI exports through the production drawer with a fluid HTML reader an
     await pause(570)
     await b.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await b.wait('!!document.querySelector(".sidebar-action-menu")')
-    assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".sidebar-action-menu-item")].map(e=>e.textContent.trim())'), ['置顶', '标记未读', '重命名', '复制会话 ID', '导出', '删除'])
+    assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".sidebar-action-menu-item")].map(e=>e.textContent.trim())'), ['置顶', '标记未读', '重命名', '复制会话 ID', '导出', '归档', '删除'])
   }
   const open = async () => {
     await menu()
