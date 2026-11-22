@@ -27,6 +27,7 @@ import { useMobileLayout } from './MobileLayout'
 import { NewConversationPicker } from './NewConversationPicker'
 import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 import { MemberAvatar } from './MemberAvatar'
+import { normalizeThreadTitle, THREAD_TITLE_MAX_SCALARS } from './camp-title'
 import { NavigationIcon } from './NavigationIcon'
 import { DialogControlIcon } from './AppDialog'
 import {
@@ -156,9 +157,9 @@ export function NewConversationDialog({
   const hasUnavailableSelection = selectedMemberIds.some((id) =>
     !availableMembers.some((member) => member.agentId === id)
   )
-  const normalizedName = isMission ? name.trim() : normalizeDraftName(name)
+  const normalizedName = isMission ? name.trim() : normalizeThreadTitle(name)
   const nameLength = Array.from(normalizedName).length
-  const nameError = nameLength > (isMission ? 200 : 80)
+  const nameError = nameLength > (isMission ? 200 : THREAD_TITLE_MAX_SCALARS)
     ? isMission ? uiAttribute('使命标题最多 200 个字符。') : uiAttribute('对话名称最多 80 个字符。')
     : isMission && Array.from(description).length > 12000 ? uiAttribute('使命描述最多 12,000 个字符。') : null
   const lead = selectedAvailableMembers.find((member) => member.agentId === leadId) ?? null
@@ -493,7 +494,7 @@ export function NewConversationDialog({
                 {optionalOpen && <div className="compact-name-field" id="new-camp-optional-panel">
                   <label className="sr-only" htmlFor="new-camp-name"><UiText zh={"对话名称"} /></label>
                   <input ref={nameInputRef} id="new-camp-name" value={name} disabled={busy} aria-invalid={Boolean(nameError)} aria-describedby="new-camp-name-hint" onChange={(event) => setName(limitDraftNameInput(event.target.value))} placeholder={uiAttribute("输入名称...")} autoComplete="off" />
-                  <div className="compact-field-meta"><span id="new-camp-name-hint"><UiText zh={"留空为「未命名对话」"} /></span><span>{nameLength} / 80</span></div>
+                  <div className="compact-field-meta"><span id="new-camp-name-hint"><UiText zh={"留空为「未命名对话」"} /></span><span>{nameLength} / {THREAD_TITLE_MAX_SCALARS}</span></div>
                   {nameError && <small className="compact-field-error" role="alert">{nameError}</small>}
                 </div>}
               </div>
@@ -718,14 +719,9 @@ export function planInitialThreadSelection(
   }
 }
 
-export function normalizeDraftName(value: string): string {
-  return value.trim().replace(/\s+/gu, ' ')
-}
-
 export function limitDraftNameInput(value: string): string {
-  const normalized = normalizeDraftName(value)
-  if (Array.from(normalized).length <= 80) return value
-  return Array.from(normalized).slice(0, 80).join('')
+  const scalars = Array.from(normalizeThreadTitle(value))
+  return scalars.length <= THREAD_TITLE_MAX_SCALARS ? value : scalars.slice(0, THREAD_TITLE_MAX_SCALARS).join('')
 }
 
 export function toggleThreadMemberSelection({

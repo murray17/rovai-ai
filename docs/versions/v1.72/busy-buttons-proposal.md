@@ -489,19 +489,20 @@ PR B：PR A 的全部命令，加 `pnpm test:host-web-mobile`（确认 Mobile We
 
 ## 8. 实施结果
 
-在独立 worktree 的 `rovai/busy-buttons` 从 `origin/main@892ef6dcc` 实施。75 个按钮接入
-`BusyLabel`，Composer 的邀请入口保留现有图标反馈并固定文字。AST 扫描在基线命中 76 个目标按钮，
-迁移后为零。9 个加载入口保留原行为，其中执行记录按钮有两条加载文案。
+在独立 worktree 的 `rovai/busy-buttons` 从 `origin/main@892ef6dcc` 实施，随后合入
+`origin/main@70efa2b4b` 的会话操作反馈更新。75 个按钮接入 `BusyLabel`，Composer 的邀请入口固定
+文字并沿用自身图标。AST 扫描在提案基线命中 76 个目标按钮，迁移后为零。9 个加载入口保留原行为，
+其中执行记录按钮有两条加载文案。
 
 消息编辑保存重新读取正文后再收起，旧编辑器保留忙碌外观直到截图完成。两个确认弹窗使用关闭前的快照完成
 110ms 退场。Mobile Web 和减少动态效果时立即卸载。失败时按钮文字立即恢复，错误与草稿沿用现有流程。
 
 | 验证 | 结果 |
 | --- | --- |
-| `pnpm typecheck`、`pnpm exec vitest run apps/desktop/src/renderer/src` | 164 个文件、1856 项通过 |
-| `pnpm test:shortcut-settings`、`pnpm test:thread-fork`、`pnpm test:message-reedit-ui`、`pnpm test:channel-camp-naming` | 通过。覆盖挂起期间几何、失败保留草稿、重命名退场时保留输入与转圈、Mobile Web 和减少动态效果立即关闭 |
+| `pnpm typecheck`、`pnpm exec vitest run apps/desktop/src/renderer/src` | 164 个文件、1865 项通过 |
+| `pnpm test:shortcut-settings`、`pnpm test:thread-fork`、`pnpm test:message-reedit-ui`、`pnpm test:channel-camp-naming` | 通过。覆盖挂起期间几何、失败保留草稿、重命名退场时保留输入与转圈、Mobile Web 和减少动态效果立即关闭、200% 缩放时确认文字完整 |
 | 隔离 Chromium 中的生产界面 | 80ms 返回时逐帧未出现转圈。1040×700 下五套配色的保存按钮宽度均为 41.5px，邻近取消按钮横坐标不变，转圈继承按钮前景色。实测编辑器淡出 90ms，气泡延迟 60ms 后淡入 150ms |
 | `node --test scripts/lib/member-editor.test.mjs` | 基线和分支都在队员运行时列表的旧顺序断言失败，期望最后一项为 PI，实际为 Goose。队员忙碌态的静态断言通过 |
 | `pnpm build:web`、`pnpm test:host-web-mobile` | Web 构建通过。Mobile Web 套件在基线和分支均为 2 项通过、4 项失败，失败落在导航间距、导航行状态节点、执行台横屏和独立 Server 设置选择器 |
 | 独立 profile 的 `pnpm dev` | 创建隔离会话后，在实际编辑器保存消息。重载后保留新正文与「（已编辑）」标记 |
-| `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=892ef6dcc pnpm docs:check:ci` | 通过 |
+| `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=70efa2b4b pnpm docs:check:ci` | 通过 |
