@@ -3,10 +3,23 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-21
+last_updated: 2026-11-22
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d92"></a>
+## V1.72-D92：在侧栏窗口末尾补显当前普通会话
+
+- 状态：accepted
+- 日期：2026-11-22
+- 当前权威：[App Shell 导航](../../ui/components/app-shell-navigation.md#导航投影新鲜度)、[Navigation Read v1](../../contracts/navigation-read-v1.md#read-scopes)、[Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md#snapshot-prefixes)。
+
+从取消归档的“查看”、搜索或历史记录进入旧会话时，窗口末尾的一行就能标出当前位置。若按真实名次自动扩大窗口，
+打开很早的会话会读入许多条目，同时改变用户选定的分页范围。补显只需要已有快照或一条按 ID 读取的摘要。
+
+启动恢复也定位一次。选中行完整可见即可，就近滚动保留较多原来的侧栏内容。下一步分页按钮可能位于视口外，
+用户可以自行继续滚动。随后手动滚动或折叠分组，后台刷新尊重用户的位置。
 
 <a id="v1-72-d91"></a>
 ## V1.72-D91：Renderer 按操作与错误码解释失败

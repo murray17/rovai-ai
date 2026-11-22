@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type Ref, type RefObject } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type Ref, type RefObject } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { NavigationIcon } from './NavigationIcon'
 import { PanelToggleIcon } from './PanelToggleIcon'
@@ -67,15 +67,17 @@ export function MobileConversationDrawer({ open, onOpenChange, triggerRef, scrol
   open: boolean; onOpenChange(open: boolean): void
   triggerRef: RefObject<HTMLButtonElement | null>; scrollPosition: RefObject<number>; children: ReactNode
 }): React.JSX.Element {
+  // Restore before ThreadNavigation resolves a newly opened Thread's position.
+  const restoreList = useCallback((menu: HTMLDivElement | null) => {
+    const list = menu?.querySelector<HTMLElement>('.navigation-scroll')
+    if (list) list.scrollTop = scrollPosition.current
+  }, [scrollPosition])
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal>
     <Dialog.Overlay className="mobile-conversation-scrim" />
-    <Dialog.Content id="mobile-app-menu" className="mobile-conversation-drawer app-menu" aria-describedby={undefined} tabIndex={-1}
+    <Dialog.Content ref={restoreList} id="mobile-app-menu" className="mobile-conversation-drawer app-menu" aria-describedby={undefined} tabIndex={-1}
       onOpenAutoFocus={event => {
         event.preventDefault()
-        const menu = document.getElementById('mobile-app-menu')
-        const list = menu?.querySelector<HTMLElement>('.navigation-scroll')
-        if (list) list.scrollTop = scrollPosition.current
-        menu?.focus()
+        document.getElementById('mobile-app-menu')?.focus({ preventScroll: true })
       }}
       onScrollCapture={event => { if (event.target instanceof HTMLElement && event.target.classList.contains('navigation-scroll')) scrollPosition.current = event.target.scrollTop }}
       onCloseAutoFocus={event => {

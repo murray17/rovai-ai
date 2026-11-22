@@ -1258,6 +1258,64 @@ Object.assign(window, { startupTest: {
       cases.push('Task capability changes during enter cannot commit the previous capability projection')
     }
 
+    {
+      const path = '/fixture/restored-project'
+      const key = 'directory:' + path
+      const id = 'restored-thread-9'
+      const row = (navigationResponses.get('navigation.snapshot') as NavigationSnapshot).quickChat.recentThreads[0]
+      const rows = Array.from({ length: 9 }, (_, index) => ({
+        ...row, id: 'restored-thread-' + (index + 1), projectPath: path, projectBindingKind: 'directory' as const
+      }))
+      const paths = [...Array.from({ length: 16 }, (_, index) => '/fixture/earlier-' + index), path]
+      await reset({ kind: 'camp', threadId: id })
+      for (const [method, response] of navigationResponses) responses.set(method, response)
+      for (const [method, handler] of navigationHandlers) requestHandlers.set(method, handler)
+      responses.set('navigationPreferences.get', { ...EMPTY_SNAPSHOT, registeredProjects: paths,
+        projectOrder: paths.map(path => 'directory:' + path), legacyProjectsSynced: true })
+      const projection = campProjection(id)
+      campRequest = () => ({ ...projection, thread: { ...projection.thread, projectBindingKind: 'directory', projectPath: path } })
+      requestHandlers.set('navigation.snapshot', ({ groupLimits }) => ({ schemaVersion: 4, throughGlobalSequence: 1,
+        quickChat: { totalCount: 0, recentThreads: [] }, projects: [{ projectPath: path, projectKey: key, name: 'restored',
+          lastActivityAt: stamp, lastActivityGlobalSequence: 1, totalCount: rows.length, recentThreads: rows.slice(0, groupLimits?.[key] ?? 5) }] }))
+      requestHandlers.set('navigation.threads', ({ threadIds }) => ({ throughGlobalSequence: 1, groupKeys: [key],
+        threads: rows.filter(thread => threadIds.includes(thread.id)) }))
+      onboarding.resolve({ schemaVersion: 2, status: 'completed', origin: 'existing_installation', completedAt: stamp,
+        selectedMemberRole: null, memberAgentId: null, quickChatThreadId: null })
+      publish({ runtimeMode: 'full_core', fullCoreState: 'ready', startupPhase: null, authorityState: { kind: 'current', origin: 'existing' },
+        capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
+      await flush(); await advance(0); await flush(); await advance(STARTUP_LOADING_EXIT_MS); await flush()
+      const group = document.querySelector<HTMLElement>(`[data-group="${key}"]`)!
+      const list = document.querySelector<HTMLElement>('.navigation-scroll')!
+      const selected = group?.querySelector<HTMLElement>('.camp-nav-row.selected')
+      check(selected?.dataset.threadId === id && group.querySelectorAll('.camp-nav-row')[5] === selected
+        && selected.querySelector('[aria-current="page"]') && !group.querySelector('.collapse-camps'),
+      'First Desktop restore must reveal the unpinned ninth Thread after the five-row window')
+      const bounds = list.getBoundingClientRect()
+      const rect = selected.getBoundingClientRect()
+      check(list.scrollTop > 0 && rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1,
+        'Cold restore must locate the complete selected row after applying saved directory order')
+      group.querySelector<HTMLButtonElement>('.show-more-camps')!.click()
+      await flush()
+      check(group.querySelectorAll('.camp-nav-row')[8] === selected, 'The revealed row must retain its DOM identity at its real rank')
+      group.querySelector<HTMLButtonElement>('.collapse-camps')!.click()
+      await flush()
+      check(group.querySelectorAll('.camp-nav-row')[5] === selected, 'Collapsing the window must restore the same selected node')
+      list.scrollTop = 0
+      rows[8].title = '新的窗口外标题'
+      const resync = async () => {
+        for (const listener of coreListeners) listener({ method: 'navigation.invalidated', params: { scope: 'all' } })
+        await advance(500); await flush()
+      }
+      await resync()
+      check(selected.textContent?.includes(rows[8].title) && list.scrollTop === 0,
+        'Resync must refresh the current row while preserving a manual scroll')
+      rows.pop()
+      await resync()
+      check(!group.querySelector('.camp-nav-row.selected') && group.querySelectorAll('.camp-nav-row').length === 5,
+        'An authoritative empty by-ID result must withdraw the supplemental row')
+      cases.push('Desktop cold restore locates the unpinned off-screen active row once and preserves it through pagination')
+    }
+
     // Use the real startup restore and workspace gates: the Thread is ready
     // before missions.list, so selection/snapshot readiness alone cannot ACK.
     const originalHasFocus = document.hasFocus.bind(document)

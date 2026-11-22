@@ -56,6 +56,7 @@ test('the production App presents the full-window brand loader without weakening
     assert.equal(report.ok, true)
     if (process.env.ROVAI_PROJECT_DIRECTORIES_ONLY === '1') { assert.equal(report.cases.length, 4); return }
     assert.ok(report.cases.length >= 8)
+    assert.ok(report.cases.includes('Desktop cold restore locates the unpinned off-screen active row once and preserves it through pagination'))
     assert.ok(report.cases.includes('Ordinary Camp switching reads only the target row without unrelated queries'))
     assert.ok(report.cases.includes('Navigation search applies a one-shot body hit anchor to an already active Thread'))
     assert.ok(report.cases.includes('Navigation search fits five themes at compact and large desktop sizes'))

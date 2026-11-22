@@ -37,6 +37,7 @@ export function createNavigationWindowReader(
   options: NavigationRefreshCoordinatorOptions & {
     readThreads(threadIds: string[]): Promise<NavigationThreadRows>
     getPinnedThreadIds?(): string[]
+    getActiveThread?(): Pick<NavigationThreadItem, 'id' | 'projectBindingKind' | 'projectPath'> | null
     onRows?(rows: NavigationThreadRows, requestedIds: string[]): void
     onError?(error: unknown): void
   }
@@ -143,7 +144,18 @@ export function createNavigationWindowReader(
       const next = scope.all || keys.length > 0
         ? await readWindow(windows, scope.all ? undefined : keys)
         : undefined
-      const ids = [...new Set([...scope.threads, ...(scope.all ? pinnedThreadIds : [])])]
+      const rowIds = new Set([...scope.threads, ...(scope.all ? pinnedThreadIds : [])])
+      const active = options.getActiveThread?.()
+      if (next && active && (scope.all || scope.groups.has(navigationGroupKey(active)))) {
+        const group = active.projectBindingKind === 'directory'
+          ? next.projects.find(project => project.projectKey === navigationGroupKey(active))
+          : next.quickChat
+        const alreadyRead = groupRows && scope.groupThreads.has(active.id) && groupRows.throughGlobalSequence >= next.throughGlobalSequence
+        if (!alreadyRead && !group?.recentThreads.some(thread => thread.id === active.id)) {
+          rowIds.add(active.id)
+        }
+      }
+      const ids = [...rowIds]
       // State-only Thread IDs must not expand a simultaneous group's read scope.
       const rows = ids.length > 0 ? await options.readThreads(ids) : undefined
       if (disposed) return
@@ -156,7 +168,8 @@ export function createNavigationWindowReader(
         if (next.schemaVersion !== 3 && next.schemaVersion !== 4) throw new Error('会话列表数据版本不兼容。')
         if (scope.all || !snapshot) {
           snapshot = next
-          appliedRows.clear()
+          // A full prefix cannot supersede a newer read of a row outside it.
+          for (const id of appliedRows.keys()) if (!rowIds.has(id)) appliedRows.delete(id)
         } else snapshot = { ...snapshot, throughGlobalSequence: Math.max(snapshot.throughGlobalSequence, next.throughGlobalSequence),
           quickChat: scope.groups.has('quick-chat') ? next.quickChat : snapshot.quickChat,
           projects: [...snapshot.projects.filter(group => !scope.groups.has(group.projectKey)), ...next.projects] }

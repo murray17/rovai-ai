@@ -3,7 +3,7 @@ document_type: contract
 contract: navigation-read
 version: v1
 status: accepted
-last_updated: 2026-10-12
+last_updated: 2026-11-22
 ---
 
 # Navigation Read v1
@@ -24,7 +24,9 @@ external_principal 消息推进。查看、重命名、队员消息和 Run 终�
 `groupKeys` 为 `quick-chat` 或 `directory:<projectPath>`。`groupLimits` 为完整前缀大小，默认/最少 5；
 未知 key 不创建组。分组响应在同一个事务里获得总数与排序后的前 N 条，不能用部分本地数据推导补位或名次。
 完整快照只跨组读取目录/计数元数据，各组详细行按索引限定窗口；正常路径不访问 event_log。
-置顶 Camp 用已知 ID 批量读取，不遍历其他组寻找；完整恢复同时按 ID 核对窗口外的置顶项，普通切换不带起其他置顶项读取。
+完整恢复批量核对置顶 Camp。当前打开的普通 Camp 位于新快照的原始前缀之外时，将其 ID 与待核对的 ID 去重合读。
+分组读取仅在涉及当前 Camp 所属组时核对该行，同轮已读且水位足够的结果可以复用。普通切换只读取目标 ID。
+客户端从成功且水位有效的按 ID 响应撤掉已归档或缺失的补显行。
 
 NavigationCampItem 提供 `lastSeenGlobalSequence`（读取旧 fixture 时可缺省为 0）。
 schema 4 增加归档状态，按 ID 的摘要仍返回有权限读取的归档记录。分组前缀、计数、普通搜索和置顶展示以
