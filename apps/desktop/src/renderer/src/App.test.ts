@@ -156,10 +156,10 @@ import {
   taskCreationBlocksSubmittedRunAutoFocus
 } from './ThreadWorkspace'
 import { MobileLayoutProvider } from './MobileLayout'
+import { normalizeThreadTitle } from './camp-title'
 import {
   initialThreadSelection,
   limitDraftNameInput,
-  normalizeDraftName,
   planInitialThreadSelection,
   projectWorkspaceActionsDisabled,
   toggleThreadMemberSelection,
@@ -2767,9 +2767,11 @@ describe('task event projections', () => {
   })
 
   it('normalizes optional Thread names before applying the local scalar boundary', () => {
-    expect(normalizeDraftName('  重构\n\tMCP  设置页  ')).toBe('重构 MCP 设置页')
-    expect(Array.from(normalizeDraftName('😀'.repeat(80))).length).toBe(80)
-    expect(Array.from(normalizeDraftName(limitDraftNameInput('😀'.repeat(81)))).length).toBe(80)
+    expect(normalizeThreadTitle('  重构\n\tMCP  设置页  ')).toBe('重构 MCP 设置页')
+    expect(normalizeThreadTitle('\u0085项目\u0085名称\u0085')).toBe('项目 名称')
+    expect(normalizeThreadTitle('\uFEFF名称')).toBe('\uFEFF名称')
+    expect(Array.from(normalizeThreadTitle('😀'.repeat(80))).length).toBe(80)
+    expect(Array.from(normalizeThreadTitle(limitDraftNameInput('😀'.repeat(81)))).length).toBe(80)
     expect(limitDraftNameInput('  重构   MCP  ')).toBe('  重构   MCP  ')
   })
 

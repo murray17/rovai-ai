@@ -819,7 +819,6 @@ export function StartupWorkspace({
         onRemoveProject={ignoreAsync}
         onRename={ignoreAsync}
         onDelete={ignoreAsync}
-        onDeleteError={ignore}
         onError={ignore}
       />
       {view === 'camp' && <AppHeader
@@ -1219,7 +1218,7 @@ export function BusinessApp({
     operation: OperationId; message: string; retry?: () => void
   } | null>(null)
   const showOperationError = useCallback((operation: OperationId, cause: unknown, retry?: () => void) => {
-    setError({ operation, message: reportOperationFailure(operation, cause).message, retry })
+    setError({ operation, message: reportOperationFailure(operation, cause, { presentation: 'detail' }).message, retry })
   }, [])
   const [toast, setToast] = useState<AppToastValue | null>(null)
   const forkOperation = useMemo(() => new ThreadForkOperation(client, client.reeditScope), [client])
@@ -1665,13 +1664,19 @@ export function BusinessApp({
         commandId: newCommandId(),
         command: { operationId }
       }).then((result) => {
-        if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      }).catch(() => {
-        notifyError(uiAttribute('删除未完成，请重试。'), { label: uiAttribute('重试'), icon: 'retry', onSelect: retry })
+        if (result.status === 'rejected') throw new OperationFailure(normalizeFailure(result))
+      }).catch(error => {
+        const feedback = reportOperationFailure('thread.delete', error)
+        if (feedback.outcome === 'gone') {
+          notify(feedback.message)
+          return
+        }
+        const canRetry = normalizeFailure(error).code !== 'camp.deletion_retry_user_required'
+        notifyError(feedback.message, canRetry ? { label: uiAttribute('重试'), icon: 'retry', onSelect: retry } : undefined)
       })
     }
     retry()
-  }, [client, notifyError])
+  }, [client, notify, notifyError])
 
   const loadThreadDeletionIssues = useCallback(async (): Promise<void> => {
     const issues = await client.request<ThreadDeletionIssue[]>('threads.deletionIssues')
@@ -2074,7 +2079,7 @@ export function BusinessApp({
         const target = navigationSnapshotRef.current && allNavigationThreads(navigationSnapshotRef.current).find(thread => thread.id === threadId)
         const subject = options.title ?? (target ? formatThreadTitle(target) : undefined)
         const visit = desktopNavigation.captureVisit()
-        const feedback = reportOperationFailure(openingFromCache ? 'thread.refresh' : 'thread.open', nextError, subject)
+        const feedback = reportOperationFailure(openingFromCache ? 'thread.refresh' : 'thread.open', nextError, { subject })
         const action: AppToastAction = {
           label: uiAttribute('重试'), icon: 'retry',
           onSelect: () => {
@@ -3407,7 +3412,7 @@ export function BusinessApp({
 
   const chooseThread = (thread: NavigationThreadTarget): void => {
     void activateThread(thread.id, { reconcileDefaultLead: thread.activationState !== 'pending', title: formatThreadTitle(thread) })
-      .catch(error => notifyError(reportOperationFailure('thread.open', error, formatThreadTitle(thread)).message))
+      .catch(error => notifyError(reportOperationFailure('thread.open', error, { subject: formatThreadTitle(thread) }).message))
   }
 
   const openSearchResult = (row: NavigationSearchRow): void => {
@@ -3761,11 +3766,10 @@ export function BusinessApp({
           title
         }
       })
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      await Promise.all([
-        navigationRefreshCoordinator.refreshThreads([thread.id], 'explicit'),
-        activeThreadId === thread.id ? refreshActiveThreadSnapshot(thread.id) : Promise.resolve()
-      ])
+      if (result.status === 'rejected') throw new OperationFailure(normalizeFailure(result))
+      void navigationRefreshCoordinator.refreshThreads([thread.id], 'explicit')
+        .catch(error => reportOperationFailure('navigation.read', error))
+      void refreshThreadInBackground(thread.id)
     } finally {
       setBusy(null)
     }
@@ -3834,7 +3838,7 @@ export function BusinessApp({
         commandId: newCommandId(),
         command: { threadId: thread.id }
       })
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      if (result.status === 'rejected') throw new OperationFailure(normalizeFailure(result))
       hideAcceptedThreadDeletion(thread.id)
       void navigationRefreshCoordinator.refreshGroups([thread.projectBindingKind === 'directory' ? `directory:${thread.projectPath}` : 'quick-chat']).catch(() => undefined)
     } finally {
@@ -3843,10 +3847,8 @@ export function BusinessApp({
   }
 
   const deleteThread = async (thread: NavigationThreadItem): Promise<void> => {
-    if (viewRef.current === 'automations' && activeThreadIdRef.current === thread.id) {
-      await leaveActiveAutomation(() => deleteThreadWithoutAutomationLeaveGuard(thread))
-      return
-    }
+    if (viewRef.current === 'automations' && activeThreadIdRef.current === thread.id
+      && !await leaveActiveAutomation(() => undefined)) return
     await deleteThreadWithoutAutomationLeaveGuard(thread)
   }
 
@@ -3924,7 +3926,7 @@ export function BusinessApp({
       })
       if (result.status === 'rejected') {
         if (visit.isSameVisit() && result.code === 'camp.default_lead_unavailable') {
-          notify(reportOperationFailure('thread.lead.change', result, subject).message)
+          notify(reportOperationFailure('thread.lead.change', result, { subject }).message)
           void refreshThreadInBackground(threadId)
           return
         }
@@ -4759,7 +4761,11 @@ export function BusinessApp({
     onArchive={async thread => { await changeArchive(thread.id, true, 'chat') }}
     onRename={renameThread}
     onDelete={deleteThread}
-    onDeleteError={(nextError) => notifyError(errorMessage(nextError))}
+    onThreadUnavailable={(thread, message) => {
+      notify(message)
+      void navigationRefreshCoordinator.invalidate({ scope: 'group', threadId: thread.id })
+        .catch(error => reportOperationFailure('navigation.read', error))
+    }}
     onError={error => showOperationError('navigation.action', error)}
   />
 

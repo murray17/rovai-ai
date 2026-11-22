@@ -2,6 +2,12 @@ import type { ThreadChannelSource } from '@contracts'
 import { getInterfaceLanguage, uiAttribute } from './interface-language'
 
 export const FIRST_RUN_CAMP_TITLE = '初次集结'
+export const THREAD_TITLE_MAX_SCALARS = 80
+
+export function normalizeThreadTitle(value: string): string {
+  // Core splits on Unicode White_Space, which differs from JavaScript's trim().
+  return value.replace(/\p{White_Space}+/gu, ' ').replace(/^ | $/g, '')
+}
 
 const CHANNEL_LABELS = {
   feishu: { p2p: '飞书私聊', group: '飞书群聊', topic: '飞书话题' },

@@ -46,6 +46,16 @@ app.whenReady().then(async () => {
   const fork=async()=>{await run('forkQA.hold()');await menu();await select();await wait('!!document.querySelector(".app-toast-spinner")')}
   const quiet=()=>wait('!document.querySelector(".app-toast")')
   const count=()=>run('forkQA.calls.filter(c=>c.method==="threads.fork").length')
+  const navAction = async (id, label) => {
+    await click('document.querySelector(' + JSON.stringify('[data-thread-id="' + id + '"] .camp-menu-trigger') + ')')
+    await wait('!!document.querySelector(".sidebar-action-menu")')
+    await click('Array.from(document.querySelectorAll(".sidebar-action-menu-item")).find(item => item.textContent.trim() === ' + JSON.stringify(label) + ')')
+  }
+  const fillRename = async title => {
+    await run('document.getElementById("rename-camp-title").focus(); document.getElementById("rename-camp-title").select()')
+    await window.webContents.insertText(title)
+  }
+  const renameCallCount = () => run('forkQA.calls.filter(call => call.method === "threads.rename").length')
   const screenshots=[]
   const output=process.argv[4]
   try {
@@ -78,10 +88,17 @@ app.whenReady().then(async () => {
     assert.equal(await run(`document.querySelector("${preferencesError}")`), null)
     assert.equal(await run('forkQA.calls.filter(call => ["threads.open", "threads.enter"].includes(call.method)).length'), threadReadsBeforePreferenceRetry)
     // The real open failure retries its original destination and keeps the independent language notice.
-    await run('forkQA.showPersistentToasts(); forkQA.timeoutOpen("other")')
+    await run('forkQA.showPersistentToasts(); forkQA.rejectOpen("other", "full_core_unavailable")')
     await wait('!!document.querySelector(".app-toast[role=status]")')
+    const existsBeforeOpenFailure = await run('forkQA.calls.filter(call => call.method === "threads.exists").length')
     await row('other')
-    const openFailure = "Array.from(document.querySelectorAll('.app-toast[role=alert]')).find(toast => toast.textContent.includes('没能打开「另一个会话 B」'))"
+    const startupFailure = "Array.from(document.querySelectorAll('.app-toast[role=alert]')).find(toast => toast.textContent.includes('没能打开「另一个会话 B」。Rovai 还在启动'))"
+    await wait('Boolean(' + startupFailure + ')')
+    assert.equal(await active(), 'source')
+    assert.equal(await run('forkQA.calls.filter(call => call.method === "threads.exists").length'), existsBeforeOpenFailure)
+    await run('forkQA.rejectOpen("other", "core_request_timeout")')
+    await click('(' + startupFailure + ').querySelector(".app-toast-action")')
+    const openFailure = "Array.from(document.querySelectorAll('.app-toast[role=alert]')).find(toast => toast.textContent.includes('没能打开「另一个会话 B」，Rovai 暂时没有响应。'))"
     await wait(`Boolean(${openFailure})`)
     assert.equal(await active(), 'source')
     await run(`window.openFailureNodes = {
@@ -99,6 +116,17 @@ app.whenReady().then(async () => {
     const leadCandidate = 'document.querySelector(' + JSON.stringify('.camp-member-action-button[aria-label="木瓦的队员操作"]') + ')'
     await click('document.querySelector(' + JSON.stringify('.camp-detail-entry[data-detail="members"]') + ')')
     await wait(`Boolean(${leadCandidate})`)
+    await run('forkQA.rejectCommand("threads.changeDefaultLead", "fixture.unmapped_rejection")')
+    await click(leadCandidate)
+    await wait('!!document.querySelector(".camp-member-menu-item")')
+    await click('Array.from(document.querySelectorAll(".camp-member-menu-item")).find(item => item.textContent.trim() === "设为队长")')
+    await wait('document.querySelector(".error-banner strong")?.textContent === "更换默认队长未完成"')
+    assert.equal(await run('document.querySelector(".error-banner strong + span").textContent'), '请重试。')
+    await click('document.querySelector(".error-banner [aria-label=关闭错误]")')
+    if (!await run('Boolean(' + leadCandidate + ')')) {
+      await click('document.querySelector(' + JSON.stringify('.camp-detail-entry[data-detail="members"]') + ')')
+    }
+    await wait(`Boolean(${leadCandidate})`)
     await click(leadCandidate)
     await wait('!!document.querySelector(".camp-member-menu-item")')
     await click('Array.from(document.querySelectorAll(".camp-member-menu-item")).find(item => item.textContent.trim() === "设为队长")')
@@ -108,6 +136,59 @@ app.whenReady().then(async () => {
     await click('document.querySelector(".app-toast-close")')
     await key('Escape')
     await quiet()
+
+    // Validate the real Rename form before sending, then preserve its draft on a Core rejection.
+    await navAction('other', '重命名')
+    await wait('document.activeElement.id === "rename-camp-title"')
+    const beforeRename = await renameCallCount()
+    await fillRename('😀'.repeat(81))
+    await wait('document.querySelector("#rename-camp-error")?.textContent === "对话名称最多 80 个字符。"')
+    assert.equal(await run('document.getElementById("rename-camp-title").getAttribute("aria-invalid")'), 'true')
+    assert.equal(await run('document.getElementById("rename-camp-title").getAttribute("aria-describedby")'), 'rename-camp-error')
+    assert.equal(await run('document.querySelector(".camp-action-dialog .compact-field-meta span").textContent'), '81 / 80')
+    assert.equal(await run('document.querySelector(".camp-action-dialog button[type=submit]").disabled'), true)
+    await key('Return')
+    assert.equal(await renameCallCount(), beforeRename)
+    await fillRename('  ' + '😀'.repeat(80) + '  ')
+    await wait('document.querySelector(".camp-action-dialog button[type=submit]")?.disabled === false')
+    await run('forkQA.rejectCommand("threads.rename", "camp.name_too_long")')
+    await key('Return')
+    await wait('document.querySelector(".camp-action-dialog [role=alert]")?.textContent === "对话名称最多 80 个字符。"')
+    assert.equal(await renameCallCount(), beforeRename + 1)
+    assert.equal(await run('forkQA.calls.filter(call => call.method === "threads.rename").at(-1).params.command.title'), '😀'.repeat(80))
+    assert.equal(await run('document.getElementById("rename-camp-title").value'), '  ' + '😀'.repeat(80) + '  ')
+    assert.equal(await run('document.querySelector(".error-banner")'), null)
+    await fillRename('  改名后的会话   B  ')
+    await key('Return')
+    await wait('!document.querySelector(".camp-action-dialog[data-state=open]")')
+    await wait('document.querySelector(\'[data-thread-id="other"] .camp-nav-open\')?.textContent.includes("改名后的会话 B")')
+    assert.equal(await renameCallCount(), beforeRename + 2)
+
+    await run('forkQA.addConversation("peer-deleted", "即将被删除的会话")')
+    await wait('!!document.querySelector(\'[data-thread-id="peer-deleted"]\')')
+    await navAction('peer-deleted', '重命名')
+    await run('forkQA.rejectCommand("threads.rename", "camp.not_found")')
+    await key('Return')
+    await wait('document.querySelector(".app-toast[role=status]")?.textContent.includes("这个会话已被删除。")')
+    await wait('!document.querySelector(".camp-action-dialog[data-state=open], [data-thread-id=peer-deleted]")')
+    await click('document.querySelector(".app-toast-close")')
+
+    await navAction('other', '删除')
+    await run('forkQA.rejectCommand("threads.delete", "camp.workspace_cleanup_pending")')
+    await click('document.querySelector(".camp-action-dialog .danger-button")')
+    await wait('document.querySelector(".camp-action-dialog [role=alert]")?.textContent === "工作区正在清理，请稍后重试。"')
+    assert.equal(await run('document.querySelector(".error-banner")'), null)
+    assert.equal(await run('document.body.textContent.includes("Raw command rejection")'), false)
+    await key('Escape')
+    await wait('!document.querySelector(".camp-action-dialog[data-state=open]")')
+    assert.equal(await run('!!document.querySelector(\'[data-thread-id="other"]\')'), true)
+
+    await run('forkQA.showDeletionIssue("fixture-deletion"); forkQA.rejectCommand("threads.retryDeletion", "camp.deletion_not_found")')
+    await wait('document.querySelector(".app-toast[role=alert]")?.textContent.includes("删除未完成，请重试。")')
+    await click('document.querySelector(".app-toast[role=alert] .app-toast-action")')
+    await wait('document.querySelector(".app-toast[role=status]")?.textContent.includes("找不到这次删除的记录。")')
+    assert.equal(await run('document.querySelector(".app-toast[role=status] .app-toast-action")'), null)
+    await click('document.querySelector(".app-toast-close")')
 
     // Two deterministic conflicts leave the error visible even after Composer takes focus.
     for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {

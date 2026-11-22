@@ -12,7 +12,7 @@ import { LanguagePreferenceReadNotice } from '../../../apps/desktop/src/renderer
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
 import { changeInterfaceLanguage, observeInterfaceLanguage, uiAttribute } from '../../../apps/desktop/src/renderer/src/interface-language'
-import type { InterfaceLanguageSnapshot } from '@contracts'
+import type { InterfaceLanguageSnapshot, ThreadDeletionIssue } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/mobile.css'
 
@@ -56,7 +56,9 @@ const projection = (value: any) => {
 }
 let releaseFork: (()=>void) | undefined
 let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false, rejectFork = false
-let timeoutThread: string | null = null
+let openFailure: { threadId: string; code: string } | null = null
+const rejectedCommands = new Map<string, string>()
+let deletionIssues: ThreadDeletionIssue[] = []
 let stopConflicts = 0
 let releaseAttachment:(()=>void)|undefined, attachmentPending=false
 const client = {...model.client,composerAttachments:{...model.client.composerAttachments,
@@ -66,6 +68,23 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
   request:async(method:string,params:any={})=>{
     calls.push({method,params:structuredClone(params)})
     const command=params.command??params,value=threads.get(command.threadId)
+    const rejection = rejectedCommands.get(method)
+    if (rejection) {
+      rejectedCommands.delete(method)
+      if (method === 'threads.rename' && rejection === 'camp.not_found') {
+        threads.delete(command.threadId)
+        sequence += 1
+        checkpoint()
+      }
+      return { ...applied(), status: 'rejected', code: rejection, payload: { message: 'Raw command rejection' } }
+    }
+    if (method === 'threads.rename') {
+      value.thread.title = command.title
+      sequence += 1
+      checkpoint()
+      return { ...applied(), code: 'camp.renamed' }
+    }
+    if (method === 'threads.deletionIssues') return deletionIssues
     if(method==='threads.fork') {
       if(rejectFork) {rejectFork=false;return {...applied(),status:'rejected',code:'camp.fork_anchor_unavailable'}}
       if(holdFork) await new Promise<void>(resolve=>{releaseFork=resolve})
@@ -123,10 +142,11 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
     if(method==='navigation.findThread')return value?navigation(value).quickChat.recentThreads[0]:null
     if(method==='threads.exists')return !!value
     if (method === 'threads.open' || method === 'threads.enter') {
-      if (timeoutThread === command.threadId) {
-        timeoutThread = null
+      if (openFailure && openFailure.threadId === command.threadId) {
+        const { code } = openFailure
+        openFailure = null
         throw Object.assign(new Error('Rust Core request timed out: threads.enter'), {
-          kind: 'infrastructure_failure', code: 'core_request_timeout', retryable: true
+          kind: 'infrastructure_failure', code, retryable: true
         })
       }
       if (failOpen && command.threadId.startsWith('copy-')) throw new Error('Open failed')
@@ -229,7 +249,17 @@ const clearToasts = () => {
 ;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts,finishLanguageRead,languageReads:()=>languageReads,hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
   generalPreferenceReads: () => generalPreferenceReads,
   finishPreferenceRetry: () => finishPreferenceRetry?.(),
-  timeoutOpen: (threadId: string) => { timeoutThread = threadId },
+  rejectOpen: (threadId: string, code: string) => { openFailure = { threadId, code } },
+  rejectCommand: (method: string, code: string) => { rejectedCommands.set(method, code) },
+  addConversation: (threadId: string, title: string) => {
+    seed(threadId, title)
+    sequence += 1
+    events.forEach(fn => fn({ method: 'navigation.invalidated', params: { scope: 'group', groupKeys: ['quick-chat'] } }))
+  },
+  showDeletionIssue: (operationId: string) => {
+    deletionIssues = [{ operationId, attentionRevision: 1 }]
+    events.forEach(fn => fn({ method: 'navigation.invalidated', params: { reason: 'camps.deletion_attention' } }))
+  },
   showLeadCandidate: () => {
     threads.get('source').members[1].membershipStatus = 'active'
     sequence += 1

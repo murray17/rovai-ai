@@ -48,8 +48,9 @@ import { allNavigationThreads } from './ui-model'
 import { NavigationSearchPanel } from './NavigationSearchPanel'
 import type { NavigationSearchRow } from './camp-navigation-search'
 import { NavigationTitle } from './NavigationTitle'
-import { formatThreadTitle } from './camp-title'
+import { formatThreadTitle, normalizeThreadTitle, THREAD_TITLE_MAX_SCALARS } from './camp-title'
 import { ProjectRenameDialog } from './ProjectRenameDialog'
+import { normalizeFailure, reportOperationFailure } from './operation-failure'
 import { useNavigationCollapsed } from './NavigationShell'
 import {
   NAVIGATION_INITIAL_VISIBLE_CAMPS,
@@ -185,7 +186,7 @@ export function ThreadNavigation({
   onArchive,
   onRename,
   onDelete,
-  onDeleteError,
+  onThreadUnavailable,
   onError
 }: {
   navigationId?: string
@@ -242,7 +243,7 @@ export function ThreadNavigation({
   onRename(thread: NavigationThreadItem, title: string): Promise<void>
   onArchive?(thread: NavigationThreadItem): Promise<void>
   onDelete(thread: NavigationThreadItem): Promise<void>
-  onDeleteError?(error: unknown): void
+  onThreadUnavailable?(thread: NavigationThreadItem, message: string): void
   onError(error: unknown): void
 }): JSX.Element {
   const client = useThreadClient()
@@ -253,8 +254,15 @@ export function ThreadNavigation({
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<NavigationAction>(null)
   const [renameTitle, setRenameTitle] = useState('')
+  const [actionIssue, setActionIssue] = useState<{ code: string | null; message: string } | null>(null)
   const [renameProject, setRenameProject] = useState<ProjectNavigationGroup | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
+  const normalizedRenameTitle = normalizeThreadTitle(renameTitle)
+  const renameTitleLength = Array.from(normalizedRenameTitle).length
+  const renameTooLong = renameTitleLength > THREAD_TITLE_MAX_SCALARS
+  const renameInvalid = renameTooLong || actionIssue?.code === 'camp.name_too_long'
+  const renameIssue = renameTooLong ? uiAttribute('对话名称最多 80 个字符。') : actionIssue?.message
+  const renameCanSubmit = !!normalizedRenameTitle && !renameInvalid && !actionBusy
   const [paletteOpen, setPaletteOpen] = useState(false)
   const loadingGroupsRef = useRef<Set<string>>(new Set())
   const navigationThreads = useMemo(
@@ -366,6 +374,7 @@ export function ThreadNavigation({
     }
     setAction({ kind, thread })
     setRenameTitle(thread.title)
+    setActionIssue(null)
   }
 
   const openProjectRemoval = (project: ProjectNavigationGroup): void => {
@@ -377,15 +386,26 @@ export function ThreadNavigation({
     setAction(null)
   }
 
+  const showThreadActionFailure = (operation: 'thread.rename' | 'thread.delete', thread: NavigationThreadItem, error: unknown): void => {
+    const feedback = reportOperationFailure(operation, error, { presentation: 'detail' })
+    if (feedback.outcome === 'gone' && onThreadUnavailable) {
+      setAction(null)
+      onThreadUnavailable(thread, feedback.message)
+      return
+    }
+    setActionIssue({ code: normalizeFailure(error).code, message: feedback.message })
+  }
+
   const submitRename = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!action || action.kind !== 'rename' || !renameTitle.trim() || actionBusy) return
+    if (!action || action.kind !== 'rename' || !renameCanSubmit) return
     setActionBusy(true)
+    setActionIssue(null)
     try {
-      await onRename(action.thread, renameTitle)
+      await onRename(action.thread, normalizedRenameTitle)
       setAction(null)
     } catch (error) {
-      onError(error)
+      showThreadActionFailure('thread.rename', action.thread, error)
     } finally {
       setActionBusy(false)
     }
@@ -394,11 +414,12 @@ export function ThreadNavigation({
   const confirmDelete = async (): Promise<void> => {
     if (!action || action.kind !== 'delete' || actionBusy) return
     setActionBusy(true)
+    setActionIssue(null)
     try {
       await onDelete(action.thread)
       setAction(null)
     } catch (error) {
-      ;(onDeleteError ?? onError)(error)
+      showThreadActionFailure('thread.delete', action.thread, error)
     } finally {
       setActionBusy(false)
     }
@@ -690,15 +711,32 @@ export function ThreadNavigation({
                   description={uiAttribute("仅更新侧栏中的对话名称。项目归属、队员、消息与活动顺序保持不变。")}
                   icon="pencil"
                   closeDisabled={actionBusy}
-            hideDescription
+                  hideDescription
                 />
                 <form className="app-dialog-form" onSubmit={(event) => void submitRename(event)}>
                   <AppDialogBody>
-                    <label className="field-label" htmlFor="rename-camp-title"><UiText zh={"对话名称"} /><input id="rename-camp-title" autoFocus data-dialog-autofocus value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={actionBusy} /></label>
+                    <label className="field-label" htmlFor="rename-camp-title">
+                      <UiText zh="对话名称" />
+                      <input
+                        id="rename-camp-title"
+                        data-dialog-autofocus
+                        autoComplete="off"
+                        value={renameTitle}
+                        readOnly={actionBusy}
+                        aria-invalid={renameInvalid}
+                        aria-describedby={renameIssue ? 'rename-camp-error' : undefined}
+                        onChange={(event) => { setRenameTitle(event.target.value); setActionIssue(null) }}
+                        onKeyDown={(event) => { if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault() }}
+                      />
+                    </label>
+                    {renameIssue && <div className="compact-field-meta">
+                      <p id="rename-camp-error" className="compact-field-error" role="alert">{renameIssue}</p>
+                      {renameTooLong && <span>{renameTitleLength} / {THREAD_TITLE_MAX_SCALARS}</span>}
+                    </div>}
                   </AppDialogBody>
                   <AppDialogFooter>
                     <Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}><UiText zh={"取消"} /></button></Dialog.Close>
-                    <button className="primary-button conversation-primary-button" type="submit" disabled={!renameTitle.trim() || actionBusy}>{actionBusy ? uiAttribute("保存中…") : uiAttribute("保存名称")}</button>
+                    <button className="primary-button conversation-primary-button" type="submit" disabled={!renameCanSubmit}>{actionBusy ? uiAttribute("保存中…") : uiAttribute("保存名称")}</button>
                   </AppDialogFooter>
                 </form>
               </>
@@ -710,6 +748,9 @@ export function ThreadNavigation({
                   icon="trash"
                   closeDisabled={actionBusy}
                 />
+                {actionIssue && <AppDialogBody>
+                  <p className="compact-inline-error" role="alert">{actionIssue.message}</p>
+                </AppDialogBody>}
                 <AppDialogFooter>
                   <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}><UiText zh={"取消"} /></button></Dialog.Close>
                   <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? uiAttribute("正在删除…") : uiAttribute("删除")}</button>
