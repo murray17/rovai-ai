@@ -6,6 +6,7 @@ import { WindowCloseSettings } from './WindowCloseSettings'
 import { GeneralLeadSelect } from './GeneralLeadSelect'
 import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 import { readErrorMessage } from './error-message'
+import { reportOperationFailure, retryRead } from './operation-failure'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
@@ -102,9 +103,9 @@ export function GeneralSettings({
     setWorldMapError(null)
     setExecutionAutoOpenError(null)
     try {
-      acceptPreferences(await api.get())
+      acceptPreferences(await retryRead(() => api.get()))
     } catch (error) {
-      setPreferenceError(errorMessage(error))
+      setPreferenceError(reportOperationFailure('preferences.read', error).message)
     }
   }, [acceptPreferences, api])
 

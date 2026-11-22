@@ -1,3 +1,4 @@
+import { reportOperationFailure } from './operation-failure'
 import type { NavigationFindIntent } from './camp-navigation-search'
 import { ThreadMessageEditor } from './ThreadMessageEditor'
 import { MoreMenuIcon, SidebarMenuIcon } from './SidebarMenuIcon'
@@ -9796,14 +9797,21 @@ export function ApprovalDock({
   const [expandedReasonIds, setExpandedReasonIds] = useState<Set<string>>(() => new Set())
   const [completed, setCompleted] = useState<Set<string>>(() => new Set())
   const [submitting, setSubmitting] = useState<Set<string>>(() => new Set())
+  const [settled, setSettled] = useState<Record<string, { approval: ActionApprovalView; message: string }>>({})
+  const acknowledgementRef = useRef<HTMLButtonElement>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [now, setNow] = useState(Date.now)
-  const inFlight = useRef(new Set<string>())
+  const inFlight = useRef(new Map<string, ActionApprovalView | null>())
   const contentId = useId()
   const presentedFocusRequest = useRef<number | null>(null)
   const arrival = useRef(new Map<string, number>())
+  const visibleApprovals = [...new Map([
+    ...[...inFlight.current.values()].filter(approval => approval !== null).map(approval => [approval.id, approval] as const),
+    ...approvals.map(approval => [approval.id, approval] as const),
+    ...Object.values(settled).map(({ approval }) => [approval.id, approval] as const)
+  ]).values()]
   const pending = [
-    ...approvals.map(approval => ({ id: approval.id, approval, interaction: null as NativeInteractionView | null, createdAt: 0 })),
+    ...visibleApprovals.map(approval => ({ id: approval.id, approval, interaction: null as NativeInteractionView | null, createdAt: 0 })),
     ...interactions.map(interaction => ({ id: interaction.id, approval: null as ActionApprovalView | null, interaction, createdAt: interaction.createdAt }))
   ].map(item => {
     if (!arrival.current.has(item.id)) arrival.current.set(item.id, arrival.current.size)
@@ -9818,6 +9826,13 @@ export function ApprovalDock({
   const agentId = approval?.agentId ?? agentRuns.find(run => run.id === interaction?.agentRunId)?.agentId ?? ''
   const sourceLabel = `${profileById.get(agentId)?.displayName ?? agentId} · ${approval ? runtimeAdapterLabel(approval.adapterKind) : 'Pi'}`
   const previousActive = useRef<string | null>(null)
+  const settledApproval = approval && settled[approval.id]
+
+  useLayoutEffect(() => {
+    if (settledApproval && !collapsed && (document.activeElement === document.body || containerRef.current?.contains(document.activeElement))) {
+      acknowledgementRef.current?.focus({ preventScroll: true })
+    }
+  }, [settledApproval, collapsed, containerRef])
 
   useEffect(() => {
     if (!interactions.some(request => request.expiresAt !== null)) return
@@ -9866,13 +9881,15 @@ export function ApprovalDock({
     if (pending[index]) setActiveId(pending[index].id)
   }
   const submit = async (answer: NativeInteractionAnswer | string): Promise<void> => {
-    if (inFlight.current.has(item.id)) return
-    inFlight.current.add(item.id)
+    if (inFlight.current.has(item.id) || settled[item.id]) return
+    inFlight.current.set(item.id, approval ?? null)
     setSubmitting(current => new Set(current).add(item.id))
     setErrors(current => { const next = { ...current }; delete next[item.id]; return next })
     try {
-      if (approval && typeof answer === 'string') await onResolve(approval, answer)
-      else if (interaction && typeof answer !== 'string' && onRespond) {
+      if (approval && typeof answer === 'string') {
+        await onResolve(approval, answer)
+        setCompleted(current => new Set(current).add(item.id))
+      } else if (interaction && typeof answer !== 'string' && onRespond) {
         const result = await onRespond(interaction, answer)
         if (result.status === 'failed') { setErrors(current => ({ ...current, [item.id]: t('提交失败，内容已保留') })); return }
         if (result.status === 'unknown' || result.status === 'pending') {
@@ -9886,6 +9903,15 @@ export function ApprovalDock({
         setCompleted(current => new Set(current).add(item.id))
       }
     } catch (error) {
+      if (approval) {
+        const feedback = reportOperationFailure('approval.resolve', error)
+        if (feedback.outcome === 'resolved' || feedback.outcome === 'gone') {
+          setSettled(current => ({ ...current, [approval.id]: { approval, message: feedback.message } }))
+        } else {
+          setErrors(current => ({ ...current, [item.id]: feedback.message }))
+        }
+        return
+      }
       const resultUncertain = Boolean(interaction) && !(error && typeof error === 'object' && 'requestNotSent' in error && error.requestNotSent === true)
       if (resultUncertain) setUncertain(current => new Set(current).add(item.id))
       setErrors(current => ({ ...current, [item.id]: t(resultUncertain ? '提交结果待核对，内容已保留' : '提交失败，内容已保留') }))
@@ -9916,7 +9942,15 @@ export function ApprovalDock({
       </nav>
     </header>
     {!collapsed && <div className="approval-dock-scroll pending-content" id={contentId} data-approval-id={item.id}>
-      {approval ? <>
+      {settledApproval ? <>
+        <p className="pending-status" role="status">{settledApproval.message}</p>
+        <div className="approval-dock-actions">
+          <button ref={acknowledgementRef} className="quiet-button approval-acknowledge" type="button" onClick={() => {
+            setCompleted(current => new Set(current).add(item.id))
+            setSettled(current => { const next = { ...current }; delete next[item.id]; return next })
+          }}><UiText zh="知道了" /></button>
+        </div>
+      </> : approval ? <>
         {showReason && <ApprovalReason key={approval.id} reason={approval.reason!} expanded={expandedReasonIds.has(approval.id)}
           onToggle={() => setExpandedReasonIds(previous => { const next = new Set(previous); if (next.has(approval.id)) next.delete(approval.id); else next.add(approval.id); return next })} />}
         <pre tabIndex={0} role="region" aria-label={uiAttribute('完整审批请求，可滚动')}>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>

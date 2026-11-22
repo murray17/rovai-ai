@@ -136,10 +136,11 @@ app.whenReady().then(async () => {
     second.destroy()
     const opensBefore=await run('window.navigationTest.actions.length')
     const p=await context(runningSelector)
-    assert.deepEqual(await menuLabels(),['置顶','标记已读','重命名','复制会话 ID','删除'])
+    assert.deepEqual(await menuLabels(),['置顶','标记已读','重命名','复制会话 ID','归档','删除'])
     assert.equal(await run('window.navigationTest.actions.length'),opensBefore,'Right click never opens a Thread')
     const popup=await run('(()=>{const r=document.querySelector(".sidebar-action-menu").getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom}})()')
-    assert.ok(Math.abs(popup.x-p.x)<2&&Math.abs(popup.y-p.y)<2,'Context menu follows the pointer')
+    assert.ok(Math.abs(popup.x - p.x) < 2 && Math.min(Math.abs(popup.y - p.y), Math.abs(popup.bottom - p.y)) < 2,
+      `Context menu follows the pointer on either side of the anchor: ${JSON.stringify({ popup, pointer: p })}`)
     assert.ok(popup.right<=1032&&popup.bottom<=692,'Menu fits inside window bounds')
     await capture('sidecar-v3-thread-menu')
     await selectItem('标记已读');await moveAway()

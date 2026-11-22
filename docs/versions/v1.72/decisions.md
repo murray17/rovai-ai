@@ -3,10 +3,24 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-20
+last_updated: 2026-11-21
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d91"></a>
+## V1.72-D91：Renderer 按操作与错误码解释失败
+
+- 状态：accepted
+- 日期：2026-11-21
+- 当前权威：[操作反馈](../../ui/components/operation-feedback.md)。
+
+操作的落点、语言偏好与可行的重试由 Desktop 和 Web 共用的 Renderer 决定。Core 保持稳定错误码，
+原始消息留给日志、CLI 和协议。明确的拒绝、待核对的回执和状态已变化分别由已有业务流程承接，
+统一文案选择后由源码检查约束新增出口。
+
+在 Core 本地化会让同一个错误同时承担多个界面的提示职责，无法根据弹窗、卡片和当前选项选择恢复动作。
+逐个出口维护会在 Desktop 和 Web 重复判断，也难以持续阻止兜底原文重新进入界面。
 
 <a id="v1-72-d90"></a>
 ## V1.72-D90：导航搜索共用公开正文与会话内查找

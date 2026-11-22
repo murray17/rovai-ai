@@ -768,8 +768,27 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .content.members-content,
 .content.memory-content { grid-row: 1 / -1; }
 .content > * { max-width: 1400px; margin-right: auto; margin-left: auto; }
-.content.task-content { min-height: 0; overflow: hidden; padding: 0; background: var(--surface); }
-.content.task-content > * { max-width: none; }
+.content.task-content { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0; background: var(--surface); }
+.content.task-content > * { max-width: none; margin-inline: 0; }
+.content.task-content > .error-banner { flex: none; }
+.content.task-content .workspace-shell { flex: 1 1 auto; height: auto; }
+.content.task-content > .mission-full { height: auto; }
+
+.thread-preferences-feedback {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  color: var(--ink);
+  text-align: center;
+}
+.thread-preferences-feedback p { margin: 0; }
+.thread-preferences-feedback .quiet-button { min-width: 44px; }
+.thread-preferences-feedback .quiet-button[aria-disabled="true"] { cursor: progress; }
 .content.compose-content > .memory-review-notice,
 .content.compose-content > .error-banner,
 .content.settings-content > .memory-review-notice,
@@ -1017,10 +1036,9 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   background: var(--danger);
   font-weight: 800;
 }
-.error-banner strong, .error-banner span, .error-banner small { display: block; }
+.error-banner strong, .error-banner > div > span { display: block; }
 .error-banner strong { font-size: 13px; }
-.error-banner span { margin-top: 3px; font-size: 13px; line-height: 1.45; }
-.error-banner small { margin-top: 4px; color: var(--danger); font-size: 11px; }
+.error-banner > div > span { margin-top: 3px; font-size: 13px; line-height: 1.45; }
 .app-toast-viewport { position: absolute; z-index: 150; top: 58px; left: 50%; display: flex; width: calc(100% - 32px); flex-direction: column; align-items: center; gap: 8px; transform: translateX(-50%); pointer-events: none; }
 .app-toast { display: inline-flex; width: max-content; max-width: min(560px, 100%); min-height: 40px; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); pointer-events: auto; -webkit-app-region: no-drag; }
 .app-toast.is-danger { border-color: color-mix(in srgb, var(--danger) 55%, var(--line-strong)); color: var(--danger); }
@@ -9728,6 +9746,7 @@ textarea.native-question-input { min-height: 96px; max-height: 180px; resize: ve
 .pending-submit-status { color: var(--muted); font-size: 10.5px; }
 .pending-submit-status:empty { display: none; }
 .pending-dock .runtime-option, .native-question-secondary { border: 1px solid var(--line); background: var(--pending-secondary-canvas); color: var(--pending-secondary-ink); }
+.approval-dock .pending-status { color: var(--ink); }
 .pending-error { margin: 8px 0 0; color: var(--danger); font-size: 12px; white-space: pre-wrap; }
 @media (max-width: 1080px) { .approval-dock.pending-dock { width: min(var(--conversation-composer-width), calc(100% - 28px)); } }
 @media (max-width: 700px) {

@@ -128,5 +128,6 @@ Page composition belongs in [surface briefs](docs/ui/README.md#页面局部-brie
 - **Do** keep labels direct; show explanations only when needed to choose, resolve a problem or understand an unavailable action.
 - **Do** use the established terms 队员、记忆、智能体、快速对话.
 - **Don't** add decorative gradients, glow, particles, role-colored message bubbles, card walls or global `transition: all`.
+- **Don't** expose backend messages, error codes or internal method names in user-facing operation feedback.
 - **Don't** invent progress, approvals, capabilities or recovery certainty.
 - **Don't** introduce a new UI framework, CSS-in-JS layer, font, icon system, animation library or state manager for an incremental change.

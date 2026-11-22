@@ -148,6 +148,8 @@ export function ThreadNavigation({
   creatingConversation = false,
   pins = [],
   pinnedThreadItems = [],
+  pinReadIssue,
+  onRetryPins,
   threadReadStates = {},
   onSetThreadUnread,
   onRevealProject,
@@ -203,6 +205,8 @@ export function ThreadNavigation({
   creatingConversation?: boolean
   pins?: NavigationPin[]
   pinnedThreadItems?: NavigationThreadItem[]
+  pinReadIssue?: string | null
+  onRetryPins?(): Promise<void>
   threadReadStates?: Record<string, NavigationThreadReadState>
   onSetThreadUnread?(thread: NavigationThreadItem, unread: boolean): Promise<void>
   onRevealProject?(project: ProjectNavigationGroup): Promise<void>
@@ -470,11 +474,15 @@ export function ThreadNavigation({
           <button className="mobile-icon-button" type="button" aria-label={uiAttribute("选择工作目录")} disabled={state !== 'ready'} onClick={onOpenProject}><NavigationIcon name="folder-open" /></button>
           <button className="mobile-icon-button" type="button" aria-label={uiAttribute("搜索对话、使命和消息")} onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
         </div></header>}
-        {(pinnedThreads.length > 0 || pinnedProjects.length > 0) && (
+        {(pinnedThreads.length > 0 || pinnedProjects.length > 0 || pinReadIssue) && (
           <section className="pinned-navigation" aria-labelledby="pinned-heading">
             <div className="sidebar-group-title navigation-section-title">
               <span id="pinned-heading"><UiText zh={"置顶"} /></span>
             </div>
+            {pinReadIssue && <div className="inline-error" role="alert">
+              <span>{pinReadIssue}</span>
+              {onRetryPins && <button className="quiet-button compact" type="button" onClick={() => void onRetryPins()}><UiText zh="重试" /></button>}
+            </div>}
             {pinnedThreads.map((thread) => (
               <ThreadRow
                 key={thread.id}

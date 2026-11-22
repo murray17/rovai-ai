@@ -135,6 +135,19 @@ app.whenReady().then(async () => {
     state = await enter()
     assert.equal(state.requests.length, 1, 'Enter while reading JSON cannot submit a decision')
 
+    // A pending item can disappear from the refreshed projection before its rejection is presented.
+    await run('window.approvalTest.reset()')
+    await snapshot()
+    await click('.runtime-option')
+    await run('window.approvalTest.rejectApproval("approval.not_pending")')
+    await snapshot()
+    assert.equal(await run("document.querySelector('.approval-dock [role=status]')?.textContent"), '这条审批已在其他地方处理，无需再次提交。')
+    assert.equal(await run("document.querySelector('.approval-dock .runtime-option')"), null)
+    assert.equal(await run("document.activeElement?.textContent"), '知道了')
+    await enter()
+    assert.equal((await snapshot()).id, 'approval-2')
+    assert.equal((await snapshot()).requests.length, 1)
+
     // Exercise the same production Dock with Web-only mobile presentation enabled.
     await run('window.approvalTest.reset(); window.approvalTest.setMobile(true); window.approvalTest.setWidth(1200)')
     for (const theme of ['day', 'night']) {

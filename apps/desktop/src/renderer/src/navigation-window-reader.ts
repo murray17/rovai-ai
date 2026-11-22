@@ -193,7 +193,10 @@ export function createNavigationWindowReader(
     refreshPins() {
       const next = new Set(options.getPinnedThreadIds?.() ?? [])
       const changed = new Set([...pinnedThreadIds, ...next].filter(id => pinnedThreadIds.has(id) !== next.has(id)))
-      if (changed.size === 0) return Promise.resolve()
+      // A failed refill restores the affected group scope even after the pin IDs have changed.
+      if (changed.size === 0) {
+        return pending.groupThreads.size > 0 ? coordinator.refresh('explicit') : Promise.resolve()
+      }
       pinnedThreadIds = next
       rowRevision += 1
       changed.forEach(id => pending.groupThreads.add(id))

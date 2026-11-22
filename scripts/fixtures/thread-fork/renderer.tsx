@@ -4,7 +4,7 @@ import { BusinessApp } from '../../../apps/desktop/src/renderer/src/BusinessApp'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { CurrentUserProfileContext } from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import { createReviewModel } from '../host-web-parity/model'
-import { initial, agents, installations, message, navigation, now, availability } from '../host-web-parity/data'
+import { initial, agents, installations, message, navigation, now, availability, run } from '../host-web-parity/data'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../../apps/desktop/src/shared/general-preferences-model'
 import { EMPTY_SNAPSHOT } from '../../../apps/desktop/src/shared/navigation-preferences-model'
 import { AppToast, type AppToastValue } from '../../../apps/desktop/src/renderer/src/AppToast'
@@ -56,6 +56,8 @@ const projection = (value: any) => {
 }
 let releaseFork: (()=>void) | undefined
 let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false, rejectFork = false
+let timeoutThread: string | null = null
+let stopConflicts = 0
 let releaseAttachment:(()=>void)|undefined, attachmentPending=false
 const client = {...model.client,composerAttachments:{...model.client.composerAttachments,
   prepare:async(_thread:string,_revision:number,file:File)=>{attachmentPending=true;await new Promise<void>(resolve=>{releaseAttachment=resolve});attachmentPending=false;return {id:crypto.randomUUID(),sourcePath:'/fixture/'+file.name,displayName:file.name,kind:'file',fileCount:1,mediaType:'text/plain',byteSize:file.size,previewKind:'none',availability:'unknown'}},
@@ -85,6 +87,23 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
       if(loseResponse) {loseResponse=false;throw new Error('Lost response')}
       return result
     }
+    if (method === 'threads.changeDefaultLead') {
+      value.members.find((member: typeof initial.members[number]) => member.agentId === command.successorAgentId).membershipStatus = 'left'
+      sequence += 1
+      return { ...applied(), status: 'rejected', code: 'camp.default_lead_unavailable', payload: { message: 'Default Lead must be active' } }
+    }
+    if (method === 'agentRuns.cancel') {
+      const currentRun = value.agentRuns.find((entry: typeof run) => entry.id === command.agentRunId)
+      if (stopConflicts > 0) {
+        stopConflicts -= 1
+        currentRun.version += 1
+        sequence += 1
+        return { ...applied(), status: 'rejected', code: 'command.version_conflict', payload: { currentVersion: currentRun.version } }
+      }
+      currentRun.status = 'cancelled'
+      sequence += 1
+      return { ...applied(), code: 'agent_run.cancelled', payload: { agentRunId: currentRun.id, status: currentRun.status } }
+    }
     if (method === 'thread.messages.edit') {
       const target = value.messages.find((message: any) => message.id === command.messageId)
       target.content = structuredClone(command.content.segments)
@@ -103,7 +122,16 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
     if(method==='navigation.threads')return {throughGlobalSequence:sequence,groupKeys:['quick-chat'],threads:nav().quickChat.recentThreads.filter((t:any)=>params.threadIds.includes(t.id))}
     if(method==='navigation.findThread')return value?navigation(value).quickChat.recentThreads[0]:null
     if(method==='threads.exists')return !!value
-    if(method==='threads.open'||method==='threads.enter') {if(failOpen&&command.threadId.startsWith('copy-'))throw new Error('Open failed');return projection(value)}
+    if (method === 'threads.open' || method === 'threads.enter') {
+      if (timeoutThread === command.threadId) {
+        timeoutThread = null
+        throw Object.assign(new Error('Rust Core request timed out: threads.enter'), {
+          kind: 'infrastructure_failure', code: 'core_request_timeout', retryable: true
+        })
+      }
+      if (failOpen && command.threadId.startsWith('copy-')) throw new Error('Open failed')
+      return projection(value)
+    }
     if(method==='navigation.threadViewed')return {threadId:command.threadId,lastSeenGlobalSequence:command.throughGlobalSequence,changed:false,navigation:{throughGlobalSequence:sequence,groupKeys:[],threads:[]}}
     if(method==='thread.messages.anchors')return {schemaVersion:1,threadId:command.threadId,throughGlobalSequence:sequence,totalCount:value.messages.filter((m:any)=>m.authorType==='user').length,items:value.messages.filter((m:any)=>m.authorType==='user').map((m:any)=>({messageId:m.id,sequence:m.sequence,title:m.body,messageVersion:m.version}))}
     if(method==='thread.pendingInputs.get')return {threadId:command.threadId,executionActive:false,items:[],editSession:null,submissionOutcomes:[]}
@@ -115,8 +143,18 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
     return model.client.request(method as any,params)
   }
 }
+let generalPreferenceReads = 0
+let finishPreferenceRetry: (() => void) | undefined
 const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}},
-  generalPreferences:new Proxy({},{get:(_,key)=>async(...args:any[])=>{if(key==='setInterfaceLanguagePreference')Object.assign(prefs,{interfaceLanguagePreference:args[0],interfaceLanguage:args[0],languageRevision:((prefs as any).languageRevision??0)+1});return prefs}}),
+  generalPreferences:new Proxy({},{get:(_,key)=>async(...args:any[])=>{
+    if (key === 'get' && !saved) {
+      generalPreferenceReads += 1
+      if (generalPreferenceReads <= 2) throw new Error('Host preference unavailable')
+      if (generalPreferenceReads === 3) await new Promise<void>(resolve => { finishPreferenceRetry = resolve })
+    }
+    if(key==='setInterfaceLanguagePreference')Object.assign(prefs,{interfaceLanguagePreference:args[0],interfaceLanguage:args[0],languageRevision:((prefs as any).languageRevision??0)+1})
+    return prefs
+  }}),
   navigationPreferences:new Proxy({},{get:(_,key)=>key==='onChanged'?()=>()=>{}:async()=>navPrefs})}
 const environment:any={client,files:{...model.fileApi,bindThread:async()=>{}},preferences,
   navigationHistory:{initial:{entries:[{kind:'camp',threadId:'source'}],index:0},write:(state:any)=>state,go:async()=>false,listen:()=>()=>{}}}
@@ -189,6 +227,30 @@ const clearToasts = () => {
   renderToasts()
 }
 ;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts,finishLanguageRead,languageReads:()=>languageReads,hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+  generalPreferenceReads: () => generalPreferenceReads,
+  finishPreferenceRetry: () => finishPreferenceRetry?.(),
+  timeoutOpen: (threadId: string) => { timeoutThread = threadId },
+  showLeadCandidate: () => {
+    threads.get('source').members[1].membershipStatus = 'active'
+    sequence += 1
+    events.forEach(fn => fn({ method: 'thread.messages.changed', params: { threadId: 'source' } }))
+  },
+  showStopRun: (conflicts: number) => {
+    stopConflicts = conflicts
+    const source = threads.get('source')
+    source.agentRuns = [{
+      ...run, threadTurnId: null, invocationKind: 'batch', executionEvidenceCount: 0, executionEvidenceChangeSequence: 0,
+      startedAt: new Date(Date.now() - 42000).toISOString(),
+      inputMessageIds: [source.messages[0].id], anchorMessageId: source.messages[0].id, publicTailSequenceAtStart: 1
+    }]
+    sequence += 1
+    events.forEach(fn => fn({ method: 'thread.messages.changed', params: { threadId: 'source' } }))
+  },
+  clearStopRun: () => {
+    threads.get('source').agentRuns = []
+    sequence += 1
+    events.forEach(fn => fn({ method: 'thread.messages.changed', params: { threadId: 'source' } }))
+  },
   addAttachment:()=>{const input=document.querySelector('.camp-workspace form.composer:not(.single-chat-composer) .composer-file-input') as HTMLInputElement;const data=new DataTransfer();data.items.add(new File(['pending'],'pending.txt',{type:'text/plain'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))},attachmentPending:()=>attachmentPending,releaseAttachment:()=>releaseAttachment?.(),
   language:(value:any)=>changeInterfaceLanguage(preferences.generalPreferences,value),
   theme:(theme:any)=>applyAppearanceSnapshot(document.documentElement,{...appearance,preference:theme,resolvedTheme:['night','ember'].includes(theme)?'night':'day'})}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -16,6 +16,9 @@ const source = join(root, 'scripts/fixtures/approval-dock')
 test('production approvals preserve decision identity, safe focus and readable reasons across desktop and phone layouts', { timeout: 90_000 }, async (t) => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-approval-dock-test-'))
+  const userData = join(fixture, 'user-data')
+  const skillRoot = join(userData, 'managed-skill-library')
+  await mkdir(skillRoot, { recursive: true })
   let child
   let closed
   try {
@@ -24,8 +27,8 @@ test('production approvals preserve decision identity, safe focus and readable r
       build: { outDir: join(fixture, 'renderer'), minify: false } })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
-    process.stdout.write(`Isolated approval userData: ${join(fixture, 'user-data')} (no Core/Runtime)\n`)
-    child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
+    process.stdout.write(`Isolated approval userData: ${userData}; Skill Library: ${skillRoot} (unused); no Core/Runtime\n`)
+    child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), userData,
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
     let output = ''

@@ -6,10 +6,15 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-20
+last_updated: 2026-11-21
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 操作反馈
+
+已确认的方向见[操作反馈 UI 合同](../../ui/components/operation-feedback.md)和 [V1.72-D91](decisions.md#v1-72-d91)。
+阶段进度和验收见[实施记录](implementation-plan.md#操作反馈)。
 
 ## 导航搜索
 

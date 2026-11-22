@@ -208,6 +208,7 @@ html[data-mobile-web="true"] .approval-reason-toggle { min-width: 44px; }
 html[data-mobile-web="true"] .approval-dock-scroll > pre { flex: 0 1 auto; min-height: 48px; max-height: 160px; margin: 0; padding: 10px; }
 html[data-mobile-web="true"] .approval-dock-actions { flex: none; gap: 8px; }
 html[data-mobile-web="true"] .approval-dock .runtime-option { min-width: 44px; min-height: 44px; padding: 8px 6px; color: var(--ink); background: var(--surface); font-size: 12px; line-height: 1.35; text-align: center; touch-action: manipulation; }
+html[data-mobile-web="true"] .approval-acknowledge { min-width: 44px; min-height: 44px; touch-action: manipulation; }
 html[data-mobile-web="true"] .approval-dock .runtime-option:hover:not(:disabled) { border-color: var(--control-line); background: var(--neutral-hover); }
 html[data-mobile-web="true"] .approval-option-error { font-size: 12px; line-height: 1.5; }
 /* The shell tracks visualViewport, including a raised software keyboard. */

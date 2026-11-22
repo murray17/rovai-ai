@@ -1356,10 +1356,63 @@ Object.assign(window, { startupTest: {
     requestHandlers.set('threads.exists', () => true)
     await clickNavigation('导航会话 C', '.camp-nav-open')
     campRequest = () => { throw new Error('Fixture connection lost') }
+    const attempts = () => calls.filter(call => call === 'threads.open').length
+    const beforeFailure = attempts()
     invalidateWeb(); await flush(); await flush()
-    check(document.querySelector('.error-banner')?.textContent?.includes('Fixture connection lost'),
-      'Refresh errors for an existing Thread must remain visible')
-    cases.push('Web refresh retains real errors when the Thread still exists')
+    check(attempts() === beforeFailure + 1, 'One passive refresh starts a recovery episode')
+    for (const [index, delay] of [1000, 3000, 10000].entries()) {
+      await advance(delay - 1)
+      check(attempts() === beforeFailure + 1 + index, 'A passive retry waits for its backoff')
+      check(!document.querySelector('.error-banner, .app-toast'), 'A pending refresh recovery stays quiet')
+      await advance(1); await flush()
+    }
+    const notice = document.querySelector('.app-toast[role=status]')
+    check(attempts() === beforeFailure + 4 && notice?.textContent?.includes('会话暂时没有刷新，Rovai 没有响应。'),
+      'Exhausting three passive retries displays one neutral notice')
+    check(!document.querySelector('.error-banner') && !document.body.textContent?.includes('Fixture connection lost'),
+      'Passive failures preserve the Thread and keep transport details in diagnostics')
+    invalidateWeb(); await flush()
+    check(document.querySelector('.app-toast[role=status]') === notice, 'A repeat failure leaves the existing notice in place')
+    campRequest = id => campProjection(id)
+    document.querySelector<HTMLButtonElement>('.app-toast[role=status] .app-toast-action')!.click()
+    await flush(); await flush()
+    check(document.querySelector('.camp-content .workspace-shell') && !document.querySelector('.app-toast, .error-banner'),
+      'Retry restores the current Thread without replacing its workspace')
+    cases.push('Web refresh backs off and reports persistent failures once in place')
+
+    const beforeInterruptedRefresh = attempts()
+    campRequest = () => { throw new Error('Fixture connection lost') }
+    invalidateWeb(); await flush()
+    const delayedRetry = deferred<unknown>()
+    campRequest = () => delayedRetry.promise
+    invalidateWeb()
+    await advance(999)
+    check(attempts() === beforeInterruptedRefresh + 1, 'An invalidation during backoff waits for the scheduled retry')
+    await advance(1)
+    check(attempts() === beforeInterruptedRefresh + 2, 'The scheduled refresh retry is in flight')
+    const olderProjection = { ...campProjection('C'), throughGlobalSequence: 1 }
+    const lastReply = '重试期间到达的最后一条消息'
+    const newerProjection = {
+      ...olderProjection,
+      throughGlobalSequence: 2,
+      messages: [fixtureMessage(1, lastReply, 'agent')],
+      coverage: {
+        ...olderProjection.coverage,
+        messages: {
+          ...olderProjection.coverage.messages,
+          loadedCount: 1, totalCount: 1, oldestLoadedSequence: 1, newestLoadedSequence: 1
+        }
+      }
+    }
+    campRequest = () => newerProjection
+    invalidateWeb(); invalidateWeb(); await flush()
+    check(attempts() === beforeInterruptedRefresh + 2, 'Notifications during the retry join the in-flight request')
+    delayedRetry.resolve(olderProjection)
+    await flush(); await flush()
+    check(attempts() === beforeInterruptedRefresh + 3, 'A burst during the retry causes exactly one follow-up read')
+    check(document.querySelector('.camp-workspace')?.textContent?.includes(lastReply),
+      'The follow-up read shows the last reply without a new notification or navigation')
+    cases.push('Web refresh retries retain updates that arrive before the response')
     delete desktopThreadClient.onInvalidated
 
     let memoryPollingFailed = true, memoryPollingReset = false, memoryEventSequence = 1

@@ -399,6 +399,8 @@ Web 登录页使用这一回退，保留的已认证工作区处于隐藏状态�
 「查看更新内容」用色块，✕ 表示稍后处理。右上角会话 heads-up、缩放、快捷键、图片操作与 Web 上传各用专用反馈。
 文件打不开转入[文件预览失败页](file-preview.md#更新与错误)。
 
+业务失败的文案、落点和重试规则见[操作反馈](operation-feedback.md)。
+
 ## References
 
 - [Thread Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)
