@@ -56,6 +56,13 @@ app.whenReady().then(async () => {
     await window.webContents.insertText(title)
   }
   const renameCallCount = () => run('forkQA.calls.filter(call => call.method === "threads.rename").length')
+  const checkBusyColors = async button => {
+    for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+      await run(`forkQA.theme(${JSON.stringify(theme)})`)
+      assert.equal(await run(`getComputedStyle(${button}.querySelector('.busy-label-spinner svg')).color === getComputedStyle(${button}).color`), true, theme)
+    }
+    await run('forkQA.theme("day")')
+  }
   const screenshots=[]
   const output=process.argv[4]
   try {
@@ -174,8 +181,21 @@ app.whenReady().then(async () => {
     await click('document.querySelector(".app-toast-close")')
 
     await navAction('other', '删除')
-    await run('forkQA.rejectCommand("threads.delete", "camp.workspace_cleanup_pending")')
-    await click('document.querySelector(".camp-action-dialog .danger-button")')
+    const deleteButton = 'document.querySelector(".camp-action-dialog .danger-button")'
+    const deleteWidth = await run(`${deleteButton}.offsetWidth`)
+    await run('forkQA.rejectCommand("threads.delete", "camp.workspace_cleanup_pending", true)')
+    await click(deleteButton)
+    await wait(`getComputedStyle(${deleteButton}.querySelector('.busy-label-spinner')).opacity === '1'`)
+    assert.equal(await run(`${deleteButton}.offsetWidth`), deleteWidth)
+    await checkBusyColors(deleteButton)
+    window.webContents.debugger.attach('1.3')
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
+    assert.equal(await run(`getComputedStyle(${deleteButton}.querySelector('.busy-label-spinner svg')).animationName`), 'none')
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+    window.webContents.debugger.detach()
+    await run('forkQA.releaseRejectedCommand()')
     await wait('document.querySelector(".camp-action-dialog [role=alert]")?.textContent === "工作区正在清理，请稍后重试。"')
     assert.equal(await run('document.querySelector(".error-banner")'), null)
     assert.equal(await run('document.body.textContent.includes("Raw command rejection")'), false)
@@ -356,6 +376,7 @@ app.whenReady().then(async () => {
     ]`), ['0.15s', '0.15s', '0.15s'])
     await wait(`getComputedStyle(${saveSpinner}).opacity === '1'`)
     assert.equal(await run(`getComputedStyle(${saveSpinner}.querySelector('svg')).width`), '14px')
+    await checkBusyColors(save)
     await run('forkQA.releaseEdit(false)')
     await wait(`!!document.querySelector('${userRow} .revision-editor [role=alert]') && !${save}.disabled`)
     assert.equal(await run(`${save}.textContent.trim()`), '保存')

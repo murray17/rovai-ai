@@ -266,8 +266,8 @@ export function BusyLabel({ busy, children }: { busy: boolean; children: ReactNo
 
 - 对每个标签名为 `button` 的 `JsxElement`，检查其子树里的 `ConditionalExpression`（包括 `UiText` 的 `zh` 属性值）。
 - 只要某个分支的字符串字面量匹配 `/^正在.+…$|^.{1,6}中…$/` 就报错；属性值（`aria-label`、`title`）不在检查范围。
-- 白名单为 2.4 的 9 处，以“文件名 + 文字”为键，不用行号。
-- 断言违规列表为空，失败信息逐条列出 `文件 · 文字`。
+- 白名单是 2.4 的 9 个按钮、10 条文案。每条记录匹配文件、按钮的 `className` 和 `onClick` 属性以及文案。
+- 断言确实扫描到源码，且全部命中项与白名单按表达式和出现次数精确匹配。
 
 先在 `main@892ef6dcc` 上跑一次，确认扫描有效：按按钮去重后，应命中 2.2 和 2.3 的全部 76 个按钮。同一个按钮可能有多条文案，例如 `ThreadWorkspace.tsx:7170`。
 全部迁移后应为 0。
@@ -465,15 +465,18 @@ PR B：PR A 的全部命令，加 `pnpm test:host-web-mobile`（确认 Mobile We
 - **撤回、删除、重命名**：`message-reedit-ui.test.mjs`、`channel-camp-naming` 中“弹窗已关闭”的断言，从立即判断改为等待（退场 110ms）。
   例如 `message-reedit-ui.test.mjs:97` 改用 `wait('!document.querySelector(".message-withdraw-dialog")')`。
 
-### 6.3 人工验收（`pnpm dev`，不要用日常 userData；见 `docs/development/local-workflow.md`）
+### 6.3 交互验收与人工复核
 
-- [ ] 编辑消息点保存：按钮和“取消”不移动，主按钮不变灰。本机快速返回时看不到转圈；编辑器淡出后显示新气泡和“（已编辑）”。
-- [ ] 断网或注入失败时保存：文字立即回来，错误显示在原处，草稿保留。
-- [ ] 撤回、删除消息，重命名、删除对话：确认按钮不变宽；弹窗 110ms 淡出，退场期间正文和标题不变。
-- [ ] 系统开启“减少动态效果”：转圈静止，编辑器和弹窗直接切换。
-- [ ] Porcelain Day、Steel Night 和其余三套配色下，危险按钮的转圈是危险色，主按钮的转圈是对比色。
-- [ ] 设置页任选三处“保存”（通用、MCP、队员）：图标和文字一起被转圈替换，按钮宽度不变，队员保存按钮不变灰。
-- [ ] 1040×700 和 200% 缩放下按钮不换行、不截断。
+下列记录区分隔离夹具和独立开发版。人工复核使用具备独立 `userData` 与 Skill 文件目录的
+`pnpm dev`，详见[本地开发与 App 隔离流程](../../development/local-workflow.md#开发版只使用-pnpm-dev)。
+
+- [x] 编辑消息。分叉夹具验证保存和取消的位置、主按钮颜色及成功后的新气泡。隔离 Chromium 的 80ms 回执未出现转圈，独立开发版确认重载后仍保留新正文与「（已编辑）」。
+- [x] 注入保存失败。分叉夹具验证原处显示错误、立即恢复保存文字并保留草稿。
+- [ ] 确认弹窗。夹具验证撤回消息与重命名对话的 110ms 退场和关闭前内容，以及删除对话的按钮宽度。删除消息与删除对话确认退场待独立开发版目视复核。
+- [ ] 减少动态效果。Chromium 模拟系统减少动态效果时，分叉夹具实测转圈静止，渠道会话夹具验证重命名弹窗直接关闭。消息保存时的直接切换待独立开发版目视复核。
+- [x] 五套配色。分叉夹具实测删除对话与消息保存的转圈颜色跟随危险按钮与主按钮。
+- [x] 通用、MCP、队员保存。隔离夹具挂起真实组件的保存请求，验证图标和文字被转圈替换、按钮尺寸一致、队员保存不变灰。MCP 保存和添加的图标均为 14px，按钮分别保持 28px 和 30px。
+- [x] 紧凑窗口和缩放。渠道会话夹具验证 1040×700 和 200% 缩放下重命名确认文案完整单行，关窗夹具验证确认动作仍在可视范围内。
 
 ---
 
@@ -483,7 +486,7 @@ PR B：PR A 的全部命令，加 `pnpm test:host-web-mobile`（确认 Mobile We
 | --- | --- |
 | 带省略号截断的按钮放进 `inline-grid` 后不再截断 | 迁移时逐一检查这类按钮；需要截断的给 `.busy-label-content` 加 `overflow: hidden; text-overflow: ellipsis; white-space: nowrap`，限定在该按钮的 class 下 |
 | `:has()` 选择器的样式重算开销 | 只挂在 `form`、`.app-dialog-footer`、`.compact-footer`、`.revision-editor-actions` 和按钮本身，不用通配选择器 |
-| View Transition 期间截图层覆盖页面约 210ms | 只在保存成功时触发；回退时把 `onSaved` 改回原实现，删掉 3.2 的 CSS 即可 |
+| View Transition 期间约 210ms 内点击无效。页面旧截图在实时内容上淡出约 150ms，流式输出可能出现短暂叠影 | 只在保存成功时触发，减少动态效果时直接切换。回退时恢复 `onSaved` 原实现并移除 3.2 的 CSS |
 | Electron 测试断言弹窗“立即”消失 | 按 6.2 改为等待；回退时去掉 `exitMotion` 即可 |
 | 75 处改动量大 | 按文件分提交；2.5 的扫描测试保证没有漏改，也不会误改 C 类 |
 
@@ -506,3 +509,7 @@ PR B：PR A 的全部命令，加 `pnpm test:host-web-mobile`（确认 Mobile We
 | `pnpm build:web`、`pnpm test:host-web-mobile` | Web 构建通过。Mobile Web 套件在基线和分支均为 2 项通过、4 项失败，失败落在导航间距、导航行状态节点、执行台横屏和独立 Server 设置选择器 |
 | 独立 profile 的 `pnpm dev` | 创建隔离会话后，在实际编辑器保存消息。重载后保留新正文与「（已编辑）」标记 |
 | `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=70efa2b4b pnpm docs:check:ci` | 通过 |
+
+复审补验通过 `pnpm typecheck`、`TZ=UTC pnpm test`、Desktop/Web 构建与文档门禁。
+MCP、通用设置、队员设置、会话操作、头像和关窗均使用隔离夹具。头像夹具验证预先挂载的状态区在文件选择期间更新，
+Windows 关窗在 macOS 模拟的控制流中验证退出等待时只有退出按钮进入忙碌态。

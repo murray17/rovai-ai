@@ -9264,7 +9264,9 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 .capability-workspace[data-empty-library="true"] > .capability-detail { display: flex; grid-column: 1; }
 .capability-workspace .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--conversation-action-contrast); border-color: transparent; background: var(--conversation-action); }
 .capability-workspace .primary-button:hover:not(:disabled) { background: var(--conversation-action-hover); }
-.capability-workspace :is(.quiet-button, .primary-button) > svg, .capability-check svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.capability-workspace :is(.quiet-button, .primary-button) > svg,
+.capability-workspace :is(.quiet-button, .primary-button) > .busy-label > .busy-label-content > svg,
+.capability-check svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .capability-workspace .capability-save-action { min-width: 66px; }
 .capability-workspace .skill-toggle { border-color: transparent; background: var(--settings-switch-off); }
 .capability-workspace .skill-toggle[aria-checked="true"] { background: var(--conversation-action); }

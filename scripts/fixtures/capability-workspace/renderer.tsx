@@ -41,6 +41,8 @@ const privateHeader = JSON.stringify({
 let failToolboxSave = false
 let deleteWait: Promise<void> | null = null
 let releaseDelete: (() => void) | undefined
+let mcpSaveWait: Promise<void> | null = null
+let releaseMcpSave: (() => void) | undefined
 let failDelete = false
 let contentHold: { path: string; wait: Promise<void>; release: () => void } | null = null
 let contentFailure: string | null = null
@@ -225,6 +227,9 @@ Object.assign(window, {
             }
           ]
         }
+      if (mcpSaveWait && (method === 'mcp.servers.update' || method === 'mcp.servers.create')) {
+        await mcpSaveWait
+      }
       if (method === 'mcp.servers.update' && conflict) {
         conflict = false
         config.configDigest = 'external-digest'
@@ -359,6 +364,11 @@ Object.assign(window, {
       })
     },
     releaseReveal: () => releaseReveal?.(),
+    holdMcpSave: () => { mcpSaveWait = new Promise(resolve => { releaseMcpSave = resolve }) },
+    releaseMcpSave: () => {
+      releaseMcpSave?.()
+      mcpSaveWait = null
+    },
     failToolboxSave: () => { failToolboxSave = true },
     holdDelete: (fail = false) => {
       failDelete = fail

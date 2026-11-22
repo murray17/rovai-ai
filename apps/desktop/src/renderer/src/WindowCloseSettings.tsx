@@ -96,6 +96,7 @@ function ClosePrompt({ snapshot, transportError, busy, respond }: {
   const text = useCloseCopy()
   const [remember, setRemember] = useState(false)
   const [chosenAction, setChosenAction] = useState<WindowCloseResponse['action'] | null>(null)
+  const exitBusy = busy && chosenAction === 'exit'
   const trayBusy = busy && chosenAction === 'tray'
   const previousFocus = useRef(document.activeElement)
   const choose = (action: WindowCloseResponse['action']) => {
@@ -126,7 +127,9 @@ function ClosePrompt({ snapshot, transportError, busy, respond }: {
         </AppDialogBody>
         <AppDialogFooter leading={<button type="button" className="quiet-button" data-dialog-autofocus disabled={busy}
           onClick={() => choose('cancel')}>{text('取消', 'Cancel')}</button>}>
-          <button type="button" className="quiet-button" disabled={busy} onClick={() => choose('exit')}>{text('退出 Rovai', 'Quit Rovai')}</button>
+          <button type="button" className="quiet-button" disabled={busy} aria-busy={exitBusy} onClick={() => choose('exit')}>
+            <BusyLabel busy={exitBusy}>{text('退出 Rovai', 'Quit Rovai')}</BusyLabel>
+          </button>
           <button type="button" className="primary-button" disabled={busy} aria-busy={trayBusy} onClick={() => choose('tray')}>
             <BusyLabel busy={trayBusy}>{text('最小化到托盘', 'Minimize to tray')}</BusyLabel>
           </button>

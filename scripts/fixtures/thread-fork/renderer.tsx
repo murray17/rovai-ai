@@ -57,7 +57,8 @@ const projection = (value: any) => {
 let releaseFork: (()=>void) | undefined
 let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false, rejectFork = false
 let openFailure: { threadId: string; code: string } | null = null
-const rejectedCommands = new Map<string, string>()
+const rejectedCommands = new Map<string, { code: string; wait?: Promise<void> }>()
+let releaseRejectedCommand: (() => void) | undefined
 let deletionIssues: ThreadDeletionIssue[] = []
 let stopConflicts = 0
 let holdEdit = false
@@ -70,9 +71,11 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
   request:async(method:string,params:any={})=>{
     calls.push({method,params:structuredClone(params)})
     const command=params.command??params,value=threads.get(command.threadId)
-    const rejection = rejectedCommands.get(method)
-    if (rejection) {
+    const rejected = rejectedCommands.get(method)
+    if (rejected) {
       rejectedCommands.delete(method)
+      const { code: rejection, wait } = rejected
+      if (wait) await wait
       if (method === 'threads.rename' && rejection === 'camp.not_found') {
         threads.delete(command.threadId)
         sequence += 1
@@ -261,7 +264,11 @@ const clearToasts = () => {
   generalPreferenceReads: () => generalPreferenceReads,
   finishPreferenceRetry: () => finishPreferenceRetry?.(),
   rejectOpen: (threadId: string, code: string) => { openFailure = { threadId, code } },
-  rejectCommand: (method: string, code: string) => { rejectedCommands.set(method, code) },
+  rejectCommand: (method: string, code: string, hold = false) => {
+    const wait = hold ? new Promise<void>(resolve => { releaseRejectedCommand = resolve }) : undefined
+    rejectedCommands.set(method, { code, wait })
+  },
+  releaseRejectedCommand: () => releaseRejectedCommand?.(),
   addConversation: (threadId: string, title: string) => {
     seed(threadId, title)
     sequence += 1

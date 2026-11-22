@@ -103,10 +103,11 @@ export function MemberAvatarEditor({ value, open, disabled, returnFocusRef, onCh
               <span className="avatar-picker-upload-glyph"><AppDialogGlyph name="image" /></span>
               <button ref={uploadButton} className="member-editor-primary avatar-picker-upload" type="button" title={uiAttribute('支持 PNG、JPEG 和 GIF')}
                 disabled={disabled || busy}
-                aria-busy={busy} onClick={() => void upload()} aria-live="polite">
+                aria-busy={busy} onClick={() => void upload()}>
                 <BusyLabel busy={busy}>{uiAttribute('上传头像')}</BusyLabel>
               </button>
             </div>
+            <span className="sr-only" role="status">{busy && uiAttribute('正在处理头像…')}</span>
             <div className="avatar-picker-presets">
               <button className="avatar-picker-preset-toggle" type="button" disabled={disabled || busy} aria-expanded={presetsOpen}
                 aria-controls={presetsId} onClick={() => setPresetsOpen(current => !current)}>
