@@ -1154,8 +1154,10 @@ export function BusinessApp({
   const [remotePort, setRemotePort] = useState<string | null>(null)
   const newConversationRequestBusy = useRef(false)
   const [generalPreferences, setGeneralPreferencesState] = useState<GeneralPreferencesSnapshot | null>(null)
+  const [generalPreferencesReadFailed, setGeneralPreferencesReadFailed] = useState(false)
   const setGeneralPreferences = useCallback((snapshot: GeneralPreferencesSnapshot): void => {
     initializeInterfaceLanguage(snapshot)
+    setGeneralPreferencesReadFailed(false)
     // Host reads return fresh objects, including when an invalidation was ignored.
     setGeneralPreferencesState(current => JSON.stringify(current) === JSON.stringify(snapshot) ? current : snapshot)
   }, [])
@@ -1164,6 +1166,7 @@ export function BusinessApp({
       setGeneralPreferences(await retryRead(() => uiPreferences.generalPreferences.get()))
     } catch (error) {
       reportOperationFailure('preferences.read', error)
+      setGeneralPreferencesReadFailed(true)
     }
   }), [uiPreferences, setGeneralPreferences])
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
@@ -2243,7 +2246,9 @@ export function BusinessApp({
   }, [activeThreadRefreshCoordinator, desktopNavigation, threadRefreshIsCurrent, threadRefreshRecovery])
 
   const refreshThreadInBackground = useCallback(async (threadId: string): Promise<void> => {
-    if (!threadRefreshIsCurrent(threadId) || threadRefreshRecovery.isRecovering(threadId)) return
+    // The upcoming read covers notifications received during backoff. Once it
+    // starts, the coordinator coalesces new notifications into a trailing read.
+    if (!threadRefreshIsCurrent(threadId) || threadRefreshRecovery.isWaitingToRetry(threadId)) return
     const visit = desktopNavigation.captureVisit()
     const read = () => refreshActiveThreadSnapshot(threadId)
     await read().catch(error => {
@@ -4550,10 +4555,10 @@ export function BusinessApp({
     settings: 'settings-content'
   }
   const startupGateVisible = Boolean(desktop) && startupGateShouldBeVisible(startupSnapshot)
-  const canRenderThread = !startupGateVisible && generalPreferences !== null && view === 'camp'
+  const canShowThread = !startupGateVisible && view === 'camp'
     && (!missionThread || !!activeMission) && activeThreadId !== null
     && visibleThreadSnapshot?.thread.id === activeThreadId
-  const formalThreadVisible = canRenderThread && !campSnapshotEntryPreviewRef.current
+  const formalThreadVisible = canShowThread && generalPreferences !== null && !campSnapshotEntryPreviewRef.current
     && !newConversationOpen && !newMissionOpen && !shuttingDown
   const interruptionAttention = useThreadInterruptionAttention(
     startupStatus === 'resolved',
@@ -4828,15 +4833,17 @@ export function BusinessApp({
           onOpenMenu={openMobileMenu} menuOpen={mobileConversationDrawerOpen} menuTriggerRef={mobileConversationListButtonRef}
           onNew={() => { setNewMissionOpen(true) }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }}/>} 
         {!startupGateVisible && view === 'camp' && missionThread && !activeMission && <section className="mission-section-empty" role={missionList.error ? 'alert' : 'status'}><p>{missionList.error || (missionList.loading ? uiAttribute("正在读取使命…") : uiAttribute("此使命当前不可用。"))}</p>{!missionList.loading && <button className="quiet-button" onClick={missionList.refresh}><UiText zh={"重试"} /></button>}<button className="quiet-button" onClick={returnToMissions}><UiText zh={"返回使命板"} /></button></section>}
-        {canRenderThread && (
+        {canShowThread && (!desktop || generalPreferences !== null) && (
           <MissionSurface key={activeThreadId} enabled={!!activeMission} full={!missionDrawer} onExpand={() => setMissionPresentation('full')} onClose={returnToMissions}>
           {activeMission && <MissionHeader mission={activeMission} drawer={missionDrawer} thread={visibleThreadSnapshot} projectName={activeThreadProject?.name ?? activeThreadContextLabel}
             openRequest={missionOpenRequest} onExpand={() => setMissionPresentation('full')} onFold={() => setMissionPresentation('drawer')}
-            executionTakesPreviewPriority={generalPreferences.executionConsoleAutoOpen
+            executionTakesPreviewPriority={generalPreferences?.executionConsoleAutoOpen
               && generalPreferences.executionConsolePlacement === 'right'
               && visibleThreadSnapshot.agentRuns.some((run) => run.status === 'running')}
             onClose={returnToMissions} onFocusApprovals={focusThreadApprovals} detailEntryHostRef={setThreadDetailEntryHost}/>}
-          <ThreadWorkspace
+          {generalPreferences === null
+            ? <ThreadPreferencesFeedback failed={generalPreferencesReadFailed} retry={readGeneralPreferences} />
+            : <ThreadWorkspace
             key={activeThreadId}
             missionBoard={activeMission ? <MissionIntro mission={activeMission} projects={displayNavigation?.projects ?? []}/> : null}
             previewTabsInPane={false}
@@ -4926,7 +4933,7 @@ export function BusinessApp({
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
             onNotify={notify}
             onNotifyError={notifyError}
-          />
+          />}
           </MissionSurface>
         )}
 
@@ -5272,6 +5279,30 @@ export function StartupRouteLoading({
   return <StartupRecoverySurface route={kind} headingLevel={2} onRetry={onRetry} onExportDiagnostics={onExportDiagnostics} />
 }
 
+
+function ThreadPreferencesFeedback({ failed, retry }: { failed: boolean; retry(): Promise<void> }): React.JSX.Element {
+  const [retrying, setRetrying] = useState(false)
+  const inFlight = useRef(false)
+
+  const retryPreferences = (): void => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setRetrying(true)
+    void retry().finally(() => {
+      inFlight.current = false
+      setRetrying(false)
+    })
+  }
+
+  return <section className="thread-preferences-feedback">
+    {failed
+      ? <p role="alert"><UiText zh={"会话设置暂时无法读取。"} /></p>
+      : <p role="status"><UiText zh={"正在读取会话设置…"} /></p>}
+    {failed && <button className="quiet-button" type="button" aria-disabled={retrying || undefined} onClick={retryPreferences}>
+      <UiText zh={retrying ? '正在读取…' : '重试'} />
+    </button>}
+  </section>
+}
 
 function ReadIssue({ message, retry }: { message: string; retry(): Promise<unknown> }): React.JSX.Element {
   return <div className="inline-error" role="alert">

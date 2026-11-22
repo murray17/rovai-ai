@@ -1379,6 +1379,40 @@ Object.assign(window, { startupTest: {
     check(document.querySelector('.camp-content .workspace-shell') && !document.querySelector('.app-toast, .error-banner'),
       'Retry restores the current Thread without replacing its workspace')
     cases.push('Web refresh backs off and reports persistent failures once in place')
+
+    const beforeInterruptedRefresh = attempts()
+    campRequest = () => { throw new Error('Fixture connection lost') }
+    invalidateWeb(); await flush()
+    const delayedRetry = deferred<unknown>()
+    campRequest = () => delayedRetry.promise
+    invalidateWeb()
+    await advance(999)
+    check(attempts() === beforeInterruptedRefresh + 1, 'An invalidation during backoff waits for the scheduled retry')
+    await advance(1)
+    check(attempts() === beforeInterruptedRefresh + 2, 'The scheduled refresh retry is in flight')
+    const olderProjection = { ...campProjection('C'), throughGlobalSequence: 1 }
+    const lastReply = '重试期间到达的最后一条消息'
+    const newerProjection = {
+      ...olderProjection,
+      throughGlobalSequence: 2,
+      messages: [fixtureMessage(1, lastReply, 'agent')],
+      coverage: {
+        ...olderProjection.coverage,
+        messages: {
+          ...olderProjection.coverage.messages,
+          loadedCount: 1, totalCount: 1, oldestLoadedSequence: 1, newestLoadedSequence: 1
+        }
+      }
+    }
+    campRequest = () => newerProjection
+    invalidateWeb(); invalidateWeb(); await flush()
+    check(attempts() === beforeInterruptedRefresh + 2, 'Notifications during the retry join the in-flight request')
+    delayedRetry.resolve(olderProjection)
+    await flush(); await flush()
+    check(attempts() === beforeInterruptedRefresh + 3, 'A burst during the retry causes exactly one follow-up read')
+    check(document.querySelector('.camp-workspace')?.textContent?.includes(lastReply),
+      'The follow-up read shows the last reply without a new notification or navigation')
+    cases.push('Web refresh retries retain updates that arrive before the response')
     delete desktopThreadClient.onInvalidated
 
     let memoryPollingFailed = true, memoryPollingReset = false, memoryEventSequence = 1

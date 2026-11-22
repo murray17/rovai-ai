@@ -773,6 +773,22 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .content.task-content > .error-banner { flex: none; }
 .content.task-content .workspace-shell { flex: 1 1 auto; height: auto; }
 .content.task-content > .mission-full { height: auto; }
+
+.thread-preferences-feedback {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  color: var(--ink);
+  text-align: center;
+}
+.thread-preferences-feedback p { margin: 0; }
+.thread-preferences-feedback .quiet-button { min-width: 44px; }
+.thread-preferences-feedback .quiet-button[aria-disabled="true"] { cursor: progress; }
 .content.compose-content > .memory-review-notice,
 .content.compose-content > .error-banner,
 .content.settings-content > .memory-review-notice,

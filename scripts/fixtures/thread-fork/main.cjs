@@ -49,7 +49,34 @@ app.whenReady().then(async () => {
   const screenshots=[]
   const output=process.argv[4]
   try {
-    await window.loadFile(process.argv[2]);await wait('!!document.querySelector("[data-message-id=review-message-2] .message-more-button")')
+    await window.loadFile(process.argv[2])
+    const preferencesError = '.thread-preferences-feedback'
+    await wait(`document.querySelector("${preferencesError} [role=alert]")?.textContent.includes("会话设置暂时无法读取。")`)
+    assert.equal(await active(), 'source')
+    assert.equal(await run('forkQA.generalPreferenceReads()'), 2)
+    assert.equal(await run('document.querySelector(".error-banner") === null && !document.body.textContent.includes("Host preference unavailable")'), true)
+    window.setContentSize(375, 812)
+    await wait('innerWidth === 375 && document.documentElement.dataset.mobileWeb === "true"')
+    await run('forkQA.theme("night"); forkQA.language("en")')
+    await wait('document.querySelector(".thread-preferences-feedback [role=alert]")?.textContent === "Conversation settings are temporarily unavailable."')
+    assert.equal(await run(`(() => {
+      const bounds = document.querySelector("${preferencesError} button").getBoundingClientRect()
+      return bounds.height >= 44 && bounds.width >= 44 && bounds.left >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight
+    })()`), true)
+    await run('forkQA.theme("day"); forkQA.language("zh-CN")')
+    window.setContentSize(1440, 920)
+    await wait('innerWidth === 1440 && document.documentElement.dataset.mobileWeb === undefined')
+    const threadReadsBeforePreferenceRetry = await run('forkQA.calls.filter(call => ["threads.open", "threads.enter"].includes(call.method)).length')
+    await run(`window.preferencesRetryButton = document.querySelector("${preferencesError} button"); preferencesRetryButton.focus()`)
+    await key('Return')
+    await wait('forkQA.generalPreferenceReads() === 3 && preferencesRetryButton.getAttribute("aria-disabled") === "true"')
+    await key('Return')
+    assert.equal(await run('document.activeElement === preferencesRetryButton && forkQA.generalPreferenceReads() === 3'), true)
+    await run('forkQA.finishPreferenceRetry()')
+    await wait('!!document.querySelector("[data-message-id=review-message-2] .message-more-button")')
+    assert.equal(await active(), 'source')
+    assert.equal(await run(`document.querySelector("${preferencesError}")`), null)
+    assert.equal(await run('forkQA.calls.filter(call => ["threads.open", "threads.enter"].includes(call.method)).length'), threadReadsBeforePreferenceRetry)
     // The real open failure retries its original destination and keeps the independent language notice.
     await run('forkQA.showPersistentToasts(); forkQA.timeoutOpen("other")')
     await wait('!!document.querySelector(".app-toast[role=status]")')
@@ -565,7 +592,7 @@ app.whenReady().then(async () => {
     await wait('!document.querySelector(".app-toast-viewport")')
 
     assert.deepEqual(await run('forkQA.errors'),[]);assert.deepEqual(errors,[])
-    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,forcedColorBorders,loadingTiming,screenshots,verified:['open timeout preserves current page and language notice through retry','unavailable default lead refreshes the roster and sends neutral feedback','one stop version retry and visible feedback in five themes','editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','solid primary, tonal secondary and danger actions','SVG close and no movement while pressed','28px hit areas','danger text contrast in all interaction states','visible forced-color borders','persistent toasts stay until closed or resolved','language re-read preserves focus on failure and clears on success','retained portal follows replacement and hidden shells','hover and focus pause the remaining time','inline editor stays in the message bubble with its actions','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
+    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,toastGeometry,forcedColorBorders,loadingTiming,screenshots,verified:['Web preference failure recovers in the original Thread by keyboard','open timeout preserves current page and language notice through retry','unavailable default lead refreshes the roster and sends neutral feedback','one stop version retry and visible feedback in five themes','editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','no completion prompt after leaving source','no opening-failure prompt','ordinary sidebar opens known copy without refork','deleted target stays quiet','fork rejection auto-dismisses','quick fork never flashes loading','visible fork loading lasts at least 600ms without delaying navigation','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion','shared toast stack and StrictMode cleanup','solid primary, tonal secondary and danger actions','SVG close and no movement while pressed','28px hit areas','danger text contrast in all interaction states','visible forced-color borders','persistent toasts stay until closed or resolved','language re-read preserves focus on failure and clears on success','retained portal follows replacement and hidden shells','hover and focus pause the remaining time','inline editor stays in the message bubble with its actions','toast keyboard actions','200% zoom long message containment','neutral/danger colors in five palettes']}
     await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:true,output,verified:report.verified}));app.exit(0)
   }catch(error){console.error(error.stack??error);console.error(await run('JSON.stringify(forkQA.calls.slice(-12))').catch(()=>''));app.exit(1)}
 })

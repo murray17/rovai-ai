@@ -1897,6 +1897,8 @@
   "暂无运行数据": "No run data available",
   "新 AgentRun 纳管后会显示在这里。": "New AgentRun will appear here after onboarding.",
   "正在读取…": "Reading…",
+  "正在读取会话设置…": "Reading conversation settings…",
+  "会话设置暂时无法读取。": "Conversation settings are temporarily unavailable.",
   "程序路径": "Program Path",
   "恢复自动": "Resume Auto",
   "选择文件": "Select File",

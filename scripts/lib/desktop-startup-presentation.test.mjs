@@ -69,6 +69,7 @@ test('the production App presents the full-window brand loader without weakening
     assert.ok(report.cases.includes('Accepted deletion discards in-flight Web refresh failures and queued reads'))
     assert.ok(report.cases.includes('Web refresh confirms external deletion before removing the current Thread'))
     assert.ok(report.cases.includes('Web refresh backs off and reports persistent failures once in place'))
+    assert.ok(report.cases.includes('Web refresh retries retain updates that arrive before the response'))
     assert.ok(report.cases.includes('The Skill picker loads its catalog on demand'))
     assert.ok(report.cases.includes('Desktop Memory polling recovery refreshes content and pending count once without replaying old notices'))
     assert.ok(report.cases.includes('Desktop global Memory changes refresh across Threads and user management without duplicate polling reads'))

@@ -12,7 +12,7 @@ it('shares 1, 3 and 10 second retries and shows one notice until a refresh succe
   const cycle = recovery.recover('thread', 'snapshot', read)
   expect(recovery.recover('thread', 'snapshot', read)).toBe(cycle)
   recovery.succeeded('thread', 'events')
-  expect(recovery.isRecovering('thread')).toBe(true)
+  expect(recovery.isWaitingToRetry('thread')).toBe(true)
   await vi.advanceTimersByTimeAsync(999)
   expect(read).not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(1)

@@ -143,8 +143,18 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
     return model.client.request(method as any,params)
   }
 }
+let generalPreferenceReads = 0
+let finishPreferenceRetry: (() => void) | undefined
 const preferences:any={appearance:{get:async()=>appearance,onChanged:()=>()=>{}},
-  generalPreferences:new Proxy({},{get:(_,key)=>async(...args:any[])=>{if(key==='setInterfaceLanguagePreference')Object.assign(prefs,{interfaceLanguagePreference:args[0],interfaceLanguage:args[0],languageRevision:((prefs as any).languageRevision??0)+1});return prefs}}),
+  generalPreferences:new Proxy({},{get:(_,key)=>async(...args:any[])=>{
+    if (key === 'get' && !saved) {
+      generalPreferenceReads += 1
+      if (generalPreferenceReads <= 2) throw new Error('Host preference unavailable')
+      if (generalPreferenceReads === 3) await new Promise<void>(resolve => { finishPreferenceRetry = resolve })
+    }
+    if(key==='setInterfaceLanguagePreference')Object.assign(prefs,{interfaceLanguagePreference:args[0],interfaceLanguage:args[0],languageRevision:((prefs as any).languageRevision??0)+1})
+    return prefs
+  }}),
   navigationPreferences:new Proxy({},{get:(_,key)=>key==='onChanged'?()=>()=>{}:async()=>navPrefs})}
 const environment:any={client,files:{...model.fileApi,bindThread:async()=>{}},preferences,
   navigationHistory:{initial:{entries:[{kind:'camp',threadId:'source'}],index:0},write:(state:any)=>state,go:async()=>false,listen:()=>()=>{}}}
@@ -217,6 +227,8 @@ const clearToasts = () => {
   renderToasts()
 }
 ;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts,finishLanguageRead,languageReads:()=>languageReads,hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+  generalPreferenceReads: () => generalPreferenceReads,
+  finishPreferenceRetry: () => finishPreferenceRetry?.(),
   timeoutOpen: (threadId: string) => { timeoutThread = threadId },
   showLeadCandidate: () => {
     threads.get('source').members[1].membershipStatus = 'active'

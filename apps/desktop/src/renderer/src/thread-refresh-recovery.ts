@@ -43,6 +43,12 @@ export function createThreadRefreshRecovery({
     const current: NonNullable<typeof episode> = { threadId, source, complete, completion, exhausted: false }
     episode = current
     const isLive = (): boolean => episode === current && isCurrent(threadId)
+    const schedule = (index: number, delay: number): void => {
+      current.timer = setTimeout(() => {
+        current.timer = undefined
+        void attempt(index)
+      }, delay)
+    }
     const attempt = async (index: number): Promise<void> => {
       if (!isLive()) { complete(); return }
       try {
@@ -52,7 +58,7 @@ export function createThreadRefreshRecovery({
         if (!isLive()) { complete(); return }
         const delay = retryDelays[index]
         if (delay !== undefined) {
-          current.timer = setTimeout(() => void attempt(index + 1), delay)
+          schedule(index + 1, delay)
           return
         }
         current.exhausted = true
@@ -64,13 +70,13 @@ export function createThreadRefreshRecovery({
       }
       complete()
     }
-    current.timer = setTimeout(() => void attempt(1), retryDelays[0])
+    schedule(1, retryDelays[0])
     return completion
   }
 
   return {
     recover,
-    isRecovering: (threadId: string): boolean => episode?.threadId === threadId && !episode.exhausted,
+    isWaitingToRetry: (threadId: string): boolean => episode?.threadId === threadId && episode.timer !== undefined,
     succeeded: (threadId: string, source: ReadSource): void => {
       if (episode?.threadId === threadId && episode.source === source) clear()
     },
