@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useTaskCapability } from './TaskCapabilityProvider'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -146,7 +147,9 @@ export function ShortcutSettings(): React.JSX.Element | null {
             : conflict ? <div className="shortcut-conflict" role="alert"><strong>{t('已用于「{0}」', t(conflict.name))}</strong><p>{t(candidate?.kind === 'mouse' ? '仅转移此侧键，原键盘快捷键保留。' : restoreIntent ? '替换组合键，并清除本项的侧键绑定。' : '仅替换这个组合键，侧键绑定保留。')}</p></div>
             : candidate && <p className="shortcut-record-valid">{t(unchanged ? '已绑定到当前操作' : 'Enter 保存 · Esc 取消')}</p>}
         </div>
-        <div className="shortcut-inline-actions"><button type="button" className="quiet-button" disabled={busy} onClick={closeEditor}>{t('取消')}</button><button type="button" className="primary-button" disabled={busy || !candidate || !!captureError || !!unchanged} onClick={commitCandidate}>{t(busy ? '保存中…' : conflict && !captureError ? '替换并保存' : '保存')}</button></div>
+        <div className="shortcut-inline-actions"><button type="button" className="quiet-button" disabled={busy} onClick={closeEditor}>{t('取消')}</button><button type="button" className="primary-button" disabled={busy || !candidate || !!captureError || !!unchanged} aria-busy={busy} onClick={commitCandidate}>
+          <BusyLabel busy={busy}>{t(conflict && !captureError ? '替换并保存' : '保存')}</BusyLabel>
+        </button></div>
       </> : <><div className={`shortcut-bindings${assigned.length ? ' has-mouse' : ''}`}>
         <div className="shortcut-field-control"><button className="shortcut-binding" id={`shortcut-binding-${row.id}`} type="button" data-edit={row.id} disabled={busy} title={t('点击录制键盘或鼠标侧键')} aria-label={t('修改{0}绑定，{1}', t(row.name), binding ? shortcutKeyParts(binding, platform).map(key => t(key)).join(' ') : t('键盘未绑定'))} onClick={() => openEditor(row)}>{keycaps(binding)}</button><button type="button" className="shortcut-clear" disabled={busy || !binding} title={t('清除键盘快捷键')} aria-label={t('清除{0}键盘快捷键', t(row.name))} onClick={() => { void save({ ...preferences!, bindings: { ...preferences!.bindings, [row.id]: null } }, row.id) }}><DialogControlIcon name="close" /></button></div>
         {assigned.map(side => <div className="shortcut-field-control shortcut-mouse-control" key={side}><button type="button" className="shortcut-binding" disabled={busy} onClick={() => openEditor(row)} aria-label={t('修改{0}的{1}', t(row.name), mouseLabel(side))}><span className="shortcut-mouse-key">{mouseLabel(side)}</span></button><button type="button" className="shortcut-clear" disabled={busy} aria-label={t('清除{0}的{1}', t(row.name), mouseLabel(side))} onClick={() => { void save({ ...preferences!, mouse: { ...preferences!.mouse, [side]: null } }, row.id) }}><DialogControlIcon name="close" /></button></div>)}

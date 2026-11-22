@@ -41,6 +41,33 @@ app.whenReady().then(async () => {
   const edit = async text => { await run(`(() => { const n=[...document.querySelectorAll('textarea')].find(n=>n.getBoundingClientRect().width>0); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(n, ${JSON.stringify(text)}); n.dispatchEvent(new Event('input',{bubbles:true})) })()`); await settle() }
   const draft = () => run("[...document.querySelectorAll('textarea')].find(n=>n.getBoundingClientRect().width>0)?.value")
   const capture = async name => writeFileSync(join(dirname(userData), name + '.png'), (await window.webContents.capturePage()).toPNG())
+  const measureMcpAction = () => run(`(() => {
+    const button = document.querySelector('.capability-detail .capability-actions button:has(.busy-label-content > svg)')
+    const icon = button.querySelector('.busy-label-content > svg')
+    const { x, width, height } = button.getBoundingClientRect()
+    const iconStyle = getComputedStyle(icon)
+    return {
+      geometry: { x, width, height, iconWidth: iconStyle.width, iconHeight: iconStyle.height },
+      label: button.textContent.trim(),
+      busy: button.getAttribute('aria-busy'),
+      contentOpacity: getComputedStyle(button.querySelector('.busy-label-content')).opacity,
+      spinnerOpacity: getComputedStyle(button.querySelector('.busy-label-spinner')).opacity
+    }
+  })()`)
+  const submitMcp = async (label, expectedHeight) => {
+    const idle = await measureMcpAction()
+    assert.deepEqual([idle.geometry.iconWidth, idle.geometry.iconHeight], ['14px', '14px'])
+    assert.equal(idle.geometry.height, expectedHeight)
+    await run('capabilityTest.holdMcpSave()')
+    await click(label)
+    await run('new Promise(resolve => setTimeout(resolve, 350))')
+    const waiting = await measureMcpAction()
+    assert.deepEqual(waiting.geometry, idle.geometry, 'The icon and button box retain their dimensions during submission')
+    assert.equal(waiting.label, idle.label)
+    assert.deepEqual([waiting.busy, waiting.contentOpacity, waiting.spinnerOpacity], ['true', '0', '1'])
+    await run('capabilityTest.releaseMcpSave()')
+    await settle()
+  }
   const checkUnsupportedLayout = async () => {
     const rows = await run(`(() => {
       return [...document.querySelectorAll('.capability-import-other-item')].map(row => {
@@ -134,7 +161,7 @@ app.whenReady().then(async () => {
     assert.equal(await draft(), json, 'CAS conflict preserves unsaved JSON')
     await click('重新载入')
     await edit(json)
-    await click('保存')
+    await submitMcp('保存', 28)
     assert.equal(await run("document.querySelector('.capability-save-action').disabled"), true, 'Successful save clears the draft')
     const positions = await run("(() => { const heading=[...document.querySelectorAll('.capability-library-heading')].find(n=>n.getBoundingClientRect().width>0); const add=heading.querySelector('button'),imp=heading.querySelector('[aria-label=\"从本机导入 MCP\"]');return {add:add.getBoundingClientRect().y,import:imp.getBoundingClientRect().y} })()")
     assert.equal(positions.add, positions.import, 'Add and import share the left heading row')
@@ -203,7 +230,7 @@ app.whenReady().then(async () => {
     assert.ok(alert.includes('JSON 格式不正确'))
     assert.ok(!alert.includes('secret-do-not-echo'))
     await edit('{"mcpServers":{"new-connection":{"command":"node"}}}')
-    await click('添加 MCP')
+    await submitMcp('添加 MCP', 30)
     assert.ok((await snapshot()).text.includes('new-connection'))
     await click('删除 MCP')
     assert.equal((await snapshot()).dialogs, 1)

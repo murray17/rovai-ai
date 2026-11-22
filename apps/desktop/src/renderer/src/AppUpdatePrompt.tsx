@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useState } from 'react'
 import type { AppUpdatePrompt as AppUpdatePromptValue, AppUpdateSnapshot } from '@contracts'
 import { UiText, uiAttribute } from './interface-language'
@@ -79,15 +80,20 @@ export function AppUpdatePrompt({
           className="quiet-button compact"
           type="button"
           disabled={busy !== null}
+          aria-busy={busy === 'details'}
           onClick={() => void run('details', () => onOpenDetails(prompt))}
-        >{busy === 'details' ? uiAttribute("正在打开…") : uiAttribute("查看更新内容")}</button>
+        >
+          <BusyLabel busy={busy === 'details'}>{uiAttribute("查看更新内容")}</BusyLabel>
+        </button>
         <button
           className="primary-button compact"
           type="button"
           aria-busy={busy === 'download' || undefined}
           disabled={busy !== null}
           onClick={() => void run('download', onDownload)}
-        >{busy === 'download' ? uiAttribute("正在开始…") : uiAttribute("下载更新")}</button>
+        >
+          <BusyLabel busy={busy === 'download'}>{uiAttribute("下载更新")}</BusyLabel>
+        </button>
       </div>
     </aside>
   )

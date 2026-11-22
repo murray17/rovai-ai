@@ -15,7 +15,9 @@ app.whenReady().then(async () => {
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   const errors = [], checks = []
   window.webContents.on('console-message', event => { if (event.level === 'error') errors.push(event.message) })
-  const run = expression => window.webContents.executeJavaScript(expression, true)
+  const run = expression => window.webContents.executeJavaScript(expression, true).catch(cause => {
+    throw new Error('Renderer evaluation failed: ' + expression, { cause })
+  })
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
   const wait = async expression => {
     for (let attempt = 0; attempt < 120; attempt++) { if (await run('Boolean(' + expression + ')')) return; await pause(25) }
@@ -75,7 +77,11 @@ app.whenReady().then(async () => {
   await check('in-flight saves block close and navigation', 'window.applyFixture.leave().then(ok=>!ok && !!document.querySelector(".runtime-apply-dialog"))')
   await run('window.applyFixture.release()')
   await done()
-  await check('each selected target saved once using its reviewed version', 'window.applyFixture.calls.length===3 && window.applyFixture.calls.every(c=>c.command.expectedVersion===1) && window.applyFixture.profiles().every(m=>JSON.stringify(m.runtimeConfiguration)===JSON.stringify(window.applyFixture.profiles()[0].runtimeConfiguration))')
+  const appliedVersions = await run("window.applyFixture.calls.filter(call => call.method === 'members.runtime.set').map(call => call.command.expectedVersion)")
+  assert.deepEqual(appliedVersions, [1, 1, 1], 'Each selected target saved once using its reviewed version')
+  const [sourceConfiguration, ...targetConfigurations] = await run('window.applyFixture.profiles().map(member => member.runtimeConfiguration)')
+  for (const targetConfiguration of targetConfigurations) assert.deepEqual(targetConfiguration, sourceConfiguration)
+  checks.push('each selected target saved once using its reviewed version')
   await capture('desktop-zh-success')
 
   await reset()
@@ -84,7 +90,23 @@ app.whenReady().then(async () => {
   await check('source draft cannot be applied', 'document.querySelector(' + JSON.stringify(active + '[data-apply-entry]') + ').disabled')
   await run('window.applyFixture.language("en")')
   await check('language preserves source draft', 'document.querySelector(' + JSON.stringify(active + '.runtime-model-picker-trigger') + ').textContent.includes("Default") && window.applyFixture.profiles()[0].runtimeConfiguration.model.mode==="explicit"')
-  await click(active + '.member-runtime-form .member-editor-save')
+  const memberSave = active + '.member-runtime-form .member-editor-save'
+  const saveNode = 'document.querySelector(' + JSON.stringify(memberSave) + ')'
+  const memberSaveGeometry = () => run(`(() => {
+    const button = document.querySelector(${JSON.stringify(memberSave)})
+    const content = button.querySelector('.busy-label-content')
+    const { width, height } = button.getBoundingClientRect()
+    const { color, backgroundColor, opacity } = getComputedStyle(button)
+    return { width, height, color, backgroundColor, opacity, label: content.textContent, icon: getComputedStyle(content.querySelector('svg')).width }
+  })()`)
+  const idleMemberSave = await memberSaveGeometry()
+  assert.equal(idleMemberSave.opacity, '1')
+  await run('window.applyFixture.hold(0)')
+  await click(memberSave)
+  await wait(`${saveNode}.getAttribute('aria-busy') === 'true' && getComputedStyle(${saveNode}.querySelector('.busy-label-spinner')).opacity === '1'`)
+  assert.equal(await run(`getComputedStyle(${saveNode}.querySelector('.busy-label-content')).opacity`), '0')
+  assert.deepEqual(await memberSaveGeometry(), idleMemberSave, 'Saving member Runtime retains the icon, label, size and tone')
+  await run('window.applyFixture.release()')
   await wait('!document.querySelector(' + JSON.stringify(active + '[data-apply-entry]') + ').disabled')
   await open()
   await click('[data-select-all]')

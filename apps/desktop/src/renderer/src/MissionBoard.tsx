@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { MissionDescription } from './MissionDescription'
 import { missionDescriptionContent, missionDescriptionText, missionMentionIds, unavailableMissionMentionIds } from './mission-description'
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type Ref } from 'react'
@@ -312,7 +313,9 @@ function MissionEdit({ mission, projects, agents, installations, catalog, onSave
             </div>
             {error && <p role="alert" className="compact-inline-error mission-editor-error">{error}</p>}
           </div>
-          <footer className="compact-footer mission-editor-footer"><div className="mission-editor-tools"><MissionAttachmentButton onClick={() => editorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/><MissionMentionButton onClick={() => editorRef.current?.startMention()} disabled={busy}/></div><div className="mission-editor-footer-actions"><button className="compact-cancel" type="button" disabled={busy} onClick={onClose}><UiText zh={"取消"} /></button><button className="compact-primary" type="submit" disabled={busy || invalid || !changed}>{busy ? uiAttribute("正在保存…") : pendingMentionIds.length ? uiAttribute("邀请并保存") : uiAttribute("保存")}</button></div></footer>
+          <footer className="compact-footer mission-editor-footer"><div className="mission-editor-tools"><MissionAttachmentButton onClick={() => editorRef.current?.chooseFiles()} disabled={busy || !client.missionAttachments}/><MissionMentionButton onClick={() => editorRef.current?.startMention()} disabled={busy}/></div><div className="mission-editor-footer-actions"><button className="compact-cancel" type="button" disabled={busy} onClick={onClose}><UiText zh={"取消"} /></button><button className="compact-primary" type="submit" disabled={busy || invalid || !changed} aria-busy={busy}>
+            <BusyLabel busy={busy}>{pendingMentionIds.length ? uiAttribute("邀请并保存") : uiAttribute("保存")}</BusyLabel>
+          </button></div></footer>
         </form>
       </Dialog.Content>
     </Dialog.Portal>
@@ -327,7 +330,9 @@ function MissionWorkspaceCleanup({ mission, onRequested, onClose }: { mission: M
       await onRequested()
     } catch (error) { setError(missionError(error)) } finally { setBusy(false) }
   }
-  return <CompactDialog title={uiAttribute("清理使命 Worktree")} className="mission-worktree-cleanup-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary" onClick={() => void cleanup()} disabled={busy || !delivery?.workspace}>{busy ? uiAttribute("正在安排清理…") : uiAttribute("清理")}</button></>}>
+  return <CompactDialog title={uiAttribute("清理使命 Worktree")} className="mission-worktree-cleanup-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary" onClick={() => void cleanup()} disabled={busy || !delivery?.workspace} aria-busy={busy}>
+    <BusyLabel busy={busy}>{uiAttribute("清理")}</BusyLabel>
+  </button></>}>
     <p><UiText zh={"将删除此使命的 Worktree 和本地分支。"} /></p>
     {delivery?.workspace && <div className="mission-delete-workspaces"><div><code>{delivery.workspace.worktreePath}</code><small>{delivery.workspace.managedBranch}</small></div></div>}
     {!delivery && !error && <p role="status"><UiText zh={"正在读取关联工作区…"} /></p>}
@@ -345,7 +350,9 @@ export function MissionDelete({ mission, recordTitle, onDelete, onClose }: {
   const [cleanupWorkspace, setCleanupWorkspace] = useState(false)
   useEffect(() => { let current = true; setError(''); void client.request<MissionDelivery>('missions.delivery', { missionId: mission.missionId }).then(data => { if (current) setDelivery(data) }).catch(error => { if (current) setError(missionError(error)) }); return () => { current = false } }, [client, mission.missionId, retry])
   async function remove() { setBusy(true); setError(''); try { await onDelete(cleanupWorkspace ? 'cleanup' : 'retain') } catch (error) { setError(missionError(error)) } finally { setBusy(false) } }
-  return <CompactDialog title={uiAttribute("删除使命")} className="mission-delete-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary mission-delete-confirm" onClick={() => void remove()} disabled={busy || !delivery}>{busy ? uiAttribute("正在删除…") : uiAttribute("删除使命")}</button></>}>
+  return <CompactDialog title={uiAttribute("删除使命")} className="mission-delete-dialog" onClose={() => { if (!busy) onClose() }} footer={<><button className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh={"取消"} /></button><button className="compact-primary mission-delete-confirm" onClick={() => void remove()} disabled={busy || !delivery} aria-busy={busy}>
+    <BusyLabel busy={busy}>{uiAttribute("删除使命")}</BusyLabel>
+  </button></>}>
     {recordTitle && <p><strong>{recordTitle}</strong></p>}
     <p className="mission-delete-summary"><UiText zh={"删除后，使命、会话和交付文件将被一并删除，正在执行的队员会停止。此操作无法撤销。"} /></p>
     {mission.workspaceEverCreated && <label className="mission-delete-workspace-option"><input type="checkbox" checked={cleanupWorkspace} disabled={busy || !mission.workspaceResourcesPresent} onChange={event => setCleanupWorkspace(event.target.checked)}/><span>{mission.workspaceResourcesPresent ? uiAttribute("同时清理 Worktree 及本地分支") : uiAttribute("同时清理 Worktree 及本地分支（已清理）")}</span><span className="mission-inline-help" tabIndex={0} aria-label={uiAttribute("未勾选时，Worktree 和本地分支保留在原位置。")} data-tooltip={uiAttribute("未勾选时，Worktree 和本地分支保留在原位置。")}>?</span></label>}
@@ -681,7 +688,9 @@ function MissionCleanupNotice() {
       return <section key={row.id}><div><code>{row.worktreePath}</code><small><UiText zh={"受管分支："} />{row.managedBranch}</small><small>Worktree：{row.cleanupWorktreeRemoved ? uiAttribute("已清理") : uiAttribute("待清理")}<UiText zh={" · 本地分支："} />{row.cleanupBranchRemoved ? uiAttribute("已清理") : uiAttribute("待清理")}</small></div>
         {row.state === 'cleanup_pending' && <p role="status">{branchOnly ? uiAttribute("正在清理本地分支…") : uiAttribute("正在清理 Worktree…")}</p>}
         {row.diagnostic && <><p className="mission-cleanup-failure-title" role="alert">{branchOnly ? uiAttribute("分支清理失败") : uiAttribute("Worktree 清理失败")}</p><p>{row.diagnostic}</p></>}
-        {row.state === 'cleanup_failed' && <button className="compact-cancel" onClick={() => void retry(row)} disabled={busy !== null}>{busy === row.id ? uiAttribute("正在安排重试…") : uiAttribute("重试未完成步骤")}</button>}
+        {row.state === 'cleanup_failed' && <button className="compact-cancel" onClick={() => void retry(row)} disabled={busy !== null} aria-busy={busy === row.id}>
+          <BusyLabel busy={busy === row.id}>{uiAttribute("重试未完成步骤")}</BusyLabel>
+        </button>}
       </section>
     })}{!rows.length && !error && <p role="status"><UiText zh={"工作区已清理完成。"} /></p>}</CompactDialog>}
   </>
@@ -716,6 +725,8 @@ export function MissionIntro({ mission: m, projects }: { mission: MissionRecord;
       <div className="mission-project-tags"><span className="mission-card-project" title={displayProjectPath(m.projectPath)}><NavigationIcon name="folder-open"/>{missionProject(m, projects)}</span><MissionTags tags={m.tags}/></div>
       <div className="mission-intro-meta"><MissionAvatars m={m}/></div>
     </section>
-    {m.status === 'not_started' && m.startAvailable && !actions.startAccepted(m.missionId) && <div className="mission-start-row"><button className="mission-new mission-start" disabled={starting} aria-busy={starting} onClick={() => actions.start(m)}><Icon name="play"/>{starting ? uiAttribute("正在开始…") : uiAttribute("开始使命")}</button></div>}
+    {m.status === 'not_started' && m.startAvailable && !actions.startAccepted(m.missionId) && <div className="mission-start-row"><button className="mission-new mission-start" disabled={starting} aria-busy={starting} onClick={() => actions.start(m)}>
+      <BusyLabel busy={starting}><Icon name="play"/>{uiAttribute("开始使命")}</BusyLabel>
+    </button></div>}
   </>
 }

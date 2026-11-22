@@ -44,5 +44,11 @@ function Fixture(): React.JSX.Element {
   </ThreadClientProvider>
 }
 
-initializeInterfaceLanguage({ interfaceLanguage: 'zh-CN' })
+initializeInterfaceLanguage({
+  interfaceLanguage: 'zh-CN',
+  interfaceLanguagePreference: 'zh-CN',
+  systemLanguage: 'zh-CN',
+  languageRevision: 0,
+  readError: null
+})
 createRoot(document.getElementById('root')!).render(<Fixture />)

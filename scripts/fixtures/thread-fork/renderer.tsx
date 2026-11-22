@@ -57,9 +57,12 @@ const projection = (value: any) => {
 let releaseFork: (()=>void) | undefined
 let holdFork = false, loseResponse = false, failOpen = false, dropTarget = false, rejectFork = false
 let openFailure: { threadId: string; code: string } | null = null
-const rejectedCommands = new Map<string, string>()
+const rejectedCommands = new Map<string, { code: string; wait?: Promise<void> }>()
+let releaseRejectedCommand: (() => void) | undefined
 let deletionIssues: ThreadDeletionIssue[] = []
 let stopConflicts = 0
+let holdEdit = false
+let resolveEdit: ((applied: boolean) => void) | undefined
 let releaseAttachment:(()=>void)|undefined, attachmentPending=false
 const client = {...model.client,composerAttachments:{...model.client.composerAttachments,
   prepare:async(_thread:string,_revision:number,file:File)=>{attachmentPending=true;await new Promise<void>(resolve=>{releaseAttachment=resolve});attachmentPending=false;return {id:crypto.randomUUID(),sourcePath:'/fixture/'+file.name,displayName:file.name,kind:'file',fileCount:1,mediaType:'text/plain',byteSize:file.size,previewKind:'none',availability:'unknown'}},
@@ -68,9 +71,11 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
   request:async(method:string,params:any={})=>{
     calls.push({method,params:structuredClone(params)})
     const command=params.command??params,value=threads.get(command.threadId)
-    const rejection = rejectedCommands.get(method)
-    if (rejection) {
+    const rejected = rejectedCommands.get(method)
+    if (rejected) {
       rejectedCommands.delete(method)
+      const { code: rejection, wait } = rejected
+      if (wait) await wait
       if (method === 'threads.rename' && rejection === 'camp.not_found') {
         threads.delete(command.threadId)
         sequence += 1
@@ -124,6 +129,12 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
       return { ...applied(), code: 'agent_run.cancelled', payload: { agentRunId: currentRun.id, status: currentRun.status } }
     }
     if (method === 'thread.messages.edit') {
+      if (holdEdit) {
+        holdEdit = false
+        const accepted = await new Promise<boolean>(resolve => { resolveEdit = resolve })
+        resolveEdit = undefined
+        if (!accepted) return { ...applied(), status: 'rejected', code: 'fixture_edit_rejected' }
+      }
       const target = value.messages.find((message: any) => message.id === command.messageId)
       target.content = structuredClone(command.content.segments)
       target.body = target.content.map((segment: any) => segment.text ?? '').join('')
@@ -247,10 +258,17 @@ const clearToasts = () => {
   renderToasts()
 }
 ;(window as any).forkQA={calls,threads,receipts,checkpoint,errors:[],loadingEvents,trackLoading:()=>{loadingEvents.length=0;previousLoading=!!document.querySelector('.app-toast-spinner')},reject:()=>{rejectFork=true},showToasts,showTimedToasts,showPersistentToasts,probeActions,clearToasts,finishLanguageRead,languageReads:()=>languageReads,hold:(value=true)=>{holdFork=value},release:()=>{holdFork=false;releaseFork?.()},lose:()=>{loseResponse=true},failOpen:(value=true)=>{failOpen=value},failDraft:(value=true)=>{failDraft=value},dropTarget:()=>{dropTarget=true},
+  holdEdit: () => { holdEdit = true },
+  editPending: () => resolveEdit !== undefined,
+  releaseEdit: (applied: boolean) => resolveEdit?.(applied),
   generalPreferenceReads: () => generalPreferenceReads,
   finishPreferenceRetry: () => finishPreferenceRetry?.(),
   rejectOpen: (threadId: string, code: string) => { openFailure = { threadId, code } },
-  rejectCommand: (method: string, code: string) => { rejectedCommands.set(method, code) },
+  rejectCommand: (method: string, code: string, hold = false) => {
+    const wait = hold ? new Promise<void>(resolve => { releaseRejectedCommand = resolve }) : undefined
+    rejectedCommands.set(method, { code, wait })
+  },
+  releaseRejectedCommand: () => releaseRejectedCommand?.(),
   addConversation: (threadId: string, title: string) => {
     seed(threadId, title)
     sequence += 1

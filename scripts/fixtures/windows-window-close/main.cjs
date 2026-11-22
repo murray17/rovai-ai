@@ -10,6 +10,7 @@ app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 const { WindowsWindowClose, WindowClosePreferences, createWindowCloseRequestHandler, createWindowsTray, AppQuitCoordinator } = require(join(fixture, 'owner/index.cjs'))
 let window, owner, coordinator, prepares = 0, drains = 0, failSave = false, failTray = false, failQuit = true, updatePending = false
+let exitSaveHold
 app.on('before-quit', event => { owner.beginQuit(); coordinator.handleQuitRequest(event) })
 app.on('window-all-closed', () => {})
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -20,7 +21,11 @@ app.whenReady().then(async () => {
   window = new BrowserWindow({ width: 1040, height: 700, useContentSize: true, show: false,
     webPreferences: { preload: join(fixture, 'preload/index.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
   owner = new WindowsWindowClose({
-    preferences: { get: () => store.get(), loadFailed: store.loadFailed, set: async value => { if (failSave) throw Error('fixture disk full'); await store.set(value) } },
+    preferences: { get: () => store.get(), loadFailed: store.loadFailed, set: async value => {
+      if (failSave) throw Error('fixture disk full')
+      if (value === 'exit' && exitSaveHold) await exitSaveHold
+      await store.set(value)
+    } },
     window: () => window,
     createTray: (open, quit) => {
       if (failTray) throw Error('fixture tray creation failure')
@@ -145,7 +150,21 @@ app.whenReady().then(async () => {
   assert.equal(owner.get().promptId, null)
   owner.restore(); assert.equal(window.isMinimized(), false)
   await prompt()
-  await click('.window-close-dialog .dialog-actions .quiet-button')
+  await click('.window-close-remember input')
+  let finishExitSave
+  exitSaveHold = new Promise(resolve => { finishExitSave = resolve })
+  const exitButton = '.window-close-dialog .dialog-actions .quiet-button'
+  const exitGeometry = `(() => {
+    const button = document.querySelector(${JSON.stringify(exitButton)})
+    const { width, height } = button.getBoundingClientRect()
+    return { width, height, label: button.textContent.trim() }
+  })()`
+  const idleExit = await run(exitGeometry)
+  await click(exitButton)
+  await wait(`document.querySelector(${JSON.stringify(exitButton)}).getAttribute('aria-busy') === 'true' && getComputedStyle(document.querySelector('.window-close-dialog .quiet-button .busy-label-spinner')).opacity === '1'`)
+  assert.deepEqual(await run(exitGeometry), idleExit, 'Quit keeps its label and dimensions while waiting')
+  assert.equal(await run("document.querySelector('.window-close-dialog .primary-button').getAttribute('aria-busy')"), 'false')
+  finishExitSave()
   await wait(`document.querySelector('.window-close-dialog [role="alert"]')`)
   assert.equal(prepares, 1); assert.equal(drains, 0); assert.equal(window.isVisible(), true)
   await cancel()

@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { useCallback, useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -197,7 +198,9 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       {channelError && <button type="button" className="quiet-button compact" onClick={() => void loadChannels()}><UiText zh={"重试读取渠道"} /></button>}
       <p className="automation-channel-note"><UiText zh={"发送到你的 Bot 私聊。通知失败只重试通知，不重新运行任务。"} /></p>
     </details>
-    {!automation && <div className="automation-create-actions"><button className="primary-button" type="submit" disabled={busy || Boolean(scheduleError) || !draft.prompt.trim() || member?.presence !== 'present'}>{busy ? uiAttribute("正在保存…") : uiAttribute("保存")}</button></div>}
+    {!automation && <div className="automation-create-actions"><button className="primary-button" type="submit" disabled={busy || Boolean(scheduleError) || !draft.prompt.trim() || member?.presence !== 'present'} aria-busy={busy}>
+      <BusyLabel busy={busy}>{uiAttribute("保存")}</BusyLabel>
+    </button></div>}
   </form>
     {automation && <RunHistory automation={automation} onOpenThread={onOpenThread} />}
   </div>

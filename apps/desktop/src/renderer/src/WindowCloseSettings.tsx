@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { WindowCloseApi, WindowCloseBehavior, WindowCloseResponse, WindowCloseSnapshot } from '@contracts'
@@ -94,9 +95,14 @@ function ClosePrompt({ snapshot, transportError, busy, respond }: {
 }): React.JSX.Element {
   const text = useCloseCopy()
   const [remember, setRemember] = useState(false)
+  const [chosenAction, setChosenAction] = useState<WindowCloseResponse['action'] | null>(null)
+  const exitBusy = busy && chosenAction === 'exit'
+  const trayBusy = busy && chosenAction === 'tray'
   const previousFocus = useRef(document.activeElement)
   const choose = (action: WindowCloseResponse['action']) => {
-    if (!busy) respond({ promptId: snapshot.promptId!, action, remember })
+    if (busy) return
+    setChosenAction(action)
+    respond({ promptId: snapshot.promptId!, action, remember })
   }
   return <Dialog.Root open onOpenChange={open => { if (!open) choose('cancel') }}>
     <Dialog.Portal>
@@ -121,8 +127,12 @@ function ClosePrompt({ snapshot, transportError, busy, respond }: {
         </AppDialogBody>
         <AppDialogFooter leading={<button type="button" className="quiet-button" data-dialog-autofocus disabled={busy}
           onClick={() => choose('cancel')}>{text('取消', 'Cancel')}</button>}>
-          <button type="button" className="quiet-button" disabled={busy} onClick={() => choose('exit')}>{text('退出 Rovai', 'Quit Rovai')}</button>
-          <button type="button" className="primary-button" disabled={busy} onClick={() => choose('tray')}>{busy ? text('正在处理…', 'Working…') : text('最小化到托盘', 'Minimize to tray')}</button>
+          <button type="button" className="quiet-button" disabled={busy} aria-busy={exitBusy} onClick={() => choose('exit')}>
+            <BusyLabel busy={exitBusy}>{text('退出 Rovai', 'Quit Rovai')}</BusyLabel>
+          </button>
+          <button type="button" className="primary-button" disabled={busy} aria-busy={trayBusy} onClick={() => choose('tray')}>
+            <BusyLabel busy={trayBusy}>{text('最小化到托盘', 'Minimize to tray')}</BusyLabel>
+          </button>
         </AppDialogFooter>
         {busy && <p className="sr-only" role="status">{text('正在处理…', 'Working…')}</p>}
       </AppDialogContent>

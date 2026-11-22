@@ -23,12 +23,14 @@ export type AppDialogIconName =
 type AppDialogContentProps = ComponentPropsWithoutRef<typeof Dialog.Content> & {
   tone?: AppDialogTone
   width?: 'compact' | 'wide' | 'large'
+  exitMotion?: boolean
 }
 
 export function AppDialogContent({
   className = '',
   tone = 'brand',
   width = 'compact',
+  exitMotion = false,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
@@ -40,6 +42,7 @@ export function AppDialogContent({
         'app-dialog',
         tone === 'brand' ? '' : `tone-${tone}`,
         width === 'compact' ? '' : `app-dialog-${width}`,
+        exitMotion ? 'app-dialog-exits' : '',
         className
       ].filter(Boolean).join(' ')}
       onOpenAutoFocus={onOpenAutoFocus ?? ((event) => {

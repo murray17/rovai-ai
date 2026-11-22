@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { CommonEnvironmentEditor, useCommonEnvironment } from './CommonEnvironmentEditor'
 import { useThreadClient } from './camp-client'
 import { Activity, useCallback, useEffect, useId, useRef, useState } from 'react'
@@ -263,7 +264,9 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
         <span className="member-editor-save-status" role="status">{saveCompleted && <UiText zh="已保存" />}</span>
         <div>
           <button className="quiet-button" type="button" disabled={!dirty || locked} onClick={discard}><UiText zh={"放弃更改"} /></button>
-          <button className="quiet-button member-editor-save" type="submit" disabled={!canSave || locked}><DialogControlIcon name="save" />{busy === 'save' ? uiAttribute("正在保存…") : uiAttribute("保存")}</button>
+          <button className="quiet-button member-editor-save" type="submit" disabled={!canSave || locked} aria-busy={busy === 'save'}>
+            <BusyLabel busy={busy === 'save'}><DialogControlIcon name="save" />{uiAttribute("保存")}</BusyLabel>
+          </button>
         </div>
       </footer>
     </form>

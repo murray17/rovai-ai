@@ -24,6 +24,8 @@ const ignore = () => {}
 const clone = structuredClone
 const requests = []
 let releaseHostStatus
+let holdDefaultsSave
+let finishDefaultsSave
 let hostTokenGeneration = 1
 const state = {
   hostWeb: { enabled: false }, holdHostStatus: false, loseHostStartReply: false,
@@ -128,6 +130,7 @@ const archiveClient = {
 }
 const savePreference = key => async value => {
   await request(key, value)
+  if (key === 'newConversationDefaults' && holdDefaultsSave) await holdDefaultsSave
   state.preferences[key] = clone(value)
   return clone(state.preferences)
 }
@@ -288,6 +291,11 @@ window.settingsTest = {
   finishRuntimeCheck: (kind, result) => { pendingRuntimeChecks.get(kind)(result); pendingRuntimeChecks.delete(kind) },
   requests, state,
   releaseHostStatus: () => releaseHostStatus?.(),
+  holdDefaultsSave: () => { holdDefaultsSave = new Promise(resolve => { finishDefaultsSave = resolve }) },
+  releaseDefaultsSave: () => {
+    finishDefaultsSave?.()
+    holdDefaultsSave = null
+  },
   updateChannel: (kind, patch) => {
     Object.assign(state.channels.channels.find(channel => channel.kind === kind), patch)
     emitChannels()

@@ -15,6 +15,7 @@ last_updated: 2026-11-21
 
 已确认的方向见[操作反馈 UI 合同](../../ui/components/operation-feedback.md)和 [V1.72-D91](decisions.md#v1-72-d91)。
 阶段进度和验收见[实施记录](implementation-plan.md#操作反馈)。
+提交按钮的统一反馈与消息、弹窗的退场时序见[实施结果](busy-buttons-proposal.md#8-实施结果)。
 
 ## 导航搜索
 

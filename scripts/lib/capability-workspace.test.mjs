@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -16,16 +16,19 @@ const source = join(root, 'scripts/fixtures/capability-workspace')
 test('current Skills, toolbox and MCP preserve reading, member configuration and credential editing', { timeout: 120_000 }, async (t) => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-capability-workspace-test-'))
+  const userData = join(fixture, 'user-data')
+  const skillLibraryRoot = join(userData, 'managed-skill-library')
   let child
   let closed
   try {
+    await mkdir(skillLibraryRoot, { recursive: true })
     await build({ configFile: false, root: source, base: './', logLevel: 'error', plugins: [react()],
       resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
       build: { outDir: join(fixture, 'renderer'), minify: false } })
     const environment = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete environment.ELECTRON_RUN_AS_NODE
-    process.stdout.write(`Isolated capability userData: ${join(fixture, 'user-data')} (no Core/Runtime)\n`)
-    child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'),
+    process.stdout.write(`Isolated capability userData: ${userData}; Skill Library: ${skillLibraryRoot} (unused); no Core/Runtime\n`)
+    child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), userData,
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
     let output = ''

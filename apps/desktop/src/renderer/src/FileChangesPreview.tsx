@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { FileFindChangesAdapter } from './FileFindChangesAdapter'
 import { ChangedFileSelect } from './ChangedFileSelect'
@@ -198,10 +199,13 @@ export function AgentRunFileChangesReviewSurface({
                       className="agent-run-file-review-open-current"
                       type="button"
                       disabled={openCurrentStatus === 'opening'}
+                      aria-busy={openCurrentStatus === 'opening'}
                       onClick={onOpenCurrent}
                     >
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H4v16h16v-6" /></svg>
-                      {openCurrentStatus === 'opening' ? uiAttribute("正在打开…") : uiAttribute("打开当前文件")}
+                      <BusyLabel busy={openCurrentStatus === 'opening'}>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H4v16h16v-6" /></svg>
+                        {uiAttribute("打开当前文件")}
+                      </BusyLabel>
                     </button>
                   </div>
                 </header>

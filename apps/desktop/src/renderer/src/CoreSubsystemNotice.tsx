@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { useState } from 'react'
 import type { CoreSubsystemSnapshot } from '@contracts'
@@ -47,8 +48,11 @@ export function CoreSubsystemNotice({
           className="quiet-button"
           type="button"
           disabled={retrying || subsystems.some((subsystem) => subsystem.state === 'initializing')}
+          aria-busy={retrying}
           onClick={() => void retry()}
-        >{retrying ? uiAttribute("正在重试…") : uiAttribute("重试受影响功能")}</button>
+        >
+          <BusyLabel busy={retrying}>{uiAttribute("重试受影响功能")}</BusyLabel>
+        </button>
       </div>
       <details>
         <summary><UiText zh={"查看原因："} />{degraded.map((subsystem) => subsystemLabel(subsystem.id)).join('、')}</summary>

@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { LegacyEnvironmentIssue } from './LegacyEnvironmentIssue'
 import { useThreadClient, type ThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
@@ -236,11 +237,11 @@ export function DiagnosticsCenter({
         description={uiAttribute("检查运行环境并处理可安全修复的问题。")}
         aside={(
           <>
-            <button className="primary-button" type="button" onClick={() => void runFullCheck()} disabled={disabled}>
-              {running ? <><span className="diagnostics-spinner" aria-hidden="true" /><UiText zh={"正在检查…"} /></> : uiAttribute("重新检查")}
+            <button className="primary-button" type="button" onClick={() => void runFullCheck()} disabled={disabled} aria-busy={running}>
+              <BusyLabel busy={running}>{uiAttribute("重新检查")}</BusyLabel>
             </button>
-            <button className="quiet-button" type="button" onClick={() => void exportDiagnostics()} disabled={disabled}>
-              {exporting ? uiAttribute("正在导出…") : uiAttribute("导出诊断")}
+            <button className="quiet-button" type="button" onClick={() => void exportDiagnostics()} disabled={disabled} aria-busy={exporting}>
+              <BusyLabel busy={exporting}>{uiAttribute("导出诊断")}</BusyLabel>
             </button>
           </>
         )}
@@ -384,7 +385,9 @@ function DiagnosticIssue({
         {legacyCleanupResult && <p className="diagnostics-cleanup-status" role="status">{legacyCleanupMessage(legacyCleanupResult)}</p>}
       </div>
       <div className="diagnostics-issue-action">
-        {action && <button className={action.kind.startsWith('repair_') || action.kind === 'cleanup_legacy_skill' ? 'primary-button compact' : 'quiet-button compact'} type="button" onClick={onAction} disabled={disabled}>{busy ? uiAttribute("正在处理…") : action.label}</button>}
+        {action && <button className={action.kind.startsWith('repair_') || action.kind === 'cleanup_legacy_skill' ? 'primary-button compact' : 'quiet-button compact'} type="button" onClick={onAction} disabled={disabled} aria-busy={busy}>
+          <BusyLabel busy={busy}>{action.label}</BusyLabel>
+        </button>}
       </div>
       {check.id !== 'legacy-skill-entries' && <DiagnosticDetails check={check} />}
     </article>
@@ -432,7 +435,9 @@ function DiagnosticsResults({
                     <span className={`diagnostics-result-status is-${check.status}`} aria-label={uiAttribute(STATUS_META[check.status].label)}><DiagnosticStatusIcon status={check.status} /></span>
                     <div className="diagnostics-result-name"><strong>{check.label}</strong><span>{uiAttribute(STATUS_META[check.status].label)}</span></div>
                     <div className="diagnostics-result-detail">{diagnosticCheckDetail(check)}</div>
-                    {action && <button className="quiet-button compact" type="button" disabled={disabled} onClick={() => onAction(check)}>{repairingId === check.id ? uiAttribute("正在处理…") : action.label}</button>}
+                    {action && <button className="quiet-button compact" type="button" disabled={disabled} aria-busy={repairingId === check.id} onClick={() => onAction(check)}>
+                      <BusyLabel busy={repairingId === check.id}>{action.label}</BusyLabel>
+                    </button>}
                     <DiagnosticDetails check={check} compact />
                   </div>
                 )

@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { HtmlPreviewHostChannel } from '../../../../../packages/html-preview/src/host-channel'
@@ -162,7 +163,9 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
         {item.stack && <pre>{item.stack}</pre>}
       </li>)}</ol>}
       {currentDiagnostics.length === 100 && <p><UiText zh={"已达到 100 项记录上限。"} /></p>}
-      {hasProblem && <button type="button" onClick={retry} disabled={tab.isRefreshing}>{tab.isRefreshing ? uiAttribute("重试中…") : uiAttribute("重试")}</button>}
+      {hasProblem && <button type="button" onClick={retry} disabled={tab.isRefreshing} aria-busy={tab.isRefreshing}>
+        <BusyLabel busy={tab.isRefreshing}>{uiAttribute("重试")}</BusyLabel>
+      </button>}
     </div>}
     {notice && <p className="file-preview-html-notice" role="status">{notice}</p>}
     <div className="file-preview-content">
@@ -172,7 +175,9 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
         onLoad={() => { load.current?.frameLoaded(); channel?.connect() }}
         onError={() => load.current?.failed(uiAttribute('无法加载预览页面。'))} />}
       {!sourceMode && documentFailed && <div className="file-preview-error file-preview-html-failure" role="alert">
-        <strong><UiText zh={"无法加载 HTML 预览"} /></strong><p>{failure ?? uiAttribute("预览站点未与主应用隔离。")}</p><button type="button" onClick={retry} disabled={tab.isRefreshing}>{tab.isRefreshing ? uiAttribute("重试中…") : uiAttribute("重试")}</button>
+        <strong><UiText zh={"无法加载 HTML 预览"} /></strong><p>{failure ?? uiAttribute("预览站点未与主应用隔离。")}</p><button type="button" onClick={retry} disabled={tab.isRefreshing} aria-busy={tab.isRefreshing}>
+          <BusyLabel busy={tab.isRefreshing}>{uiAttribute("重试")}</BusyLabel>
+        </button>
       </div>}
     </div>
   </div>

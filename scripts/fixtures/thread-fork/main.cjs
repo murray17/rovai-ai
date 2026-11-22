@@ -56,6 +56,13 @@ app.whenReady().then(async () => {
     await window.webContents.insertText(title)
   }
   const renameCallCount = () => run('forkQA.calls.filter(call => call.method === "threads.rename").length')
+  const checkBusyColors = async button => {
+    for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+      await run(`forkQA.theme(${JSON.stringify(theme)})`)
+      assert.equal(await run(`getComputedStyle(${button}.querySelector('.busy-label-spinner svg')).color === getComputedStyle(${button}).color`), true, theme)
+    }
+    await run('forkQA.theme("day")')
+  }
   const screenshots=[]
   const output=process.argv[4]
   try {
@@ -160,7 +167,7 @@ app.whenReady().then(async () => {
     assert.equal(await run('document.querySelector(".error-banner")'), null)
     await fillRename('  改名后的会话   B  ')
     await key('Return')
-    await wait('!document.querySelector(".camp-action-dialog[data-state=open]")')
+    await wait('!document.querySelector(".camp-action-dialog")')
     await wait('document.querySelector(\'[data-thread-id="other"] .camp-nav-open\')?.textContent.includes("改名后的会话 B")')
     assert.equal(await renameCallCount(), beforeRename + 2)
 
@@ -170,17 +177,30 @@ app.whenReady().then(async () => {
     await run('forkQA.rejectCommand("threads.rename", "camp.not_found")')
     await key('Return')
     await wait('document.querySelector(".app-toast[role=status]")?.textContent.includes("这个会话已被删除。")')
-    await wait('!document.querySelector(".camp-action-dialog[data-state=open], [data-thread-id=peer-deleted]")')
+    await wait('!document.querySelector(".camp-action-dialog, [data-thread-id=peer-deleted]")')
     await click('document.querySelector(".app-toast-close")')
 
     await navAction('other', '删除')
-    await run('forkQA.rejectCommand("threads.delete", "camp.workspace_cleanup_pending")')
-    await click('document.querySelector(".camp-action-dialog .danger-button")')
+    const deleteButton = 'document.querySelector(".camp-action-dialog .danger-button")'
+    const deleteWidth = await run(`${deleteButton}.offsetWidth`)
+    await run('forkQA.rejectCommand("threads.delete", "camp.workspace_cleanup_pending", true)')
+    await click(deleteButton)
+    await wait(`getComputedStyle(${deleteButton}.querySelector('.busy-label-spinner')).opacity === '1'`)
+    assert.equal(await run(`${deleteButton}.offsetWidth`), deleteWidth)
+    await checkBusyColors(deleteButton)
+    window.webContents.debugger.attach('1.3')
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
+    assert.equal(await run(`getComputedStyle(${deleteButton}.querySelector('.busy-label-spinner svg')).animationName`), 'none')
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+    window.webContents.debugger.detach()
+    await run('forkQA.releaseRejectedCommand()')
     await wait('document.querySelector(".camp-action-dialog [role=alert]")?.textContent === "工作区正在清理，请稍后重试。"')
     assert.equal(await run('document.querySelector(".error-banner")'), null)
     assert.equal(await run('document.body.textContent.includes("Raw command rejection")'), false)
     await key('Escape')
-    await wait('!document.querySelector(".camp-action-dialog[data-state=open]")')
+    await wait('!document.querySelector(".camp-action-dialog")')
     assert.equal(await run('!!document.querySelector(\'[data-thread-id="other"]\')'), true)
 
     await run('forkQA.showDeletionIssue("fixture-deletion"); forkQA.rejectCommand("threads.retryDeletion", "camp.deletion_not_found")')
@@ -330,8 +350,47 @@ app.whenReady().then(async () => {
     await mkdir(output, { recursive: true })
     await writeFile(join(output, 'inline-message-editor.png'), (await window.webContents.capturePage()).toPNG())
     screenshots.push('inline-message-editor.png')
-    await click(`document.querySelector('${userRow} .revision-editor button[type=submit]')`)
+    const saveSelector = `${userRow} .revision-editor button[type=submit]`
+    const save = `document.querySelector('${saveSelector}')`
+    const saveSpinner = `${save}.querySelector('.busy-label-spinner')`
+    const editorCancel = `document.querySelector('${userRow} .revision-editor-actions .quiet-button')`
+    const measureSave = () => run(`(() => {
+      const save = ${save}
+      const cancel = ${editorCancel}
+      const bounds = save.getBoundingClientRect()
+      const { color, backgroundColor, opacity } = getComputedStyle(save)
+      return { x: bounds.x, width: bounds.width, cancelX: cancel.getBoundingClientRect().x,
+        color, backgroundColor, opacity, label: save.textContent.trim() }
+    })()`)
+    const readySave = await measureSave()
+    assert.equal(readySave.label, '保存')
+    await run('forkQA.holdEdit()')
+    await click(save)
+    await wait(`forkQA.editPending() && ${save}.getAttribute('aria-busy') === 'true'`)
+    assert.equal(await run(`${save}.disabled && ${editorCancel}.disabled`), true)
+    assert.deepEqual(await measureSave(), readySave, 'Busy keeps the pressed button and its peer in place')
+    assert.deepEqual(await run(`[
+      getComputedStyle(${save}.querySelector('.busy-label-content')).transitionDelay,
+      getComputedStyle(${saveSpinner}).transitionDelay,
+      getComputedStyle(${editorCancel}).transitionDelay
+    ]`), ['0.15s', '0.15s', '0.15s'])
+    await wait(`getComputedStyle(${saveSpinner}).opacity === '1'`)
+    assert.equal(await run(`getComputedStyle(${saveSpinner}.querySelector('svg')).width`), '14px')
+    await checkBusyColors(save)
+    await run('forkQA.releaseEdit(false)')
+    await wait(`!!document.querySelector('${userRow} .revision-editor [role=alert]') && !${save}.disabled`)
+    assert.equal(await run(`${save}.textContent.trim()`), '保存')
+    assert.equal(await run(`getComputedStyle(${save}.querySelector('.busy-label-content')).opacity`), '1')
+    assert.match(await run(`document.querySelector('${userRow} .revision-editor [contenteditable=true]').textContent`), /更新/)
+    assert.equal(await run('!!document.querySelector(".public-message-edited")'), false)
+
+    await run('forkQA.holdEdit()')
+    await click(save)
+    await wait('forkQA.editPending()')
+    await run('forkQA.releaseEdit(true)')
     await wait('!document.querySelector(".revision-editor") && !!document.querySelector(".public-message-edited")')
+    await wait('!document.documentElement.classList.contains("message-edit-transition")')
+    assert.equal(await run(`document.querySelector('${userRow} .message-bubble').style.viewTransitionName`), '')
     assert.equal(await run('forkQA.calls.find(c => c.method === "thread.messages.edit").params.command.expectedContentRevision'), 1)
     assert.match(await run(`document.querySelector('${userRow} .message-bubble').textContent`), /更新/)
     await run('forkQA.language("en")')

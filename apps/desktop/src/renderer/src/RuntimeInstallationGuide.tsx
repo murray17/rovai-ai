@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { DialogControlIcon } from './AppDialog'
 import { writeClipboardText } from './clipboard'
@@ -70,7 +71,7 @@ export function RuntimeInstallationGuide({ id, label, guide, mode, busy, checkin
     {feedback}
     <div className="runtime-guide-footer"><p><UiText zh={"完成后，回到这里检测。"} /></p>
       <button type="button" className="primary-button" aria-disabled={busy} aria-busy={checking} onClick={() => { if (!busy) onCheck() }}>
-        {checking ? uiAttribute("正在检测…") : mode === 'login' ? uiAttribute("我已登录，重新检测") : uiAttribute("我已安装，重新检测")}
+        <BusyLabel busy={checking}>{mode === 'login' ? uiAttribute("我已登录，重新检测") : uiAttribute("我已安装，重新检测")}</BusyLabel>
       </button>
     </div>
   </div>

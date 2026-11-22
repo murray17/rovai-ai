@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { AdapterInstallation, AgentProfile, MemberRuntimeConfiguration } from '@contracts'
@@ -262,9 +263,9 @@ export function MemberRuntimeApplyDialog({ source, agents, installations, editor
           </button>
         </> : stage === 'applying' ? <button type="button" className="primary-button apply-primary" disabled>{t('正在应用…')}</button> : <>
           {failures.length > 0 && <button type="button" className="quiet-button" disabled={busy} onClick={close}>{t('关闭')}</button>}
-          <button type="button" className="primary-button apply-primary" data-apply-complete disabled={busy}
+          <button type="button" className="primary-button apply-primary" data-apply-complete disabled={busy} aria-busy={refreshing}
             onClick={() => hasUnknown ? void refresh(false) : hasConflict ? void refresh(true) : failures.length ? void apply(true) : close()}>
-            {refreshing ? t('正在读取…') : hasUnknown ? t('核对结果') : hasConflict ? t('重新选择') : failures.length ? t('重试失败项') : t('完成')}
+            <BusyLabel busy={refreshing}>{hasUnknown ? t('核对结果') : hasConflict ? t('重新选择') : failures.length ? t('重试失败项') : t('完成')}</BusyLabel>
           </button>
         </>}
       </AppDialogFooter>

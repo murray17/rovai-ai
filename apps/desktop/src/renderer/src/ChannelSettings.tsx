@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useThreadClient, type ThreadClient } from './camp-client'
 import { feishuLoginFailureDetail } from '../../shared/feishu-login-progress'
 import { useCallback, useEffect, useId, useMemo, useState, useRef } from 'react'
@@ -559,8 +560,8 @@ export function ExecutionWebSettingsPanel(): React.JSX.Element {
         <p className="execution-web-warning"><UiText zh={"修改端口后，此前发送的执行台链接可能失效。"} /></p>
         {error && <p className="execution-web-error" role="alert">{error}</p>}
         <div className="execution-web-actions">
-          <button className="primary-button compact" type="submit" disabled={!dirty || !portValid || saving}>
-            <DialogControlIcon name="save" />{saving ? uiAttribute("保存中…") : uiAttribute("保存")}
+          <button className="primary-button compact" type="submit" disabled={!dirty || !portValid || saving} aria-busy={saving}>
+            <BusyLabel busy={saving}><DialogControlIcon name="save" />{uiAttribute("保存")}</BusyLabel>
           </button>
         </div>
       </form>
@@ -820,17 +821,18 @@ function ChannelMemberBotTable({
                     className="channel-row-action"
                     type="button"
                     disabled={!connected || busy !== null || provisioning || !action || (published && !bot?.canReconcile)}
+                    aria-busy={actionBusy || provisioning}
                     onClick={() => action?.(channel, agent)}
                   >
-                    {actionBusy || provisioning
-                      ? uiAttribute("处理中…")
-                      : published && !bot?.canReconcile
+                    <BusyLabel busy={actionBusy || provisioning}>
+                      {published && !bot?.canReconcile
                         ? uiAttribute("管理不可用")
                         : failed
                           ? bot?.appId ? uiAttribute("继续核对") : uiAttribute("重试")
                           : connected
                             ? disabled ? uiAttribute("重新发布") : uiAttribute("发布")
                             : uiAttribute("等待连接")}
+                    </BusyLabel>
                   </button>
                 )}
               </div>
@@ -1124,21 +1126,22 @@ function PublishBotDialog({
                 className="primary-button"
                 type="button"
                 disabled={busy || !selectedApprover}
+                aria-busy={busy}
                 onClick={() => onSelectApprover(agent.agentId, selectedApprover)}
               >
-                {busy ? uiAttribute("正在提交审批…") : uiAttribute("提交审批并继续发布")}
+                <BusyLabel busy={busy}>{uiAttribute("提交审批并继续发布")}</BusyLabel>
               </button>
             ) : !retryLocked && !recoveringConnection && (
-              <button className="primary-button" type="button" disabled={busy} onClick={() => onPublish(agent.agentId)}>
-                {busy
-                  ? effectiveAppId ? uiAttribute("核对中…") : uiAttribute("发布中…")
-                  : provisioning?.stage === 'failed' && effectiveAppId
+              <button className="primary-button" type="button" disabled={busy} aria-busy={busy} onClick={() => onPublish(agent.agentId)}>
+                <BusyLabel busy={busy}>
+                  {provisioning?.stage === 'failed' && effectiveAppId
                     ? uiAttribute("继续核对")
                     : boundAppId
                       ? uiAttribute("确认重新发布")
                       : provisioning?.stage === 'failed'
                         ? uiAttribute("重新发布")
                         : uiAttribute("确认发布")}
+                </BusyLabel>
               </button>
             ))}
           </AppDialogFooter>

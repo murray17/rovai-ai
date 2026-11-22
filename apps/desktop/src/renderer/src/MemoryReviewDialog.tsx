@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useId, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { AgentProfile, HearthReviewItem, MemoryRecord } from '@contracts'
@@ -163,8 +164,8 @@ export function MemoryReviewDialog({
                 <button className="quiet-button" type="button" disabled={disabled} onClick={() => void resolve('reject')}><UiText zh="拒绝" /></button>
                 {!selected.stale && <>
                   <button className="quiet-button" type="button" disabled={disabled} onClick={() => updateDraft({ editing: !editing })}><UiText zh={editing ? '取消编辑' : '编辑后接受'} /></button>
-                  <button className="primary-button" type="button" disabled={disabled || (editing && !validation?.valid)} onClick={() => void resolve('accept')}>
-                    <UiText zh={busy?.startsWith('review-accept-') ? '正在保存…' : editing ? '接受最终内容' : '接受'} />
+                  <button className="primary-button" type="button" disabled={disabled || (editing && !validation?.valid)} aria-busy={busy?.startsWith('review-accept-') ?? false} onClick={() => void resolve('accept')}>
+                    <BusyLabel busy={busy?.startsWith('review-accept-') ?? false}><UiText zh={editing ? '接受最终内容' : '接受'} /></BusyLabel>
                   </button>
                 </>}
               </div>}

@@ -100,6 +100,8 @@ add component-level theme colors, automatic inversion or theme-specific markup.
 - **Buttons:** primary actions use the action family; secondary and workspace creation entries use quiet tonal surfaces.
   Destructive actions use `--danger-soft` and `--danger`. Mission Worktree cleanup keeps its documented ordinary action treatment.
   Preserve existing pressed behavior; fixed-position controls must not shift their hit area. Disabled labels remain legible.
+  Busy buttons keep their label, size and tone. After 150ms, the shared BusyLabel spinner replaces the label in place.
+  Do not swap the label for in-progress text.
 - **Inputs and selection:** use the input surface and visible labels.
   Keep DOM focus, caret, IME and keyboard navigation without extra focus rings, glow, focus-only borders or search underlines.
 - **Splitters:** use one 1px boundary; hover/drag changes it to `--resize-line` without thickening or a short grip.

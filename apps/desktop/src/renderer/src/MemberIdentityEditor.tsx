@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import {
   forwardRef,
   useEffect,
@@ -472,9 +473,12 @@ export const MemberIdentityEditor = forwardRef<
                 !draft.displayName.trim() ||
                 (Boolean(agent) && !dirty)
               }
+              aria-busy={busy}
             >
-              {agent && <DialogControlIcon name="save" />}
-              {busy ? uiAttribute("正在保存…") : agent ? uiAttribute("保存") : uiAttribute("创建队员")}
+              <BusyLabel busy={busy}>
+                {agent && <DialogControlIcon name="save" />}
+                {agent ? uiAttribute("保存") : uiAttribute("创建队员")}
+              </BusyLabel>
             </button>
           </div>
         </footer>

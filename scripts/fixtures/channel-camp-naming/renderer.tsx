@@ -24,6 +24,7 @@ const initial: NavigationThreadItem[] = sources.map((channelSource, index) => ({
   lastActivityAt: '2026-08-31T00:00:00Z', lastActivityGlobalSequence: 1, latestCompletionGlobalSequence: 0, version: 1
 }))
 const saved: Array<{ id: string; title: string }> = []
+let releaseRename: (() => void) | undefined
 Object.assign(window, { rovai: { platform: 'darwin' } })
 function Fixture(): React.JSX.Element {
   const [camps, setCamps] = useState(initial)
@@ -41,6 +42,8 @@ function Fixture(): React.JSX.Element {
       onNewConversation={() => {}} onMembers={() => {}} onMemory={() => {}} onSettings={() => {}}
       onOpenProject={() => {}} onCamp={camp => setActive(camp.id)} onRemoveProject={async () => {}}
       onRename={async (camp, title) => {
+        await new Promise<void>(resolve => { releaseRename = resolve })
+        releaseRename = undefined
         saved.push({ id: camp.id, title })
         setCamps(current => current.map(item => item.id === camp.id ? { ...item, title, version: item.version + 1 } : item))
       }} onDelete={async () => {}} onError={error => { throw error }} />
@@ -53,6 +56,8 @@ function Fixture(): React.JSX.Element {
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)
 Object.assign(window, { namingTest: {
+  renamePending: () => releaseRename !== undefined,
+  releaseRename: () => releaseRename?.(),
   settle: async () => {
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   },
@@ -63,7 +68,7 @@ Object.assign(window, { namingTest: {
     saved,
     long: (() => {
       const node = document.querySelector('[data-sidebar-menu-target="thread:fixture-camp-4"]')?.closest('.camp-nav-row')?.querySelector<HTMLElement>('.truncate')
-      return node ? { clipped: node.scrollWidth > node.clientWidth, ellipsis: getComputedStyle(node).textOverflow } : null
+      return node ? { clipped: node.scrollWidth > node.clientWidth, faded: getComputedStyle(node).maskImage.startsWith('linear-gradient(') } : null
     })(),
     overflow: document.documentElement.scrollWidth > innerWidth,
     errors: document.querySelector('[role="alert"]')?.textContent ?? ''

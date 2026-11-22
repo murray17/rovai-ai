@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ThreadMessageView } from '@contracts'
@@ -206,7 +207,9 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
       </AppDialogBody>
       <AppDialogFooter leading={<button type="button" className="quiet-button" disabled={busy} onClick={close}><UiText zh={conversation ? '关闭' : '返回调整'} /></button>}>
         <button type="button" className="quiet-button message-export-copy" disabled={busy || unavailable} onClick={() => { const current = revision.current; void writeClipboardText(markdown).then(ok => { if (current !== revision.current) return; setCopied(ok); if (!ok) { setManualCopy(markdown); setError(uiAttribute('复制失败，请手动复制。')) } }) }}><CopyIcon copied={copied} />{copied ? uiAttribute('已复制') : uiAttribute('复制文本')}</button>
-        <button type="button" className="primary-button" disabled={busy || unavailable} aria-busy={busy} onClick={() => void download()}><ExportGlyph />{busy ? uiAttribute('正在生成…') : uiAttribute('下载 {0}', format === 'markdown' ? 'Markdown' : format.toUpperCase())}</button>
+        <button type="button" className="primary-button" disabled={busy || unavailable} aria-busy={busy} onClick={() => void download()}>
+          <BusyLabel busy={busy}><ExportGlyph />{uiAttribute('下载 {0}', format === 'markdown' ? 'Markdown' : format.toUpperCase())}</BusyLabel>
+        </button>
       </AppDialogFooter>
       <Dialog.Root open={zoom !== null} onOpenChange={open => { if (!open) setZoom(null) }}><Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />

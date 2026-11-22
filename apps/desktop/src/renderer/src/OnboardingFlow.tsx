@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import gooseLogo from './assets/runtime-logos/goose.svg'
 import { RovaiBrandMark } from './RovaiBrandMark'
 import hermesLogo from './assets/runtime-logos/hermes.png'
@@ -557,10 +558,13 @@ function RuntimeStep({
               className="primary-button conversation-primary-button onboarding-primary"
               type="button"
               disabled={!canContinue || busy}
+              aria-busy={busy}
               onClick={onComplete}
             >
-              {t(busy ? uiAttribute("正在准备…") : provisioning ? uiAttribute("继续准备") : uiAttribute("开始对话"))}
-              {!busy && <ForwardIcon />}
+              <BusyLabel busy={busy}>
+                {t(provisioning ? uiAttribute("继续准备") : uiAttribute("开始对话"))}
+                <ForwardIcon />
+              </BusyLabel>
             </button>
           </footer>
                 </>
@@ -636,8 +640,8 @@ function RuntimeEmptyState({
       </section>
       <footer className="onboarding-runtime-footer onboarding-runtime-empty-footer">
         <span>{t('稍后可在设置中继续配置。')}</span>
-        <button className="quiet-button onboarding-defer" type="button" disabled={busy} onClick={onDefer}>
-          {t(busy ? uiAttribute("正在进入…") : uiAttribute("稍后配置"))}
+        <button className="quiet-button onboarding-defer" type="button" disabled={busy} aria-busy={busy} onClick={onDefer}>
+          <BusyLabel busy={busy}>{t(uiAttribute("稍后配置"))}</BusyLabel>
         </button>
       </footer>
     </>

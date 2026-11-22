@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useRef, useState } from 'react'
 import type { AdapterKind, DiagnosticCheck } from '@contracts'
 import { useThreadClient } from './camp-client'
@@ -36,7 +37,9 @@ export function LegacyEnvironmentIssue({ check, disabled, onHandled }: { check: 
       <p>{handled ? t('{0} 项旧配置仍保留，可按需查阅。', count) : t('环境变量配置已从“智能体”页移至“队员”页。保留的 {0} 项旧配置已停用，请将仍需使用的变量手动复制到相应队员的“环境变量”中并保存。', count)}</p>
       {!handled && <small>{t('标记已处理不会迁移配置或删除旧值。')}</small>}
     </div>
-    <div className="diagnostics-issue-action">{!handled && <button type="button" className="quiet-button compact" disabled={disabled || busy} onClick={() => void acknowledge()}>{busy ? t('正在记录…') : t('标记已处理')}</button>}</div>
+    <div className="diagnostics-issue-action">{!handled && <button type="button" className="quiet-button compact" disabled={disabled || busy} aria-busy={busy} onClick={() => void acknowledge()}>
+      <BusyLabel busy={busy}>{t('标记已处理')}</BusyLabel>
+    </button>}</div>
     <details className="diagnostics-details legacy-environment-details" open={open} onToggle={event => {
       const expanded = event.currentTarget.open; setOpen(expanded)
       if (expanded) void read()

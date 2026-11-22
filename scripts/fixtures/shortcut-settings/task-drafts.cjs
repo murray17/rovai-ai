@@ -11,10 +11,11 @@ module.exports = async ({ run, settle, click, capture }) => {
   const reopen = async () => { await toggle(false); assert.equal(await run('!!document.querySelector(".task-panel,.task-editor-dialog,.task-cancel-dialog")'), false); await toggle(true) }
   const create = () => click('.task-new-button')
   const lastRequest = () => run('window.taskDraftTest.calls().at(-1).params')
-  const assertPending = async () => {
+  const assertPending = async (label = '新建') => {
     const count = await run('window.taskDraftTest.calls().length')
     assert.equal(await run('document.querySelector(".task-submit").disabled'), true)
-    assert.equal(await run('document.querySelector(".task-submit").textContent'), '正在保存…')
+    assert.equal(await run('document.querySelector(".task-submit").getAttribute("aria-busy")'), 'true')
+    assert.equal(await run('document.querySelector(".task-submit").textContent'), label)
     await click('.task-submit')
     await act('document.querySelector(".task-editor").dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}))')
     assert.equal(await run('window.taskDraftTest.calls().length'), count, 'Recovered pending draft cannot send another command')
@@ -77,7 +78,7 @@ module.exports = async ({ run, settle, click, capture }) => {
   assert.equal(await value('标题'), '修改的标题'); assert.equal(await value('责任范围与要求'), '原说明'); assert.equal(await value('状态'), 'blocked'); assert.equal(await value('阻塞原因'), '等待确认'); assert.equal(await value('负责人'), '')
   await capture('task-draft-recovered')
   await fill('负责人', assignee); await act('window.taskDraftTest.result("pending")'); await click('.task-submit')
-  await reopen(); await edit(); await assertPending(); await act('window.taskDraftTest.finish("applied")')
+  await reopen(); await edit(); await assertPending('保存'); await act('window.taskDraftTest.finish("applied")')
   assert.equal(await run('!!document.querySelector(".task-editor-dialog")'), false, 'Recovered update settles in the current editor')
   const patch = await run('window.taskDraftTest.calls().at(-1).params')
   assert.equal(patch.taskId, 'task-one'); assert.equal(patch.title, '修改的标题'); assert.equal(patch.blockedReason, '等待确认')

@@ -90,11 +90,36 @@ test('withdrawn text recovery uses production storage, expiry and composer inter
     })
     await check('Withdrawal is accepted even when initial/ready storage or projection refresh fails', async () => {
       for (const name of ['storage-failure', 'ready-storage-failure', 'refresh-failure']) {
-        await scenario(name); await withdraw()
+        await scenario(name)
+        if (name === 'storage-failure') {
+          await click('[aria-label="撤回这条消息"]')
+          await b.evaluate(`(() => {
+            window.withdrawExit = null
+            const dialog = document.querySelector('.message-withdraw-dialog')
+            const observer = new MutationObserver(() => {
+              if (dialog.dataset.state !== 'closed') return
+              window.withdrawExit = {
+                title: dialog.querySelector('.app-dialog-title').textContent,
+                button: dialog.querySelector('.danger-button').textContent,
+                duration: getComputedStyle(dialog).animationDuration
+              }
+              observer.disconnect()
+            })
+            observer.observe(dialog, { attributes: true, attributeFilter: ['data-state'] })
+          })()`)
+          await click('[aria-label="确认撤回消息"]')
+          await b.wait('window.withdrawExit !== null')
+          assert.deepEqual(await b.evaluate('window.withdrawExit'), {
+            title: '撤回这条消息？', button: '撤回', duration: '0.11s'
+          })
+          await b.wait('!document.querySelector(".message-withdraw-dialog")')
+        } else {
+          await withdraw()
+        }
         assert.equal((await state()).messages[3].withdrawn, true, name)
         assert.equal(await count(), name === 'refresh-failure' ? 1 : 0, name)
         assert.equal(await text(), existing)
-        assert.equal(await b.evaluate('!!document.querySelector(".message-withdraw-dialog")'), false)
+        await b.wait('!document.querySelector(".message-withdraw-dialog, .app-dialog-overlay.app-dialog-exits")')
         await capture(name)
       }
     })

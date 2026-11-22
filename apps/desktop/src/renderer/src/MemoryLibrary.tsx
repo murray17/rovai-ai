@@ -1,3 +1,4 @@
+import { BusyLabel } from './BusyLabel'
 import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { useThreadClient } from './camp-client'
 import { MobileBack, useMobileLayout } from './MobileLayout'
@@ -882,7 +883,9 @@ export function MemoryLibrary({
             />
             <AppDialogFooter>
               <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}><UiText zh={"取消"} /></button></Dialog.Close>
-              <button className="danger-button" type="button" onClick={() => forgetTarget && void forget(forgetTarget)} disabled={busy !== null}>{busy?.startsWith('forget-') ? uiAttribute("正在遗忘…") : uiAttribute("永久遗忘")}</button>
+              <button className="danger-button" type="button" onClick={() => forgetTarget && void forget(forgetTarget)} disabled={busy !== null} aria-busy={busy?.startsWith('forget-') ?? false}>
+                <BusyLabel busy={busy?.startsWith('forget-') ?? false}>{uiAttribute("永久遗忘")}</BusyLabel>
+              </button>
             </AppDialogFooter>
           </AppDialogContent>
         </Dialog.Portal>
@@ -1193,13 +1196,14 @@ function ReviewScheduleDialog({
                         className="quiet-button compact"
                         type="button"
                         disabled={busy}
+                        aria-busy={busyAction === 'refresh'}
                         onClick={() => void onRetryRefresh()}
                       >
-                        {busyAction === 'refresh'
-                          ? uiAttribute("正在刷新…")
-                          : renderedEditor.phase === 'applied-refresh-failed'
-                            ? uiAttribute("只重试刷新")
-                            : uiAttribute("重新获取最新状态")}
+                        <BusyLabel busy={busyAction === 'refresh'}>
+                          {renderedEditor.phase === 'applied-refresh-failed'
+                              ? uiAttribute("只重试刷新")
+                              : uiAttribute("重新获取最新状态")}
+                        </BusyLabel>
                       </button>
                     )}
                   </div>
@@ -1222,9 +1226,10 @@ function ReviewScheduleDialog({
                       className="quiet-button compact"
                       type="button"
                       disabled={controlsDisabled}
+                      aria-busy={busyAction === 'clear'}
                       onClick={() => void onSubmit('clear')}
                     >
-                      {busyAction === 'clear' ? uiAttribute("正在清除…") : uiAttribute("清除提醒")}
+                      <BusyLabel busy={busyAction === 'clear'}>{uiAttribute("清除提醒")}</BusyLabel>
                     </button>
                   )}
                   <span><UiText zh={"时间精确到分钟，且必须晚于当前时间。"} /></span>
@@ -1236,8 +1241,8 @@ function ReviewScheduleDialog({
                   {renderedEditor.phase === 'applied-refresh-failed' ? uiAttribute("关闭") : uiAttribute("取消")}
                 </button>
               </Dialog.Close>
-              <button className="primary-button" type="submit" disabled={saveDisabled}>
-                {busyAction === 'save' ? uiAttribute("正在保存…") : uiAttribute("保存设置")}
+              <button className="primary-button" type="submit" disabled={saveDisabled} aria-busy={busyAction === 'save'}>
+                <BusyLabel busy={busyAction === 'save'}>{uiAttribute("保存设置")}</BusyLabel>
               </button>
             </AppDialogFooter>
           </form>
@@ -1301,7 +1306,9 @@ function MemoryEditorDialog({
             </AppDialogBody>
             <AppDialogFooter>
               <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}><UiText zh={"取消"} /></button></Dialog.Close>
-              <button className="primary-button" type="submit" disabled={!contentValid || !identityValid || busy}>{busy ? uiAttribute("正在保存…") : editor?.kind === 'revise' ? uiAttribute("保存修订") : uiAttribute("保存记忆")}</button>
+              <button className="primary-button" type="submit" disabled={!contentValid || !identityValid || busy} aria-busy={busy}>
+                <BusyLabel busy={busy}>{editor?.kind === 'revise' ? uiAttribute("保存修订") : uiAttribute("保存记忆")}</BusyLabel>
+              </button>
             </AppDialogFooter>
           </form>
         </AppDialogContent>
