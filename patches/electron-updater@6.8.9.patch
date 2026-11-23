@@ -1,0 +1,168 @@
+diff --git a/out/differentialDownloader/DifferentialDownloader.js b/out/differentialDownloader/DifferentialDownloader.js
+index c6e948a79d1bb85122b21d8ddd61a5a842ca2e8d..f7b35db53806e86bbff4b1377d44f066598b21db 100644
+--- a/out/differentialDownloader/DifferentialDownloader.js
++++ b/out/differentialDownloader/DifferentialDownloader.js
+@@ -4,6 +4,7 @@ exports.DifferentialDownloader = void 0;
+ const builder_util_runtime_1 = require("builder-util-runtime");
+ const fs_extra_1 = require("fs-extra");
+ const fs_1 = require("fs");
++const { Transform } = require("stream");
+ const DataSplitter_1 = require("./DataSplitter");
+ const url_1 = require("url");
+ const downloadPlanBuilder_1 = require("./downloadPlanBuilder");
+@@ -95,11 +96,21 @@ class DifferentialDownloader {
+     async doDownloadFile(tasks, fdList) {
+         const oldFileFd = await (0, fs_extra_1.open)(this.options.oldFile, "r");
+         fdList.push({ descriptor: oldFileFd, path: this.options.oldFile });
+-        const newFileFd = await (0, fs_extra_1.open)(this.options.newFile, "w");
+-        fdList.push({ descriptor: newFileFd, path: this.options.newFile });
+-        const fileOut = (0, fs_1.createWriteStream)(this.options.newFile, { fd: newFileFd });
+-        await new Promise((resolve, reject) => {
++        const fileOut = (0, fs_1.createWriteStream)(this.options.newFile);
++        const writerClosed = new Promise(resolve => fileOut.once("close", resolve));
++        await new Promise((resolve, rejectDownload) => {
+             const streams = [];
++            let failed = false;
++            let activeRequest = null;
++            let activeRange = null;
++            const reject = error => {
++                if (failed) return;
++                failed = true;
++                activeRange?.destroy();
++                activeRequest?.abort();
++                for (const stream of streams) stream.destroy();
++                rejectDownload(error);
++            };
+             // Create our download info transformer if we have one
+             let downloadInfoTransform = undefined;
+             if (!this.options.isUseMultipleRangeRequest && this.options.onProgress) {
+@@ -124,19 +135,13 @@ class DifferentialDownloader {
+             streams.push(digestTransform);
+             // noinspection JSArrowFunctionCanBeReplacedWithShorthand
+             fileOut.on("finish", () => {
+-                ;
+-                fileOut.close(() => {
+-                    // remove from fd list because closed successfully
+-                    fdList.splice(1, 1);
+-                    try {
+-                        digestTransform.validate();
+-                    }
+-                    catch (e) {
+-                        reject(e);
+-                        return;
+-                    }
++                try {
++                    digestTransform.validate();
+                     resolve(undefined);
+-                });
++                }
++                catch (e) {
++                    reject(e);
++                }
+             });
+             streams.push(fileOut);
+             let lastStream = null;
+@@ -157,12 +162,23 @@ class DifferentialDownloader {
+                 return;
+             }
+             let downloadOperationCount = 0;
++            const token = this.options.cancellationToken;
++            const cancelRequest = () => {
++                if (activeRequest) reject(new builder_util_runtime_1.CancellationError());
++            };
++            token.onCancel(cancelRequest);
++            fileOut.once("close", () => token.removeListener("cancel", cancelRequest));
+             let actualUrl = null;
+             this.logger.info(`Differential download: ${this.options.newUrl}`);
+             const requestOptions = this.createRequestOptions();
+             requestOptions.redirect = "manual";
+             w = (index) => {
+                 var _a, _b;
++                if (failed) return;
++                if (token.cancelled) {
++                    reject(new builder_util_runtime_1.CancellationError());
++                    return;
++                }
+                 if (index >= tasks.length) {
+                     if (this.fileMetadataBuffer != null) {
+                         firstStream.write(this.fileMetadataBuffer);
+@@ -191,14 +207,19 @@ class DifferentialDownloader {
+                     response.on("aborted", () => {
+                         reject(new Error("response has been aborted by the server"));
+                     });
+-                    // Electron net handles redirects automatically, our NodeJS test server doesn't use redirects - so, we don't check 3xx codes.
+-                    if (response.statusCode >= 400) {
+-                        reject((0, builder_util_runtime_1.createHttpError)(response));
++                    if (failed) return;
++                    try {
++                        activeRange = checkedRange(response, operation, this.blockAwareFileInfo.size);
+                     }
+-                    response.pipe(firstStream, {
+-                        end: false,
+-                    });
+-                    response.once("end", () => {
++                    catch (error) {
++                        reject(error);
++                        return;
++                    }
++                    activeRange.once("error", reject);
++                    activeRange.once("end", () => {
++                        if (failed) return;
++                        activeRange = null;
++                        activeRequest = null;
+                         // Pass on that we are downloading a segment
+                         if (downloadInfoTransform) {
+                             downloadInfoTransform.endRangeDownload();
+@@ -211,8 +232,11 @@ class DifferentialDownloader {
+                             w(index);
+                         }
+                     });
++                    response.pipe(activeRange).pipe(firstStream, { end: false });
+                 });
++                activeRequest = request;
+                 request.on("redirect", (statusCode, method, redirectUrl) => {
++                    if (failed) return;
+                     this.logger.info(`Redirect to ${removeQuery(redirectUrl)}`);
+                     actualUrl = redirectUrl;
+                     (0, builder_util_runtime_1.configureRequestUrl)(new url_1.URL(actualUrl), requestOptions);
+@@ -222,6 +246,10 @@ class DifferentialDownloader {
+                 request.end();
+             };
+             w(0);
++        }).finally(() => {
++            // Full download reopens this same destination. Wait for outstanding file I/O.
++            fileOut.destroy();
++            return writerClosed;
+         });
+     }
+     async readRemoteBytes(start, endInclusive) {
+@@ -257,6 +285,29 @@ class DifferentialDownloader {
+     }
+ }
+ exports.DifferentialDownloader = DifferentialDownloader;
++function checkedRange(response, operation, fileSize) {
++    const { start, end } = operation;
++    const expected = end - start;
++    const range = /^bytes (\d+)-(\d+)\/(\d+)$/i.exec(String(response.headers["content-range"]).trim());
++    if (response.statusCode !== 206 || !range || Number(range[1]) !== start || Number(range[2]) !== end - 1 || Number(range[3]) !== fileSize) {
++        throw new Error(`Expected HTTP 206 for bytes ${start}-${end - 1}/${fileSize}, received HTTP ${response.statusCode} with an incompatible Content-Range`);
++    }
++    const length = response.headers["content-length"];
++    if (length != null && (!/^\d+$/.test(String(length)) || Number(length) !== expected)) {
++        throw new Error(`Unexpected Content-Length for ${expected}-byte range`);
++    }
++    let received = 0;
++    return new Transform({
++        transform(chunk, encoding, callback) {
++            received += chunk.length;
++            if (received > expected) callback(new Error(`Range body exceeds ${expected} bytes`));
++            else callback(null, chunk);
++        },
++        flush(callback) {
++            callback(received === expected ? null : new Error(`Range body ended after ${received} of ${expected} bytes`));
++        },
++    });
++}
+ function formatBytes(value, symbol = " KB") {
+     return new Intl.NumberFormat("en").format((value / 1024).toFixed(2)) + symbol;
+ }

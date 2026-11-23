@@ -141,6 +141,10 @@ jobs:
           pnpm typecheck
           pnpm exec vitest run
 
+      - name: Check differential downloads and release blockmaps
+        if: steps.changes.outputs.node == 'true'
+        run: node --test scripts/lib/differential-update.test.mjs scripts/lib/macos-zip-blockmap.test.mjs
+
       - name: Install native UI acceptance dependencies
         if: steps.changes.outputs.node == 'true'
         run: |

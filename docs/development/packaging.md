@@ -170,8 +170,10 @@ macOS 正式 Release 必须在同一个版本标签中上传以下完整集合�
 ```text
 Rovai-AI-<version>-arm64.dmg
 Rovai-AI-<version>-arm64.zip
+Rovai-AI-<version>-arm64.zip.blockmap
 Rovai-AI-<version>-x64.dmg
 Rovai-AI-<version>-x64.zip
+Rovai-AI-<version>-x64.zip.blockmap
 latest-mac.yml
 ```
 
@@ -184,6 +186,21 @@ latest-mac.yml
 合并输出必须保持 YAML 1.1 字符串兼容性，尤其不能省略 `releaseDate` 的引号；否则
 `electron-updater` 会将时间戳解析为 `Date` 对象，旧客户端会丢弃候选版本的日期。
 `scripts/lib/macos-update-info.test.mjs` 使用更新器自身的解析器验证合并前后字段和值类型一致。
+
+签名工作流在两种 Mac 上用 Electron 网络栈运行下载回归，从各自最终的 ZIP 重算分块索引，
+并在签名报告中记录发布索引的大小和 SHA-256。更新器从 ZIP 地址加 `.blockmap` 自动获取索引。
+从 DMG 新装且没有旧 ZIP 时直接下载全量。常规增量从连续两版发布索引后开始，旧 ZIP 和索引需要匹配。
+如果上次索引获取失败，本机可能保留旧索引，下次更新可能额外传输一次增量数据。
+
+共用下载器核对 GitHub 单段响应的 HTTP 206、字节区间、目标大小及实际长度。异常时终止分段，
+关闭临时文件，从原始发布地址重新下载整包。拼合与全量结果都要通过清单的 SHA-512 校验，
+macOS 安装继续使用原有签名校验。关于页沿用普通进度条，回退时总量和百分比会按整包重新计算。
+
+将 Server 草稿、两个平台的更新清单及 Windows 安装器索引准备在同一草稿后，
+向 `release-asset-transfer.yml` 的 `manifest.files` 提供两个 DMG、两个 ZIP、两个 ZIP 索引和
+Windows EXE 的文件名、大小及 SHA-256。工作流校验来源，上传这七个文件，再从已上传资产的摘要
+生成统一的 `SHA256SUMS.txt`。重复运行会核对既有资产。发布者公开后应匿名读取两份索引，
+并检查两个 ZIP 的单段 GET 返回正确的 `206` 和 `Content-Range`。
 
 已发布的 v0.0.1 没有 ZIP/`latest-mac.yml`，旧 App 也没有自动安装能力，所以
 `v0.0.1 → v0.0.2` 是一次性手动迁移。后来到 v0.4.0 的公共 macOS 包使用仓库原有的临时自签名
@@ -255,9 +272,10 @@ Apple 网络错误时，在同一工作区重跑原有签名构建命令，复�
 4. 合入发布代码并提升版本与 `build/release-notes.md` 后，从 `main` 手动运行
    `.github/workflows/macos-signed-build.yml`。它先检查证书指纹和有效身份，分别签名、公证 App，
    再公证 DMG，最后验证两种架构并合并唯一的 `latest-mac.yml`。只有完整的
-   `rovai-macos-signed` artifact 和全部验证通过后，才能把五件发布集合上传到同一 GitHub Release。
-5. 用隔离机器或隔离用户数据验证新 DMG 的首次安装；再用上一版 Developer ID 正式包测试“关于与更新”
-   下载和“安装并重启”。切换时的旧临时签名用户按上文执行一次手动迁移，不能把其旧 App 能显示更新视为
+   `rovai-macos-signed` artifact 和全部验证通过后，才能把七件 macOS 发布集合上传到同一 GitHub Release。
+5. 在 Apple Silicon 和 Intel 隔离机器上验证新 DMG 的首次安装，再用上一版同一 Team 的 Developer ID
+   正式包验证有旧 ZIP 的增量、无缓存的全量和分段异常后的全量，逐项完成“安装并重启”并核对原用户数据。
+   切换时的旧临时签名用户按上文执行一次手动迁移，不能把其旧 App 能显示更新视为
    安装已获验证。
 
 本机需要把已验收构建提升为日常安装版时，使用专用 ad-hoc 入口：

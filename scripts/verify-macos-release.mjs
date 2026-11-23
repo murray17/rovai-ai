@@ -19,6 +19,7 @@ import {
   assertStableMacosSignature
 } from './lib/macos-signing-policy.mjs'
 import { runMacosTicket } from './lib/macos-ticket-retry.mjs'
+import { verifyMacZipBlockmap } from './lib/macos-zip-blockmap.mjs'
 import {
   assertUpdateInfoReleaseNotes,
   configuredReleaseNotesFile
@@ -88,7 +89,7 @@ function findDmg() {
   return candidates[0]
 }
 
-function verifyUpdateArtifacts() {
+async function verifyUpdateArtifacts() {
   const zipPath = join(distDir, artifactName('zip'))
   const updateInfoPath = join(distDir, 'latest-mac.yml')
   if (!existsSync(zipPath)) throw new Error(`macOS update ZIP is missing: ${zipPath}`)
@@ -117,14 +118,12 @@ function verifyUpdateArtifacts() {
   if (Number(zipEntry.size) !== statSync(zipPath).size) {
     throw new Error(`latest-mac.yml has the wrong size for ${zipName}`)
   }
-  const actualSha512 = Buffer.from(
-    run('/usr/bin/shasum', ['-a', '512', zipPath]).split(/\s+/)[0],
-    'hex'
-  ).toString('base64')
-  if (zipEntry.sha512 !== actualSha512) {
+  const { zipSha512, blockmapSize, blockmapSha256 } = await verifyMacZipBlockmap(zipPath)
+  if (zipEntry.sha512 !== zipSha512) {
     throw new Error(`latest-mac.yml has the wrong SHA-512 for ${zipName}`)
   }
   report.push(`Update ZIP: ${relative(root, zipPath)}`)
+  report.push(`${zipName}.blockmap: ${blockmapSize} bytes, SHA-256 ${blockmapSha256}`)
   report.push('latest-mac.yml: version, release notes, actual sha512 and size passed')
   return zipPath
 }
@@ -260,7 +259,7 @@ try {
   report.push(`DMG format: ${dmgFormat}`)
 
   const packagedAppPath = findPackagedApp()
-  const zipPath = verifyUpdateArtifacts()
+  const zipPath = await verifyUpdateArtifacts()
   const updateConfiguration = parseYaml(readFileSync(
     join(packagedAppPath, 'Contents', 'Resources', 'app-update.yml'),
     'utf8'
