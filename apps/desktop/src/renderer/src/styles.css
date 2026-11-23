@@ -268,7 +268,7 @@ html[data-rovai-platform="win32"] .unified-sidebar-drag {
 .rail-logo-mark { flex: 0 0 auto; }
 .rail-logo > span { display: grid; min-width: 0; }
 .rail-logo strong { color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
-.rail-search-button { margin-right: 2px; }
+.rail-search-button { margin-right: -8px; }
 .rail-search-button:hover { color: var(--ink); background: var(--surface-muted); }
 .rail-search-button > .navigation-icon { width: 17px; height: 17px; flex-basis: 17px; }
 .unified-primary-nav { display: grid; gap: 3px; margin-bottom: 12px; }

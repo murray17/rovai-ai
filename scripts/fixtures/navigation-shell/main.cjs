@@ -14,6 +14,18 @@ app.whenReady().then(async () => {
   const frame = () => run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
   const width = () => run('document.querySelector(".unified-sidebar").getBoundingClientRect().width')
+  const checkSearchAlignment = async (expectedRight, scrolls) => {
+    const layout = await run(`(() => {
+      const list = document.querySelector('.navigation-scroll')
+      const right = selector => document.querySelector(selector).getBoundingClientRect().right
+      return { search: right('.rail-search-button'), primary: right('.new-conversation-button'),
+        scrolls: list.scrollHeight > list.clientHeight, gutter: list.offsetWidth - list.clientWidth }
+    })()`)
+    assert.equal(layout.scrolls, scrolls, 'Fixture covers the expected list overflow state')
+    assert.equal(layout.primary, expectedRight)
+    assert.equal(layout.search, layout.primary, 'Search aligns with the primary navigation rows')
+    if (!scrolls) assert.equal(layout.gutter, 0, 'Short lists keep their full width')
+  }
   const point = selector => run(`(() => {const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+Math.min(350,r.height/2))}})()`)
   let mousePressed = false
   const mouse = (type, p) => {
@@ -233,6 +245,7 @@ app.whenReady().then(async () => {
     await run('document.documentElement.dataset.theme="day";window.navigationTest.setLongLabels(false)');await moveAway()
     assert.equal((await label(projectLabel)).mask,'none','A renamed short project clears its old overflow mask')
     assert.equal(await width(),270)
+    await checkSearchAlignment(259, false)
     assert.equal(await run('document.querySelector(".windows-application-menu-item").getBoundingClientRect().left > document.querySelector(".navigation-collapse-button").getBoundingClientRect().right'),true)
     const initialRenders=await run('window.navigationTest.renders()')
     await run('document.querySelector("textarea").value="保留输入草稿"')
@@ -249,6 +262,7 @@ app.whenReady().then(async () => {
     await click('.navigation-collapse-button');assert.equal(await width(),350)
     assert.equal(await run('document.querySelector("textarea").value'),'保留输入草稿')
     await drag(-150);assert.equal(await width(),200)
+    await checkSearchAlignment(189, false)
     await moveAway();await capture('sidecar-v3-compact')
     assert.equal((await status(runningSelector)).slots,2,'Compact layout retains both facts')
     await drag(-20);assert.equal(await width(),200, 'Release in the detent keeps the minimum')
@@ -404,6 +418,10 @@ app.whenReady().then(async () => {
       assert.equal(await run(`document.querySelector(${JSON.stringify(groupSelector(ordinaryKey)+' .show-more-camps')}).disabled`),false,'The first page remains expandable after the old read settles')
     }
     assert.deepEqual(await run('window.navigationTest.paginationErrors'),[],'Obsolete read failures stay fenced')
+    for (const [railWidth, right] of [[270, 259], [200, 189]]) {
+      await drag(railWidth - await width())
+      await checkSearchAlignment(right, true)
+    }
     console.log(JSON.stringify({ok:true,checks:'Desktop pinned conversation icon/alignment/trailing status slot, pointer threshold/reversal/cancellation, full collapse/inert, keyboard/menu, storage, unchanged content renders, draft retention, Windows/menu, macOS/Web fixed settings and collapsed recovery, memory-only shared history, keyboard navigation, ignored Renderer side buttons, native Mac swipe, input consumption and history reset, Project pagination reset/freshness/late-result fencing and whole-rail state retention'}))
     window.destroy();app.quit()
   } catch(error) {console.error(error);console.error(await run('JSON.stringify({events:window.pointerEvents?.slice(-30),shell:document.querySelector(".navigation-shell").outerHTML.slice(0,300)})'));await capture('failure');app.exit(1)}
