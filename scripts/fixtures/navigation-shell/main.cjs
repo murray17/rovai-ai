@@ -118,6 +118,28 @@ app.whenReady().then(async () => {
     assert.equal(defaultStatus.color,'rgb(122, 125, 128)','The running ring is neutral gray in Day')
     assert.equal(await run('getComputedStyle(document.querySelector(".selected .camp-menu-trigger")).opacity'),'0','Selected rows keep actions hidden by default')
     assert.equal(await run('getComputedStyle(document.querySelector(".group-create-button")).opacity'),'0','Project creation stays hidden by default')
+    const quickChatHeading = '[data-group="quick-chat"] .project-heading-row'
+    const toggleQuickChat = async () => {
+      await run(`document.querySelector(${JSON.stringify(quickChatHeading + ' .project-select-row')}).click()`)
+      await settle()
+    }
+    await toggleQuickChat()
+    const pinnedSelector = '.pinned-navigation > .camp-nav-row.selected'
+    const rowStyle = (selector, property) => run(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(property)}]`)
+    assert.notEqual(await rowStyle(pinnedSelector, 'backgroundColor'), 'rgba(0, 0, 0, 0)')
+    assert.notEqual(await rowStyle(quickChatHeading, 'backgroundColor'), await rowStyle(pinnedSelector, 'backgroundColor'),
+      'Folding the original group of a separately pinned Thread preserves a single selection fill')
+    window.webContents.debugger.attach('1.3')
+    try {
+      await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] })
+      await frame()
+      assert.equal(await rowStyle(pinnedSelector, 'outlineStyle'), 'solid')
+      assert.equal(await rowStyle(quickChatHeading, 'outlineStyle'), 'none', 'High contrast marks only the independently pinned Thread')
+    } finally {
+      await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+      window.webContents.debugger.detach()
+    }
+    await toggleQuickChat()
     await capture('sidecar-v3-default-day')
     const hoverPoint=await point(runningSelector);mouse('mouseMove',hoverPoint);await settle()
     const hoverStatus=await status(runningSelector)

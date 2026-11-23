@@ -1154,6 +1154,7 @@
   "查看智能体": "View Agents",
   "最近对话": "Recent Chats",
   "正在运行": "Running",
+  "所选会话：{0}": "Selected conversation: {0}",
   "查找当前会话": "Find Current Thread",
   "搜索当前会话": "Search Current Thread",
   "上一个匹配项": "Previous Match",

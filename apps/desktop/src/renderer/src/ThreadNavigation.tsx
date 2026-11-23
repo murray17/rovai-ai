@@ -327,6 +327,16 @@ export function ThreadNavigation({
     groupKey === activeGroupKey ? activeRow : undefined, groupKey === activeGroupKey ? activeGroupPins : 0
   )
   const quickChatWindow = groupWindow('quick-chat', navigation?.quickChat ?? { recentThreads: [], totalCount: 0 })
+  // The project used for new conversations can differ from the one being read.
+  let highlightedProjectKey: string | null = currentProjectKey
+  if (!mobile && activeRow && activeGroupKey) {
+    const group = activeGroupKey === 'quick-chat' ? navigation?.quickChat : projectByKey.get(activeGroupKey)
+    if (pinnedThreads.some(thread => thread.id === activeRow.id)) {
+      highlightedProjectKey = null
+    } else if (group && groupWindow(activeGroupKey, group).threads.some(thread => thread.id === activeRow.id)) {
+      highlightedProjectKey = collapsedProjectGroups.has(activeGroupKey) ? activeGroupKey : null
+    }
+  }
   const updateBadge = appUpdateBadgePresentation(updateSnapshot)
   const managed = Boolean(useShortcuts())
   const jumpLabel = useShortcutLabel('jump', platform)
@@ -624,6 +634,7 @@ export function ThreadNavigation({
                 firstRunThreadId={firstRunThreadId}
                 openingThreadId={openingThreadId}
                 currentProject={currentProjectKey === project.projectKey}
+                highlighted={highlightedProjectKey === groupKey}
                 createDisabled={creatingConversation}
                 pinned
                 onShowMore={() => void showMore(groupKey)}
@@ -673,6 +684,7 @@ export function ThreadNavigation({
                 firstRunThreadId={firstRunThreadId}
                 openingThreadId={openingThreadId}
                 currentProject={currentProjectKey === project.projectKey}
+                highlighted={highlightedProjectKey === groupKey}
                 createDisabled={creatingConversation}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
                 onShowMore={() => void showMore(groupKey)}
@@ -713,6 +725,7 @@ export function ThreadNavigation({
             firstRunThreadId={firstRunThreadId}
             openingThreadId={openingThreadId}
             currentProject={currentProjectKey === 'quick-chat'}
+            highlighted={highlightedProjectKey === 'quick-chat'}
             createDisabled={creatingConversation}
             onShowMore={() => void showMore('quick-chat')}
             onCollapseThreads={() => collapseGroupThreads('quick-chat')}
@@ -1011,6 +1024,7 @@ function ThreadGroup({
   firstRunThreadId,
   openingThreadId,
   currentProject,
+  highlighted,
   createDisabled,
   pinned = false,
   onShowMore,
@@ -1048,6 +1062,7 @@ function ThreadGroup({
   firstRunThreadId: string | null
   openingThreadId: string | null
   currentProject: boolean
+  highlighted: boolean
   createDisabled: boolean
   pinned?: boolean
   onShowMore(): void
@@ -1104,9 +1119,12 @@ function ThreadGroup({
   const pressMenu = useNavigationPressMenu(!!pinTargetKey && projectMenuItems.length > 0)
   const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const paginationControls = navigationPaginationControls(windowCount, hasMore)
+  const hiddenSelection = highlighted && !mobile && !projectExpanded
+    ? threads.find(thread => thread.id === activeThreadId) : undefined
   return (
     <section className="camp-nav-group" data-group={groupKey}>
       <div className={`project-heading-row ${currentProject ? 'current-project' : ''}`} data-menu-open={pressMenu.open || undefined}
+        data-highlighted={highlighted || undefined}
         onContextMenu={(event) => { if (!event.defaultPrevented) pressMenu.rowProps.onContextMenu?.(event) }} data-expanded={projectExpanded ? 'true' : 'false'}>
         <button
           {...pressMenu.rowProps}
@@ -1114,6 +1132,7 @@ function ThreadGroup({
           type="button"
           title={label}
           aria-current={currentProject ? 'true' : undefined}
+          aria-description={hiddenSelection && uiAttribute('所选会话：{0}', formatThreadTitle(hiddenSelection, firstRunThreadId))}
           aria-expanded={projectExpanded}
           aria-controls={contentId}
           data-sidebar-focus-target={`project-row:${groupKey}`}

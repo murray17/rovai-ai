@@ -1328,6 +1328,10 @@ Object.assign(window, { startupTest: {
       const currentPages = () => [...sidebar.querySelectorAll('[aria-current="page"]')]
       const heading = group.querySelector<HTMLButtonElement>('.project-select-row')!
       const otherProject = sidebar.querySelector<HTMLButtonElement>(`[data-group="directory:${paths[0]}"] .project-select-row`)!
+      const projectBackground = (button: HTMLButtonElement) => getComputedStyle(button.closest('.project-heading-row')!).backgroundColor
+      const selectionFill = getComputedStyle(selected).backgroundColor
+      check(selectionFill !== 'rgba(0, 0, 0, 0)' && projectBackground(heading) !== selectionFill,
+        'An expanded project leaves the selection fill on its visible Thread')
       await clickNavigation('团队')
       check(group.querySelector('.camp-nav-row.selected') === selected && list.scrollTop === 0
         && currentPages().length === 1 && currentPages()[0].getAttribute('aria-label') === '团队',
@@ -1337,9 +1341,14 @@ Object.assign(window, { startupTest: {
       check(selected.textContent?.includes(rows[8].title) && currentPages().length === 1
         && currentPages()[0].getAttribute('aria-label') === '团队', 'The selected Thread stays fresh on Teams')
       heading.click(); await flush()
+      check(projectBackground(heading) === selectionFill && heading.getAttribute('aria-description')?.includes(rows[8].title),
+        'Folding the selected Thread group transfers its fill and announces the hidden Thread title')
       await back()
       check(group.querySelectorAll('.camp-nav-row')[5]?.contains(currentPages()[0]) && currentPages().length === 1,
         'Returning from Teams starts a new visit and expands the selected group')
+      check(projectBackground(heading) !== selectionFill && !heading.hasAttribute('aria-description')
+        && getComputedStyle(group.querySelector('.camp-nav-row.selected')!).backgroundColor === selectionFill,
+        'Reopening the group transfers the selection fill back to the Thread')
 
       for (const gesture of ['scroll', 'collapse'] as const) {
         group.querySelector<HTMLButtonElement>('.camp-nav-open')!.click(); await flush(); await flush()
@@ -1357,6 +1366,9 @@ Object.assign(window, { startupTest: {
           heading.click(); await flush()
           otherProject.click(); await flush()
           check(currentPages().length === 0, 'A manually collapsed current group has no current-page marker')
+          check(projectBackground(heading) === selectionFill && projectBackground(otherProject) !== selectionFill
+            && otherProject.getAttribute('aria-current') === 'true',
+          'Choosing another creation target preserves the collapsed reading location and its unique fill')
         }
         const confirmed = projectProjection(id)
         confirmed.thread.title = '正式会话 ' + gesture
@@ -1375,6 +1387,8 @@ Object.assign(window, { startupTest: {
       await resync()
       check(!group.querySelector('.camp-nav-row.selected') && group.querySelectorAll('.camp-nav-row').length === 5,
         'An authoritative empty by-ID result must withdraw the supplemental row on Teams')
+      check(heading.getAttribute('aria-current') === 'true' && projectBackground(heading) === selectionFill,
+        'Without a presentable Thread the chosen project recovers its selection fill')
       cases.push('Desktop cold restore locates the unpinned off-screen active row once and preserves it through pagination')
       cases.push('Cached and off-page Thread selection respects current-page ownership, manual scrolling and folding')
     }

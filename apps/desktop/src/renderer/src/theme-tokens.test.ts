@@ -379,9 +379,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toMatch(/has-adjacent-text-(?:before|after)\s*\{[^}]*(?:margin-left|margin-right):/)
   })
 
-  it('uses quiet selected backgrounds for the active Thread and current Project', () => {
+  it('uses quiet selected backgrounds for the selected Thread or highlighted project heading', () => {
     expect(css).toMatch(/\.camp-nav-row\.selected\s*\{[^}]*background: var\(--surface-selected\)/)
-    expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
+    expect(css).toMatch(/\.project-heading-row\[data-highlighted="true"\]\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
   it('aligns sidebar titles independently from the fixed status and action lane', () => {
