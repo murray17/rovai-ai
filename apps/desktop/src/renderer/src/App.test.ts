@@ -1707,10 +1707,12 @@ describe('task event projections', () => {
     const fullMarkup = renderReview('src/full.ts')
     expect(fullMarkup).toContain('@@ -10,1 +10,1 @@')
     expect(fullMarkup).toContain('>10<')
+    expect(fullMarkup).not.toContain('完整差异')
 
     const exactMarkup = renderReview('src/exact.ts')
     expect(exactMarkup).not.toContain('Runtime 提供了精确替换片段')
-    expect(exactMarkup).toContain('修改 1')
+    expect(exactMarkup).toContain('精确替换 · 无行号')
+    expect(exactMarkup).not.toContain('修改 1')
     expect(exactMarkup).not.toContain('is-hunk')
     expect(exactMarkup).not.toContain('>10<')
 

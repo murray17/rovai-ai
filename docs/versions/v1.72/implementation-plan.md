@@ -5626,3 +5626,13 @@ Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起�
   既有 Desktop 跨会话刷新、普通事件去重及恢复回归通过；类型检查通过。仅组件内存标记，无新增界面信息。
   Desktop/Web 构建、真实隔离 Host/Web 回归及通用文档门禁通过；默认 Vitest 3275 passed / 2 skipped，
   Node 377 passed / 2 skipped。本轮 Rust/模型代码未变，未重复 Rust 测试或真实模型验收，沿用既有资格边界。
+
+## File Change 单行详情（2026-11-23）
+
+会话卡片显示变更文件数和文件名。详情使用 40px 单行工具栏，窄栏通过文件路径选择器切换，
+宽栏在文件列表中显示各文件统计。标准差异正文紧接工具栏，局部片段在代码上方标明来源。
+交互规则见[文件预览](../../ui/components/file-preview.md)。
+
+`pnpm test:file-preview-layout` 在隔离 Electron 窗口通过，覆盖 420px 分栏、360px 英文单文件、
+宽栏深色模式、32 个文件的键盘筛选、跨文件查找及打开当前文件后恢复阅读位置。
+`pnpm typecheck`、`pnpm build:desktop` 和 `pnpm test` 通过。

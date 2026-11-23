@@ -7,6 +7,15 @@ import { useOptionalFileFind } from './FilePreviewFind'
 import { agentRunFilePathParts } from './file-changes-presentation'
 import { UiText, uiAttribute } from './interface-language'
 
+export function ChangedFilePath({ path }: { path: string }): JSX.Element {
+  const { basename } = agentRunFilePathParts(path)
+  return (
+    <code className="changed-file-inline-path" title={path}>
+      <small>{path.slice(0, path.length - basename.length)}</small><strong>{basename}</strong>
+    </code>
+  )
+}
+
 export function ChangedFileSelect({ files, value, onChange }: {
   files: AgentRunFileChangesView['files']
   value: string
@@ -22,7 +31,7 @@ export function ChangedFileSelect({ files, value, onChange }: {
   const list = useRef<HTMLDivElement>(null)
   const id = useId()
   const selected = files.find(file => file.evidenceFileId === value)
-  const path = agentRunFilePathParts(selected?.path ?? '')
+  const path = selected?.path ?? ''
   const filtered = files.filter(file => file.path.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const active = filtered.find(file => file.evidenceFileId === activeId) ?? filtered[0]
   const activeIndex = filtered.findIndex(file => file.evidenceFileId === active?.evidenceFileId)
@@ -92,7 +101,7 @@ export function ChangedFileSelect({ files, value, onChange }: {
     <Popover.Root open={open} onOpenChange={changeOpen}>
       <Popover.Trigger asChild>
         <button ref={trigger} type="button" className="changed-file-trigger"
-          aria-label={uiAttribute("选择变更文件，当前 {0}", String(path.basename))} title={selected?.path}
+          aria-label={uiAttribute("选择变更文件，当前 {0}", path)} title={path}
           onKeyDown={event => {
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault()
@@ -100,7 +109,7 @@ export function ChangedFileSelect({ files, value, onChange }: {
             }
           }}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6" /></svg>
-          <span className="changed-file-copy"><strong>{path.basename}</strong><small>{path.directory}</small></span>
+          <ChangedFilePath path={path} />
           <DialogControlIcon name="chevron" />
         </button>
       </Popover.Trigger>

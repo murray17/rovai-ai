@@ -20,6 +20,8 @@ import { buildLiveExecutionProgress } from '../../../apps/desktop/src/shared/exe
 import { FILE_PREVIEW_RATIO_STORAGE_KEY } from '../../../apps/desktop/src/renderer/src/file-preview-layout'
 import { openAgentRunCurrentFilePreview } from '../../../apps/desktop/src/renderer/src/agent-run-file-preview'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
+import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { languageTestApi } from '../../../apps/desktop/src/renderer/src/interface-language-test-api'
 import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import { agents, initial, initialDraft, installations, run as fixtureRun } from '../host-web-parity/data'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -283,6 +285,10 @@ const operationOnlyChanges: AgentRunFileChangesView = {
   operationCount: 1,
   completedAt: '2026-08-30T08:01:00Z'
 }
+const singleFileChanges: AgentRunFileChangesView = {
+  ...changes, agentRunId: 'run-single', files: [changes.files[0]], fileCount: 1, operationCount: 1,
+  additions: changes.files[0].additions, deletions: changes.files[0].deletions
+}
 const pickerChanges: AgentRunFileChangesView = {
   ...changes, agentRunId: 'run-picker', fileCount: 32, operationCount: 32, additions: 32, deletions: 32,
   files: Array.from({ length: 32 }, (_, index) => ({
@@ -302,7 +308,7 @@ Object.assign(window, { rovai: {
     if (method === 'skills.candidates') return { skills: [], errors: [] }
     if (method === 'threads.pendingDraft.setPresence') return { changed: true }
     if (method === 'thread.messages.anchors') return { schemaVersion: 1, threadId: request.threadId, throughGlobalSequence: 0, totalCount: 0, items: [] }
-    const source = [changes, pickerChanges].find(card => card.agentRunId === request.agentRunId)
+    const source = [changes, pickerChanges, singleFileChanges].find(card => card.agentRunId === request.agentRunId)
     if (method !== 'agentRunFileChanges.get' || request.threadId !== 'camp-1' || !source) return unsupported()
     reviewRequests.push(request)
     if (failNextReview) { failNextReview = false; throw new Error('Fixture detail unavailable') }
@@ -816,8 +822,12 @@ Object.assign(window, { previewTest: {
     document.querySelectorAll<HTMLButtonElement>('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-file')[index].click()
     await settle()
   },
-  async openPickerReview() {
-    previewController.openFileChanges('camp-1', pickerChanges)
+  async openFileReviewFixture(size: 'many' | 'single') {
+    previewController.openFileChanges('camp-1', size === 'single' ? singleFileChanges : pickerChanges)
+    await settle()
+  },
+  async setLanguage(language: 'zh-CN' | 'en') {
+    await changeInterfaceLanguage(languageTestApi, language)
     await settle()
   },
   async setCodeFontSize(codeFontSize: number) {
@@ -1063,6 +1073,8 @@ Object.assign(window, { previewTest: {
     const panel = element('.file-preview-tab-panel:not([hidden])')
     const review = panel?.querySelector<HTMLElement>('.agent-run-file-review')
     const scroll = review?.querySelector<HTMLElement>('.agent-run-file-review-scroll')
+    const toolbar = review?.querySelector<HTMLElement>('.agent-run-file-review-pane-header')
+    const path = Array.from(toolbar?.querySelectorAll('.changed-file-inline-path') ?? []).find(node => node.getClientRects().length)
     const bar = element('.file-preview-tabs')
     const strip = element('.file-preview-tab-strip')
     const toggle = element('.file-preview-toggle')!
@@ -1070,7 +1082,10 @@ Object.assign(window, { previewTest: {
     return {
       reviewVisible: Boolean(review && review.getBoundingClientRect().height > 0),
       emptyVisible: visible('.file-preview-empty'),
-      selectedFile: review?.querySelector('.agent-run-file-review-pane-header code')?.textContent,
+      selectedFile: path?.textContent,
+      toolbarHeight: toolbar?.getBoundingClientRect().height,
+      diffStart: scroll && review ? scroll.getBoundingClientRect().top - review.getBoundingClientRect().top : null,
+      toolbarStatsVisible: Boolean(toolbar?.querySelector('.agent-run-file-review-pane-meta > span')?.getClientRects().length),
       selectedTab: element('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label'),
       tabs: [...document.querySelectorAll<HTMLElement>('[role="tab"]')].map((tab) => ({
         label: tab.getAttribute('aria-label'),
@@ -1084,7 +1099,7 @@ Object.assign(window, { previewTest: {
       sidebarVisible: Boolean(review?.querySelector('.agent-run-file-review-sidebar')?.getBoundingClientRect().width),
       pickerVisible: Boolean(review?.querySelector('.agent-run-file-review-file-picker')?.getBoundingClientRect().width),
       reviewInPreview: Boolean(review?.closest('.file-preview-pane')),
-      overflow: [...document.querySelectorAll<HTMLElement>('.file-preview-tab-panel:not([hidden]), .agent-run-file-review, .agent-run-file-review-header, .agent-run-file-review-file-picker, .agent-run-file-review-pane-header')]
+      overflow: [...document.querySelectorAll<HTMLElement>('.file-preview-tab-panel:not([hidden]), .agent-run-file-review, .changed-file-trigger, .agent-run-file-review-pane-actions, .agent-run-file-review-pane-header')]
         .filter((node) => node.getBoundingClientRect().width && node.scrollWidth > node.clientWidth + 1).map(node => node.className),
       headerDrag: region(bar), toggleNoDrag: region(toggle.parentElement) === 'no-drag',
       dragSpace: strip ? toggle.parentElement!.getBoundingClientRect().left - strip.getBoundingClientRect().right : null,
