@@ -218,7 +218,10 @@ app.whenReady().then(async () => {
     mouse('mouseMove',await point('[data-thread-id="rvcamp_01h47kvsy5fk1shh6w1g60eec1"]'));await settle()
     assert.equal(shortRest.width-(await label(shortLabel)).width,24,'An icon-free conversation uses the hidden action space')
     await moveAway();await capture('navigation-title-fade-day')
-    await click('.conversation-jump')
+    await run("document.querySelector('.new-conversation-button').focus()")
+    await key('Tab', ['shift'])
+    assert.equal(await run("document.activeElement.matches('.unified-brand > .rail-search-button')"), true)
+    await click('.rail-search-button')
     const searchTitle='.command-palette-item .navigation-title[title^="会话长标题"]'
     const searchProject='.command-palette-project .navigation-title[title^="Rovai AI"]'
     assert.equal((await label(searchTitle)).overflow,'true')

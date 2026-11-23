@@ -23,7 +23,7 @@ html[data-mobile-web="true"] .app-shell {
   width: 100%; height: var(--mobile-viewport-height, 100dvh); min-width: 0; overflow: hidden;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); background: var(--mobile-page);
 }
-html[data-mobile-web="true"] :is(.navigation-browser-control, .navigation-resize-handle, .window-drag-strip, .unified-sidebar-drag, .unified-brand, .conversation-jump) { display: none; }
+html[data-mobile-web="true"] :is(.navigation-browser-control, .navigation-resize-handle, .window-drag-strip, .unified-sidebar-drag, .unified-brand) { display: none; }
 html[data-mobile-web="true"] .unified-sidebar { --nav-child-indent: 28px; --nav-unread-size: 6px; display: none; width: 100%; flex: 1; min-height: 0; padding: 0; border: 0; background: var(--mobile-page); }
 html[data-mobile-web="true"] .content { width: 100%; max-width: none; flex: 1; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; background: var(--mobile-page); }
 html[data-mobile-web="true"] .content.compose-content { display: flex; flex-direction: column; }

@@ -269,6 +269,7 @@ export function ThreadNavigation({
   const mobile = useMobileLayout()
   const collapsed = useNavigationCollapsed()
   const navigationCollapsed = !mobile && collapsed
+  const settingsSidebar = view === 'settings' && !mobile
   const navigationScroll = useRef<HTMLDivElement>(null)
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
@@ -329,6 +330,7 @@ export function ThreadNavigation({
   const updateBadge = appUpdateBadgePresentation(updateSnapshot)
   const managed = Boolean(useShortcuts())
   const jumpLabel = useShortcutLabel('jump', platform)
+  const searchLabel = uiAttribute('搜索')
   useShortcutAction('jump', () => setPaletteOpen(open => !open), !disabled)
 
   useEffect(() => {
@@ -510,15 +512,26 @@ export function ThreadNavigation({
 
   return (
     <>
-      <aside id={navigationId} className={`unified-sidebar ${view === 'settings' && !mobile ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={view === 'settings' && !mobile ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
+      <aside id={navigationId} className={`unified-sidebar ${settingsSidebar ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={settingsSidebar ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
             <RovaiBrandMark className="rail-logo-mark" width={20} height={20} />
             <span><strong>Rovai AI</strong></span>
           </span>
+          {!settingsSidebar && (
+            <button
+              className="rail-search-button"
+              type="button"
+              aria-label={uiAttribute('搜索对话、使命和消息')}
+              title={jumpLabel ? `${searchLabel}（${jumpLabel}）` : searchLabel}
+              onClick={() => setPaletteOpen(true)}
+            >
+              <NavigationIcon name="search" />
+            </button>
+          )}
         </div>
-        {view === 'settings' && !mobile
+        {settingsSidebar
           ? (
               settingsNavigation ?? <SettingsSidebarNavigation
                 groups={SETTINGS_SIDEBAR_GROUPS.map(group => ({ ...group, items: group.items.filter(item => (item.key !== 'channels' || client.channels) && (item.key !== 'shortcuts' || managed)) }))}
@@ -556,9 +569,6 @@ export function ThreadNavigation({
                     <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="calendar-clock" /></span><span className="rail-label"><UiText zh={"定时任务"} /></span>
                   </button>
                 </nav>
-                <button className="conversation-jump is-search" type="button" onClick={() => setPaletteOpen(true)}>
-                  <NavigationIcon name="search" /><span><UiText zh="搜索" /></span><kbd aria-hidden="true">{jumpLabel}</kbd>
-                </button>
 
       <div className="navigation-scroll" ref={navigationScroll} onWheel={cancelRowReveal} onTouchMove={cancelRowReveal}
         onClickCapture={event => {

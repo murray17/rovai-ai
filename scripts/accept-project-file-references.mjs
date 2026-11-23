@@ -39,7 +39,7 @@ try {
   await desktop.wait('Boolean(window.rovai?.request)')
   await desktop.wait("window.rovai.supervisor.getSnapshot().then(state => state.fullCoreState === 'ready')", 40000)
   await desktop.evaluate("(async()=>{const api=window.rovai.onboarding;let state=await api.get();if(state.status==='uninitialized')state=await api.showWelcome();if(state.status==='in_progress'&&state.step==='welcome')state=await api.completeWelcome();if(state.status==='in_progress'&&state.step==='member'){await api.selectMember('luoke');state=await api.completeMemberSelection()}if(state.status==='in_progress'&&state.step==='runtime')state=await api.deferRuntimeSetup();return state.status})()")
-  { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.conversation-jump'))`, 25000) }
+  { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.rail-search-button'))`, 25000) }
   const call = (method, params = {}) => desktop.evaluate(`window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)}).catch(error=>{throw new Error(JSON.stringify(error))})`)
   const slowCall = async (method, params) => {
     await desktop.evaluate(`(()=>{window.__fileAcceptanceRequest={done:false};window.rovai.request(${JSON.stringify(method)},${JSON.stringify(params)}).then(value=>window.__fileAcceptanceRequest={done:true,value}).catch(error=>window.__fileAcceptanceRequest={done:true,error});return true})()`)
@@ -68,9 +68,9 @@ try {
   const foreign = await create('Project files · different root', foreignProject)
   const quick = await create('Project files · quick chat', null)
   const openThread = async (surface, id) => {
-    await surface.wait("Boolean(document.querySelector('.conversation-jump'))", 25000)
+    await surface.wait("Boolean(document.querySelector('.rail-search-button'))", 25000)
     await surface.evaluate("window.__fileRefPointers=[];document.addEventListener('pointerdown',event=>window.__fileRefPointers.push({type:event.type,target:event.target.className}),{capture:true});document.addEventListener('click',event=>window.__fileRefPointers.push({type:event.type,target:event.target.className}),{capture:true})")
-    await surface.click("document.querySelector('.conversation-jump')")
+    await surface.click("document.querySelector('.rail-search-button')")
     await surface.wait("Boolean(document.querySelector('.command-palette input'))").catch(async error=>{console.log(JSON.stringify({pointerDebug:await surface.evaluate('window.__fileRefPointers')}));throw error})
     await surface.send('Input.insertText', {text:id})
     await surface.wait("Boolean(document.querySelector('.command-palette-item'))", 20000)
@@ -120,7 +120,7 @@ try {
     assert.equal(await surface.evaluate("document.querySelectorAll('.ref-options [data-option-kind=file]').length"),0)
     await key(surface,'Escape')
   }
-  { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.conversation-jump'))`, 25000) }
+  { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.rail-search-button'))`, 25000) }
   await openThread(desktop, thread)
   const directoryFlow = async surface => {
     await clear(surface); await type(surface, '@')

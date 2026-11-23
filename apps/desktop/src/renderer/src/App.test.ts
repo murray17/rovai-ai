@@ -4,6 +4,7 @@ import { VISIBLE_PRODUCT_RUNTIMES, visibleProductRuntimes } from './runtime-prod
 import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 import { changeInterfaceLanguage } from './interface-language'
+import * as shortcuts from './ShortcutProvider'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
 import { agentRunFileChangesSummaryLabel, agentRunFileChangeModeLabel, agentRunFilePathParts } from './file-changes-presentation'
 import { ThreadDetailEntries } from './ThreadDetailPopover'
@@ -3036,7 +3037,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('新对话')
-    expect(markup).toContain('<kbd aria-hidden="true">Ctrl+K</kbd>')
+    expect(markup).toContain('title="搜索（Ctrl+K）"')
     expect(markup).not.toContain('⌘K')
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('data-brand-mark="horizon"')
@@ -3340,6 +3341,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('aria-label="设置分类"')
     expect(markup).toContain('aria-label="Rovai AI"')
+    expect(markup).not.toContain('rail-search-button')
     expect(markup).toContain('返回 App')
     expect(markup).not.toContain('应用级偏好与本机能力')
     expect(markup).not.toContain('settings-sidebar-title')
@@ -3513,8 +3515,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
 
-  it('keeps global project navigation on the members page', () => {
-    const markup = renderToStaticMarkup(createElement(ThreadNavigation, {
+  it('keeps global project navigation and the brand-row search button on the members page', () => {
+    const navigation = createElement(ThreadNavigation, {
       view: 'members',
       state: 'ready',
       navigation: {
@@ -3543,14 +3545,29 @@ describe('task event projections', () => {
       onRename: async () => undefined,
       onDelete: async () => undefined,
       onError: () => undefined
-    }))
-
-    expect(markup).toContain('conversation-jump is-search')
-    expect(markup).toContain('<span>搜索</span>')
+    })
+    const markup = renderToStaticMarkup(navigation)
+    const brandRow = markup.slice(markup.indexOf('class="unified-brand"'), markup.indexOf('<nav'))
+    expect(brandRow).toContain('class="rail-search-button"')
+    expect(brandRow).toContain('aria-label="搜索对话、使命和消息"')
+    expect(brandRow).toContain('title="搜索（⌘K）"')
+    expect(brandRow).toContain('data-navigation-icon="search"')
+    expect(markup).not.toContain('conversation-jump')
     expect(markup).toContain('新对话')
     expect(markup).toContain('设置')
     expect(markup).toContain('should-not-render')
     expect(markup).toContain('id="projects-heading"')
+
+    const shortcutLabel = vi.spyOn(shortcuts, 'useShortcutLabel')
+    try {
+      for (const [binding, title] of [['⌥S', '搜索（⌥S）'], ['', '搜索']]) {
+        shortcutLabel.mockReturnValueOnce(binding)
+        expect(renderToStaticMarkup(navigation)).toContain(`aria-label="搜索对话、使命和消息" title="${title}"`)
+        expect(shortcutLabel).toHaveBeenCalledWith('jump', 'darwin')
+      }
+    } finally {
+      shortcutLabel.mockRestore()
+    }
   })
 
   it('disables the sidebar Project picker while navigation authority is loading', () => {
