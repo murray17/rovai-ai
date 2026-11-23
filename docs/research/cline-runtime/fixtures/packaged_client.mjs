@@ -93,7 +93,7 @@ export async function startPackagedAcceptance({ app, data, cwd, onNotification }
     return { pid: child.pid, request, stop,
       async capture(path, threadId) {
         assert(threadId, 'capture requires the actual accepted Thread')
-        assert(await evaluate('(() => { const button = document.querySelector(".conversation-jump"); button?.click(); return Boolean(button) })()'))
+        assert(await evaluate('(() => { const button = document.querySelector(".rail-search-button"); button?.click(); return Boolean(button) })()'))
         for (let i = 0; i < 100; i++) {
           if (await evaluate('Boolean(document.querySelector(".command-palette-input"))')) break
           await sleep(100)

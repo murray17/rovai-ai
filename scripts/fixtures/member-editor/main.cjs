@@ -219,7 +219,7 @@ app
       await capture('jump-search')
       await key('Enter')
       await wait("!document.querySelector('.command-palette')")
-      assert.equal(await run("document.activeElement.matches('.conversation-jump')"), false)
+      assert.equal(await run("document.activeElement.matches('.rail-search-button')"), false)
     })
     await check('roster holds its minimum, folds to avatars and reverses with its useful width intact', async () => {
       assert.deepEqual(await dragRoster([179, 170]), [192, 192])

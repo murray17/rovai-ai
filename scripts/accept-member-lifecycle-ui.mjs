@@ -1677,7 +1677,7 @@ async function openMembers(cdp) {
 async function openCamp(cdp, title) {
   await waitForSelector(cdp, '.unified-sidebar', 30_000)
   if (await evaluate(cdp, `Boolean(document.querySelector('.members-view'))`)) {
-    await mouseClick(cdp, '.conversation-jump')
+    await mouseClick(cdp, '.rail-search-button')
     await waitForSelector(cdp, '.command-palette')
     await replaceInputValue(cdp, '.command-palette-input', title)
     await waitForExpression(cdp, `(() => {
