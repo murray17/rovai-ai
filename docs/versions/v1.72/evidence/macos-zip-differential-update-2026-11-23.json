@@ -1,0 +1,393 @@
+{
+  "recordedUtc": "2026-11-23",
+  "repoRevision": "9cfc550abe84507f26f91cca49a7cf2b0317a907",
+  "route": {
+    "electron": "43.1.1",
+    "updater": "6.8.9",
+    "proxyForGitHub": "PROXY",
+    "proxyForCdn": "PROXY",
+    "proxyForTrace": "PROXY",
+    "traceCountry": "US"
+  },
+  "hostArch": "arm64",
+  "builder": "26.15.3",
+  "transferMethod": "GenericDifferentialDownloader and ElectronHttpExecutor with GitHubProvider single-range mode, Chromium network cache disabled. ZIP response-body bytes only. Locally regenerated maps from verified public ZIPs. One trial per method and architecture, SDK timer includes on-disk output and the built-in hash check. No native installation.",
+  "inputs": {
+    "Rovai-AI-0.5.14-x64.zip": {
+      "bytes": 163015570,
+      "sha512Base64": "P2TqDs31tQPJaSQOXMx+zyy1gyZJIUL6u2H6yiANtkb/yQ3m9EktPcV8w7gzzF+/wX0lvHg0gk06cJiSxDRvNA==",
+      "blockmapBytes": 171489
+    },
+    "Rovai-AI-0.5.14-arm64.zip": {
+      "bytes": 157598398,
+      "sha512Base64": "CbdCuDDGQker/VFdBnTbQDmIRfo7yrt/5FMWt27ogTV1lyTHGqdezx8EAz7N06kSSeY7l+HUJRIdtGZCRzSHOQ==",
+      "blockmapBytes": 166810
+    },
+    "Rovai-AI-0.5.15-x64.zip": {
+      "bytes": 163341344,
+      "sha512Base64": "15aEZH0WYtfRO/Qi+JLJXRSGPxPJi7PJCJsYuCV5AoTFPpmm1UCWtTLFHsUXdi2E8LdhtyAtBLn2Fm0dyolAAQ==",
+      "blockmapBytes": 171407
+    },
+    "Rovai-AI-0.5.15-arm64.zip": {
+      "bytes": 157706848,
+      "sha512Base64": "QDXiwavsqP9HReuZ8VdzpokqrKmUjdh3HUUm4gbluVfxtLP0WB+BRpgGfqXmBqQEH+sKRtV/0LuiFOxK4PICLQ==",
+      "blockmapBytes": 165997
+    }
+  },
+  "plans": {
+    "arm64": {
+      "ranges": 118,
+      "delta": 37365358,
+      "changedBlocks": 1717,
+      "totalBlocks": 7487
+    },
+    "x64": {
+      "ranges": 111,
+      "delta": 39699556,
+      "changedBlocks": 1849,
+      "totalBlocks": 7771
+    }
+  },
+  "githubTransfersInOrder": [
+    {
+      "arch": "arm64",
+      "mode": "diff",
+      "utc": "2026-11-23T09:49:07.499Z",
+      "seconds": 24.9,
+      "bytes": 37365358,
+      "ranges": 118,
+      "fullResponses": 0,
+      "requests": 118,
+      "statuses": {
+        "206": 118
+      },
+      "ttfbP50ms": 143.7,
+      "ttfbP95ms": 184,
+      "redirects": [
+        {
+          "host": "release-assets.githubusercontent.com",
+          "at": "2026-11-23T09:49:07.963Z",
+          "seMin": 53.8,
+          "jwtMin": 60
+        }
+      ],
+      "sha512OK": true,
+      "ok": true
+    },
+    {
+      "arch": "arm64",
+      "mode": "full",
+      "utc": "2026-11-23T09:49:32.558Z",
+      "seconds": 28.6,
+      "bytes": 157706848,
+      "ranges": 0,
+      "fullResponses": 1,
+      "requests": 2,
+      "statuses": {
+        "200": 1
+      },
+      "ttfbP50ms": null,
+      "ttfbP95ms": null,
+      "redirects": [
+        {
+          "host": "release-assets.githubusercontent.com",
+          "at": "2026-11-23T09:49:32.962Z",
+          "seMin": 57.4,
+          "jwtMin": 60
+        }
+      ],
+      "sha512OK": true,
+      "ok": true
+    },
+    {
+      "arch": "x64",
+      "mode": "full",
+      "utc": "2026-11-23T09:50:01.377Z",
+      "seconds": 31,
+      "bytes": 163341344,
+      "ranges": 0,
+      "fullResponses": 1,
+      "requests": 2,
+      "statuses": {
+        "200": 1
+      },
+      "ttfbP50ms": null,
+      "ttfbP95ms": null,
+      "redirects": [
+        {
+          "host": "release-assets.githubusercontent.com",
+          "at": "2026-11-23T09:50:01.771Z",
+          "seMin": 54.9,
+          "jwtMin": 60
+        }
+      ],
+      "sha512OK": true,
+      "ok": true
+    },
+    {
+      "arch": "x64",
+      "mode": "diff",
+      "utc": "2026-11-23T09:50:32.593Z",
+      "seconds": 23.7,
+      "bytes": 39699556,
+      "ranges": 111,
+      "fullResponses": 0,
+      "requests": 111,
+      "statuses": {
+        "206": 111
+      },
+      "ttfbP50ms": 146,
+      "ttfbP95ms": 162.5,
+      "redirects": [
+        {
+          "host": "release-assets.githubusercontent.com",
+          "at": "2026-11-23T09:50:33.057Z",
+          "seMin": 57.5,
+          "jwtMin": 60
+        }
+      ],
+      "sha512OK": true,
+      "ok": true
+    }
+  ],
+  "fixtureMethod": "MacUpdater with ElectronHttpExecutor, isolated cache, native installer handoff replaced by a counter. Local fixture ZIPs have a 524288-byte stored entry. Response-body counts are recorded at the server. Progress percentages here are raw SDK events before Rovai clamps their display.",
+  "fixtureRuns": [
+    {
+      "label": "ordinary-full-only-origin",
+      "from": "1.0.0",
+      "to": "1.0.2",
+      "size": 524410,
+      "groups": {
+        "map": {
+          "count": 1,
+          "bytes": 752
+        },
+        "range-as-full": {
+          "count": 4,
+          "bytes": 2097640
+        },
+        "full": {
+          "count": 1,
+          "bytes": 524410
+        }
+      },
+      "zipBytes": 2622050,
+      "stages": [
+        {
+          "total": 74389,
+          "firstPercent": 705,
+          "lastPercent": 100
+        },
+        {
+          "total": 524410,
+          "firstPercent": 100,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.2",
+      "zipCacheMatches": true,
+      "handed": 1
+    },
+    {
+      "label": "missing-new-map-preserved",
+      "from": "1.0.0",
+      "to": "1.0.1",
+      "size": 524410,
+      "groups": {
+        "missing": {
+          "count": 1,
+          "bytes": 0
+        },
+        "full": {
+          "count": 1,
+          "bytes": 524410
+        }
+      },
+      "zipBytes": 524410,
+      "stages": [
+        {
+          "total": 524410,
+          "firstPercent": 100,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.0",
+      "zipCacheMatches": true,
+      "handed": 1
+    },
+    {
+      "label": "next-preserved",
+      "from": "1.0.1",
+      "to": "1.0.2",
+      "size": 524410,
+      "groups": {
+        "map": {
+          "count": 1,
+          "bytes": 752
+        },
+        "range": {
+          "count": 4,
+          "bytes": 74389
+        }
+      },
+      "zipBytes": 74389,
+      "stages": [
+        {
+          "total": 74389,
+          "firstPercent": 14,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.2",
+      "zipCacheMatches": true,
+      "handed": 1
+    },
+    {
+      "label": "missing-new-map-reverted",
+      "from": "1.0.0",
+      "to": "1.0.1",
+      "size": 524410,
+      "groups": {
+        "missing": {
+          "count": 1,
+          "bytes": 0
+        },
+        "full": {
+          "count": 1,
+          "bytes": 524410
+        }
+      },
+      "zipBytes": 524410,
+      "stages": [
+        {
+          "total": 524410,
+          "firstPercent": 100,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.0",
+      "zipCacheMatches": true,
+      "handed": 1
+    },
+    {
+      "label": "next-reverted",
+      "from": "1.0.1",
+      "to": "1.0.3",
+      "size": 524410,
+      "groups": {
+        "map": {
+          "count": 1,
+          "bytes": 751
+        },
+        "range": {
+          "count": 3,
+          "bytes": 41621
+        },
+        "full": {
+          "count": 1,
+          "bytes": 524410
+        }
+      },
+      "zipBytes": 566031,
+      "stages": [
+        {
+          "total": 41621,
+          "firstPercent": 26,
+          "lastPercent": 100
+        },
+        {
+          "total": 524410,
+          "firstPercent": 100,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.3",
+      "zipCacheMatches": true,
+      "handed": 1
+    },
+    {
+      "label": "range-denied",
+      "from": "1.0.0",
+      "to": "1.0.2",
+      "size": 524410,
+      "groups": {
+        "map": {
+          "count": 1,
+          "bytes": 752
+        },
+        "unavailable-range": {
+          "count": 1,
+          "bytes": 0
+        },
+        "full": {
+          "count": 1,
+          "bytes": 524410
+        }
+      },
+      "zipBytes": 524410,
+      "stages": [
+        {
+          "total": 74389,
+          "firstPercent": 0,
+          "lastPercent": 0
+        },
+        {
+          "total": 524410,
+          "firstPercent": 100,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.2",
+      "zipCacheMatches": true,
+      "handed": 1
+    },
+    {
+      "label": "mid-transfer-403",
+      "from": "1.0.0",
+      "to": "1.0.2",
+      "size": 524410,
+      "groups": {
+        "map": {
+          "count": 1,
+          "bytes": 752
+        },
+        "stable-range-redirect": {
+          "count": 1,
+          "bytes": 0
+        },
+        "range": {
+          "count": 2,
+          "bytes": 43463
+        },
+        "unavailable-range": {
+          "count": 1,
+          "bytes": 0
+        },
+        "stable-full-redirect": {
+          "count": 1,
+          "bytes": 0
+        },
+        "full": {
+          "count": 1,
+          "bytes": 524410
+        }
+      },
+      "zipBytes": 567873,
+      "stages": [
+        {
+          "total": 74389,
+          "firstPercent": 14,
+          "lastPercent": 58
+        },
+        {
+          "total": 524410,
+          "firstPercent": 100,
+          "lastPercent": 100
+        }
+      ],
+      "cachedMapVersion": "1.0.2",
+      "zipCacheMatches": true,
+      "handed": 1
+    }
+  ]
+}

@@ -11,6 +11,13 @@ last_updated: 2026-11-23
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## macOS 应用内 ZIP 增量更新（2026-11-23）
+
+Apple Silicon 与 Intel 的正式构建分别附带 ZIP 分块索引。分段响应异常或拼合校验失败时，
+应用内更新会自动下载同版本的完整 ZIP。设计取舍见 [R3 提案](macos-zip-differential-update-proposal.md)，
+历史版本间的下载结果见[逐次网络实测](evidence/macos-zip-differential-update-2026-11-23.json)。
+代码已在 [#1151](https://github.com/murray17/rovai-ai/pull/1151) 合入。签名安装与重启按[发布验收](../../development/packaging.md#主动检查更新发布集合)执行。
+
 ## 会话移出队员（2026-11-23）
 
 影响详情暂时不可用时，用户仍可确认从当前会话移出队员。提交核对用户选中时的名册与成员版本。
