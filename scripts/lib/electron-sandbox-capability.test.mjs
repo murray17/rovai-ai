@@ -5,6 +5,7 @@ import test from 'node:test'
 import {
   ELECTRON_INTEGRATION_REQUIRED_ENV,
   admitElectronIntegrationTest,
+  assertBrowserLaunchAvailable,
   classifyMacOsSandboxProbe
 } from './electron-sandbox-capability.mjs'
 
@@ -130,4 +131,18 @@ test('an unexpected sandbox probe failure remains a test failure', () => {
       stderr: 'unexpected probe failure'
     })
   }), /macOS sandbox capability probe failed.*SIGKILL.*unexpected probe failure/)
+})
+
+test('browser acceptance reports a blocked macOS launch as an error', () => {
+  assert.throws(() => assertBrowserLaunchAvailable({
+    platform: 'darwin',
+    runProbe: () => nestedSandboxProbe
+  }), /Acceptance browser launch blocked.*regular Terminal/)
+})
+
+test('browser acceptance can launch when the macOS probe succeeds', () => {
+  assertBrowserLaunchAvailable({
+    platform: 'darwin',
+    runProbe: () => ({ status: 0, signal: null, stderr: '' })
+  })
 })

@@ -14,6 +14,8 @@
   [`docs/development/local-workflow.md`](docs/development/local-workflow.md). Use `pnpm dev` rather than
   bare `electron-vite dev`; never run the daily App from `dist/`, and never point development or acceptance
   processes at daily Electron `userData`.
+- For macOS Chrome screenshots and browser acceptance, follow
+  [the isolated UI acceptance workflow](docs/development/ui-acceptance.md#独立-ui-验收).
 - Do not treat historical version documents as current constraints, and do not infer implementation completion from historical decision status. Follow the conflict rules in `docs/README.md`.
 
 ## Frontend design

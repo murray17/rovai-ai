@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
+import { assertBrowserLaunchAvailable } from './electron-sandbox-capability.mjs'
 
 export const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-// Used only by the real Host acceptance commands. Each caller owns an isolated
-// profile and process; this helper never attaches to a user's existing browser.
+// Each caller supplies an isolated profile. This helper owns the process it starts.
 export async function launchAcceptanceBrowser({ executable, args, env = process.env }) {
+  assertBrowserLaunchAvailable()
   const child = spawn(executable, args, { env, stdio: ['ignore', 'pipe', 'pipe'] })
   // Crashpad may inherit stderr beyond Chrome's lifetime. Wait for our process,
   // then close the log pipes instead of waiting indefinitely for that descendant.

@@ -34,16 +34,8 @@ export function admitElectronIntegrationTest(testContext, {
 } = {}) {
   if (platform !== 'darwin') return true
 
-  const capability = classifyMacOsSandboxProbe(runProbe())
+  const capability = checkMacOsSandboxCapability(runProbe)
   if (capability.kind === 'available') return true
-  if (capability.kind === 'failed') {
-    throw new Error(
-      'macOS sandbox capability probe failed: '
-      + `status=${capability.status ?? 'none'} `
-      + `signal=${capability.signal ?? 'none'} `
-      + `stderr=${capability.stderr || 'none'}`
-    )
-  }
 
   const required = environment[ELECTRON_INTEGRATION_REQUIRED_ENV] === '1'
     || environment.CI === 'true'
@@ -58,6 +50,34 @@ export function admitElectronIntegrationTest(testContext, {
     + 'business assertions did not run and this skip is not a passing acceptance result.'
   )
   return false
+}
+
+export function assertBrowserLaunchAvailable({
+  platform = process.platform,
+  runProbe = runMacOsSandboxProbe
+} = {}) {
+  if (platform !== 'darwin') return
+
+  // Even headless Chrome can abort during app registration inside this sandbox.
+  if (checkMacOsSandboxCapability(runProbe).kind === 'blocked') {
+    throw new Error(
+      'Acceptance browser launch blocked by a nested macOS sandbox. '
+      + 'Run the command from a regular Terminal or with approval outside the agent sandbox.'
+    )
+  }
+}
+
+function checkMacOsSandboxCapability(runProbe) {
+  const capability = classifyMacOsSandboxProbe(runProbe())
+  if (capability.kind === 'failed') {
+    throw new Error(
+      'macOS sandbox capability probe failed: '
+      + `status=${capability.status ?? 'none'} `
+      + `signal=${capability.signal ?? 'none'} `
+      + `stderr=${capability.stderr || 'none'}`
+    )
+  }
+  return capability
 }
 
 function runMacOsSandboxProbe() {
