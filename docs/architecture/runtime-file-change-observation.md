@@ -3,12 +3,12 @@ document_type: architecture
 architecture: runtime-file-change-observation
 authority: command-and-agent-run-file-change-boundaries
 status: accepted
-last_updated: 2026-10-26
+last_updated: 2026-11-23
 ---
 
 # Runtime File Change Observation 架构
 
-字段、归约与授权接口见 [Runtime File Change Observation v9](../contracts/runtime-file-change-observation-v9.md)。
+字段、归约与授权接口见 [Runtime File Change Observation v10](../contracts/runtime-file-change-observation-v10.md)。
 本架构只消费 Runtime 明确报告的文件变化，不读取当前文件、不扫描工作区，也不依赖 Git。
 
 ## 产品模型
@@ -123,9 +123,9 @@ AgentRun projector 在既有 Evidence 遍历中收集同 Run/epoch 来源，归�
 - Thread open 投影每个 Run 的卡片摘要；Renderer 将卡片锚定到来源 Run 的最后一条公开消息，没有公开消息时才按
   `completedAt` 排序。并行 Run 不合并，后完成的 Run 不覆盖先前卡片，也不会被摆到其他 Run 的消息之后；
 - detail RPC 必须同时匹配 `threadId + agentRunId + executionEpoch`，不能仅凭 Run ID 或 Managed Blob ID 读取；
-- Renderer 卡片默认只显示三行；header 的 `View` 与文件行进入同一独立 Review，文件行预选对应路径。Review
-  完整净差异显示 unified diff；exact mutation 显示没有虚假 hunk/行号的片段块；operation history 保留全部
-  operation 的时序、计数和原始序号，但不为 operation-only 记录渲染空白占位块；operation-only 文件显示诚实空态；
+- Renderer 卡片默认显示三行。含差异的文件从卡片进入历史 Review，仅有路径的文件行直接打开当前文件。
+  Review 从 detail 读取原始序号、计数和差异语义，依次呈现有正文的代码块。完整差异保留可靠坐标，片段只呈现
+  增删符号和代码。选中仅有路径的文件时，由用户通过空状态按钮打开当前文件。布局见[文件预览](../ui/components/file-preview.md#file-change-标签页)。
 - 卡片和 Review 都只消费 typed projection 与受管 detail blob，不读取当前 workspace 或执行 Git；
 - 卡片与 detail 携带相同 projection source water/revision。Renderer 拒绝较旧异步响应；已打开 Review 原位失效
   detail，并保留 Tab、文件选择、展开和滚动，不通过卸载卡片刷新；
@@ -206,7 +206,7 @@ read/write/edit 的唯一原生路径可补齐相对 location；共享 normalize
 
 ## 相关规范
 
-- [Runtime File Change Observation v9](../contracts/runtime-file-change-observation-v9.md)
+- [Runtime File Change Observation v10](../contracts/runtime-file-change-observation-v10.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
 - [Thread 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)

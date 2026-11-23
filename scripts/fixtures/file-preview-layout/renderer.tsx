@@ -5,7 +5,7 @@ import { EditorView } from '@codemirror/view'
 import { isFileFindTarget } from '../../../apps/desktop/src/renderer/src/FilePreviewFind'
 import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, ResolvedTheme, TaskView } from '@contracts'
+import type { ActionApprovalView, AgentRunChangedFileDetailView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, ResolvedTheme, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard, ThreadWorkspace, type NotificationFocusTarget } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
@@ -135,8 +135,8 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   }
   let target = file
   if (request.kind === 'run_evidence' && request.action === 'open_current') {
-    const selected = [...changes.files, ...operationOnlyChanges.files]
-      .find((entry) => entry.evidenceFileId === request.evidenceFileId)
+    const selected = [changes, operationOnlyChanges, mixedChanges, pickerChanges, singleFileChanges]
+      .find(card => card.agentRunId === request.agentRunId)?.files.find(entry => entry.evidenceFileId === request.evidenceFileId)
     if (!selected) return unsupported()
     target = { ...file, previewKey: `current:${selected.path}`, displayPath: selected.path, fileName: selected.path.split('/').at(-1)! }
   } else if (request.kind === 'message_reference'
@@ -297,6 +297,26 @@ const pickerChanges: AgentRunFileChangesView = {
     operationCount: 1, additions: 1, deletions: 1
   }))
 }
+const patchBlock = { sequence: 4, semantics: 'reported_mutation', changeKind: 'update', diff: '-before\n+after' } as const
+const mixedFiles: AgentRunChangedFileDetailView[] = [{
+  evidenceFileId: 'patch', path: 'src/patch.ts', changeKind: 'update', presentationKind: 'reported_mutations',
+  operationCount: 1, additions: 1, deletions: 1, blocks: [patchBlock]
+}, {
+  evidenceFileId: 'history', path: 'src/history.ts', changeKind: 'update', presentationKind: 'operation_history',
+  operationCount: 4, blocks: [
+    { sequence: 1, semantics: 'unified_diff_snapshot', changeKind: 'update', diff: '@@ -12 +12 @@\n-first\n+second' },
+    { sequence: 2, semantics: 'operation_only', changeKind: 'update' },
+    { sequence: 3, semantics: 'exact_mutation', changeKind: 'update', diff: '-second\n+before' },
+    patchBlock
+  ]
+}, {
+  ...operationOnlyChanges.files[0], blocks: [{ sequence: 1, semantics: 'operation_only', changeKind: 'update' }]
+}]
+const mixedChanges: AgentRunFileChangesView = {
+  schemaVersion: 2, agentRunId: 'run-mixed', executionEpoch: 1, completedAt: changes.completedAt,
+  files: mixedFiles.map(({ blocks, ...summary }) => summary), fileCount: mixedFiles.length,
+  operationCount: mixedFiles.reduce((total, file) => total + file.operationCount, 0)
+}
 Object.assign(window, { rovai: {
   platform: 'darwin',
   onEvent: () => () => {},
@@ -308,13 +328,13 @@ Object.assign(window, { rovai: {
     if (method === 'skills.candidates') return { skills: [], errors: [] }
     if (method === 'threads.pendingDraft.setPresence') return { changed: true }
     if (method === 'thread.messages.anchors') return { schemaVersion: 1, threadId: request.threadId, throughGlobalSequence: 0, totalCount: 0, items: [] }
-    const source = [changes, pickerChanges, singleFileChanges].find(card => card.agentRunId === request.agentRunId)
+    const source = [changes, pickerChanges, singleFileChanges, mixedChanges].find(card => card.agentRunId === request.agentRunId)
     if (method !== 'agentRunFileChanges.get' || request.threadId !== 'camp-1' || !source) return unsupported()
     reviewRequests.push(request)
     if (failNextReview) { failNextReview = false; throw new Error('Fixture detail unavailable') }
     return {
       schemaVersion: 2, card: { ...source, executionEpoch: request.executionEpoch },
-      files: source.files.map((entry) => ({ ...entry, blocks: [{
+      files: source === mixedChanges ? mixedFiles : source.files.map((entry) => ({ ...entry, blocks: [{
         sequence: 1, semantics: entry.presentationKind === 'exact_mutations' ? 'exact_mutation' : 'full_net_diff', changeKind: 'update',
         diff: (entry.presentationKind === 'exact_mutations' ? '' : `@@ -1,${entry.deletions} +1,${entry.additions} @@\n`)
           + Array.from({ length: entry.deletions! }, (_, index) => `-历史旧内容 ${index + 1}`).join('\n') + '\n'
@@ -822,8 +842,9 @@ Object.assign(window, { previewTest: {
     document.querySelectorAll<HTMLButtonElement>('.file-preview-tab-panel:not([hidden]) .agent-run-file-review-file')[index].click()
     await settle()
   },
-  async openFileReviewFixture(size: 'many' | 'single') {
-    previewController.openFileChanges('camp-1', size === 'single' ? singleFileChanges : pickerChanges)
+  async openFileReviewFixture(scenario: 'many' | 'single' | 'mixed') {
+    const cards = { many: pickerChanges, single: singleFileChanges, mixed: mixedChanges }
+    previewController.openFileChanges('camp-1', cards[scenario])
     await settle()
   },
   async setLanguage(language: 'zh-CN' | 'en') {

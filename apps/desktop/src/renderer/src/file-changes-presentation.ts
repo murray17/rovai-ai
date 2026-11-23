@@ -1,4 +1,4 @@
-import type { AgentRunFileChangesView } from '@contracts'
+import type { AgentRunChangedFileDetailView, AgentRunFileChangeBlockView, AgentRunFileChangesView } from '@contracts'
 import { uiAttribute } from './interface-language'
 
 type AgentRunFileChangeSummary = AgentRunFileChangesView['files'][number]
@@ -42,14 +42,11 @@ export function agentRunFileChangesSummaryLabel(changes: AgentRunFileChangesView
   return `${files} · ${operations}`
 }
 
-export function agentRunFileChangeModeLabel(
-  presentationKind: AgentRunFileChangesView['files'][number]['presentationKind']
-): string {
-  if (presentationKind === 'full_net_diff') return uiAttribute('完整差异')
-  if (presentationKind === 'exact_mutations') return uiAttribute('片段差异')
-  if (presentationKind === 'reported_mutations') return uiAttribute('补丁片段')
-  if (presentationKind === 'operation_history') return uiAttribute('操作记录')
-  return uiAttribute('仅文件操作')
+export function reviewableFileChangeBlocks(file: AgentRunChangedFileDetailView) {
+  if (file.presentationKind === 'operation_only') return []
+  return file.blocks
+    .filter((block): block is AgentRunFileChangeBlockView & { diff: string } => Boolean(block.diff))
+    .sort((left, right) => left.sequence - right.sequence)
 }
 
 export function agentRunFileChangeKindMark(changeKind: string): string {

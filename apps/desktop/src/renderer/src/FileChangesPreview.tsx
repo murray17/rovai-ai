@@ -4,10 +4,10 @@ import { FileFindChangesAdapter } from './FileFindChangesAdapter'
 import { ChangedFilePath, ChangedFileSelect } from './ChangedFileSelect'
 import { fileChangeFindLineId } from './file-find-changes'
 import { selectPreviewContents } from './file-preview-selection'
-import { useEffect, useRef, useState, type JSX } from 'react'
-import type { AgentRunFileChangesDetailView, AgentRunFileChangesView } from '@contracts'
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import type { AgentRunFileChangeBlockView, AgentRunFileChangesDetailView, AgentRunFileChangesView } from '@contracts'
 import { useFilePreview, type FileChangesPreviewTabModel } from './FilePreviewContext'
-import { agentRunFileChangeModeLabel, agentRunFileChangeKindMark, agentRunFilePathParts, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
+import { agentRunFileChangeKindMark, agentRunFilePathParts, inlineDiffLines, exactMutationDiffLines, reviewableFileChangeBlocks } from './file-changes-presentation'
 import { UiText, uiAttribute } from './interface-language'
 
 type AgentRunFileChangesDetailStatus = 'loading' | 'ready' | 'error'
@@ -28,11 +28,8 @@ export function FileChangesPreview({ tab, visible }: { tab: FileChangesPreviewTa
     if (visible && !tab.detail && !tab.detailStatus) void filePreview.loadChanges(tab.id, readDetail)
   }, [visible, tab.id, tab.detail, tab.detailStatus, client, filePreview.loadChanges])
 
-  const openCurrentFile = async (): Promise<void> => {
-    const file = changes.files.find((candidate) =>
-      candidate.evidenceFileId === selectedEvidenceFileId
-    )
-    if (!file || openCurrentStatus === 'opening') return
+  const openCurrentFile = async (file: AgentRunFileChangesView['files'][number]): Promise<void> => {
+    if (openCurrentStatus === 'opening') return
     setOpenCurrentStatus('opening')
     setOpenCurrentError(null)
     const outcome = await filePreview.open({
@@ -61,7 +58,7 @@ export function FileChangesPreview({ tab, visible }: { tab: FileChangesPreviewTa
       detailStatus={detailStatus}
       selectedEvidenceFileId={selectedEvidenceFileId}
       onSelectEvidenceFileId={(evidenceFileId) => filePreview.selectChangedFile(tab.id, evidenceFileId)}
-      onOpenCurrent={() => void openCurrentFile()}
+      onOpenCurrent={openCurrentFile}
       openCurrentStatus={openCurrentStatus}
       openCurrentError={openCurrentError}
       onRetry={() => void filePreview.loadChanges(tab.id, readDetail, true)}
@@ -85,7 +82,7 @@ export function AgentRunFileChangesReviewSurface({
   detailStatus: AgentRunFileChangesDetailStatus
   selectedEvidenceFileId: string | null
   onSelectEvidenceFileId(evidenceFileId: string): void
-  onOpenCurrent(): void
+  onOpenCurrent(file: AgentRunFileChangesView['files'][number]): void
   openCurrentStatus: 'idle' | 'opening'
   openCurrentError: string | null
   onRetry(): void
@@ -95,7 +92,24 @@ export function AgentRunFileChangesReviewSurface({
   const selectedDetail = selectedFile
     ? detail?.files.find((file) => file.evidenceFileId === selectedFile.evidenceFileId) ?? null
     : null
-  const truthNote = selectedFile ? agentRunFileChangeTruthNote(selectedFile.presentationKind) : null
+  const blocks = useMemo(() => selectedDetail ? reviewableFileChangeBlocks(selectedDetail) : [], [selectedDetail])
+  const showEmpty = detailStatus === 'ready' && selectedDetail !== null && blocks.length === 0
+  const openCurrentButton = selectedFile && (
+    <button
+      className="agent-run-file-review-open-current"
+      type="button"
+      aria-label={uiAttribute("打开当前文件")}
+      title={uiAttribute("打开当前文件")}
+      disabled={openCurrentStatus === 'opening'}
+      aria-busy={openCurrentStatus === 'opening'}
+      onClick={() => onOpenCurrent(selectedFile)}
+    >
+      <BusyLabel busy={openCurrentStatus === 'opening'}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H4v16h16v-6" /></svg>
+        <span className="agent-run-file-review-open-label">{uiAttribute("打开当前文件")}</span>
+      </BusyLabel>
+    </button>
+  )
   return (
     <section className={`agent-run-file-review${changes.files.length <= 1 ? ' has-single-file' : ''}`} aria-label={uiAttribute("File Change 详情")} ref={root}>
       <FileFindChangesAdapter root={root} detail={detail} selected={selectedFile?.evidenceFileId ?? null} select={onSelectEvidenceFileId} />
@@ -126,7 +140,6 @@ export function AgentRunFileChangesReviewSurface({
                         ? <><i className="addition">+{file.additions}</i><i className="deletion">−{file.deletions}</i></>
                         : uiAttribute("{0} 次", String(file.operationCount))}
                     </span>
-                    {file.presentationKind !== 'full_net_diff' && <small>{agentRunFileChangeModeLabel(file.presentationKind)}</small>}
                   </span>
                 </button>
               )
@@ -150,9 +163,6 @@ export function AgentRunFileChangesReviewSurface({
                   )}
                   <div className="agent-run-file-review-pane-actions">
                     <span className="agent-run-file-review-pane-meta">
-                      {(selectedFile.presentationKind === 'operation_history' || selectedFile.presentationKind === 'operation_only') && (
-                        <small>{agentRunFileChangeModeLabel(selectedFile.presentationKind)}</small>
-                      )}
                       <span>
                         {selectedFile.additions !== undefined && selectedFile.deletions !== undefined
                           ? <><i className="addition">+{selectedFile.additions}</i><i className="deletion">−{selectedFile.deletions}</i></>
@@ -161,20 +171,7 @@ export function AgentRunFileChangesReviewSurface({
                             : uiAttribute('{0} 次修改', selectedFile.operationCount)}
                       </span>
                     </span>
-                    <button
-                      className="agent-run-file-review-open-current"
-                      type="button"
-                      aria-label={uiAttribute("打开当前文件")}
-                      title={uiAttribute("打开当前文件")}
-                      disabled={openCurrentStatus === 'opening'}
-                      aria-busy={openCurrentStatus === 'opening'}
-                      onClick={onOpenCurrent}
-                    >
-                      <BusyLabel busy={openCurrentStatus === 'opening'}>
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H4v16h16v-6" /></svg>
-                        <span className="agent-run-file-review-open-label">{uiAttribute("打开当前文件")}</span>
-                      </BusyLabel>
-                    </button>
+                    {!showEmpty && openCurrentButton}
                   </div>
                 </header>
                 {openCurrentError && (
@@ -187,12 +184,6 @@ export function AgentRunFileChangesReviewSurface({
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
                     <span><UiText zh={"检测到较新的文件事实。当前结果仍可阅读，刷新完成后会自动更新。"} /></span>
                     <button type="button" onClick={onRetry}><UiText zh={"重试刷新"} /></button>
-                  </div>
-                )}
-                {truthNote && (
-                  <div className="agent-run-file-review-truth-note">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
-                    <span>{truthNote}</span>
                   </div>
                 )}
                 <div
@@ -215,8 +206,25 @@ export function AgentRunFileChangesReviewSurface({
                       <button type="button" onClick={onRetry}><UiText zh={"重试"} /></button>
                     </div>
                   )}
-                  {detailStatus === 'ready' && selectedDetail && (
-                    <AgentRunFileReviewBlocks file={selectedDetail} />
+                  {showEmpty && (
+                    <div className="agent-run-file-review-empty" role="group" aria-label={uiAttribute("没有可审查的差异内容")}>
+                      <span aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6M8 14h8" /></svg>
+                      </span>
+                      {openCurrentButton}
+                    </div>
+                  )}
+                  {detailStatus === 'ready' && blocks.length > 0 && (
+                    <div className="agent-run-file-review-blocks">
+                      {blocks.map((block, index) => (
+                        <AgentRunFileReviewBlock
+                          key={`${block.sequence}:${index}`}
+                          block={block}
+                          index={index}
+                          fileId={selectedFile.evidenceFileId}
+                        />
+                      ))}
+                    </div>
                   )}
                   {detailStatus === 'ready' && !selectedDetail && (
                     <div className="agent-run-file-review-state is-error" role="alert">
@@ -237,73 +245,19 @@ export function AgentRunFileChangesReviewSurface({
   )
 }
 
-function agentRunFileChangeTruthNote(
-  presentationKind: AgentRunFileChangesView['files'][number]['presentationKind']
-): string | null {
-  if (presentationKind === 'operation_only') {
-    return uiAttribute("智能体只可靠报告了成功文件操作与路径，没有提供可审查的 old/new 或标准差异。")
-  }
-  return null
-}
-
-function AgentRunFileReviewBlocks({
-  file
-}: {
-  file: AgentRunFileChangesDetailView['files'][number]
-}): JSX.Element {
-  const blocks = file.blocks.slice().sort((left, right) => left.sequence - right.sequence)
-  const reviewableBlocks = blocks.filter((block) => Boolean(block.diff))
-  if (file.presentationKind === 'operation_only' || reviewableBlocks.length === 0) {
-    return (
-      <div className="agent-run-file-review-empty">
-        <span aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6M8 14h8" /></svg>
-        </span>
-        <strong><UiText zh={"没有可审查的差异内容"} /></strong>
-        <p><UiText zh={"这条记录只证明智能体成功操作了该文件；Rovai 不读取当前文件，也不推测修改内容。"} /></p>
-      </div>
-    )
-  }
-  return (
-    <div className="agent-run-file-review-blocks">
-      {reviewableBlocks.map((block, reviewIndex) => (
-        <AgentRunFileReviewBlock
-          key={`${block.sequence}:${reviewIndex}`}
-          block={block}
-          index={reviewIndex}
-          fileId={file.evidenceFileId}
-          numbered={reviewableBlocks.length > 1 || file.presentationKind === 'operation_history'}
-        />
-      ))}
-    </div>
-  )
-}
-
 function AgentRunFileReviewBlock({
   block,
   index,
-  numbered,
   fileId
 }: {
   fileId: string
-  block: AgentRunFileChangesDetailView['files'][number]['blocks'][number]
+  block: AgentRunFileChangeBlockView & { diff: string }
   index: number
-  numbered: boolean
-}): JSX.Element | null {
-  const reportedMutation = block.semantics === 'reported_mutation'
-  const fragmentDiff = block.semantics === 'exact_mutation' || reportedMutation
-  if (!block.diff) {
-    return null
-  }
+}): JSX.Element {
+  const fragmentDiff = block.semantics === 'exact_mutation' || block.semantics === 'reported_mutation'
   const lines = fragmentDiff ? exactMutationDiffLines(block.diff) : inlineDiffLines(block.diff)
   return (
     <section className={`agent-run-file-review-block${fragmentDiff ? ' is-exact-mutation' : ''}`}>
-      {(numbered || fragmentDiff) && (
-        <header>
-          {numbered && <strong><UiText zh={"修改 "} />{index + 1}</strong>}
-          <span title={reportedMutation ? uiAttribute('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。') : undefined}>{reportedMutation ? uiAttribute('补丁片段') : fragmentDiff ? uiAttribute("精确替换 · 无行号") : uiAttribute("完整文件差异")}</span>
-        </header>
-      )}
       <div className="agent-run-file-review-diff-code">
         {lines.map((line, lineIndex) => fragmentDiff
           ? (

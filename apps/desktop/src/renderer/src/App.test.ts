@@ -6,7 +6,7 @@ import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-mo
 import { changeInterfaceLanguage } from './interface-language'
 import * as shortcuts from './ShortcutProvider'
 import { AgentRunFileChangesReviewSurface } from './FileChangesPreview'
-import { agentRunFileChangesSummaryLabel, agentRunFileChangeModeLabel, agentRunFilePathParts } from './file-changes-presentation'
+import { agentRunFileChangesSummaryLabel, agentRunFilePathParts } from './file-changes-presentation'
 import { ThreadDetailEntries } from './ThreadDetailPopover'
 import { createElement, type ComponentProps } from 'react'
 import { ExecutionToolGroupStateContext } from './ExecutionToolGroup'
@@ -1520,7 +1520,7 @@ describe('task event projections', () => {
         imageGroups: images, fileChanges: [{ agentRunId: 'run-claude' }] }])
   })
 
-  it('localizes file change summaries and evidence labels in English', async () => {
+  it('localizes file change totals and the current directory in English', async () => {
     const languageApi = languageTestApi
     await changeInterfaceLanguage(languageApi, 'en')
     try {
@@ -1531,10 +1531,6 @@ describe('task event projections', () => {
       expect(agentRunFileChangesSummaryLabel(changes)).toBe('1 file · 1 change')
       expect(agentRunFileChangesSummaryLabel({ ...changes, fileCount: 4, operationCount: 5 })).toBe('4 files · 5 changes')
       expect(agentRunFileChangesSummaryLabel({ ...changes, additions: 1, deletions: 2 })).toBe('1 file · +1 −2')
-      expect((['full_net_diff', 'exact_mutations', 'reported_mutations', 'operation_history', 'operation_only'] as const)
-        .map(agentRunFileChangeModeLabel)).toEqual([
-          'Full diff', 'Edit fragments', 'Patch fragments', 'Operation history', 'File operations only'
-        ])
       expect(agentRunFilePathParts('README.md').directory).toBe('Current directory')
     } finally {
       await changeInterfaceLanguage(languageApi, 'zh-CN')
@@ -1616,7 +1612,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('2 次修改')
   })
 
-  it('renders full, exact, history, and operation-only evidence honestly in Files Changed Review', () => {
+  it('renders file changes in evidence order with reliable coordinates and a single open-current action', () => {
     const changes = {
       schemaVersion: 2,
       agentRunId: 'run-review',
@@ -1637,9 +1633,13 @@ describe('task event projections', () => {
         evidenceFileId: 'ef-review-3',
         path: 'src/path-only.ts', changeKind: 'update', presentationKind: 'operation_only',
         operationCount: 1
+      }, {
+        evidenceFileId: 'ef-review-4',
+        path: 'src/patch.ts', changeKind: 'update', presentationKind: 'reported_mutations',
+        operationCount: 1, additions: 1, deletions: 1
       }],
-      fileCount: 4,
-      operationCount: 6,
+      fileCount: 5,
+      operationCount: 7,
       completedAt: '2026-08-27T00:00:00Z'
     } satisfies AgentRunFileChangesView
     const detail = {
@@ -1670,26 +1670,32 @@ describe('task event projections', () => {
           semantics: 'operation_only',
           changeKind: 'update'
         }, {
-          sequence: 4,
-          semantics: 'exact_mutation',
-          changeKind: 'update',
-          diff: '-old\n+new'
-        }, {
           sequence: 5,
           semantics: 'reported_mutation',
           changeKind: 'update',
           diff: '-before\n+after'
+        }, {
+          sequence: 4,
+          semantics: 'exact_mutation',
+          changeKind: 'update',
+          diff: '-old\n+new'
         }]
       }, {
         ...changes.files[3],
         blocks: [{
-          sequence: 5,
+          sequence: 6,
           semantics: 'operation_only',
           changeKind: 'update'
         }]
+      }, {
+        ...changes.files[4],
+        blocks: [{ sequence: 7, semantics: 'reported_mutation', changeKind: 'update', diff: '-before\n+after' }]
       }]
     } satisfies AgentRunFileChangesDetailView
-    const renderReview = (selectedPath: string): string => renderToStaticMarkup(createElement(
+    const renderReview = (
+      selectedPath: string,
+      overrides: Partial<ComponentProps<typeof AgentRunFileChangesReviewSurface>> = {}
+    ) => renderToStaticMarkup(createElement(
       AgentRunFileChangesReviewSurface,
       {
         changes,
@@ -1700,40 +1706,46 @@ describe('task event projections', () => {
         onOpenCurrent: vi.fn(),
         openCurrentStatus: 'idle',
         openCurrentError: null,
-        onRetry: vi.fn()
+        onRetry: vi.fn(),
+        ...overrides
       }
     ))
 
-    const fullMarkup = renderReview('src/full.ts')
+    const [fullMarkup, exactMarkup, historyMarkup, operationOnlyMarkup, patchMarkup] =
+      changes.files.map((file) => renderReview(file.path))
+    for (const markup of [fullMarkup, exactMarkup, historyMarkup, operationOnlyMarkup, patchMarkup]) {
+      expect(markup).not.toMatch(/完整差异|片段差异|补丁片段|操作记录|仅文件操作|完整文件差异|精确替换|修改 \d/)
+      expect(markup.match(/class="agent-run-file-review-open-current"/g)).toHaveLength(1)
+    }
     expect(fullMarkup).toContain('@@ -10,1 +10,1 @@')
     expect(fullMarkup).toContain('>10<')
-    expect(fullMarkup).not.toContain('完整差异')
+    expect(exactMarkup).toContain('data-file-find-id="ef-review-1:0:1">const enabled = true')
+    expect(patchMarkup).toContain('data-file-find-id="ef-review-4:0:1">after')
+    for (const markup of [exactMarkup, patchMarkup, historyMarkup]) {
+      expect(markup).not.toContain('is-hunk')
+      expect(markup).not.toContain('>10<')
+      expect(markup).not.toMatch(/<section class="agent-run-file-review-block[^"]*"><header>/)
+    }
 
-    const exactMarkup = renderReview('src/exact.ts')
-    expect(exactMarkup).not.toContain('Runtime 提供了精确替换片段')
-    expect(exactMarkup).toContain('精确替换 · 无行号')
-    expect(exactMarkup).not.toContain('修改 1')
-    expect(exactMarkup).not.toContain('is-hunk')
-    expect(exactMarkup).not.toContain('>10<')
-
-    const historyMarkup = renderReview('/tmp/history.ts')
-    expect(historyMarkup).not.toContain('该文件包含按时序保存的多次操作')
     expect(historyMarkup).toContain('3 次修改')
-    expect(historyMarkup).toContain('修改 1')
-    expect(historyMarkup).toContain('修改 2')
-    expect(historyMarkup).not.toContain('修改 3')
-    expect(historyMarkup).toContain('>old<')
-    expect(historyMarkup).toContain('>new<')
-    expect(historyMarkup).toContain('补丁片段')
-    expect(historyMarkup).toContain('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。')
-    expect(historyMarkup).toContain('>before<')
-    expect(historyMarkup).toContain('>after<')
-    expect(historyMarkup).not.toContain('这次文件操作没有可靠的差异内容')
-    expect(historyMarkup).not.toContain('is-operation-only')
+    expect(historyMarkup.match(/class="agent-run-file-review-block is-exact-mutation"/g)).toHaveLength(2)
+    expect(Array.from(historyMarkup.matchAll(/data-file-find-id="ef-review-2:([^"]+)">([^<]*)/g), match => match.slice(1)))
+      .toEqual([['0:0', 'old'], ['0:1', 'new'], ['1:0', 'before'], ['1:1', 'after']])
 
-    const operationOnlyMarkup = renderReview('src/path-only.ts')
-    expect(operationOnlyMarkup).toContain('没有可审查的差异内容')
-    expect(operationOnlyMarkup).toContain('Rovai 不读取当前文件，也不推测修改内容')
+    const noBlocksMarkup = renderReview('src/full.ts', { detail: { ...detail, files: [{ ...detail.files[0], blocks: [] }] } })
+    for (const markup of [operationOnlyMarkup, noBlocksMarkup]) {
+      expect(markup).toContain('role="group" aria-label="没有可审查的差异内容"')
+      expect(markup).not.toContain('class="agent-run-file-review-diff-code"')
+      const emptyMarkup = markup.slice(markup.indexOf('<div class="agent-run-file-review-empty"'))
+      expect(emptyMarkup.replace(/<[^>]+>/g, '')).toBe('打开当前文件')
+      expect(markup.slice(0, markup.indexOf('</header>'))).not.toContain('agent-run-file-review-open-current')
+    }
+    for (const detailStatus of ['loading', 'error'] as const) {
+      const markup = renderReview('src/path-only.ts', { detailStatus })
+      expect(markup).toContain(detailStatus === 'loading' ? '正在读取文件变化' : '文件变化暂时无法读取')
+      expect(markup).not.toContain('class="agent-run-file-review-empty"')
+      expect(markup.slice(0, markup.indexOf('</header>'))).toContain('agent-run-file-review-open-current')
+    }
   })
 
   it('keeps ordinary directories quiet and presents Git detection metadata and warnings', () => {

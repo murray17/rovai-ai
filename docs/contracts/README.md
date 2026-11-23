@@ -97,7 +97,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v98（当前）](runtime-launch-and-verification-v98.md) | Codex Host 关闭两种原生问卷，替换 Host 后续接原 Thread |
 | [Runtime Usage Monitoring v12（当前）](runtime-usage-monitoring-v12.md) | Core 统一投影 RunCard 已知消费总量、同调用补齐去重、原生 full total 和旧 Run 保守边界 |
 | [Runtime Execution Metrics v8（当前）](runtime-execution-metrics-v8.md) | RunCard 只显示一个 Core 总量 xxK，所有状态统一准入、零与未知分开、气泡仅耗时 |
-| [Runtime File Change Observation v9（当前）](runtime-file-change-observation-v9.md) | 成功 Send 输入路径按 Run/epoch 排除；复用现有 Evidence 与投影失效 |
+| [Runtime File Change Observation v10（当前）](runtime-file-change-observation-v10.md) | Review 按证据顺序直接显示代码，路径空状态打开当前文件 |
 | [ACP Client Terminal v3（当前）](acp-client-terminal-v3.md) | 继承 v2 capability/wire/cwd/lifecycle；派生进程跟随 Managed Process v2 移除 macOS User Automation protected-tree deny |
 | [Runtime Platform Admission v2（当前）](runtime-platform-admission-v2.md) | v1 不变；保留可 discovery/选择/执行但不伪造 qualification evidence 的 `preview` 状态；Pi 三个平台已分别以 immutable evidence 晋升为 qualified |
 | [Managed Runtime Process v2（当前）](managed-runtime-process-v2.md) | 直接启动 Runtime，移除 macOS User Automation 外层沙箱；保留 process group、Windows Job/handle 与后代回收 |
@@ -409,6 +409,7 @@ v1.07 的五份模型上下文合同见[当时的确认记录](../versions/v1.07
 | [Camp Permanent Deletion v3（历史）](camp-permanent-deletion-v3.md) | 原删除权限/journal 不变；先定向业务终态，再有界 Runtime 清理和物理删除 |
 | [Camp Permanent Deletion v2（历史）](camp-permanent-deletion-v2.md) | v1 删除合同不变；增加 Camp Published Attachment View journal cleanup，并规定先 fence Runtime、再取得 View write gate |
 | [Camp Permanent Deletion v1（历史）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界；不含 Published View cleanup |
+| [Runtime File Change Observation v9（历史）](runtime-file-change-observation-v9.md) | 成功 Send 输入路径按 Run/epoch 排除，复用现有 Evidence 与投影失效 |
 | [Runtime File Change Observation v8（历史）](runtime-file-change-observation-v8.md) | MiniMax 原生 patch、创建标志与相对路径；排除预览伪完整状态，继承共享文件投影 |
 | [Runtime File Change Observation v7（历史）](runtime-file-change-observation-v7.md) | 已成功的原生补丁片段、来源标签、按序统计与共享 Command/Files Changed 投影 |
 | [Runtime File Change Observation v6（历史）](runtime-file-change-observation-v6.md) | exact-epoch 文件事实水位、stale/no_changes 重算、稳定文件 ID 与原子 projection 发布 |

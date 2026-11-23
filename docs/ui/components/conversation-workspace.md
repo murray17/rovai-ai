@@ -1009,7 +1009,7 @@ standalone raw Evidence、Envelope JSON 或独立
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v9](../../contracts/runtime-file-change-observation-v9.md)准入的可靠
+只有 [Runtime File Change Observation v10](../../contracts/runtime-file-change-observation-v10.md)准入的可靠
 Evidence 才进入文件操作呈现。成功 read 的可靠单路径显示为不可展开的 `阅读 <basename>`；成功 write 的可靠
 单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot、exact mutation 或已准入 reported mutation 时，每个文件作为同一
 Canonical Activity 的 presentation row，明确 add 显示“新增”，其他显示“编辑”；没有可靠内容时不显示
@@ -1040,8 +1040,8 @@ Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 
 推测上下文。同一文件连续 Edit 在 Command View 中仍按各 Tool 时序分别显示；Write、NotebookEdit、ApplyPatch、
 失败/缺失 result 与 `replace_all=true` 保持普通 Tool Activity。
 
-Cline 已确认成功的 Update 补丁或 editor 替换用 `reported_mutation` 展示“补丁片段”，复用无行号片段布局。
-提示说明原生匹配可能调整文本、统计来自补丁；Command 和 Review 都保留该来源区别，不合成为完整文件净差异。
+Cline 已确认成功的 Update 补丁或 editor 替换保留为 `reported_mutation`。Command 展开时显示“补丁片段”，
+提示原生匹配可能调整文本、统计来自补丁。历史 Review 直接呈现同一份增删正文。
 失败、未知语法、创建/移动/删除等未准入内容保持原有文件行回退。
 
 每个 terminal `agentRunId + executionEpoch` 可以在对应 Run 的会话位置追加一张独立卡片，标题固定为
@@ -1096,11 +1096,10 @@ Runtime 明确报告的 root 外文件使用规范化绝对路径。卡片默认
 Review 与普通文件共用预览区和标签栏，正常双栏中保留左侧会话、Composer 与审批信息。
 宽预览内部使用文件列表与 Evidence 阅读面；选中项使用中性整行底色与细边框，不加左侧竖线。
 窄预览的路径、当前文件统计和“打开当前文件”共用单行工具栏。多文件时点击路径即可搜索、滚动或用键盘选择文件。
-完整净差异显示 unified diff 及可靠 hunk、旧/新行号；exact mutation 不显示 hunk、行号或推测上下文；history
-保留全部 operation 的时序与计数，但只渲染有可靠 diff 的代码块，并将可见代码块从“修改 1”连续编号，不为
-operation-only 记录生成空白占位块。单个精确替换或补丁片段仅显示来源，多段修改保留编号。在已经打开的混合 Review 内，
-operation-only 文件仍可选择，右侧显示“没有可审查的差异内容”。卡片上的 operation-only 入口直接打开当前文件，
-不以内联当前正文补齐历史 Review。“打开当前文件”通过既有来源校验打开普通文件 Tab，历史 Review 保留原
+完整净差异显示 unified diff 及可靠 hunk、旧/新行号。精确替换和原生补丁只显示增删符号及正文。
+多次修改保留操作总数，按发生顺序展示有差异的代码块，相邻块用细线分开。
+在已打开的混合 Review 中选中仅有路径的文件时，阅读区中央显示文件图标和“打开当前文件”按钮。
+卡片上的 operation-only 入口直接打开当前文件。“打开当前文件”通过既有来源校验打开普通文件 Tab，历史 Review 保留原
 选择和阅读位置；关闭预览或在单 Pane 模式返回时恢复原会话，不默认跳转系统编辑器。
 
 卡片只读取 AgentRun/epoch 的版本化 projection 与受管 detail blob，不读取当前 workspace 或重新执行 Git。来源水位
