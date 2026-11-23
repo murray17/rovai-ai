@@ -3,12 +3,12 @@ document_type: architecture
 architecture: dynamic-camp-membership
 authority: dynamic-camp-membership-component-boundaries
 status: accepted
-last_updated: 2026-10-13
+last_updated: 2026-11-23
 ---
 
 # 动态 Thread 队员关系架构
 
-字段级合同见 [Camp Membership v3](../contracts/camp-membership-v3.md)，决定理由见
+字段级合同见 [Camp Membership v4](../contracts/camp-membership-v4.md)，决定理由见
 [v1.29 决策记录](../versions/v1.29/decisions.md)与[零成员会话决定](../versions/v1.72/decisions.md#v1-72-d39)。
 
 ## 权威模型
@@ -66,5 +66,4 @@ status/completed_at 同事务完成。Runtime 后台清理与审计无关。同�
 ## Read side 与 Renderer
 
 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)投影当前 generation、成员 version 与历史尚未完成的
-reconciliation；新 cutover 已同事务完成，不产生持续收口等待。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Thread，不在本地
-模拟关系。最后成员允许移出；空会话保留历史与本地草稿，显示邀请入口且没有隐式接收者。添加候选来自当前 present 且不在 active set 的 AgentProfile。首位加入者恢复 Default Lead，不自动发送输入或重分配已释放 Task。永久移除预览逐会话展示空会话/队长交接影响，非终态 Run 仍阻止全局移除。
+reconciliation；新 cutover 已同事务完成，不产生持续收口等待。Renderer 用 removal preview 解释影响。预览不可用时按确认窗口打开时的名册与成员版本提交，由 Core 校验并结算。成功后重读 Thread。最后成员允许移出；空会话保留历史与本地草稿，显示邀请入口且没有隐式接收者。添加候选来自当前 present 且不在 active set 的 AgentProfile。首位加入者恢复 Default Lead，不自动发送输入或重分配已释放 Task。永久移除预览逐会话展示空会话/队长交接影响，非终态 Run 仍阻止全局移除。

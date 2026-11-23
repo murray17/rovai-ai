@@ -59,6 +59,7 @@ const operationNames = {
   'thread.refresh': () => uiAttribute('刷新会话'),
   'thread.rename': () => uiAttribute('重命名对话'),
   'thread.delete': () => uiAttribute('删除对话'),
+  'thread.member.remove': () => uiAttribute('移出队员'),
   'thread.lead.change': () => uiAttribute('更换默认队长'),
   'approval.resolve': () => uiAttribute('提交审批'),
   'overview.read': () => uiAttribute('刷新状态'),
@@ -151,6 +152,9 @@ export function failureFeedback(
   }
   if (operation === 'thread.lead.change' && code === 'camp.default_lead_unavailable') {
     return changed(uiAttribute('{0}已不在当前会话，队长没有更换。', subject ?? uiAttribute('该队员')), 'gone')
+  }
+  if (operation === 'thread.member.remove' && code === 'command.capability_denied') {
+    return failed(uiAttribute('你没有权限从当前会话移出队员。'))
   }
   if (operation === 'approval.resolve') {
     if (code === 'approval.not_pending') return changed(uiAttribute('这条审批已在其他地方处理，无需再次提交。'), 'resolved')

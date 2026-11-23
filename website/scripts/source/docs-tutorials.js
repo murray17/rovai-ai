@@ -90,8 +90,8 @@
       '在 @ 选择器中选择芝士。图中上方是实现交付，下方是用户填写的审查请求，可以同时看见工作背景和下一位接收者。',
       'collaboration-review-request-en.jpg'),
     P('Decide from the review, then inspect files','按审查意见决定，再查看文件',
-      ['Read the actual review before deciding on another edit. A confirmed defect calls for a narrow follow-up addressed to the implementer; a suggestion may need a product decision. If no defect is found, inspect the delivery rather than inventing a repair round.', 'Open Files Changed below the implementation reply and inspect the changed paths and lines. Open index.html in a browser to inspect the delivered page. A successful Run or a reviewer’s answer is not a merge or a release.'],
-      ['先读真实审查意见，再决定是否继续修改。确定的缺陷可以交给实现队员作小范围修复；建议项可能需要你作产品决定。没有发现缺陷时，就继续验收交付，不为凑闭环虚构修复。','从实现回复下方的“文件变更”展开路径和差异，再用浏览器打开 index.html 查看页面。执行成功或审查队员回复都不等于代码已经合入或发布。']),
+      ['Read the actual review before deciding on another edit. A confirmed defect calls for a narrow follow-up addressed to the implementer; a suggestion may need a product decision. If the review finds no issues, continue with acceptance checks.', 'Open Files Changed below the implementation reply and inspect the changed paths and lines. Open index.html in a browser to inspect the delivered page. A successful Run or a reviewer’s answer is not a merge or a release.'],
+      ['先读真实审查意见，再决定是否继续修改。确定的缺陷可以交给实现队员作小范围修复；建议项可能需要你作产品决定。没有发现问题，就继续验收。','从实现回复下方的“文件变更”展开路径和差异，再用浏览器打开 index.html 查看页面。执行成功或审查队员回复都不等于代码已经合入或发布。']),
     F('Who receives the next message?','下一条消息由谁接收？',[
       ['No explicit recipient','没有显式接收对象','Normally the lead receives it. After you explicitly address one non-lead teammate, the composer may show “Send to continue” for that teammate. Check the visible routing hint; cancel continuation to return to normal routing.','通常由队长接收。但你明确发给一位非队长队员后，输入区可能显示继续发给该队员。以可见的接收提示为准；取消延续后再使用正常路由。'],
       ['One or several selected teammates','选择一位或多位队员','Each selected recipient gets work from the same message. Multiple recipients do not establish an implementation-then-review order. If order matters, wait for the first result and send the next request yourself.','同一消息会给每位选中队员建立待处理工作。多人接收不会自动形成“先实现、后审查”的顺序；有先后依赖时，等待前一结果，再发送后续请求。'],
@@ -431,7 +431,6 @@
     agents:['compatibility','execution'],missions:['tasks','execution','files'],tasks:['collaboration','missions'],
     memory:['collaboration','members'],execution:['approvals','recovery','files'],files:['missions','collaboration'],
     approvals:['execution','recovery'],recovery:['message-queue','execution'],skills:['agents','mcp','collaboration'],
-    automations:['execution','channels'],channels:['feishu','remote'],feishu:['channels','remote','execution'],remote:['channels','compatibility'],
-    quickstart:['collaboration','mechanism']
+    automations:['execution','channels'],channels:['feishu','remote'],feishu:['channels','remote','execution'],remote:['channels','compatibility']
   })) related(id,ids);
 })();

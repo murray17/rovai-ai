@@ -71,9 +71,11 @@ Object.assign(window, { rovai: { clipboard: { write: async (data: { text: string
 let rejectSend = true
 let coreActivated = false
 let acceptedSends = 0
+let publishedUserMessages: ThreadMessageView[] = []
 let clearAcceptedMessages: () => void
 let failNextInvite = false
 let conflictNextRemoval = false
+let removalPreviewMode: 'ready' | 'unavailable' | 'missing' = 'ready'
 let prepareLeave: ThreadLeaveGuard | null = null
 let visibleSnapshot = initial
 let visibleProfiles = profiles
@@ -98,7 +100,12 @@ const client = {
       id: 'paste-review', name: 'review-code', description: '设计审查 Clipboard regression fixture',
       source: 'native', entryPath: '/fixture/review-code/SKILL.md', memberIds: ['lead']
     }], errors: [] }
-    if (method === 'thread.messages.anchors') return { schemaVersion: 1, threadId, throughGlobalSequence: 0, totalCount: 0, items: [] }
+    if (method === 'thread.messages.anchors') {
+      const items = publishedUserMessages.map(message => ({
+        messageId: message.id, sequence: message.sequence, title: message.body, messageVersion: message.version
+      }))
+      return { schemaVersion: 1, threadId, throughGlobalSequence: acceptedSends, totalCount: items.length, items }
+    }
     if (method === 'threads.pendingDraft.setPresence') {
       if (failPresence) throw new Error('Fixture presence offline')
       if (coreActivated) throw new Error('camp.pending_draft_unavailable')
@@ -152,8 +159,15 @@ function Fixture() {
   const [snapshot, setSnapshot] = useState(initial)
   const [currentProfiles, updateProfiles] = useState(profiles)
   const [acceptedMessages, setAcceptedMessages] = useState<ThreadMessageView[]>([])
+  publishedUserMessages = acceptedMessages
   clearAcceptedMessages = () => { setAcceptedMessages([]) }
-  showAgentFiles = () => setAcceptedMessages(current => current.map(message => ({ ...message, authorType: 'agent', authorId: 'lead' })))
+  showAgentFiles = () => setSnapshot(current => ({
+    ...current,
+    messages: acceptedMessages.map(message => ({
+      ...message, id: 'agent-' + message.id, sequence: message.sequence + acceptedSends,
+      authorType: 'agent', authorId: 'lead', body: '交付文件'
+    }))
+  }))
   const [visible, show] = useState(true)
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
   const [inspectorVisible, setInspectorVisible] = useState(false)
@@ -189,6 +203,8 @@ function Fixture() {
       }}
       onPreviewMemberRemoval={async agentId => {
         calls.push('preview:' + agentId)
+        if (removalPreviewMode === 'unavailable') throw new Error('Preview unavailable')
+        if (removalPreviewMode === 'missing') return null
         const target = snapshot.members.find(item => item.agentId === agentId)!
         return { threadId, agentId, displayName: target.displayName,
           membershipGeneration: snapshot.thread.membershipGeneration, membershipVersion: target.version,
@@ -197,15 +213,17 @@ function Fixture() {
           nonTerminalAgentRunCount: 0, openAssignedTaskCount: 0, pendingDeliveryCount: 0,
           runningDeliveryCount: 0, removable: true, blockerCode: null }
       }}
-      onRemoveMember={async preview => {
-        calls.push('remove:' + preview.agentId + ':' + preview.membershipGeneration)
+      onRemoveMember={async command => {
+        calls.push('remove:' + command.agentId + ':' + command.expectedMembershipGeneration)
+        if (command.threadId !== snapshot.thread.id || command.expectedMembershipVersion !== snapshot.members.find(item => item.agentId === command.agentId)?.version
+          || command.expectedMembershipGeneration !== snapshot.thread.membershipGeneration) throw new Error('Stale removal command')
         if (conflictNextRemoval) {
           conflictNextRemoval = false
           setSnapshot(current => ({ ...current, thread: { ...current.thread, membershipGeneration: current.thread.membershipGeneration + 1 } }))
-          return { status: 'conflict', message: '名册已发生变化，请重新读取影响。' }
+          return { status: 'conflict' }
         }
-        setSnapshot(current => ({ ...current, members: current.members.filter(item => item.agentId !== preview.agentId),
-          thread: { ...current.thread, defaultLeadAgentId: preview.nextDefaultLeadAgentId,
+        setSnapshot(current => ({ ...current, members: current.members.filter(item => item.agentId !== command.agentId),
+          thread: { ...current.thread, defaultLeadAgentId: command.replacementDefaultLeadAgentId ?? current.members.find(item => item.agentId !== command.agentId)?.agentId ?? null,
             membershipGeneration: current.thread.membershipGeneration + 1 } }))
         return { status: 'removed', message: '已移出' }
       }}
@@ -259,6 +277,7 @@ Object.assign(window, { invitationTest: {
   removeAll: () => setFixture(current => ({ ...current, members: [], thread: { ...current.thread, defaultLeadAgentId: null } })),
   away: () => setFixture(current => ({ ...current, members: current.members.map(item => ({ ...item, profilePresence: 'away', isDefaultLead: false })), thread: { ...current.thread, defaultLeadAgentId: null } })),
   failInvite: () => { failNextInvite = true },
+  removalPreviewMode: (mode: typeof removalPreviewMode) => { removalPreviewMode = mode },
   conflictRemoval: () => { conflictNextRemoval = true },
   submit: () => document.querySelector<HTMLButtonElement>('form.composer:has(#camp-message) button[type="submit"]')!.click(),
   focus: () => document.querySelector<HTMLElement>('#camp-message[contenteditable="true"]')!.focus(),

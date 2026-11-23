@@ -59,6 +59,7 @@ import type {
   ThreadMessageAroundSnapshot,
   ThreadMessageView,
   ThreadMemberRemovalPreview,
+  RemoveThreadMemberCommand,
   ThreadOpenProjection,
   ThreadSnapshot,
   CreateThreadRequest,
@@ -4046,39 +4047,30 @@ export function BusinessApp({
     }
   }
 
-  const previewThreadMemberRemoval = async (agentId: string): Promise<ThreadMemberRemovalPreview> => {
+  const previewThreadMemberRemoval = async (agentId: string): Promise<ThreadMemberRemovalPreview | null> => {
     const threadId = activeThreadIdRef.current
     if (!threadId || campSnapshotRef.current?.thread.id !== threadId) {
       throw new Error(uiAttribute('当前会话尚未准备好。'))
     }
-    const preview = await client.request<ThreadMemberRemovalPreview | null>(
+    return client.request<ThreadMemberRemovalPreview | null>(
       'threads.members.removalPreview',
       { threadId, agentId }
     )
-    if (!preview) throw new Error(uiAttribute('这位队员已不在当前会话中。'))
-    return preview
   }
 
   const removeThreadMember = async (
-    preview: ThreadMemberRemovalPreview
+    command: RemoveThreadMemberCommand
   ): Promise<ThreadMemberRemoveOutcome> => {
     const threadId = activeThreadIdRef.current
-    if (!threadId || preview.threadId !== threadId || campSnapshotRef.current?.thread.id !== threadId) {
-      return { status: 'conflict', message:uiAttribute("当前会话已发生变化，请重新读取影响。") }
+    if (!threadId || command.threadId !== threadId || campSnapshotRef.current?.thread.id !== threadId) {
+      return { status: 'conflict', message: uiAttribute('队员名单已变化，请重新选择要移出的队员。') }
     }
     setBusy('camp-membership')
     setError(null)
     try {
       const result = await client.request<StoredCommandResult>('threads.members.remove', {
         commandId: newCommandId(),
-        command: {
-          threadId,
-          agentId: preview.agentId,
-          expectedMembershipGeneration: preview.membershipGeneration,
-          expectedMembershipVersion: preview.membershipVersion,
-          replacementDefaultLeadAgentId: preview.nextDefaultLeadAgentId,
-          reason: 'removed_from_camp'
-        }
+        command: { ...command, reason: 'removed_from_camp' }
       })
       if (result.status === 'rejected') {
         try {
@@ -4086,10 +4078,10 @@ export function BusinessApp({
         } catch {
           // Keep the deterministic command result when the follow-up projection is unavailable.
         }
-        return {
-          status: membershipConflictCode(result.code) ? 'conflict' : 'failed',
-          message: commandFailureMessage(result)
+        if (membershipConflictCode(result.code)) {
+          return { status: 'conflict', message: uiAttribute('队员名单已变化，请重新选择要移出的队员。') }
         }
+        return { status: 'failed', message: reportOperationFailure('thread.member.remove', result).message }
       }
       try {
         await Promise.all([
@@ -4105,7 +4097,7 @@ export function BusinessApp({
         reconciliationStatus: reconciliationStatus === 'reconciling' ? 'reconciling' : 'settled'
       }
     } catch (error) {
-      return { status: 'failed', message: errorMessage(error) }
+      return { status: 'failed', message: reportOperationFailure('thread.member.remove', error).message }
     } finally {
       setBusy(null)
     }

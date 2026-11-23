@@ -108,6 +108,7 @@ import type {
   ThreadMessageFindSnapshot,
   ThreadMessageView,
   ThreadMemberRemovalPreview,
+  RemoveThreadMemberCommand,
   ThreadOpenCollectionCoverage,
   ThreadOpenMessageCoverage,
   ThreadOpenProjection,
@@ -1763,8 +1764,8 @@ export function ThreadWorkspace({
   onThreadLeaveGuardChange?(threadId: string, guard: ThreadLeaveGuard | null): void
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<ThreadMemberAddOutcome>
-  onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
-  onRemoveMember?(preview: ThreadMemberRemovalPreview): Promise<ThreadMemberRemoveOutcome>
+  onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview | null>
+  onRemoveMember?(command: RemoveThreadMemberCommand): Promise<ThreadMemberRemoveOutcome>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void | Promise<void>
   onRespondInteraction?(interaction: NativeInteractionView, answer: NativeInteractionAnswer): Promise<NativeInteractionResult>
@@ -9250,6 +9251,18 @@ export function RuntimeRecoveryDock({
   )
 }
 
+type MemberRemovalDetails =
+  | { status: 'loading' | 'unavailable' }
+  | { status: 'ready'; preview: ThreadMemberRemovalPreview }
+  | { status: 'blocked'; message: string }
+
+interface MemberRemovalDialog {
+  displayName: string
+  command: RemoveThreadMemberCommand
+  details: MemberRemovalDetails
+  submitError?: string
+}
+
 function ThreadMembersPanel({
   addDialogOpen,
   setAddDialogOpen,
@@ -9272,8 +9285,8 @@ function ThreadMembersPanel({
   busy: boolean
   onChangeLead(agentId: string): Promise<void>
   onAddMembers?(agentIds: string[]): Promise<ThreadMemberAddOutcome>
-  onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
-  onRemoveMember?(preview: ThreadMemberRemovalPreview): Promise<ThreadMemberRemoveOutcome>
+  onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview | null>
+  onRemoveMember?(command: RemoveThreadMemberCommand): Promise<ThreadMemberRemoveOutcome>
 }): JSX.Element {
   const mobile = useMobileLayout()
   const members = campInspectorMembers(snapshot.members)
@@ -9300,12 +9313,10 @@ function ThreadMembersPanel({
     message: string
     failures: Map<string, string>
   } | null>(null)
-  const [removalTarget, setRemovalTarget] = useState<ThreadSnapshot['members'][number] | null>(null)
-  const [removalPreviewState, setRemovalPreviewState] = useState<
-    | { status: 'idle' | 'loading' }
-    | { status: 'ready'; preview: ThreadMemberRemovalPreview }
-    | { status: 'conflict' | 'error'; message: string }
-  >({ status: 'idle' })
+  const [removal, setRemoval] = useState<MemberRemovalDialog | null>(null)
+  useEffect(() => {
+    setRemoval(current => current && current.command.threadId !== snapshot.thread.id ? null : current)
+  }, [snapshot.thread.id])
   const [removeSubmitting, setRemoveSubmitting] = useState(false)
 
   useEffect(() => {
@@ -9387,56 +9398,64 @@ function ThreadMembersPanel({
     }
   }
 
-  const loadRemovalPreview = useCallback(async (agentId: string): Promise<void> => {
-    if (!onPreviewMemberRemoval) {
-      setRemovalPreviewState({ status: 'error', message:uiAttribute("当前版本无法读取移出影响。") })
-      return
-    }
-    setRemovalPreviewState({ status: 'loading' })
-    try {
-      const preview = await onPreviewMemberRemoval(agentId)
-      setRemovalPreviewState({ status: 'ready', preview })
-    } catch (error) {
-      setRemovalPreviewState({
-        status: 'error',
-        message: readErrorMessage(error, uiAttribute('无法读取 Core 权威影响，请重试。'))
-      })
-    }
-  }, [onPreviewMemberRemoval])
-
-  const openRemovalDialog = (member: ThreadSnapshot['members'][number]): void => {
+  const openRemovalDialog = async (member: ThreadSnapshot['members'][number]): Promise<void> => {
     if (!onRemoveMember) return
-    setRemovalTarget(member)
-    void loadRemovalPreview(member.agentId)
+    const command: RemoveThreadMemberCommand = {
+      threadId: snapshot.thread.id,
+      agentId: member.agentId,
+      expectedMembershipGeneration: snapshot.thread.membershipGeneration,
+      expectedMembershipVersion: member.version
+    }
+    setRemoval({ displayName: member.displayName, command, details: { status: onPreviewMemberRemoval ? 'loading' : 'unavailable' } })
+    if (!onPreviewMemberRemoval) return
+
+    let details: MemberRemovalDetails
+    try {
+      const preview = await onPreviewMemberRemoval(member.agentId)
+      if (!preview || !preview.removable) {
+        details = { status: 'blocked', message: uiAttribute('这位队员已不在当前会话中。') }
+      } else if (preview.threadId !== command.threadId || preview.agentId !== command.agentId
+        || preview.membershipVersion !== command.expectedMembershipVersion) {
+        details = { status: 'blocked', message: uiAttribute('队员名单已变化，请重新选择要移出的队员。') }
+      } else {
+        details = { status: 'ready', preview }
+      }
+    } catch {
+      // A missing impact breakdown does not invalidate the revisions captured when the dialog opened.
+      details = { status: 'unavailable' }
+    }
+    setRemoval(current => current?.command === command ? { ...current, details } : current)
   }
 
   const closeRemovalDialog = (): void => {
-    if (removeSubmitting) return
-    setRemovalTarget(null)
-    setRemovalPreviewState({ status: 'idle' })
+    if (!removeSubmitting) setRemoval(null)
   }
 
+  const removalPreview = removal?.details.status === 'ready' ? removal.details.preview : null
+  const canRemove = removal?.command.threadId === snapshot.thread.id
+    && (removal.details.status === 'ready' || removal.details.status === 'unavailable')
+
   const submitRemoveMember = async (): Promise<void> => {
-    if (!onRemoveMember || removalPreviewState.status !== 'ready' || removeSubmitting) return
+    if (!onRemoveMember || !removal || !canRemove || removeSubmitting) return
+    const { command } = removal
     setRemoveSubmitting(true)
     try {
-      const outcome = await onRemoveMember(removalPreviewState.preview)
-      if (outcome.status === 'removed') {
-        setRemovalTarget(null)
-        setRemovalPreviewState({ status: 'idle' })
-        return
-      }
-      setRemovalPreviewState({
-        status: outcome.status === 'conflict' ? 'conflict' : 'error',
-        message: outcome.message ?? (outcome.status === 'conflict'
-          ? uiAttribute('名册已发生变化。请重新读取影响后再确认，本次没有移出任何队员。')
-          : uiAttribute('移出未完成，请重试。'))
+      const outcome = await onRemoveMember(removalPreview ? {
+        ...command,
+        expectedMembershipGeneration: removalPreview.membershipGeneration,
+        replacementDefaultLeadAgentId: removalPreview.nextDefaultLeadAgentId
+      } : command)
+      setRemoval(current => {
+        if (current?.command !== command) return current
+        if (outcome.status === 'removed') return null
+        if (outcome.status === 'conflict') {
+          return { ...current, details: { status: 'blocked', message: outcome.message ?? uiAttribute('队员名单已变化，请重新选择要移出的队员。') }, submitError: undefined }
+        }
+        return { ...current, submitError: outcome.message ?? uiAttribute('移出未完成，请重试。') }
       })
     } catch (error) {
-      setRemovalPreviewState({
-        status: 'error',
-        message: readErrorMessage(error, uiAttribute('移出未完成，请重试。'))
-      })
+      const { message } = reportOperationFailure('thread.member.remove', error)
+      setRemoval(current => current?.command === command ? { ...current, submitError: message } : current)
     } finally {
       setRemoveSubmitting(false)
     }
@@ -9451,9 +9470,6 @@ function ThreadMembersPanel({
     })
   }
 
-  const removalPreview = removalPreviewState.status === 'ready'
-    ? removalPreviewState.preview
-    : null
   const removalDeliveryCount = removalPreview
     ? removalPreview.pendingDeliveryCount + removalPreview.runningDeliveryCount
     : 0
@@ -9464,8 +9480,8 @@ function ThreadMembersPanel({
     || removalPreview.isDefaultLead
     || removalPreview.remainingMemberCount === 0
   ))
-  const showRemovalDialogBody = removalPreviewState.status !== 'ready'
-    || Boolean(removalPreview && (!removalPreview.removable || removalHasActualImpact))
+  const removalMessage = removal?.details.status === 'blocked' ? removal.details.message : removal?.submitError
+  const showRemovalDialogBody = removal?.details.status === 'loading' || Boolean(removalMessage) || removalHasActualImpact
 
   return (
     <section aria-label={uiAttribute("当前会话队员")}>
@@ -9596,7 +9612,7 @@ function ThreadMembersPanel({
                     <DropdownMenu.Item
                       className="camp-member-menu-item is-danger"
                       disabled={!onRemoveMember}
-                      onSelect={() => openRemovalDialog(member)}
+                      onSelect={() => void openRemovalDialog(member)}
                     >
                       <strong><UiText zh={"移出当前会话"} /></strong>
                     </DropdownMenu.Item>
@@ -9719,7 +9735,7 @@ function ThreadMembersPanel({
         </Dialog.Portal>
       </Dialog.Root>
 
-      <Dialog.Root open={removalTarget !== null} onOpenChange={(open) => !open && closeRemovalDialog()}>
+      <Dialog.Root open={removal?.command.threadId === snapshot.thread.id} onOpenChange={(open) => !open && closeRemovalDialog()}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
           <AppDialogContent
@@ -9728,8 +9744,10 @@ function ThreadMembersPanel({
             aria-describedby="camp-remove-member-description"
           >
             <AppDialogHeader
-              title={uiAttribute("移出{0}？", String(removalTarget?.displayName ?? uiAttribute("这位队员")))}
-              description={uiAttribute("只影响当前会话，移出后不再接收这里的新工作。")}
+              title={uiAttribute("移出{0}？", String(removal?.displayName ?? uiAttribute("这位队员")))}
+              description={removal?.details.status === 'unavailable'
+                ? uiAttribute('只影响当前会话。正在执行的工作会停止，未完成的任务会回到待分配。')
+                : uiAttribute('只影响当前会话，移出后不再接收这里的新工作。')}
               descriptionId="camp-remove-member-description"
               icon="user"
               kicker={uiAttribute("当前会话")}
@@ -9737,59 +9755,47 @@ function ThreadMembersPanel({
             />
             {showRemovalDialogBody && (
               <AppDialogBody>
-                {(removalPreviewState.status === 'loading' || removalPreviewState.status === 'idle') && (
+                {removal?.details.status === 'loading' && (
                   <div className="camp-member-preview-loading" aria-label={uiAttribute("正在读取移出影响")}>
                     <span /><span /><span className="is-short" />
                   </div>
                 )}
-                {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && (
-                  <div className={`camp-member-dialog-alert ${removalPreviewState.status === 'conflict' ? 'is-attention' : 'is-danger'}`} role="alert">
-                    {removalPreviewState.message}
-                  </div>
+                {removalMessage && (
+                  <div className="camp-member-dialog-alert is-danger" role="alert">{removalMessage}</div>
                 )}
-                {removalPreview && (
-                  <>
-                    {!removalPreview.removable && (
-                      <div className="camp-member-dialog-alert is-danger" role="alert"><UiText zh={"这位队员已不在当前会话，请重新读取移出影响。"} /></div>
+                {removalPreview && removalHasActualImpact && (
+                  <AppDialogImpactList>
+                    {removalPreview.nonTerminalAgentRunCount > 0 && (
+                      <AppDialogImpact tone="warning" icon="bolt" label={uiAttribute("已开始的执行")}>
+                        {removalPreview.nonTerminalAgentRunCount}<UiText zh={" 个执行将停止接收新写入，并在后台收拢。"} /></AppDialogImpact>
                     )}
-                    {removalHasActualImpact && (
-                      <AppDialogImpactList>
-                        {removalPreview.nonTerminalAgentRunCount > 0 && (
-                          <AppDialogImpact tone="warning" icon="bolt" label={uiAttribute("已开始的执行")}>
-                            {removalPreview.nonTerminalAgentRunCount}<UiText zh={" 个执行将停止接收新写入，并在后台收拢。"} /></AppDialogImpact>
-                        )}
-                        {(removalPreview.openAssignedTaskCount ?? 0) > 0 && (
-                          <AppDialogImpact tone="warning" icon="keep" label={uiAttribute("未完成任务")}>
-                            {removalPreview.openAssignedTaskCount}<UiText zh={" 个任务将释放负责人，回到待分配状态。"} /></AppDialogImpact>
-                        )}
-                        {removalDeliveryCount > 0 && (
-                          <AppDialogImpact tone="warning" icon="info" label={uiAttribute("等待消息")}>
-                            {removalDeliveryCount}<UiText zh={" 个投递将取消或结束。"} /></AppDialogImpact>
-                        )}
-                        {(removalPreview.isDefaultLead || removalPreview.remainingMemberCount === 0) && (
-                          <AppDialogImpact tone="warning" icon="user" label={removalPreview.remainingMemberCount === 0 ? uiAttribute('会话状态') : uiAttribute("队长职责")}>
-                            {removalPreview.remainingMemberCount === 0
-                              ? uiAttribute('移出后暂无队员，邀请后可继续发送。历史记录保留。')
-                              : removalPreview.nextDefaultLeadAgentId
-                              ? uiAttribute("将交给{0}。", String(profileById.get(removalPreview.nextDefaultLeadAgentId)?.displayName ?? uiAttribute("另一位在队队员")))
-                              : uiAttribute("剩余队员都处于暂离状态，会话将暂时没有队长；有人归队后自动恢复。")}
-                          </AppDialogImpact>
-                        )}
-                      </AppDialogImpactList>
+                    {(removalPreview.openAssignedTaskCount ?? 0) > 0 && (
+                      <AppDialogImpact tone="warning" icon="keep" label={uiAttribute("未完成任务")}>
+                        {removalPreview.openAssignedTaskCount}<UiText zh={" 个任务将释放负责人，回到待分配状态。"} /></AppDialogImpact>
                     )}
-                  </>
+                    {removalDeliveryCount > 0 && (
+                      <AppDialogImpact tone="warning" icon="info" label={uiAttribute("等待消息")}>
+                        {removalDeliveryCount}<UiText zh={" 个投递将取消或结束。"} /></AppDialogImpact>
+                    )}
+                    {(removalPreview.isDefaultLead || removalPreview.remainingMemberCount === 0) && (
+                      <AppDialogImpact tone="warning" icon="user" label={removalPreview.remainingMemberCount === 0 ? uiAttribute('会话状态') : uiAttribute("队长职责")}>
+                        {removalPreview.remainingMemberCount === 0
+                          ? uiAttribute('移出后暂无队员，邀请后可继续发送。历史记录保留。')
+                          : removalPreview.nextDefaultLeadAgentId
+                          ? uiAttribute("将交给{0}。", String(profileById.get(removalPreview.nextDefaultLeadAgentId)?.displayName ?? uiAttribute("另一位在队队员")))
+                          : uiAttribute("剩余队员都处于暂离状态，会话将暂时没有队长；有人归队后自动恢复。")}
+                      </AppDialogImpact>
+                    )}
+                  </AppDialogImpactList>
                 )}
               </AppDialogBody>
             )}
-            <AppDialogFooter note={removalPreviewState.status === 'ready' ? uiAttribute("提交后立即阻止该队员的新消息与工具写入。") : uiAttribute("请先读取 Core 权威影响。")}>
+            <AppDialogFooter note={removalPreview ? uiAttribute("提交后立即阻止该队员的新消息与工具写入。") : undefined}>
               <Dialog.Close asChild><button className="quiet-button" type="button" disabled={removeSubmitting}><UiText zh={"取消"} /></button></Dialog.Close>
-              {(removalPreviewState.status === 'conflict' || removalPreviewState.status === 'error') && removalTarget && (
-                <button className="quiet-button" type="button" disabled={removeSubmitting} onClick={() => void loadRemovalPreview(removalTarget.agentId)}><UiText zh={"重新读取影响"} /></button>
-              )}
               <button
                 className="danger-button"
                 type="button"
-                disabled={removeSubmitting || removalPreviewState.status !== 'ready' || !removalPreviewState.preview.removable}
+                disabled={removeSubmitting || !canRemove}
                 aria-busy={removeSubmitting}
                 onClick={() => void submitRemoveMember()}
               >

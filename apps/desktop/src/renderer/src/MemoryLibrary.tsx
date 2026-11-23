@@ -362,7 +362,7 @@ export function MemoryLibrary({
           const snapshot = await load()
           if (!isCurrentPage(lifetime) || !memoryActive.current) return
           setEditor((current) => refreshEditorAuthority(current, snapshot))
-          setError(uiAttribute('审核状态或记忆版本已经变化。已刷新权威状态并保留当前草稿，请核对后明确重试。'))
+          setError(uiAttribute('这条记忆有更新。你的草稿已保留，请核对后再提交。'))
         } catch (refreshError) {
           if (isCurrentPage(lifetime) && memoryActive.current) setError(uiAttribute("状态冲突，且刷新失败：{0}", String(errorMessage(refreshError))))
         }
@@ -518,7 +518,7 @@ export function MemoryLibrary({
         try {
           await load()
           if (!isCurrentPage(lifetime) || !memoryActive.current) return applied
-          setReviewError(uiAttribute('审核状态或记忆版本已经变化。已刷新权威状态并保留当前草稿，请核对后明确重试。'))
+          setReviewError(uiAttribute('这条记忆有更新。你的草稿已保留，请核对后再提交。'))
         } catch {
           if (!isCurrentPage(lifetime) || !memoryActive.current) return applied
           setReviewNeedsRefresh(true)
