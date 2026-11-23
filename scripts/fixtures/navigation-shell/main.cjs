@@ -419,7 +419,8 @@ app.whenReady().then(async () => {
     }
     assert.deepEqual(await run('window.navigationTest.paginationErrors'),[],'Obsolete read failures stay fenced')
     for (const [railWidth, right] of [[270, 259], [200, 189]]) {
-      await drag(railWidth - await width())
+      const currentWidth = await width()
+      if (currentWidth !== railWidth) await drag(railWidth - currentWidth)
       await checkSearchAlignment(right, true)
     }
     console.log(JSON.stringify({ok:true,checks:'Desktop pinned conversation icon/alignment/trailing status slot, pointer threshold/reversal/cancellation, full collapse/inert, keyboard/menu, storage, unchanged content renders, draft retention, Windows/menu, macOS/Web fixed settings and collapsed recovery, memory-only shared history, keyboard navigation, ignored Renderer side buttons, native Mac swipe, input consumption and history reset, Project pagination reset/freshness/late-result fencing and whole-rail state retention'}))
