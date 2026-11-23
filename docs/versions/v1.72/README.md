@@ -6,10 +6,14 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-22
+last_updated: 2026-11-23
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 公屏发送与执行台（2026-11-23）
+
+公开 Thread 的 Charter 从发送场景中删去 `status`，并说明用户可在执行台实时查看 Runtime 输出。新会话按 [Charter revision 27](model-context-change-charter-console-visibility.md) 接收该文案。
 
 ## 公开会话回执与执行状态（2026-11-22）
 
