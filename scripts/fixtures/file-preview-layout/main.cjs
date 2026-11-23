@@ -1545,6 +1545,49 @@ app.whenReady().then(async () => {
     await run('window.previewTest.setLanguage("zh-CN")')
     await viewport(1_440)
   })
+  await check('mixed review shows chronological code and opens a path-only file from the empty state', async () => {
+    await viewport(630)
+    await run('window.previewTest.openFileReviewFixture("mixed")')
+    const panel = '.file-preview-tab-panel:not([hidden])'
+    const selectFile = async (name) => {
+      await click(`${panel} .changed-file-trigger`)
+      await window.webContents.insertText(name)
+      await snapshot()
+      await key('Enter')
+    }
+    const patch = await reviewSnapshot()
+    assert.equal(patch.selectedTab, 'File Change·patch.ts')
+    assert.equal(patch.text, '−before+after')
+    await selectFile('history.ts')
+    const history = await reviewSnapshot()
+    assert.equal(history.toolbarHeight, 40)
+    assert.equal(history.text, '@@ -12 +12 @@−12first+12second−second+before−before+after')
+    const separators = await run(`Array.from(document.querySelectorAll('${panel} .agent-run-file-review-block'), block => getComputedStyle(block).borderTopWidth)`)
+    assert.deepEqual(separators, ['0px', '1px', '1px'])
+    await capture('file-change-mixed-history-360px')
+    await selectFile('path-only.ts')
+    const empty = await reviewSnapshot()
+    assert.equal(empty.text, '打开当前文件')
+    assert.equal(empty.fileReads, patch.fileReads, 'Selecting a path-only record never reads the current file')
+    assert.deepEqual(empty.overflow, [])
+    const action = `${panel} .agent-run-file-review-empty .agent-run-file-review-open-current`
+    assert.equal(await run(`document.querySelectorAll('${panel} .agent-run-file-review-open-current').length`), 1)
+    assert.equal(await run(`document.querySelector('${action} .agent-run-file-review-open-label').checkVisibility()`), true)
+    await capture('file-change-path-only-360px')
+    await run(`document.querySelector('${action}').focus()`)
+    await key('Enter')
+    const opened = await reviewSnapshot()
+    assert.equal(opened.selectedTab, 'path-only.ts')
+    assert.deepEqual(opened.fileOpens.at(-1), {
+      kind: 'run_evidence', threadId: 'camp-1', agentRunId: 'run-mixed', executionEpoch: 1,
+      evidenceFileId: 'file-operation-only', action: 'open_current'
+    })
+    await click('[role="tab"][aria-label="File Change·path-only.ts"]')
+    const restored = await reviewSnapshot()
+    assert.equal(restored.text, empty.text)
+    assert.equal(restored.reviewRequests.length, patch.reviewRequests.length)
+    await viewport(1_440)
+  })
   await check('operation-only DiffCard opens once and reuses the loaded current file', async () => {
     await run('window.previewTest.closeAll()')
     const before = await reviewSnapshot()
