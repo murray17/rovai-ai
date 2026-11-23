@@ -118,11 +118,18 @@ async function verifyUpdateArtifacts() {
   if (Number(zipEntry.size) !== statSync(zipPath).size) {
     throw new Error(`latest-mac.yml has the wrong size for ${zipName}`)
   }
-  const { zipSha512, blockmapSize, blockmapSha256 } = await verifyMacZipBlockmap(zipPath)
-  if (zipEntry.sha512 !== zipSha512) {
+  const systemSha512 = Buffer.from(
+    run('/usr/bin/shasum', ['-a', '512', zipPath]).split(/\s+/)[0], 'hex'
+  ).toString('base64')
+  if (zipEntry.sha512 !== systemSha512) {
     throw new Error(`latest-mac.yml has the wrong SHA-512 for ${zipName}`)
   }
+  const { zipSha512, blockmapSize, blockmapSha256 } = await verifyMacZipBlockmap(zipPath)
+  if (zipSha512 !== systemSha512) {
+    throw new Error(`Blockmap generator and system shasum disagree on the SHA-512 for ${zipName}`)
+  }
   report.push(`Update ZIP: ${relative(root, zipPath)}`)
+  report.push(`Update ZIP SHA-512 (system shasum): ${systemSha512}`)
   report.push(`${zipName}.blockmap: ${blockmapSize} bytes, SHA-256 ${blockmapSha256}`)
   report.push('latest-mac.yml: version, release notes, actual sha512 and size passed')
   return zipPath
