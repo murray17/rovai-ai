@@ -9,7 +9,7 @@ export async function verifyRunStatus(b, root, out) {
   const viewport = (width, height) => b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
   const text = selector => b.evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`)
   const hasText = (selector, value) => b.wait(`document.querySelector(${JSON.stringify(selector)})?.textContent === ${JSON.stringify(value)}`)
-  const show = kind => b.evaluate(`__presence.showStatusCase(${JSON.stringify(kind)})`)
+  const show = (...args) => b.evaluate(`__presence.showStatusCase(...${JSON.stringify(args)})`)
   const receipt = id => `[data-message-id="${id}"] .user-message-receipt`
   const preview = id => `[data-presence-run="${id}"] .run-presence-preview`
   await viewport(1280, 800)
@@ -62,12 +62,35 @@ export async function verifyRunStatus(b, root, out) {
   await b.evaluate('__presence.setTheme("day")')
   await b.click('.native-question-actions .primary-button:not(:disabled)')
   await b.wait(`!document.querySelector('[data-presence-run="question-run"] .run-presence-label')`)
+  for (const [reason, label] of [['network_recovery', '网络重连中'], ['runtime_recovery', '恢复上次执行']]) {
+    await show('wait', reason)
+    await hasText(preview('status-run'), '正在恢复 · ' + label)
+    await b.click('[data-presence-run="status-run"] .run-presence-open')
+    const indicators = [
+      '[data-presence-run="status-run"] .run-presence-spinner',
+      '[data-agent-id="presence-member-0"] .run-pulse-chip-state.tone-neutral.state-running',
+      '[data-agent-run-id="status-run"] .execution-process-node.tone-neutral.state-running'
+    ]
+    await b.wait(`${JSON.stringify(indicators)}.every(s => document.querySelector(s))`)
+    assert.ok(await b.evaluate(`(() => {
+      const row = document.querySelector('[data-presence-run="status-run"] .run-presence-preview')
+      return ${JSON.stringify(indicators)}.every(s => {
+        const icon = document.querySelector(s)
+        return getComputedStyle(icon).color === getComputedStyle(row).color
+          && getComputedStyle(icon.querySelector('svg')).animationName !== 'none'
+      })
+    })()`), 'recovery uses an animated neutral indicator in the conversation, avatar rail and run card')
+    assert.ok(await b.evaluate(`!!document.querySelector('[data-presence-run="question-run"] .run-presence-status.is-attention')`))
+    if (reason === 'network_recovery') await b.capture(join(out, 'r5-recovery-neutral.png'))
+  }
   await show('recovery')
   await hasText(preview('status-run'), '执行失败 · 查看原因')
   await hasText(receipt('next-input'), '排队中')
   assert.equal(await text(receipt('status-input')), null)
   assert.ok(await b.evaluate('!!document.querySelector(\'[data-presence-run="status-run"] button[aria-label="重试"]\')'))
   await b.capture(join(out, 'r5-recovery-failed.png'))
+  await b.click('[data-presence-run="status-run"] .run-presence-open')
+  await hasText('[data-agent-run-id="status-run"] .execution-run-status', '执行失败')
 
   page.search = 'pure=1&mobile=1'
   await b.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })

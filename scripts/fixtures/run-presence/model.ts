@@ -488,7 +488,7 @@ export const model = {
     ) } })
     return { status: 'sent' as const }
   },
-  showStatusCase(kind: 'wait' | 'recovery' | 'configuration') {
+  showStatusCase(kind: 'wait' | 'recovery' | 'configuration', waitReason = 'action_execution') {
     this.setScenario('stream'); halt()
     const source = makeMessage('status-input', 1, kind === 'wait' ? '请一起核对这份执行记录。'
       : kind === 'recovery' ? '请检查昨天提交的修订。' : '请检查配置并整理更新记录。')
@@ -496,7 +496,7 @@ export const model = {
     const messages = [source], deliveries = []
     const run = runs[0]
     Object.assign(run, { inputSummary: source.body, executionEvidenceCount: 0, executionEvidenceChangeSequence: 0,
-      failure: null, waitReason: kind === 'wait' ? 'action_execution' : null })
+      failure: null, waitReason: kind === 'wait' ? waitReason : null })
     const nativeInteractions = []
     if (kind === 'wait') {
       source.addressedAgentIds = [aid(0), aid(1)]

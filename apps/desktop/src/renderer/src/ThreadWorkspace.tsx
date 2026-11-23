@@ -2759,15 +2759,9 @@ export function ThreadWorkspace({
   const [acceptedRetry, setAcceptedRetry] = useState<{threadId: string; sequence: number; ids: Set<string>} | null>(null)
   const pendingProjection = acceptedRetry?.threadId === snapshot.thread.id
     && acceptedRetry.sequence === snapshot.throughGlobalSequence ? acceptedRetry.ids : undefined
-  const presenceTimeline = useMemo(() => conversationRunPresenceTimeline(
+  const { items: presenceTimeline, resultRowByRunId } = useMemo(() => conversationRunPresenceTimeline(
     conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, pendingProjection
   ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, pendingProjection])
-  const presenceRunIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
-    item.kind === 'run_presence' ? [item.slot.run.id] : []
-  )), [presenceTimeline])
-  const retainedStopIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
-    item.kind === 'run_presence' && isUserInterruptedRun(item.slot.run) ? [item.slot.run.id] : []
-  )), [presenceTimeline])
   // Row metadata is structural: execution text does not rebuild this list. Results
   // attached to a public message remain in that message's measured row.
   const timelineRows = useMemo(() => {
@@ -2783,7 +2777,7 @@ export function ThreadWorkspace({
       const message = item.message
       author = ['user', 'agent', 'external_principal'].includes(message.authorType)
         ? `${message.authorType}:${message.authorId}` : null
-      if (item.interruptedRun && !retainedStopIds.has(item.interruptedRun.id)) author = null
+      if (item.interruptedRun && resultRowByRunId.get(item.interruptedRun.id) === item.id) author = null
       if (message.authorType !== 'agent' || !message.sourceAgentRunId) continue
       while (index + 1 < presenceTimeline.length) {
         const next = presenceTimeline[index + 1]
@@ -2794,7 +2788,7 @@ export function ThreadWorkspace({
       }
     }
     return rows
-  }, [presenceTimeline, retainedStopIds])
+  }, [presenceTimeline, resultRowByRunId])
   const virtualTimelineEnabled = timelineRows.length > PUBLIC_TIMELINE_VIRTUAL_THRESHOLD
 
   const historyBoundaryId = anchorWindowBeforeNormal
@@ -5973,7 +5967,7 @@ export function ThreadWorkspace({
                           ))}
                         </div>
                       )}
-                      {isUserInterruptedRun(run) && !retainedStopIds.has(run.id) && (
+                      {resultRowByRunId.get(run.id) === timelineItem.id && (
                         <RunInterruptionMarker run={run} author={author} onOpen={openExecutionProcess} />
                       )}
                     </section>
@@ -6022,7 +6016,7 @@ export function ThreadWorkspace({
                   return items
                 }
                 const campMessage = timelineItem.message
-                const interruptedRun = timelineItem.interruptedRun && !retainedStopIds.has(timelineItem.interruptedRun.id)
+                const interruptedRun = timelineItem.interruptedRun && resultRowByRunId.get(timelineItem.interruptedRun.id) === timelineItem.id
                   ? timelineItem.interruptedRun : undefined
                 if (campMessage.withdrawn) {
                   previousMessageAuthorKey = null
@@ -6241,7 +6235,7 @@ export function ThreadWorkspace({
                                   message={campMessage}
                                   onReconcile={onReconcileDelivery}
                                   runs={userMessageRuns}
-                                  presenceRunIds={presenceRunIds}
+                                  resultRowByRunId={resultRowByRunId}
                                   deliveries={campMessageDeliveries}
                                   allRuns={snapshot.agentRuns}
                                   memberById={memberById}
@@ -7279,7 +7273,7 @@ export function executionDeliveryQueuePresentation(process: AgentExecutionProces
 
 function runPulseStateShape(run: AgentRunView, state: AgentRunStatus): RunPulseStateShape {
   if (state.word === '正在停止…') return 'cancelling'
-  if (state.tone === 'attention') return 'waiting'
+  if (state.word === '需要你处理') return 'waiting'
   if (NON_TERMINAL_RUNS.has(run.status)) return 'running'
   if (run.status === 'succeeded') return 'completed'
   if (run.status === 'failed') return 'failed'
@@ -7804,7 +7798,7 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
   const status = agentRunStatus(run)
   return <span className="execution-run-metric-group">
     {(run.status === 'failed' || run.status === 'cancelled') && <span className={`execution-run-status tone-${status.tone}`}>
-      {uiAttribute(status.word)}{status.reason && ` · ${uiAttribute(status.reason)}`}
+      {uiAttribute(status.word)}{status.reason && status.reason !== '查看原因' && ` · ${uiAttribute(status.reason)}`}
     </span>}
     {total !== null ? <ExecutionUsagePopover run={run} usage={usage} total={total} />
       : <ExecutionDurationPopover run={run} />}
@@ -8784,7 +8778,7 @@ function ThreadMessageDeliveryFooter({
 const receiptWords = ['已收到', '发送中', '待发送', '排队中', '未确认送达', '已停止', '执行失败'] as const
 
 function UserMessageDeliveryReceipt({
-  deliveries, allRuns, presenceRunIds, onReconcile,
+  deliveries, allRuns, resultRowByRunId, onReconcile,
   message,
   runs,
   memberById,
@@ -8794,7 +8788,7 @@ function UserMessageDeliveryReceipt({
   runs: AgentRunView[]
   allRuns: AgentRunView[]
   deliveries: MessageDeliveryView[]
-  presenceRunIds: ReadonlySet<string>
+  resultRowByRunId: ReadonlyMap<string, string>
   onReconcile?(deliveryId: string): Promise<string>
   memberById: Map<string, ThreadSnapshot['members'][number]>
   onOpenExecution(run: AgentRunView, trigger: HTMLButtonElement): void
@@ -8831,7 +8825,7 @@ function UserMessageDeliveryReceipt({
     else if (steer) word = delivery.dispatchPhase === 'attempting' ? '发送中' : '待发送'
     else word = delivery?.status === 'settled' ? '已完成' : '排队中'
     const counted = steer || (!run ? word !== '已完成'
-      : (word === '执行失败' || word === '已停止') && !presenceRunIds.has(run.id))
+      : (word === '执行失败' || word === '已停止') && !resultRowByRunId.has(run.id))
     return { agentId, delivery, run, word, counted }
   }).filter(item => item.run !== null || item.delivery !== undefined)
   const counts = new Map<string, number>()
@@ -8855,13 +8849,12 @@ function UserMessageDeliveryReceipt({
       : counts.has('待发送') || counts.has('排队中') ? 'is-queued' : counts.has('已停止') ? 'is-stopped' : 'is-confirmed',
     label: [prefix, ...ordinaryLabels, failureLabel].filter(Boolean).join(' · ')
   }
-  const hasMixedStatus = counts.size > 1
   return (
     <div className="user-message-receipt-row">
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
-            className={`user-message-receipt ${presentation.className}${hasMixedStatus ? ' has-mixed-status' : ''}`}
+            className={`user-message-receipt ${presentation.className}`}
             type="button"
             aria-label={uiAttribute("查看消息处理状态，{0}", String(presentation.label))}
           >

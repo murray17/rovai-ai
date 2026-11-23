@@ -24,7 +24,7 @@ import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/
 import { snapshotExportDocument, exportDocumentPNG } from '../../../apps/desktop/src/renderer/src/message-export'
 import { ConversationExportDialog, useConversationExport } from '../../../apps/desktop/src/renderer/src/ConversationExport'
 const projectedTimeline = (snapshot: any) => conversationRunPresenceTimeline(campConversationTimeline(snapshot.messages,
-  snapshot.turns, snapshot.agentRuns, snapshot.tasks, snapshot.agentRunFileChanges, snapshot.agentRunImages, snapshot.memberCreations), snapshot.agentRuns)
+  snapshot.turns, snapshot.agentRuns, snapshot.tasks, snapshot.agentRunFileChanges, snapshot.agentRunImages, snapshot.memberCreations), snapshot.agentRuns).items
 const projectedPresence = (snapshot: any) => projectedTimeline(snapshot).flatMap(item => item.kind === 'run_presence' ? [{ ...item.slot, status: item.slot.run.status }] : [])
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'

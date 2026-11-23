@@ -79,10 +79,11 @@ const initial: ThreadSnapshot = {
   executionEvidence: [], contextManifests: [], agentRunFileChanges: [], approvals: [], actions: [], timeline: []
 }
 
-function workspaceMarkup(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryView[], overrides: Partial<ThreadSnapshot> = {}): string {
+function workspaceMarkup(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryView[],
+  overrides: Partial<ThreadSnapshot> = {}, workspaceEntrySnapshotReady = true): string {
   return renderToStaticMarkup(createElement(ThreadWorkspace, {
     snapshot: { ...initial, messages, agentRuns, messageDeliveries, ...overrides },
-    agents, projectName: null, busy: false, stopping: false,
+    agents, projectName: null, busy: false, stopping: false, workspaceEntrySnapshotReady,
     onSend: async () => undefined, onChangeLead: async () => undefined,
     onTasksChanged: async () => undefined, onResolveApproval: () => undefined,
     onStop: () => undefined
@@ -192,6 +193,40 @@ describe('user message receipts follow the current execution attempt', () => {
     const stop = { ...historical, status: 'cancelled' as const }
     expect(receipts([stop], [])).toEqual([])
     expect(receipts([stop, { ...successor, inputMessageIds: ['unrelated'] }], [])).toEqual(['已停止'])
+  })
+
+  it.each(['failed', 'cancelled'] as const)('reserves the %s row during cached entry', status => {
+    const run = { ...source, status, cancelReasonCode: status === 'cancelled' ? 'user_requested_agent_run_stop' as const : null }
+    const reply: ThreadMessageView = { ...messages[0], id: 'reply', sequence: 3, authorType: 'agent',
+      authorId: run.agentId, addressedAgentIds: [], sourceAgentRunId: run.id }
+    for (const ready of [false, true]) {
+      const markup = workspaceMarkup([run], originalDeliveries, { messages: [...messages, reply] }, ready)
+      expect(markup.includes(`data-presence-run="${run.id}"`)).toBe(ready)
+      expect(markup).not.toContain('aria-label="查看消息处理状态，')
+      expect(markup).not.toContain(`data-interrupted-run-id="${run.id}"`)
+    }
+  })
+
+  it.each([false, true])('keeps displaced outcomes at their visible marker or receipt, snapshot ready = %s', ready => {
+    const stopped: AgentRunView = { ...source, status: 'cancelled', cancelReasonCode: 'user_requested_agent_run_stop' }
+    const later = { ...successor, inputMessageIds: ['unrelated'] }
+    const reply: ThreadMessageView = { ...messages[0], id: 'reply', sequence: 3, authorType: 'agent',
+      authorId: stopped.agentId, addressedAgentIds: [], sourceAgentRunId: stopped.id }
+    const render = (overrides: Partial<ThreadSnapshot>) => workspaceMarkup([stopped, later], originalDeliveries, overrides, ready)
+    const withReply = render({ messages: [...messages, reply] })
+    expect(withReply).not.toContain(`data-presence-run="${stopped.id}"`)
+    expect(withReply).toContain(`data-interrupted-run-id="${stopped.id}"`)
+    expect(withReply).not.toContain('aria-label="查看消息处理状态，')
+    const withFiles = render({ agentRunFileChanges: [{ schemaVersion: 2, agentRunId: stopped.id, executionEpoch: 1,
+      files: [{ evidenceFileId: 'file', path: 'result.ts', changeKind: 'update', presentationKind: 'operation_history', operationCount: 1 }],
+      fileCount: 1, operationCount: 1, completedAt: createdAt }] })
+    expect(withFiles).toContain(`data-interrupted-run-id="${stopped.id}"`)
+    expect(withFiles).not.toContain('aria-label="查看消息处理状态，')
+    const withWithdrawnReply = render({ messages: [...messages, { ...reply, withdrawn: true }] })
+    expect(withWithdrawnReply).not.toContain('data-interrupted-run-id=')
+    expect(withWithdrawnReply).toContain('aria-label="查看消息处理状态，已停止"')
+    const direct = { ...source, invocationKind: 'direct' as const }
+    expect(workspaceMarkup([direct], originalDeliveries, {}, ready)).toContain('aria-label="查看消息处理状态，执行失败"')
   })
 
   it('counts only pending Pi questions for this Run and epoch as user work', () => {

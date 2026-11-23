@@ -376,10 +376,10 @@ export function agentRunStatus(
   const attention = pendingApproval ? '等你批准' : pendingQuestion ? '等你回答' : attentionReasons.get(waitReason ?? '')
   if (attention) return { word: '需要你处理', reason: attention, tone: 'attention' }
   if (waitReason === 'network_recovery' || (run.status === 'running' && run.failure?.code === 'runtime_network_interrupted')) {
-    return { word: '正在恢复', reason: '网络重连中', tone: 'attention' }
+    return { word: '正在恢复', reason: '网络重连中', tone: 'neutral' }
   }
   if (waitReason === 'runtime_recovery' || waitReason === 'runtime_delivery_recovery') {
-    return { word: '正在恢复', reason: '恢复上次执行', tone: 'attention' }
+    return { word: '正在恢复', reason: '恢复上次执行', tone: 'neutral' }
   }
   return { word: '执行中', reason: null, tone: 'info' }
 }

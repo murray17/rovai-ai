@@ -29,10 +29,10 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 | 「需要你处理」出现在自动等待上 | Core 共写入 13 种 `waitReason`，`action_execution`、`runtime_delivery`、`context_compaction` 等都无需用户操作（`action.rs:969`） | 改为白名单：只有待审批、待回答和 5 种需用户决定的等待原因算「需要你处理」，其余非终态一律「执行中」（2.1） |
 | Pi 原生问答挂在 `running` 的 Run 上 | 快照 `nativeInteractions` 带 `agentRunId`、`executionEpoch`（`application.rs:8669`） | 同一 Run 有待审批或待回答时即「需要你处理」，不看 `status`（2.1） |
 | 「结果无法确认」用了旧恢复路径 | 现行 Core 结算为 `failed / accepted_input_outcome_unknown`；架构要求“作为普通红色执行失败展示，不要求用户理解 unknown”（`agent-run-recovery.md:41-51`） | 现行路径显示「执行失败 · 查看原因」+ 重试；`waiting/recovery_blocked` 仅作旧数据兼容；验收改用现行路径（9） |
-| 历史 `direct` 的失败与停止 | `direct + failed` 没有执行行，最近一次 `direct + cancelled` 有（`conversation-run-presence.test.ts:145、159`） | 不按 `invocationKind` 分支。通用规则：Run 的失败／停止**有执行行就只在执行行，没有就留在回执**，复用执行行的准入函数（2.4） |
+| 历史 `direct` 的失败与停止 | `direct + failed` 没有执行行，最近一次 `direct + cancelled` 有（`conversation-run-presence.test.ts:145、159`） | 不按 `invocationKind` 分支。通用规则：先由符合准入条件的执行行显示结果，其次由历史中断标记显示停止，其余失败或停止留在回执（2.4） |
 | 核对资格把「Run 非终态」写成前提 | 核对命令按原 Run/epoch 查 Codex 并在原 turn 中匹配，允许迟到的接受证据（`application/steer.rs:273`） | 去掉非终态条件；Host 已释放时命令返回未确认，沿用现有反馈（4） |
 | 「核对结果」与「查看执行」二选一 | `ThreadWorkspace.tsx:8900` | 有 Run 时始终显示「查看执行」，可核对时并列「核对结果」（2.4） |
-| 只有 `terminalReasonCode` 的失败没有详情 | 配置类失败由读侧把 `last_error_code` 映射为 `terminalReasonCode`，没有 `failure`（`read_model.rs:3092`）；执行卡无内容可展开（`ThreadWorkspace.tsx:11850`） | 执行卡状态位显示「执行失败 · 原因」，执行行收起后原因仍在；只有确有详情时才写「查看原因」（2.2.1、2.6） |
+| 只有 `terminalReasonCode` 的失败没有详情 | 配置类失败由读侧把 `last_error_code` 映射为 `terminalReasonCode`，没有 `failure`（`read_model.rs:3092`）；执行卡无内容可展开（`ThreadWorkspace.tsx:11850`） | 执行卡状态位显示「执行失败 · 原因」，执行行收起后原因仍在；可打开详情的执行行可写「查看原因」，卡内只保留具体原因（2.2.1、2.6） |
 | 「智能体未登录」不覆盖缺少 API 密钥 | `runtime_failure.rs:260` 含凭据过期与缺少 Provider 凭据 | 改为「认证未通过」 |
 | 手机摘要与单聊 | 手机摘要分支只在终态调用且卡片传入 `hideSummary`（`ThreadWorkspace.tsx:8454、11939`）；单聊另有等待提示，其 Run 投影没有 `waitReason`（`SingleChatPanel.tsx:402`） | 删除“手机摘要”条款，手机按实际入口验收；单聊与 `executionRunSummary` 移出本次范围（5） |
 | 插话行「待发送」「已转为排队」同为时钟图标，触屏无法区分 | `RunInputRow.tsx:17` | 正常流程（待发送、发送中、已收到）只看图标；异常（未确认送达、未送达、已转为排队、原消息不可用）在标题里写字（2.5） |
@@ -78,10 +78,11 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 | `cancelled` | 已停止 | neutral |
 | 快照中有同一 Run 的待审批（`approvals` 中 `agentRunId` 相同且 `status = pending`）或待回答（`nativeInteractions` 中 `agentRunId`、`executionEpoch` 相同） | 需要你处理 | attention |
 | `waiting` + `approval` / `user_input` / `network_recovery_blocked` / `delivery_unknown` / `recovery_blocked` | 需要你处理 | attention |
-| `running` + `failure.code = runtime_network_interrupted`；`waiting` + `runtime_recovery` / `network_recovery` / `runtime_delivery_recovery` | 正在恢复 | attention |
+| `running` + `failure.code = runtime_network_interrupted`；`waiting` + `runtime_recovery` / `network_recovery` / `runtime_delivery_recovery` | 正在恢复 | neutral |
 | 其他非终态（含 `queued`、启动中，以及 `action_execution`、`runtime_delivery`、`context_compaction`、`skill_projection_drain`、`unknown_action_outcome`、`runtime_initializing` 和今后新增的等待原因） | 执行中 | info |
 
 - 「需要你处理」只来自白名单和实际待办；未知等待原因默认「执行中」，不制造提醒。`unknown_action_outcome` 本身没有会话内可提交的用户操作，按「执行中」显示；如同一执行另有待办，按待办提醒。
+- 会话执行行、头像栏和执行卡节点都用中性色转圈表示「正在恢复」。提醒色暂停图标仅用于「需要你处理」。
 - 排队中：Delivery 已收下、还没有 Run（含 `waitCondition`）。
 - 「启动中…」「正在停止…」、命令、正文、思考标题和兜底文案是**进度文字**，不是状态词，照旧出现在执行行和执行卡里。
   状态为「执行中」时，执行行显示进度文字，不显示状态词。
@@ -132,7 +133,7 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 
 | 位置 | 负责 |
 | --- | --- |
-| 消息回执 | 执行行说不了的：还没开始（排队中）、插话的送达、没有执行行的失败或停止、未确认送达 |
+| 消息回执 | 执行行说不了的：还没开始（排队中）、插话的送达、执行行和历史中断标记均未展示的失败或停止、未确认送达 |
 | 执行行 | 每位队员这一次执行的「状态词 · 原因」或进度文字、用时、停止／重试／继续 |
 | 执行台 | 完整状态与原因、过程；头像提示「{队员} · {状态词}」；执行卡状态位（2.6） |
 | 顶栏「执行」入口 | 不变 |
@@ -144,8 +145,8 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 1. **计入回执**
    - 插话收件人（`requestedMode = 'steer'`）全部计入。
    - 普通收件人：还没有 Run 时，`pending`、`unknown`、`failed`、`stopped` 计入；有 Run 时只有 Run 的失败或停止计入，
-     且仅当该 Run **没有执行行**。判断直接使用同一时间线实际保留的执行行 Run ID，
-     这样旧版 `direct` 失败、被后续执行收起的失败仍留在回执，最近一次停止只在执行行。进行中的 Run 不计入。
+     且仅当时间线上没有承接该结果的位置。符合准入条件的执行行优先，缓存首屏也为它保留结果，等最新快照到达再显示。
+     手动停止的执行行收起后，已有队员回复或独立产物上的「你已中断」承接结果。既无执行行也无可见中断标记的旧版 `direct` 失败、历史失败或停止留在回执。进行中的 Run 不计入。
    - 没有计入项时不显示回执。
 2. **插话状态**：`steerSending` 按 `delivery.dispatchPhase` 再分——`materialized`（已绑定、未开始投递）为「待发送」，`attempting` 为「发送中」；
    `inputDeliveryStatus = accepted` 为「已收到」，`delivery_unknown` 为「未确认送达」。插话收件人 `pending` 也是「待发送」。
@@ -157,7 +158,7 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
    发送中用插话图标（与执行卡插话行同形 `M3 3.5h10v7H7l-3.5 2v-2H3z` + `M5.5 6h5M5.5 8h3`），不用执行心跳。
 6. **下拉**逐人：排队中 / 待发送 / 发送中 / 已收到 / 未确认送达 / 执行失败 / 已停止 / 已完成；其余按 2.1 的状态词。
    删除「未读」「启动中」「等待中」「运行时已接收」。有 Run 时始终显示「查看执行」；`canReconcile` 为 true 时并列「核对结果」。
-7. 回执计入项都常驻；`styles.css:3223` 的悬停规则不再有普通收件人触发，保留以兼容边缘分类。
+7. 计入的回执始终可见。
 
 「已收到」与原「已插话」边界相同：只表示智能体接收，不表示已处理。
 
@@ -171,7 +172,8 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 ### 2.6 执行卡状态位与其他
 
 - **执行卡状态位**（`ThreadWorkspace.tsx:7803`，现在只给 `cancelled` 显示「已停止」）：`failed` 显示「执行失败 · {2.2.1 原因}」，
-  `cancelled` 显示「已停止」（含原因时带原因）。执行行收起后，历史卡仍能看到原因。
+  只有「查看原因」这个兜底词时，卡内只写「执行失败」，详情在同一张卡里。
+  `cancelled` 显示「已停止」（含原因时带原因）。执行行收起后，历史卡仍能看到具体原因。
 - **排队卡**：`executionDeliveryQueuePresentation` 一律「排队中」，删除「准备中…」；「等待上一轮完成」说明保留。
 - **继续按钮**：执行行 `appearance="continue"` 用播放图标，路径 `m8 5 11 7-11 7Z`（`MissionControls.tsx:25` 的 `play`），
   `viewBox 0 0 24 24`、描边 1.8；重试保留 `DialogControlIcon name="refresh"`。可访问名称不变（重试／继续执行）。
@@ -218,7 +220,7 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 ## 6. 对现有用户的影响
 
 - 普通消息下大多不再出现回执：执行中的消息不再显示「处理中」，原来经由回执下拉「查看执行」打开执行台，改为点执行行。
-  排队、送达异常和没有执行行的失败／停止仍显示，后者与现状一致。
+  排队、送达异常、执行行及历史中断标记均未承接的失败／停止仍显示回执。
 - 仍作为插话投递的消息下始终有「插话 · …」；退回队列的按普通消息显示「排队中」。插话在启动期显示「待发送」而不是「发送中」。
 - 自动进行的等待（工具执行、结果回送、上下文压缩等）从「等待处理」等提醒改为「执行中」；Pi 原生问答等待回答时提醒。
 - 配置类失败的原因在执行卡里也能看到。非 Codex 的「未确认送达」不再有「核对结果」按钮（原来点了也只能得到未确认）。
@@ -240,7 +242,7 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
   无详情的未知失败不写原因。
 - 文案守卫：执行行、回执、回执下拉、插话行提示、执行卡状态位的中文文案不含「Runtime」「运行时」。
 - 回执：单人插话（名字）、多人插话（「插话 · 已收到 1 · 发送中 1 · 排队中 1」）、`materialized`→「待发送」、`attempting`→「发送中」、
-  退回队列→「排队中」无前缀、普通收件人执行中不计入、有执行行的停止不计入、`direct` 失败计入、被后续执行收起的失败计入、
+  退回队列→「排队中」无前缀、普通收件人执行中不计入、缓存首屏预留执行行、已有中断标记的停止不计入、`direct` 失败计入、被后续执行收起的失败计入、
   已送达无 Run 显示「已完成」、`canReconcile` 为 true 时「核对结果」与「查看执行」并列、为 false／缺省时只有「查看执行」。
 - `RunInputRow`：正常流程标题无状态、异常标题含状态，提示与读屏为对应词。
 - 执行卡状态位：配置类失败（无 `failure`）显示「执行失败 · 未设置智能体」等。
@@ -270,10 +272,10 @@ R4 评审的意见已逐条对照代码核实，全部属实。处理方式如�
 | 插话给三人 | 回执「插话 · 已收到 1 · 发送中 1 · 排队中 1」 |
 | 等审批、等回答（Pi，Run 仍为 `running`） | 「需要你处理 · 等你批准」「需要你处理 · 等你回答」，提醒色 |
 | 已批准的工具自动执行、结果回送 | 执行行显示进度文字，不出现「需要你处理」 |
-| 网络重连 | 「正在恢复 · 网络重连中」 |
-| 现行“结果无法对账”：`failed / accepted_input_outcome_unknown` | 执行行「执行失败 · 查看原因」+ ↻；此时再发一条消息，回执与排队卡均为「排队中」 |
+| 网络重连、恢复上次执行 | 执行行显示「正在恢复 · 网络重连中」或「正在恢复 · 恢复上次执行」，执行行、头像栏和执行卡节点均为中性色转圈 |
+| 现行“结果无法对账”：`failed / accepted_input_outcome_unknown` | 执行行「执行失败 · 查看原因」+ ↻，执行卡状态位只写「执行失败」；此时再发一条消息，回执与排队卡均为「排队中」 |
 | 配置类失败（无 `failure`）后被后续执行收起 | 回执「执行失败」；执行卡状态位「执行失败 · 未设置智能体」 |
-| 用户停止 | 执行行「已停止」+ 播放图标；回执不重复 |
+| 用户停止 | 执行行「已停止」+ 播放图标；行收起后已有「你已中断」时由该标记承接，回执不重复 |
 | 手机（390 宽，实际执行卡入口） | 执行行与执行卡状态位同上；插话行异常状态可在标题读到 |
 
 - 五套配色下「需要你处理」的提醒色与状态词对比度达标。

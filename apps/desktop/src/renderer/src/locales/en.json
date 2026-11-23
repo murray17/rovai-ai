@@ -3905,7 +3905,7 @@
   "待插话": "Steer pending",
   "待插话 {0}": "Steer pending · {0}",
   "发送中": "Sending",
-  "发送中 {0}": "Sending · {0}",
+  "发送中 {0}": "Sending {0}",
   "待处理 {0}": "Pending · {0}",
   "待核对 · {0}": "Needs verification · {0}",
   "待核对 {0}": "Needs verification · {0}",

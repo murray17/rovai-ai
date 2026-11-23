@@ -239,14 +239,15 @@ export function RunPresenceOpen({ threadId, run, name, description, windowedEvid
   const preview = useMemo(() => runPresencePreview(run, mergedEvents, name, status),
     [run, mergedEvents, name, language, status])
   const starting = status.word === '执行中' && agentRunIsStarting(run) && !agentRunHasCurrentActivity(run, mergedEvents)
-  const running = status.word === '执行中' && (run.status === 'running' || run.status === 'waiting' || starting)
+  const showSpinner = status.word === '正在恢复'
+    || status.word === '执行中' && (run.status === 'running' || run.status === 'waiting' || starting)
   const spokenStatus = preview.label ?? uiAttribute(status.word)
   const button = <button ref={trigger} {...menu.rowProps} className={`run-presence-open is-${preview.kind}`} type="button" data-preview-kind={preview.kind}
     title={uiAttribute('查看执行过程')} aria-label={[name, spokenStatus, preview.text !== spokenStatus && preview.text, description].filter(Boolean).join(uiAttribute('，'))}
     aria-describedby={starting ? undefined : elapsedId} aria-expanded={menu.open} aria-controls={menu.open ? menuId : undefined}
     onClick={event => onOpen(run.agentId, event.currentTarget, { runId: run.id })}>
-    {running && <span className="run-presence-spinner" aria-hidden="true"><ExecutionStatusGlyph status="cancelling" /></span>}
-    {!running && <span className={`run-presence-status is-${status.tone}`} aria-hidden="true"><ExecutionStatusGlyph status={status.tone === 'attention' ? 'waiting' : run.status === 'cancelled' ? 'stopped' : run.status} /></span>}
+    {showSpinner && <span className="run-presence-spinner" aria-hidden="true"><ExecutionStatusGlyph status="cancelling" /></span>}
+    {!showSpinner && <span className={`run-presence-status is-${status.tone}`} aria-hidden="true"><ExecutionStatusGlyph status={status.tone === 'attention' ? 'waiting' : run.status === 'cancelled' ? 'stopped' : run.status} /></span>}
     {preview.iconKind && <ToolCallIcon iconKind={preview.iconKind} />}
     <span className={`run-presence-preview is-${preview.kind}`}>{preview.label && <strong className="run-presence-label">{preview.label}</strong>}{preview.label && preview.text && ' · '}{preview.text}</span>
     {!starting && <RunPresenceTime run={run} id={elapsedId} />}

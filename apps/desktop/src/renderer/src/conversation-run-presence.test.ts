@@ -18,7 +18,7 @@ const message = (sequence: number, sourceAgentRunId: string | null, patch: Parti
     withdrawn: false, createdAt: '2026-10-10T12:00:00Z', ...patch } as ThreadMessageView
 })
 const project = (runs: AgentRunView[], timeline: ThreadConversationTimelineItem[], ready = true) =>
-  conversationRunPresenceTimeline(timeline, runs, ready)
+  conversationRunPresenceTimeline(timeline, runs, ready).items
 const order = (runs: AgentRunView[], timeline: ThreadConversationTimelineItem[]) => project(runs, timeline).map(item => item.id)
 const slots = (runs: AgentRunView[], timeline: ThreadConversationTimelineItem[] = [], ready = true) =>
   project(runs, timeline, ready).flatMap(item => item.kind === 'run_presence' ? [[item.slot.run.id, item.slot.continuation]] : [])
@@ -27,12 +27,15 @@ describe('public Thread run status', () => {
   const context = run('current')
   const failure = (code: string) => ({ code } as NonNullable<AgentRunView['failure']>)
   it.each([
-    ['approval', '需要你处理', '等你批准'], ['user_input', '需要你处理', '等你回答'],
-    ['network_recovery_blocked', '需要你处理', '自动恢复已停止'], ['delivery_unknown', '需要你处理', '未确认送达'],
-    ['recovery_blocked', '需要你处理', '结果无法确认'], ['network_recovery', '正在恢复', '网络重连中'],
-    ['runtime_recovery', '正在恢复', '恢复上次执行'], ['runtime_delivery_recovery', '正在恢复', '恢复上次执行']
-  ])('explains waiting reason %s', (waitReason, word, reason) => {
-    expect(agentRunStatus({ ...context, status: 'waiting', waitReason })).toEqual({ word, reason, tone: 'attention' })
+    ['approval', '等你批准'], ['user_input', '等你回答'], ['network_recovery_blocked', '自动恢复已停止'],
+    ['delivery_unknown', '未确认送达'], ['recovery_blocked', '结果无法确认']
+  ])('calls for attention for %s', (waitReason, reason) => {
+    expect(agentRunStatus({ ...context, status: 'waiting', waitReason })).toEqual({ word: '需要你处理', reason, tone: 'attention' })
+  })
+  it.each([
+    ['network_recovery', '网络重连中'], ['runtime_recovery', '恢复上次执行'], ['runtime_delivery_recovery', '恢复上次执行']
+  ])('keeps automatic recovery neutral for %s', (waitReason, reason) => {
+    expect(agentRunStatus({ ...context, status: 'waiting', waitReason })).toEqual({ word: '正在恢复', reason, tone: 'neutral' })
   })
   it.each(['action_execution', 'runtime_delivery', 'context_compaction', 'skill_projection_drain',
     'unknown_action_outcome', 'runtime_initializing', 'future_reason', 'constructor', null])(
@@ -41,8 +44,8 @@ describe('public Thread run status', () => {
     })
   it('honors pending actions, cancellation and terminal precedence', () => {
     const network = { ...context, failure: failure('runtime_network_interrupted') }
-    expect(agentRunStatus(network).reason).toBe('网络重连中')
-    expect(agentRunStatus(network, { pendingQuestion: true }).reason).toBe('等你回答')
+    expect(agentRunStatus(network)).toEqual({ word: '正在恢复', reason: '网络重连中', tone: 'neutral' })
+    expect(agentRunStatus(network, { pendingQuestion: true })).toEqual({ word: '需要你处理', reason: '等你回答', tone: 'attention' })
     expect(agentRunStatus(network, { pendingApproval: true, pendingQuestion: true }).reason).toBe('等你批准')
     expect(agentRunStatus(network, { cancelling: true, pendingApproval: true }).word).toBe('正在停止…')
     expect(agentRunStatus({ ...network, status: 'succeeded' }, { cancelling: true }).word).toBe('已完成')
@@ -183,7 +186,7 @@ describe('conversation Run presence', () => {
     expect(slots([{ ...stopped, hasAcceptedContinuation: true }])).toEqual([])
     const oldFailure = run('older', 'alice', { status: 'failed', createdAt: '2026-10-10T11:59:00Z' })
     const acknowledged = conversationRunPresenceTimeline([], [oldFailure, stopped], true, new Set([stopped.id]))
-    expect(acknowledged).toEqual([])
+    expect(acknowledged.items).toEqual([])
     expect(stopped.hasAcceptedContinuation).toBeUndefined()
     for (const status of ['queued', 'running', 'waiting', 'failed', 'succeeded'] as const) {
       expect(slots([stopped, { ...next, status }]).flat()).not.toContain(stopped.id)

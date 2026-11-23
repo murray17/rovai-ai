@@ -3201,7 +3201,6 @@ html[data-mobile-web="true"] .quick-chat-empty-unavailable > button { min-height
   font-size: 10.5px;
   white-space: nowrap;
 }
-.user-message-receipt.is-progress svg { stroke-width: 1.65; }
 .user-message-receipt.is-failed > svg,
 .user-message-receipt-failure { color: var(--danger); }
 .user-message-receipt svg,
@@ -3219,16 +3218,6 @@ html[data-mobile-web="true"] .quick-chat-empty-unavailable > button { min-height
 .user-message-withdraw:is(:hover, :focus-visible) {
   color: var(--ink);
   background: var(--surface-hover);
-}
-@media (min-width: 761px) and (pointer: fine) {
-  .user-message-receipt.is-progress:not(.has-mixed-status) {
-    opacity: 0;
-    pointer-events: none;
-  }
-  .conversation-bubble:is(:hover, :focus-within) .user-message-receipt.is-progress {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 .user-message-receipt-menu {
   z-index: 190;

@@ -53,17 +53,32 @@ function outputRunId(item: ThreadConversationTimelineItem | undefined): string |
   return null
 }
 
-/** Insert transient Run rows without sorting or rewriting any public content. */
+const presenceRowId = (runId: string): string => 'run-presence:' + runId
+
+/** Place transient rows and choose one timeline row for each visible failure or stop. */
 export function conversationRunPresenceTimeline(
   timeline: readonly ThreadConversationTimelineItem[],
   runs: readonly AgentRunView[],
   snapshotReady = true,
   continuedRunIds?: ReadonlySet<string>
-): ConversationPresenceTimelineItem[] {
-  const messages = timeline.flatMap(item => item.kind === 'camp_message' ? [item.message] : [])
+): { items: ConversationPresenceTimelineItem[]; resultRowByRunId: ReadonlyMap<string, string> } {
+  const messages: ThreadMessageView[] = []
+  const resultRowByRunId = new Map<string, string>()
+  for (const item of timeline) {
+    if (item.kind === 'camp_message') {
+      messages.push(item.message)
+      if (item.interruptedRun && !item.message.withdrawn) resultRowByRunId.set(item.interruptedRun.id, item.id)
+    } else if (item.kind === 'run_artifacts' && isUserInterruptedRun(item.run)) {
+      resultRowByRunId.set(item.run.id, item.id)
+    }
+  }
   const groups = new Map<number, ConversationRunPresenceSlot[]>()
   for (const run of eligibleConversationRuns(runs, continuedRunIds)) {
-    if (!snapshotReady && (run.status === 'failed' || run.status === 'cancelled')) continue
+    if (run.status === 'failed' || run.status === 'cancelled') {
+      // Reserve retained results even while the cached entry defers rendering their rows.
+      resultRowByRunId.set(run.id, presenceRowId(run.id))
+      if (!snapshotReady) continue
+    }
     const ownMessage = messages.filter(message => !message.withdrawn && message.authorType === 'agent'
       && message.sourceAgentRunId === run.id && !message.id.startsWith('optimistic:'))
       .reduce<ThreadMessageView | null>((last, message) => !last || message.sequence > last.sequence ? message : last, null)
@@ -102,14 +117,14 @@ export function conversationRunPresenceTimeline(
       || (a.run.startedAt ?? a.run.createdAt).localeCompare(b.run.startedAt ?? b.run.createdAt)
       || a.run.id.localeCompare(b.run.id))
     for (const [position, slot] of slots.entries()) result.push({
-      kind: 'run_presence', id: 'run-presence:' + slot.run.id,
+      kind: 'run_presence', id: presenceRowId(slot.run.id),
       createdAt: slot.run.startedAt ?? slot.run.createdAt,
       slot: { run: slot.run, continuation: position === 0 && slot.run.id === precedingRunId }
     })
   }
   append(-1)
   timeline.forEach((item, index) => { result.push(item); append(index) })
-  return result
+  return { items: result, resultRowByRunId }
 }
 
 const singleLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
