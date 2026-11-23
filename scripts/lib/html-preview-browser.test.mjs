@@ -8,11 +8,13 @@ import { createRequire } from 'node:module'
 import { once } from 'node:events'
 import test from 'node:test'
 import { build } from 'vite'
+import { assertBrowserLaunchAvailable } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 test('ordinary browser embeds isolated preview sites and uses the shared diagnostic/find channel without Electron', { timeout: 90_000 }, async t => {
   const chrome = process.env.ROVAI_TEST_CHROME ?? (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '/usr/bin/google-chrome')
   if (!await access(chrome).then(() => true, () => false)) { t.skip('Chrome is not installed; browser acceptance did not run'); return }
+  assertBrowserLaunchAvailable()
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-html-browser-'))
   let child, childClosed, socket, server
   const sites = []

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-10-30
+last_updated: 2026-11-23
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -102,6 +102,11 @@ network/removable/non-NTFS 目标。unpacked App 与 installed App 使用不同 
 使用独立 Chrome profile 验证[远程连接](../ui/host-remote-connection.md)的几何、状态与键盘交互，不启动 Core/Runtime。
 `pnpm test:host-web` 验证实际授权、附件与命令回执；`pnpm test:host-web-live` 验证真实 Desktop/Web 页面。
 模拟交互稿不能替代实际 Web 接入、网络与身份隔离验收。
+
+macOS 的 Chrome 即使使用 `--headless`，启动时也会向系统注册应用。Chrome 截图和验收脚本应使用
+[`launchAcceptanceBrowser`](../../scripts/lib/host-web-browser.mjs) 并指定临时 profile。若探针报告嵌套
+sandbox 阻断，脚本会在启动浏览器前报错。请在普通 Terminal 中执行同一条命令，或由 Agent 申请单次
+沙箱外执行批准后重跑。
 
 以下 package scripts 自行创建或要求隔离 fixture，不调用模型：
 
