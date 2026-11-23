@@ -79,16 +79,20 @@ const initial: ThreadSnapshot = {
   executionEvidence: [], contextManifests: [], agentRunFileChanges: [], approvals: [], actions: [], timeline: []
 }
 
-function receipts(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryView[] = originalDeliveries,
-  overrides: Partial<ThreadSnapshot> = {}): string[] {
-  const markup = renderToStaticMarkup(createElement(ThreadWorkspace, {
+function workspaceMarkup(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryView[],
+  overrides: Partial<ThreadSnapshot> = {}, workspaceEntrySnapshotReady = true): string {
+  return renderToStaticMarkup(createElement(ThreadWorkspace, {
     snapshot: { ...initial, messages, agentRuns, messageDeliveries, ...overrides },
-    agents, projectName: null, busy: false, stopping: false,
+    agents, projectName: null, busy: false, stopping: false, workspaceEntrySnapshotReady,
     onSend: async () => undefined, onChangeLead: async () => undefined,
     onTasksChanged: async () => undefined, onResolveApproval: () => undefined,
     onStop: () => undefined
   }))
-  return [...markup.matchAll(/aria-label="查看消息处理状态，([^"]*)"/g)].map(match => match[1])
+}
+
+function receipts(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryView[] = originalDeliveries,
+  overrides: Partial<ThreadSnapshot> = {}): string[] {
+  return [...workspaceMarkup(agentRuns, messageDeliveries, overrides).matchAll(/aria-label="查看消息处理状态，([^"]*)"/g)].map(match => match[1])
 }
 
 describe('user message receipts follow the current execution attempt', () => {
@@ -97,25 +101,25 @@ describe('user message receipts follow the current execution attempt', () => {
     const waiting = originalDeliveries.map(item => ({
       ...item, status: 'waiting' as const, targetAgentRunId: null, endedAt: null
     }))
-    expect(receipts([], waiting)).toEqual(['待处理 1', '待处理 1'])
+    expect(receipts([], waiting)).toEqual(['排队中', '排队中'])
     expect(receipts([], waiting, {
       messages: messages.map(message => ({ ...message, addressedAgentIds: agents.map(agent => agent.agentId) }))
-    })).toEqual(['待处理 1', '待处理 1'])
+    })).toEqual(['排队中 1', '排队中 1'])
   })
 
   it('replaces the original failed receipt for every continued batch input', () => {
     expect(receipts([source, successor], [...originalDeliveries, ...redeliveries(continuation)]))
-      .toEqual(['处理中 1', '处理中 1'])
+      .toEqual([])
   })
 
   it('shows accepted continuation requests as pending before a Run exists', () => {
     expect(receipts([source], [...originalDeliveries,
       ...redeliveries({ ...continuation, status: 'waiting', targetAgentRunId: null })]))
-      .toEqual(['待处理 1', '待处理 1'])
+      .toEqual(['排队中', '排队中'])
   })
 
   it.each([
-    ['waiting', ['待处理 1', '待处理 1']], ['running', ['处理中 1', '处理中 1']], ['succeeded', []]
+    ['waiting', ['排队中', '排队中']], ['running', []], ['succeeded', []]
   ] as const)('also follows a %s continuation after a manual stop', (status, labels) => {
     const stopped = { ...source, status: 'cancelled' as const,
       cancelReasonCode: 'user_requested_agent_run_stop' as const }
@@ -128,7 +132,7 @@ describe('user message receipts follow the current execution attempt', () => {
   })
 
   it.each([
-    ['queued', '处理中 1'], ['failed', '执行失败'], ['cancelled', '已停止'], ['succeeded', null]
+    ['queued', null], ['failed', null], ['cancelled', null], ['succeeded', null]
   ] as const)('uses the successor %s state without reviving the original failure', (status, label) => {
     expect(receipts([source, { ...successor, status }], [...originalDeliveries, ...redeliveries(continuation)]))
       .toEqual(label ? [label, label] : [])
@@ -138,28 +142,28 @@ describe('user message receipts follow the current execution attempt', () => {
     'uses newer input Runs when the projection retains only the original %s Delivery', state => {
       expect(receipts([source, successor], originalDeliveries.map(item => state === 'delivery_unknown'
         ? { ...item, inputDeliveryStatus: state } : { ...item, status: state })))
-        .toEqual(['处理中 1', '处理中 1'])
+        .toEqual([])
     }
   )
 
   it('ignores older continuation outcomes when a newer input Run is present', () => {
     expect(receipts([source, successor], [...originalDeliveries,
       { ...continuation, targetAgentRunId: source.id, status: 'failed' }]))
-      .toEqual(['处理中 1', '处理中 1'])
+      .toEqual([])
   })
 
   it('keeps later queued requests ahead of earlier Run outcomes', () => {
     const later = { ...continuation, id: 'next-continuation', status: 'waiting',
       targetAgentRunId: null, createdAt: '2026-09-12T02:33:00Z' }
     expect(receipts([successor, source], [...redeliveries(later), ...originalDeliveries, ...redeliveries(continuation)]))
-      .toEqual(['待处理 1', '待处理 1'])
+      .toEqual(['排队中', '排队中'])
   })
 
   it('orders queued requests by acceptance even when an older request is claimed later', () => {
     const later = { ...continuation, id: 'next-continuation', status: 'waiting',
       targetAgentRunId: null, createdAt: '2026-09-12T02:31:30Z' }
     expect(receipts([source, successor], [...originalDeliveries, ...redeliveries(continuation), ...redeliveries(later)]))
-      .toEqual(['待处理 1', '待处理 1'])
+      .toEqual(['排队中', '排队中'])
   })
 
   it('leaves other recipients and unrelated messages attached to their own attempts', () => {
@@ -170,7 +174,7 @@ describe('user message receipts follow the current execution attempt', () => {
       ...inputMessageIds.map(messageId => delivery({ id: `other-${messageId}`, messageId,
         recipientAgentId: other.agentId, targetAgentRunId: other.id }))], {
       messages: messages.map(message => ({ ...message, addressedAgentIds: [source.agentId, other.agentId] }))
-    })).toEqual(['处理中 1 · 执行失败 1', '处理中 1 · 执行失败 1'])
+    })).toEqual([])
   })
 
   it('shows regrouped ordinary messages as pending while the stopped batch remains in history', () => {
@@ -180,7 +184,61 @@ describe('user message receipts follow the current execution attempt', () => {
       targetAgentRunId: null, status: 'waiting', endedAt: null, createdAt: '2026-09-12T02:31:00Z'
     })
     expect(receipts([stopped], [...originalDeliveries.map(item => ({ ...item, status: 'cancelled' as const })), replacement]))
-      .toEqual(['已停止', '待处理 1'])
+      .toEqual(['排队中'])
+  })
+
+  it('retains old direct failures without a presence row and moves a displaced stop back to its receipt', () => {
+    const historical = { ...source, invocationKind: 'direct' as const, inputMessageIds: [], anchorMessageId: inputMessageIds[0] }
+    expect(receipts([historical], [])).toEqual(['执行失败'])
+    const stop = { ...historical, status: 'cancelled' as const }
+    expect(receipts([stop], [])).toEqual([])
+    expect(receipts([stop, { ...successor, inputMessageIds: ['unrelated'] }], [])).toEqual(['已停止'])
+  })
+
+  it.each(['failed', 'cancelled'] as const)('reserves the %s row during cached entry', status => {
+    const run = { ...source, status, cancelReasonCode: status === 'cancelled' ? 'user_requested_agent_run_stop' as const : null }
+    const reply: ThreadMessageView = { ...messages[0], id: 'reply', sequence: 3, authorType: 'agent',
+      authorId: run.agentId, addressedAgentIds: [], sourceAgentRunId: run.id }
+    for (const ready of [false, true]) {
+      const markup = workspaceMarkup([run], originalDeliveries, { messages: [...messages, reply] }, ready)
+      expect(markup.includes(`data-presence-run="${run.id}"`)).toBe(ready)
+      expect(markup).not.toContain('aria-label="查看消息处理状态，')
+      expect(markup).not.toContain(`data-interrupted-run-id="${run.id}"`)
+    }
+  })
+
+  it.each([false, true])('keeps displaced outcomes at their visible marker or receipt, snapshot ready = %s', ready => {
+    const stopped: AgentRunView = { ...source, status: 'cancelled', cancelReasonCode: 'user_requested_agent_run_stop' }
+    const later = { ...successor, inputMessageIds: ['unrelated'] }
+    const reply: ThreadMessageView = { ...messages[0], id: 'reply', sequence: 3, authorType: 'agent',
+      authorId: stopped.agentId, addressedAgentIds: [], sourceAgentRunId: stopped.id }
+    const render = (overrides: Partial<ThreadSnapshot>) => workspaceMarkup([stopped, later], originalDeliveries, overrides, ready)
+    const withReply = render({ messages: [...messages, reply] })
+    expect(withReply).not.toContain(`data-presence-run="${stopped.id}"`)
+    expect(withReply).toContain(`data-interrupted-run-id="${stopped.id}"`)
+    expect(withReply).not.toContain('aria-label="查看消息处理状态，')
+    const withFiles = render({ agentRunFileChanges: [{ schemaVersion: 2, agentRunId: stopped.id, executionEpoch: 1,
+      files: [{ evidenceFileId: 'file', path: 'result.ts', changeKind: 'update', presentationKind: 'operation_history', operationCount: 1 }],
+      fileCount: 1, operationCount: 1, completedAt: createdAt }] })
+    expect(withFiles).toContain(`data-interrupted-run-id="${stopped.id}"`)
+    expect(withFiles).not.toContain('aria-label="查看消息处理状态，')
+    const withWithdrawnReply = render({ messages: [...messages, { ...reply, withdrawn: true }] })
+    expect(withWithdrawnReply).not.toContain('data-interrupted-run-id=')
+    expect(withWithdrawnReply).toContain('aria-label="查看消息处理状态，已停止"')
+    const direct = { ...source, invocationKind: 'direct' as const }
+    expect(workspaceMarkup([direct], originalDeliveries, {}, ready)).toContain('aria-label="查看消息处理状态，执行失败"')
+  })
+
+  it('counts only pending Pi questions for this Run and epoch as user work', () => {
+    const request = { id: 'q', agentRunId: successor.id, executionEpoch: successor.executionEpoch,
+      status: 'pending' as const, createdAt: Date.now(), expiresAt: null, canSkip: false, questions: [] }
+    const row = (interaction: NonNullable<ThreadSnapshot['nativeInteractions']>[number]) =>
+      workspaceMarkup([successor], [], { nativeInteractions: [interaction] }).match(/<article[^>]+data-presence-run="continued-run"[^>]+>/)?.[0]
+    expect(row(request)).toContain('需要你处理，等你回答')
+    for (const other of [
+      { ...request, agentRunId: source.id }, { ...request, executionEpoch: request.executionEpoch + 1 },
+      { ...request, status: 'unknown' as const }, { ...request, expiresAt: Date.now() - 1 }
+    ]) expect(row(other)).toContain('执行中')
   })
 
   it('preserves accepted and unknown Steer receipts across subsequent continuation', () => {
@@ -188,6 +246,6 @@ describe('user message receipts follow the current execution attempt', () => {
       delivery({ requestedMode: 'steer', inputDeliveryStatus: 'accepted' }),
       delivery({ id: 'unknown-steer', messageId: inputMessageIds[1], requestedMode: 'steer',
         inputDeliveryStatus: 'delivery_unknown' })
-    ])).toEqual(['已插话', '未确认送达'])
+    ])).toEqual(['插话 · alice已收到', '插话 · 未确认送达'])
   })
 })

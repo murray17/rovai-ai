@@ -1,5 +1,5 @@
 import type { AgentRunView, ThreadMessageView } from '@contracts'
-import { agentRunIsStarting, agentRunPresentation, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
+import { agentRunIsStarting, agentRunStatus, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
 import { uiAttribute } from './interface-language'
 import { localizedExecutionStepTitle } from './execution-step-language'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
@@ -32,6 +32,7 @@ function eligibleConversationRuns(runs: readonly AgentRunView[], continuedRunIds
 export interface RunPresencePreview {
   kind: 'narration' | 'command' | 'status' | 'error'
   text: string
+  label?: string
   iconKind?: ActivityIconKind
 }
 
@@ -52,17 +53,32 @@ function outputRunId(item: ThreadConversationTimelineItem | undefined): string |
   return null
 }
 
-/** Insert transient Run rows without sorting or rewriting any public content. */
+const presenceRowId = (runId: string): string => 'run-presence:' + runId
+
+/** Place transient rows and choose one timeline row for each visible failure or stop. */
 export function conversationRunPresenceTimeline(
   timeline: readonly ThreadConversationTimelineItem[],
   runs: readonly AgentRunView[],
   snapshotReady = true,
   continuedRunIds?: ReadonlySet<string>
-): ConversationPresenceTimelineItem[] {
-  const messages = timeline.flatMap(item => item.kind === 'camp_message' ? [item.message] : [])
+): { items: ConversationPresenceTimelineItem[]; resultRowByRunId: ReadonlyMap<string, string> } {
+  const messages: ThreadMessageView[] = []
+  const resultRowByRunId = new Map<string, string>()
+  for (const item of timeline) {
+    if (item.kind === 'camp_message') {
+      messages.push(item.message)
+      if (item.interruptedRun && !item.message.withdrawn) resultRowByRunId.set(item.interruptedRun.id, item.id)
+    } else if (item.kind === 'run_artifacts' && isUserInterruptedRun(item.run)) {
+      resultRowByRunId.set(item.run.id, item.id)
+    }
+  }
   const groups = new Map<number, ConversationRunPresenceSlot[]>()
   for (const run of eligibleConversationRuns(runs, continuedRunIds)) {
-    if (!snapshotReady && (run.status === 'failed' || run.status === 'cancelled')) continue
+    if (run.status === 'failed' || run.status === 'cancelled') {
+      // Reserve retained results even while the cached entry defers rendering their rows.
+      resultRowByRunId.set(run.id, presenceRowId(run.id))
+      if (!snapshotReady) continue
+    }
     const ownMessage = messages.filter(message => !message.withdrawn && message.authorType === 'agent'
       && message.sourceAgentRunId === run.id && !message.id.startsWith('optimistic:'))
       .reduce<ThreadMessageView | null>((last, message) => !last || message.sequence > last.sequence ? message : last, null)
@@ -101,14 +117,14 @@ export function conversationRunPresenceTimeline(
       || (a.run.startedAt ?? a.run.createdAt).localeCompare(b.run.startedAt ?? b.run.createdAt)
       || a.run.id.localeCompare(b.run.id))
     for (const [position, slot] of slots.entries()) result.push({
-      kind: 'run_presence', id: 'run-presence:' + slot.run.id,
+      kind: 'run_presence', id: presenceRowId(slot.run.id),
       createdAt: slot.run.startedAt ?? slot.run.createdAt,
       slot: { run: slot.run, continuation: position === 0 && slot.run.id === precedingRunId }
     })
   }
   append(-1)
   timeline.forEach((item, index) => { result.push(item); append(index) })
-  return result
+  return { items: result, resultRowByRunId }
 }
 
 const singleLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
@@ -154,18 +170,12 @@ export function formatRunPresenceDuration(seconds: number): string {
   return uiAttribute('{0}秒', s)
 }
 
-export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = [], name = run.agentId): RunPresencePreview {
-  if (run.status === 'failed') {
-    if (run.failure?.code === 'context_payload_too_large') {
-      return { kind: 'error', text: uiAttribute('输入内容过大 · 查看详情') }
-    }
-    const disconnected = run.failure?.code === 'runtime_network_interrupted'
-      || run.failure?.code === 'runtime_disconnected'
-    return { kind: 'error', text: disconnected ? uiAttribute('连接中断 · 查看原因') : uiAttribute('执行中断 · 查看原因') }
+export function runPresencePreview(run: AgentRunView, events: readonly LiveRuntimeEvent[] = [], name = run.agentId, status = agentRunStatus(run)): RunPresencePreview {
+  if (status.word !== '执行中') return {
+    kind: run.status === 'failed' ? 'error' : 'status',
+    label: uiAttribute(status.word),
+    text: status.reason ? uiAttribute(status.reason) : ''
   }
-  if (!['queued', 'running', 'waiting'].includes(run.status)) return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
-  if (run.cancelRequestedAt) return { kind: 'status', text: uiAttribute('正在停止…') }
-  if (run.status === 'waiting' || run.failure?.code === 'runtime_network_interrupted') return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
   const initializing = agentRunIsStarting(run)
   // ACP can acknowledge the input only at prompt completion. Current-epoch
   // activity already describes what is happening, without changing that ACK.
@@ -181,5 +191,5 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
   }
   if (latest?.kind === 'narration') return { kind: 'narration', text: currentNarrationLine(latest.body) }
   if (initializing) return { kind: 'status', text: uiAttribute('启动中…') }
-  return { kind: 'status', text: progress.runtimeThinkingTitle || fallbackText(run.id, 'working', name) }
+  return { kind: 'status', text: progress.runtimeThinkingTitle || (run.status === 'waiting' ? uiAttribute('执行中') : fallbackText(run.id, 'working', name)) }
 }

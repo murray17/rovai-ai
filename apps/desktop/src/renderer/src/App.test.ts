@@ -183,7 +183,6 @@ import {
   activityStatusForAgentRun,
   activityIconKind,
   agentRunPresentation,
-  agentRunStateTag,
   agentRunWaitDetail,
   buildGitStatusEntries,
   buildLiveExecutionProgress,
@@ -4084,22 +4083,22 @@ describe('task event projections', () => {
       waitingDeliveries: [{ id: 'delivery-waiting-1' }]
     }])
     const queueProcess = { agentId: 'agent_2', runs: [], waitingDeliveries: [waitingDelivery] }
-    expect(executionDeliveryQueuePresentation(queueProcess)).toMatchObject({ label: '准备中…', blocked: false })
+    expect(executionDeliveryQueuePresentation(queueProcess)).toMatchObject({ label: '排队中', blocked: false })
     const previousRun = { ...snapshot.agentRuns[0], agentId: 'agent_2' }
     expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [previousRun] }))
       .toMatchObject({ label: '排队中', detail: '等待上一轮完成' })
     const cleanupRun = { ...previousRun, status: 'cancelled' as const, cancelRequestedAt: '2020-01-01T00:00:00Z', cancelAcknowledgedAt: null }
     expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [cleanupRun] }))
-      .toMatchObject({ label: '准备中…', detail: null, blocked: false })
+      .toMatchObject({ label: '排队中', detail: null, blocked: false })
     expect(executionDeliveryQueuePresentation({
       ...queueProcess, runs: [cleanupRun],
       waitingDeliveries: [{ ...waitingDelivery, waitCondition: 'target_busy' }]
     })).toMatchObject({ label: '排队中', detail: null, blocked: true })
     expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [{ ...cleanupRun, cancelAcknowledgedAt: '2020-01-01T00:00:01Z' }] }))
-      .toMatchObject({ label: '准备中…', blocked: false })
+      .toMatchObject({ label: '排队中', blocked: false })
     // Overview / private history cannot supply another member's queue copy.
     expect(executionDeliveryQueuePresentation({ ...queueProcess, runs: [{ ...previousRun, agentId: 'other' }, { ...previousRun, invocationKind: 'single_chat' }] }))
-      .toMatchObject({ label: '准备中…', blocked: false })
+      .toMatchObject({ label: '排队中', blocked: false })
     expect(executionDeliveryQueueBatches([secondWaitingDelivery, waitingDelivery])).toMatchObject([{
       agentId: 'agent_2',
       messageIds: ['message-waiting-1', 'message-waiting-2']
@@ -4301,9 +4300,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('>复制</button>')
     expect(markup).not.toContain('d="M16.7 17.3H10l-4.2 3.1v-3.1h-.7a2.6 2.6 0 0 1-2.6-2.6V7.6A2.6 2.6 0 0 1 5.1 5h11.8a2.6 2.6 0 0 1 2.6 2.6v2.2"')
     expect(markup).not.toContain('d="m15.2 9.2-3.6 3.5 3.6 3.5"')
-    expect(markup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"/)
-    expect(markup).toContain('处理中 1')
-    expect(queuedMarkup).toMatch(/class="message-action-line"><div class="message-actions"[\s\S]*class="user-message-receipt-row"[\s\S]*处理中 1/)
+    expect(markup).not.toContain('class="user-message-receipt-row"')
+    expect(queuedMarkup).not.toContain('class="user-message-receipt-row"')
     expect(waitingQueueMarkup).toContain('data-delivery-queue-agent-id="agent_2"')
     expect(waitingQueueMarkup).toContain('aria-label="查看排队消息的 2 条输入"')
     expect(waitingQueueMarkup).toContain('d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 17l10 5 10-5"')
@@ -4311,7 +4309,7 @@ describe('task event projections', () => {
     expect(waitingQueueMarkup).toMatch(
       /<h3 class="execution-run-heading"><button class="execution-run-toggle"[\s\S]*?<\/button><\/h3><button class="execution-batch-count"/
     )
-    expect(waitingOverHistoryMarkup).toContain('aria-label="打开沐瓦的执行过程，准备中…"')
+    expect(waitingOverHistoryMarkup).toContain('aria-label="打开沐瓦的执行过程，排队中"')
     expect(batchedRunMarkup).toContain('aria-label="查看本次执行的 2 条输入"')
     expect(batchedRunMarkup).toContain('class="execution-batch-count"')
     expect(failedReceiptMarkup).not.toContain('未完成 · 1')
@@ -5450,9 +5448,7 @@ describe('task event projections', () => {
     expect(agentRunPresentation({ status: 'failed', waitReason: null, terminalReasonCode: 'adapter_installation_disabled' })).toEqual({ label: '所选 Runtime 已停用', tone: 'danger' })
     expect(agentRunPresentation({ status: 'queued', waitReason: null })).toEqual({ label: '启动中…', tone: 'neutral' })
     expect(agentRunPresentation({ status: 'queued', waitReason: null }, false, true)).toEqual({ label: '执行中', tone: 'info' })
-    expect(agentRunStateTag({ status: 'queued', waitReason: null })).toEqual({ tag: 'STARTING', tone: 'neutral' })
     expect(agentRunPresentation({ status: 'running', waitReason: 'runtime_initializing' })).toEqual({ label: '启动中…', tone: 'neutral' })
-    expect(agentRunStateTag({ status: 'running', waitReason: 'runtime_initializing' })).toEqual({ tag: 'STARTING', tone: 'neutral' })
     expect(agentRunPresentation({ status: 'waiting', waitReason: 'delivery_unknown' })).toEqual({
       label: '投递待确认',
       tone: 'danger'
@@ -5485,19 +5481,11 @@ describe('task event projections', () => {
       status: 'waiting',
       waitReason: 'network_recovery_blocked'
     })).toEqual({ label: '需要处理', tone: 'danger' })
-    expect(agentRunStateTag({ status: 'waiting', waitReason: 'recovery_blocked' })).toEqual({
-      tag: 'REVIEW',
-      tone: 'danger'
-    })
     expect(agentRunWaitDetail('recovery_blocked')).toContain('原请求不会自动重发')
     expect(agentRunWaitDetail('network_recovery')).toContain('确认输入未被接收')
     expect(agentRunWaitDetail('network_recovery_blocked')).toContain('需要处理')
     expect(agentRunPresentation({ status: 'running', waitReason: null }, true)).toEqual({
       label: '正在停止…',
-      tone: 'neutral'
-    })
-    expect(agentRunStateTag({ status: 'running', waitReason: null }, true)).toEqual({
-      tag: '正在停止',
       tone: 'neutral'
     })
     expect(agentRunPresentation({ status: 'cancelled', waitReason: null }, true)).toEqual({
@@ -5512,18 +5500,6 @@ describe('task event projections', () => {
       label: '已停止',
       tone: 'neutral'
     })
-    expect(agentRunStateTag({
-      status: 'cancelled',
-      waitReason: null,
-      terminalReasonCode: 'planned_shutdown_cancelled'
-    })).toEqual({
-      tag: 'STOPPED',
-      tone: 'neutral'
-    })
-    expect(agentRunStateTag({ status: 'cancelled', waitReason: null })).toEqual({
-      tag: 'CANCELLED',
-      tone: 'neutral'
-    })
     expect(agentRunTerminalNote({
       terminalReasonCode: 'planned_shutdown_cancelled'
     })).toBe('因 Rovai 计划关闭，执行引擎已确认取消本次执行。')
@@ -5533,14 +5509,6 @@ describe('task event projections', () => {
       terminalReasonCode: 'runtime_interrupted'
     })).toEqual({
       label: '执行已中断',
-      tone: 'neutral'
-    })
-    expect(agentRunStateTag({
-      status: 'failed',
-      waitReason: null,
-      terminalReasonCode: 'runtime_interrupted'
-    })).toEqual({
-      tag: 'INTERRUPTED',
       tone: 'neutral'
     })
     expect(agentRunTerminalNote({
@@ -6236,7 +6204,7 @@ describe('task event projections', () => {
     }))
     expect(waitingMarkup).toContain('class="process-content"')
     expect(waitingMarkup).toContain('仅在详情激活后渲染')
-    expect(waitingMarkup).toContain('执行异常，正在清理')
+    expect(waitingMarkup).toContain('结果无法确认')
     expect(waitingMarkup).toContain('清理完成后，后续消息会按正常顺序继续执行')
 
     const networkBlockedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
@@ -6262,7 +6230,7 @@ describe('task event projections', () => {
         threadId: 'camp-1'
       }))
       expect(englishMarkup).toContain('The Agent accepted the task, but Rovai AI cannot confirm its final result after restart.')
-      expect(englishMarkup).toContain('Execution exception, cleaning up')
+      expect(englishMarkup).toContain('Outcome could not be confirmed')
       expect(englishMarkup).toContain('The original request will not be sent again automatically.')
       expect(englishMarkup).toContain('仅在详情激活后渲染')
       expect(englishMarkup).not.toContain('原请求不会自动重发')

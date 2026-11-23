@@ -2968,6 +2968,7 @@ export interface ThreadMessageFindParams {
 interface MessageDeliveryBaseView {
   requestedMode?: 'start' | 'steer'
   inputDeliveryStatus?: string
+  canReconcile?: boolean
   messageSequence?: number
   id: string
   messageId: string

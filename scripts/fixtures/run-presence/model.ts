@@ -51,6 +51,8 @@ function delivery(id: string, messageId: string, agentId: string, targetAgentRun
     deliveryKind: 'public_a2a', dispatchDisposition: 'dispatch', completionRole: 'required', gatherId: null,
     gatherDispatchDeliveryId: null, recipientCanonicalPosition: 0, edgeKind: 'forward', targetParentAgentRunId: null, returnToAgentRunId: null }
 }
+const networkFailure = { code: 'runtime_network_interrupted', runtimeKind: 'codex-cli', origin: 'runtime',
+  phase: 'execution', summary: '连接中断', detail: '连接中断，本次执行未完成。', retryable: true }
 function makeRun(id: string, agent = 0, status = 'running', inputs = ['request-main'], seconds = 48): any {
   return { ...structuredClone(runTemplate), id, agentId: aid(agent), status, inputMessageIds: inputs,
     canContinue: (status === 'failed' || status === 'cancelled') && inputs.length > 0,
@@ -59,7 +61,7 @@ function makeRun(id: string, agent = 0, status = 'running', inputs = ['request-m
     a2aRootAgentRunId: id, runtimeModel: { adapterKind: 'codex-cli', modelId: 'frozen-run-model', reasoningEffort: 'high' },
     createdAt: at(31), startedAt: at(34), updatedAt: at(seconds), endedAt: ['succeeded', 'failed', 'cancelled'].includes(status) ? at(seconds) : null,
     executionEvidenceCount: 3, executionEvidenceChangeSequence: 3,
-    failure: status === 'failed' ? { code: 'runtime_disconnected', message: 'Runtime 连接中断。', retryable: true } : null }
+    failure: status === 'failed' ? networkFailure : null }
 }
 function evidence(run: any, published = false): any[] {
   if (run.status === 'queued') return []
@@ -445,7 +447,7 @@ export const model = {
         ...(multiple ? [0,1,2] : kind === 'other-member' ? [2] : []).map(index => ({ kind: 'atom', atom: { type: 'member', agentId: aid(index) } })),
         { kind: 'text', text: '采用这条更正。' }] } } })
   },
-  showReceiptCase(routes: Array<'steer' | 'steer-pending' | 'steer-sending' | 'running' | 'waiting' | 'unknown' | 'unknown-cancelled' | 'failed' | 'cancelled' | 'succeeded' | 'failed-before-run' | 'cancelled-before-run' | 'steer-failed' | 'steer-cancelled'>, completed = false) {
+  showReceiptCase(routes: Array<'steer' | 'steer-pending' | 'steer-sending' | 'running' | 'waiting' | 'unknown' | 'unknown-cancelled' | 'unknown-noncodex' | 'failed' | 'cancelled' | 'succeeded' | 'failed-before-run' | 'cancelled-before-run' | 'steer-failed' | 'steer-cancelled'>, completed = false) {
     this.setScenario('stream'); halt(); controls.steerReview = true
     const message = { ...makeMessage('receipt-example', 4,
       routes.map((_, index) => '@' + profiles[index].displayName).join(' ') + ' 请按这条补充继续处理。'),
@@ -454,21 +456,23 @@ export const model = {
     routes.forEach((route, index) => {
       const runId = `receipt-run-${index}`
       const steered = route === 'steer' || route === 'steer-failed' || route === 'steer-cancelled'
-      const unknown = route === 'unknown' || route === 'unknown-cancelled'
+      const unknown = route.startsWith('unknown')
       const pendingSteer = route === 'steer-pending' || route === 'steer-sending'
       const noRun = route === 'waiting' || route.endsWith('-before-run')
       const status = route.startsWith('failed') || route === 'steer-failed' ? 'failed'
         : route.startsWith('cancelled') || route === 'steer-cancelled' || route === 'unknown-cancelled' ? 'cancelled'
-        : completed || route === 'succeeded' ? 'succeeded' : 'running'
+        : completed || route === 'succeeded' ? 'succeeded' : route === 'steer-pending' ? 'queued' : 'running'
       if (!noRun && route !== 'unknown') runs.push({
         ...makeRun(runId, index, status,
-          steered ? ['history-user', message.id] : [message.id]),
+          steered || pendingSteer ? ['history-user'] : [message.id]),
+        ...(route === 'unknown-noncodex' ? { runtimeModel: { adapterKind: 'pi', modelId: null, reasoningEffort: null } } : {}),
         canSteer: !completed, steerUnavailableReason: null,
         executionEvidenceCount: 0, executionEvidenceChangeSequence: 0
       })
       deliveries.push({ ...delivery(`receipt-delivery-${index}`, message.id, aid(index), noRun ? null : runId,
         pendingSteer ? 'claimed' : route === 'waiting' ? 'waiting' : unknown || status === 'failed' ? 'failed' : status === 'cancelled' ? 'cancelled' : route === 'running' && !completed ? 'running' : 'settled'),
-        requestedMode: steered || pendingSteer || unknown ? 'steer' : 'send',
+        requestedMode: steered || pendingSteer || unknown ? 'steer' : 'start',
+        canReconcile: route === 'unknown-cancelled',
         ...(pendingSteer ? { dispatchPhase: route === 'steer-sending' ? 'attempting' : 'materialized' } : {}),
         inputDeliveryStatus: steered ? 'accepted' : unknown ? 'delivery_unknown' : null })
     })
@@ -477,6 +481,52 @@ export const model = {
         agentRuns: runs, messageDeliveries: deliveries, executionEvidence: [] },
       draft: { ...state.draft, body: '', attachments: [], content: { version: 2, segments: [] } }
     })
+  },
+  async answerQuestion(interaction: { id: string }) {
+    update({ snapshot: { ...state.snapshot, nativeInteractions: state.snapshot.nativeInteractions.filter(
+      (item: { id: string }) => item.id !== interaction.id
+    ) } })
+    return { status: 'sent' as const }
+  },
+  showStatusCase(kind: 'wait' | 'recovery' | 'configuration', waitReason = 'action_execution') {
+    this.setScenario('stream'); halt()
+    const source = makeMessage('status-input', 1, kind === 'wait' ? '请一起核对这份执行记录。'
+      : kind === 'recovery' ? '请检查昨天提交的修订。' : '请检查配置并整理更新记录。')
+    const runs = [makeRun('status-run', 0, kind === 'wait' ? 'waiting' : 'failed', [source.id])]
+    const messages = [source], deliveries = []
+    const run = runs[0]
+    Object.assign(run, { inputSummary: source.body, executionEvidenceCount: 0, executionEvidenceChangeSequence: 0,
+      failure: null, waitReason: kind === 'wait' ? waitReason : null })
+    const nativeInteractions = []
+    if (kind === 'wait') {
+      source.addressedAgentIds = [aid(0), aid(1)]
+      const second = makeRun('question-run', 1, 'running', [source.id])
+      second.runtimeModel = { adapterKind: 'pi', modelId: null, reasoningEffort: null }
+      runs.push(second)
+      nativeInteractions.push({ id: 'pending-question', agentRunId: second.id, executionEpoch: second.executionEpoch,
+        status: 'pending', createdAt: Date.now(), expiresAt: null, canSkip: true,
+        questions: [{ id: 'question', kind: 'confirm', title: '继续核对历史记录吗？', description: null, options: [], placeholder: null, prefill: null, multiline: false }] })
+    } else if (kind === 'recovery') {
+      // Runtime loss settles with last_error_code=accepted_input_outcome_unknown.
+      // Core exposes the fence and recorded evidence, not that code as a terminal reason.
+      run.terminalReasonCode = null
+      run.cancelRequestedAt = run.endedAt
+      run.cancelReasonCode = 'accepted_input_outcome_unknown'
+      run.executionEvidenceCount = 1
+      run.executionEvidenceChangeSequence = 1
+      const next = makeMessage('next-input', 2, '请先整理后续要点，等上一轮结束后处理。')
+      messages.push(next)
+      deliveries.push(delivery('waiting-next', next.id, aid(0), null, 'waiting'))
+    } else {
+      run.terminalReasonCode = 'runtime_not_configured'
+      const next = makeMessage('next-input', 2, '智能体已配置，继续整理更新记录。')
+      const successor = makeRun('next-run', 0, 'running', [next.id])
+      Object.assign(successor, { createdAt: at(65), startedAt: at(66), inputSummary: next.body })
+      messages.push(next); runs.push(successor)
+    }
+    update({ streamPaused: true, generation: state.generation + 1, snapshot: { ...state.snapshot,
+      thread: { ...state.snapshot.thread, title: '核对执行记录' }, messages, agentRuns: runs,
+      messageDeliveries: deliveries, nativeInteractions, executionEvidence: kind === 'recovery' ? evidence(run).slice(0, 1) : [] } })
   },
   showSteerTimeline(olderSource = false) {
     this.showSteerCase('accepted')
@@ -606,7 +656,7 @@ export const model = {
   },
   failRun(id: string) {
     extraRuns = extraRuns.map(r => r.id === id ? { ...r, status: 'failed', canContinue: r.inputMessageIds.length > 0, endedAt: new Date().toISOString(),
-      failure: { code: 'runtime_disconnected', message: 'Runtime 连接中断。', retryable: true } } : r)
+      failure: networkFailure } : r)
     refresh()
   },
   async send(draft: any, deliveryMode?: string) {

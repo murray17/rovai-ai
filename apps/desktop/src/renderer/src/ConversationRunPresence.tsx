@@ -4,6 +4,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AdapterInstallation, AgentProfile, AgentRunView, ThreadSnapshot } from '@contracts'
 import { ContinueAgentRunButton } from './ContinueAgentRunButton'
 import { ExecutionIcon, ExecutionStopIcon } from './ExecutionIcons'
+import { useThreadRunStatus } from './ThreadRunStatus'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { ToolCallIcon } from './ExecutionToolGroup'
 import { MemberAvatar } from './MemberAvatar'
@@ -42,6 +43,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
   const submitting = useRef(false)
   const stopTrigger = useRef<HTMLButtonElement | null>(null)
   const confirmationId = useId()
+  const readStatus = useThreadRunStatus()
   const slots = [slot]
   const target = snapshot.agentRuns.find(run => run.id === stopId)
   const canConfirm = Boolean(target && stopState(target) === 'available')
@@ -100,12 +102,11 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
         }
         const state = submittingId === run.id && ['queued', 'running', 'waiting'].includes(run.status) ? 'stopping' : stopState(run)
         const canStop = state === 'available' || state === 'stopping' || state === 'confirming'
-        const inputTooLarge = run.failure?.code === 'context_payload_too_large'
-        const description = inputTooLarge ? uiAttribute('输入内容过大，查看详情') : run.status === 'failed' ? uiAttribute('执行中断，查看原因')
-          : uiAttribute('查看执行过程')
+        const status = readStatus(run, state === 'stopping' || state === 'confirming')
+        const description = uiAttribute('查看执行过程')
         return <article key={run.id} className="conversation-bubble agent conversation-run-presence"
           data-presence-run={run.id} data-presence-state={run.status} data-continuation={continuation}
-          aria-label={`${name}，${description}`} style={{ '--agent-accent': identityColorToken(run.agentId) } as CSSProperties}>
+          aria-label={[name, uiAttribute(status.word), status.reason && uiAttribute(status.reason)].filter(Boolean).join(uiAttribute('，'))} style={{ '--agent-accent': identityColorToken(run.agentId) } as CSSProperties}>
           {!continuation && authorPart('avatar')}
           <div className="message-body">
             {!continuation && <div className="bubble-meta">
@@ -233,19 +234,22 @@ export function RunPresenceOpen({ threadId, run, name, description, windowedEvid
     const merged = groupExecutionEventsByRunId([{ id: run.id }], tail.evidence, windowedEvidence ? currentEvents.slice(-48) : currentEvents)
     return merged.get(run.id) ?? []
   }, [tail.evidence, currentEvents, run.id, windowedEvidence])
-  const preview = useMemo(() => stopping && ['queued', 'running', 'waiting'].includes(run.status)
-    ? { kind: 'status' as const, text: uiAttribute('正在停止…') }
-    : runPresencePreview(run, mergedEvents, name), [run, mergedEvents, name, language, stopping])
-  const starting = agentRunIsStarting(run) && !agentRunHasCurrentActivity(run, mergedEvents)
-  const running = (run.status === 'running' || starting) && !run.cancelRequestedAt && !stopping
+  const readStatus = useThreadRunStatus()
+  const status = useMemo(() => readStatus(run, stopping), [readStatus, run, stopping])
+  const preview = useMemo(() => runPresencePreview(run, mergedEvents, name, status),
+    [run, mergedEvents, name, language, status])
+  const starting = status.word === '执行中' && agentRunIsStarting(run) && !agentRunHasCurrentActivity(run, mergedEvents)
+  const showSpinner = status.word === '正在恢复'
+    || status.word === '执行中' && (run.status === 'running' || run.status === 'waiting' || starting)
+  const spokenStatus = preview.label ?? uiAttribute(status.word)
   const button = <button ref={trigger} {...menu.rowProps} className={`run-presence-open is-${preview.kind}`} type="button" data-preview-kind={preview.kind}
-    title={uiAttribute('查看执行过程')} aria-label={`${name}，${preview.text}，${description}`}
+    title={uiAttribute('查看执行过程')} aria-label={[name, spokenStatus, preview.text !== spokenStatus && preview.text, description].filter(Boolean).join(uiAttribute('，'))}
     aria-describedby={starting ? undefined : elapsedId} aria-expanded={menu.open} aria-controls={menu.open ? menuId : undefined}
     onClick={event => onOpen(run.agentId, event.currentTarget, { runId: run.id })}>
-    {running && <span className="run-presence-spinner" aria-hidden="true"><ExecutionStatusGlyph status="cancelling" /></span>}
-    {!running && <span className={`run-presence-status is-${run.status}`} aria-hidden="true"><ExecutionStatusGlyph status={run.status === 'cancelled' ? 'stopped' : run.status} /></span>}
+    {showSpinner && <span className="run-presence-spinner" aria-hidden="true"><ExecutionStatusGlyph status="cancelling" /></span>}
+    {!showSpinner && <span className={`run-presence-status is-${status.tone}`} aria-hidden="true"><ExecutionStatusGlyph status={status.tone === 'attention' ? 'waiting' : run.status === 'cancelled' ? 'stopped' : run.status} /></span>}
     {preview.iconKind && <ToolCallIcon iconKind={preview.iconKind} />}
-    <span className={`run-presence-preview is-${preview.kind}`}>{preview.text}</span>
+    <span className={`run-presence-preview is-${preview.kind}`}>{preview.label && <strong className="run-presence-label">{preview.label}</strong>}{preview.label && preview.text && ' · '}{preview.text}</span>
     {!starting && <RunPresenceTime run={run} id={elapsedId} />}
   </button>
   const bounds = menu.open ? trigger.current?.getBoundingClientRect() : undefined

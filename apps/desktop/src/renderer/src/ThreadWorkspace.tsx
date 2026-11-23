@@ -168,7 +168,8 @@ export {
   droppedAttachmentInputs
 } from './attachment-drop'
 import {
-  agentRunPresentation,
+  agentRunStatus,
+  type AgentRunStatus,
   agentRunIsStarting,
   agentRunHasCurrentActivity,
   agentRunWaitDetail,
@@ -186,7 +187,7 @@ import {
 import { MemberAvatar } from './MemberAvatar'
 import { ImageGallery, partitionMessageAttachments, type GalleryImage } from './ImageGallery'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
-import { ExecutionIcon, ExecutionOverviewMark, ExecutionStopIcon } from './ExecutionIcons'
+import { ExecutionIcon, ExecutionOverviewMark, ExecutionStopIcon, RunInputIcon } from './ExecutionIcons'
 import { ExecutionStatusGlyph, type ExecutionStatusShape } from './ExecutionStatusGlyph'
 import { AgentRunDeliveryRecipients } from './AgentRunDeliveryRecipients'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -253,16 +254,8 @@ import {
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './execution-tool-grouping'
+import { ThreadRunStatusProvider, useThreadRunStatus, type ThreadRunStatusReader } from './ThreadRunStatus'
 import { UiText, getInterfaceLanguage, uiAttribute, useInterfaceLanguage, useUiText } from './interface-language'
-
-function localizedAgentRunPresentation(
-  run: Parameters<typeof agentRunPresentation>[0],
-  cancelling = false,
-  hasCurrentActivity = false
-): ReturnType<typeof agentRunPresentation> {
-  const presentation = agentRunPresentation(run, cancelling, hasCurrentActivity)
-  return { ...presentation, label: uiAttribute(presentation.label) }
-}
 
 function localizedAgentRunWaitDetail(waitReason: string | null): string | null {
   const detail = agentRunWaitDetail(waitReason)
@@ -2766,12 +2759,9 @@ export function ThreadWorkspace({
   const [acceptedRetry, setAcceptedRetry] = useState<{threadId: string; sequence: number; ids: Set<string>} | null>(null)
   const pendingProjection = acceptedRetry?.threadId === snapshot.thread.id
     && acceptedRetry.sequence === snapshot.throughGlobalSequence ? acceptedRetry.ids : undefined
-  const presenceTimeline = useMemo(() => conversationRunPresenceTimeline(
+  const { items: presenceTimeline, resultRowByRunId } = useMemo(() => conversationRunPresenceTimeline(
     conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, pendingProjection
   ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, pendingProjection])
-  const retainedStopIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
-    item.kind === 'run_presence' && isUserInterruptedRun(item.slot.run) ? [item.slot.run.id] : []
-  )), [presenceTimeline])
   // Row metadata is structural: execution text does not rebuild this list. Results
   // attached to a public message remain in that message's measured row.
   const timelineRows = useMemo(() => {
@@ -2787,7 +2777,7 @@ export function ThreadWorkspace({
       const message = item.message
       author = ['user', 'agent', 'external_principal'].includes(message.authorType)
         ? `${message.authorType}:${message.authorId}` : null
-      if (item.interruptedRun && !retainedStopIds.has(item.interruptedRun.id)) author = null
+      if (item.interruptedRun && resultRowByRunId.get(item.interruptedRun.id) === item.id) author = null
       if (message.authorType !== 'agent' || !message.sourceAgentRunId) continue
       while (index + 1 < presenceTimeline.length) {
         const next = presenceTimeline[index + 1]
@@ -2798,7 +2788,7 @@ export function ThreadWorkspace({
       }
     }
     return rows
-  }, [presenceTimeline, retainedStopIds])
+  }, [presenceTimeline, resultRowByRunId])
   const virtualTimelineEnabled = timelineRows.length > PUBLIC_TIMELINE_VIRTUAL_THRESHOLD
 
   const historyBoundaryId = anchorWindowBeforeNormal
@@ -5627,6 +5617,7 @@ export function ThreadWorkspace({
   })
 
   return (
+    <ThreadRunStatusProvider approvals={snapshot.approvals} nativeInteractions={snapshot.nativeInteractions}>
     <RunInputSourceContext.Provider value={{
       bodyIsUnavailable: messageBodyUnavailable,
       body: async messageId => {
@@ -5976,7 +5967,7 @@ export function ThreadWorkspace({
                           ))}
                         </div>
                       )}
-                      {isUserInterruptedRun(run) && !retainedStopIds.has(run.id) && (
+                      {resultRowByRunId.get(run.id) === timelineItem.id && (
                         <RunInterruptionMarker run={run} author={author} onOpen={openExecutionProcess} />
                       )}
                     </section>
@@ -6025,7 +6016,7 @@ export function ThreadWorkspace({
                   return items
                 }
                 const campMessage = timelineItem.message
-                const interruptedRun = timelineItem.interruptedRun && !retainedStopIds.has(timelineItem.interruptedRun.id)
+                const interruptedRun = timelineItem.interruptedRun && resultRowByRunId.get(timelineItem.interruptedRun.id) === timelineItem.id
                   ? timelineItem.interruptedRun : undefined
                 if (campMessage.withdrawn) {
                   previousMessageAuthorKey = null
@@ -6091,6 +6082,8 @@ export function ThreadWorkspace({
                 const userMessageRuns = campMessage.authorType === 'user'
                   ? snapshot.agentRuns.filter((run) =>
                       (run.inputMessageIds ?? []).includes(campMessage.id)
+                      || (run.invocationKind === 'direct' && !run.inputMessageIds?.length
+                        && executionRunInputMessageIds(run, snapshot.turns).includes(campMessage.id))
                     )
                   : []
                 const replyParentId = campMessage.replyToThreadMessageId
@@ -6242,6 +6235,7 @@ export function ThreadWorkspace({
                                   message={campMessage}
                                   onReconcile={onReconcileDelivery}
                                   runs={userMessageRuns}
+                                  resultRowByRunId={resultRowByRunId}
                                   deliveries={campMessageDeliveries}
                                   allRuns={snapshot.agentRuns}
                                   memberById={memberById}
@@ -7226,6 +7220,7 @@ export function ThreadWorkspace({
       </Dialog.Root>
     </section>
     </RunInputSourceContext.Provider>
+    </ThreadRunStatusProvider>
   )
 }
 
@@ -7269,18 +7264,17 @@ export function executionDeliveryQueuePresentation(process: AgentExecutionProces
   const blocked = active || process.waitingDeliveries.some(delivery =>
     delivery.recipientAgentId === agentId && delivery.waitCondition != null)
   return {
-    label: blocked ? '排队中' : '准备中…',
+    label: '排队中',
     tone: 'neutral',
     blocked,
     detail: active ? '等待上一轮完成' : null
   }
 }
 
-function runPulseStateShape(run: AgentRunView, stopping: boolean): RunPulseStateShape {
-  if (stopping && NON_TERMINAL_RUNS.has(run.status)) return 'cancelling'
-  if (run.status === 'running') return 'running'
-  if (run.status === 'queued') return 'running'
-  if (run.status === 'waiting') return 'waiting'
+function runPulseStateShape(run: AgentRunView, state: AgentRunStatus): RunPulseStateShape {
+  if (state.word === '正在停止…') return 'cancelling'
+  if (state.word === '需要你处理') return 'waiting'
+  if (NON_TERMINAL_RUNS.has(run.status)) return 'running'
   if (run.status === 'succeeded') return 'completed'
   if (run.status === 'failed') return 'failed'
   if (run.status === 'cancelled') return 'stopped'
@@ -7289,7 +7283,8 @@ function runPulseStateShape(run: AgentRunView, stopping: boolean): RunPulseState
 
 function runPulseProcessState(
   process: AgentExecutionProcess,
-  stopping: boolean
+  stopping: boolean,
+  readStatus: ThreadRunStatusReader
 ): {
   run: AgentRunView | null
   label: string
@@ -7298,16 +7293,16 @@ function runPulseProcessState(
 } {
   const run = preferredAgentProcessRun(process.runs)
   if (run && NON_TERMINAL_RUNS.has(run.status)) {
-    const presentation = localizedAgentRunPresentation(run, stopping && NON_TERMINAL_RUNS.has(run.status))
-    return { run, label: presentation.label, tone: presentation.tone, shape: runPulseStateShape(run, stopping) }
+    const presentation = readStatus(run, stopping)
+    return { run, label: uiAttribute(presentation.word), tone: presentation.tone, shape: runPulseStateShape(run, presentation) }
   }
   if (process.waitingDeliveries.length > 0) {
     const queue = executionDeliveryQueuePresentation(process)
-    return { run: null, label: uiAttribute(queue.label), tone: queue.tone, shape: queue.blocked ? 'queued' : 'running' }
+    return { run: null, label: uiAttribute(queue.label), tone: queue.tone, shape: 'queued' }
   }
   if (run) {
-    const presentation = localizedAgentRunPresentation(run)
-    return { run, label: presentation.label, tone: presentation.tone, shape: runPulseStateShape(run, false) }
+    const presentation = readStatus(run)
+    return { run, label: uiAttribute(presentation.word), tone: presentation.tone, shape: runPulseStateShape(run, presentation) }
   }
   return { run: null, label:uiAttribute("暂无执行"), tone: 'neutral', shape: 'recorded' }
 }
@@ -7351,6 +7346,7 @@ function RunPulse({
   placementPending: boolean
   placementError: { message: string; detail: string | null; target: ExecutionConsolePlacement } | null
 }): JSX.Element {
+  const readStatus = useThreadRunStatus()
   const visibleProcesses = processes.slice().sort((left, right) => {
     const leftPosition = memberById.get(left.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
     const rightPosition = memberById.get(right.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
@@ -7386,7 +7382,7 @@ function RunPulse({
           statusTone: activeProcessCount > 0 ? 'info' : 'neutral',
           stateShape: activeProcessCount > 0 ? 'running' : 'recorded'
         }, ...visibleProcesses.flatMap(process => {
-          const state = runPulseProcessState(process, stopping)
+          const state = runPulseProcessState(process, stopping, readStatus)
           if (!state.run && process.waitingDeliveries.length === 0) return []
           const member = memberById.get(process.agentId)
           return [{
@@ -7423,7 +7419,7 @@ function RunPulse({
           </button>
         </li>
         {visibleProcesses.map((process) => {
-          const state = runPulseProcessState(process, stopping)
+          const state = runPulseProcessState(process, stopping, readStatus)
           if (!state.run && process.waitingDeliveries.length === 0) return null
           const member = memberById.get(process.agentId)
           const memberName = member?.displayName ?? process.agentId
@@ -7799,8 +7795,11 @@ function ExecutionRunMetric({ run, usage, cancelling, starting, threadId, window
   </span>
   if (live) return <span className="execution-run-metric">{duration}</span>
   const total = executionUsageTotal(run, usage)
+  const status = agentRunStatus(run)
   return <span className="execution-run-metric-group">
-    {run.status === 'cancelled' && <span className="execution-run-status">{localizedAgentRunPresentation(run).label}</span>}
+    {(run.status === 'failed' || run.status === 'cancelled') && <span className={`execution-run-status tone-${status.tone}`}>
+      {uiAttribute(status.word)}{status.reason && status.reason !== '查看原因' && ` · ${uiAttribute(status.reason)}`}
+    </span>}
     {total !== null ? <ExecutionUsagePopover run={run} usage={usage} total={total} />
       : <ExecutionDurationPopover run={run} />}
   </span>
@@ -7979,6 +7978,7 @@ function ExecutionDrawer({
   const client = useThreadClient()
   const mobile = useMobileLayout()
   const recovery = useEditingRecovery()
+  const readStatus = useThreadRunStatus()
   const groupKey = `mobile-execution-groups:${threadId}:${process.agentId}`
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => {
     try {
@@ -8378,9 +8378,9 @@ function ExecutionDrawer({
     const expanded = expandedRunIds.has(run.id)
     const hasCurrentActivity = activeEpochs.get(run.id) === run.executionEpoch
       || agentRunHasCurrentActivity(run, executionEventsByRunId.get(run.id) ?? [])
-    const state = localizedAgentRunPresentation(run, cancelling, hasCurrentActivity)
-    const stateShape = runPulseStateShape(run, cancelling)
-    const starting = !cancelling && agentRunIsStarting(run, hasCurrentActivity)
+    const state = readStatus(run, cancelling)
+    const stateShape = runPulseStateShape(run, state)
+    const starting = state.word === '执行中' && agentRunIsStarting(run, hasCurrentActivity)
     const sourceMessage = executionTriggerMessage(run, turns, messageById)
     const inputMessageIds = executionRunInputMessageIds(run, turns)
     const summary = executionMessageSummary(sourceMessage, run)
@@ -8395,7 +8395,7 @@ function ExecutionDrawer({
         key={run.id}
         tabIndex={-1}
         aria-current={focused ? 'step' : undefined}
-        aria-label={[runMemberName, state.label, summary].join(uiAttribute('，'))}
+        aria-label={[runMemberName, uiAttribute(state.word), summary].join(uiAttribute('，'))}
       >
         <span className={`execution-process-node tone-${state.tone} state-${stateShape}`} aria-hidden="true">
           <ExecutionStatusGlyph status={stateShape} />
@@ -8775,18 +8775,10 @@ function ThreadMessageDeliveryFooter({
   )
 }
 
-function userMessageRunStatusLabel(run: AgentRunView | null): string {
-  if (!run) return uiAttribute("未读")
-  if (agentRunIsStarting(run)) return uiAttribute("启动中")
-  if (run.status === 'running') return uiAttribute("处理中")
-  if (run.status === 'waiting') return uiAttribute("等待中")
-  if (run.status === 'succeeded') return uiAttribute("已完成")
-  if (run.status === 'failed') return uiAttribute("执行失败")
-  return uiAttribute("已停止")
-}
+const receiptWords = ['已收到', '发送中', '待发送', '排队中', '未确认送达', '已停止', '执行失败'] as const
 
 function UserMessageDeliveryReceipt({
-  deliveries, allRuns, onReconcile,
+  deliveries, allRuns, resultRowByRunId, onReconcile,
   message,
   runs,
   memberById,
@@ -8796,10 +8788,12 @@ function UserMessageDeliveryReceipt({
   runs: AgentRunView[]
   allRuns: AgentRunView[]
   deliveries: MessageDeliveryView[]
+  resultRowByRunId: ReadonlyMap<string, string>
   onReconcile?(deliveryId: string): Promise<string>
   memberById: Map<string, ThreadSnapshot['members'][number]>
   onOpenExecution(run: AgentRunView, trigger: HTMLButtonElement): void
 }): JSX.Element | null {
+  const readStatus = useThreadRunStatus()
   const [checking, setChecking] = useState<string | null>(null)
   const [checkResult, setCheckResult] = useState<string | null>(null)
   if (message.id.startsWith('optimistic:') || message.addressedAgentIds.length === 0) return null
@@ -8819,53 +8813,52 @@ function UserMessageDeliveryReceipt({
       const runDelivery = deliveries.find(item => item.targetAgentRunId === run?.id)
       if (!run || delivery.createdAt >= (runDelivery?.createdAt ?? run.createdAt)) run = null
     }
-    const deliveryOwnsStatus = delivery?.requestedMode === 'steer' || !run || delivery?.targetAgentRunId === run.id
     // Classify each target once. A Steer receipt describes delivery, even when
     // its target Run later finishes; ordinary targets describe execution.
-    const status = delivery?.requestedMode === 'steer' && delivery.inputDeliveryStatus === 'accepted' ? 'steered'
-      : deliveryOwnsStatus && delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
-      : (deliveryOwnsStatus && delivery?.status === 'failed') || run?.status === 'failed' ? 'failed'
-      : (deliveryOwnsStatus && delivery?.status === 'cancelled') || run?.status === 'cancelled' ? 'stopped'
-      : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? 'steerSending'
-      : run?.status === 'succeeded' || (!run && delivery?.status === 'settled') ? 'completed'
-      : run && agentRunIsStarting(run) ? 'starting'
-      : (deliveryOwnsStatus && delivery?.status === 'waiting') || !run ? 'pending'
-      : 'inProgress'
-    return { agentId, delivery, run, status }
+    const steer = delivery?.requestedMode === 'steer'
+    let word: string
+    if (run && !steer) word = readStatus(run).word
+    else if (steer && delivery.inputDeliveryStatus === 'accepted') word = '已收到'
+    else if (delivery?.inputDeliveryStatus === 'delivery_unknown') word = '未确认送达'
+    else if (delivery?.status === 'failed' || run?.status === 'failed') word = '执行失败'
+    else if (delivery?.status === 'cancelled' || run?.status === 'cancelled') word = '已停止'
+    else if (steer) word = delivery.dispatchPhase === 'attempting' ? '发送中' : '待发送'
+    else word = delivery?.status === 'settled' ? '已完成' : '排队中'
+    const counted = steer || (!run ? word !== '已完成'
+      : (word === '执行失败' || word === '已停止') && !resultRowByRunId.has(run.id))
+    return { agentId, delivery, run, word, counted }
   }).filter(item => item.run !== null || item.delivery !== undefined)
-  const steered = ordered.filter(item => item.status === 'steered')
-  const unknown = ordered.filter(item => item.status === 'unknown')
-  const steerSending = ordered.filter(item => item.status === 'steerSending')
-  const pending = ordered.filter(item => item.status === 'pending')
-  const inProgress = ordered.filter(item => item.status === 'inProgress' || item.status === 'starting')
-  const stopped = ordered.filter(item => item.status === 'stopped')
-  const failed = ordered.filter(item => item.status === 'failed')
-  const ordinaryLabels = [
-    steered.length ? (ordered.length === 1 ? uiAttribute('已插话') : uiAttribute('已插话 {0}', String(steered.length))) : '',
-    steerSending.length ? (ordered.length === 1 ? uiAttribute('插话中') : uiAttribute('插话中 {0}', String(steerSending.length))) : '',
-    inProgress.length ? uiAttribute('处理中 {0}', String(inProgress.length)) : '',
-    pending.length ? uiAttribute('待处理 {0}', String(pending.length)) : '',
-    unknown.length ? (ordered.length === 1 ? uiAttribute('未确认送达') : uiAttribute('未确认送达 {0}', String(unknown.length))) : '',
-    stopped.length ? (ordered.length === 1 ? uiAttribute('已停止') : uiAttribute('已停止 {0}', String(stopped.length))) : ''
-  ].filter(Boolean)
-  const failureLabel = failed.length ? (ordered.length === 1 ? uiAttribute('执行失败') : uiAttribute('执行失败 {0}', String(failed.length))) : ''
-  const receiptLabel = [...ordinaryLabels, failureLabel].filter(Boolean).join(' · ')
-  if (!receiptLabel) return null
-  const presentation = {
-    className: unknown.length ? 'is-unknown' : failed.length ? 'is-failed' : steerSending.length ? 'is-sending' : inProgress.length ? 'is-progress' : pending.length ? 'is-queued' : stopped.length ? 'is-stopped' : 'is-confirmed',
-    label: receiptLabel
+  const counts = new Map<string, number>()
+  for (const { counted, word } of ordered) {
+    if (counted) counts.set(word, (counts.get(word) ?? 0) + 1)
   }
-  const hasMixedStatus = ordinaryLabels.length + Number(Boolean(failureLabel)) > 1
+  if (counts.size === 0) return null
+  const multiRecipient = message.addressedAgentIds.length > 1
+  const labelFor = (word: typeof receiptWords[number]): string => {
+    const count = counts.get(word)
+    if (!count) return ''
+    if (multiRecipient) return uiAttribute(`${word} {0}`, count)
+    if (word === '已收到') return uiAttribute('{0}已收到', memberById.get(ordered[0].agentId)?.displayName ?? ordered[0].agentId)
+    return uiAttribute(word)
+  }
+  const ordinaryLabels = receiptWords.filter(word => word !== '执行失败').map(labelFor).filter(Boolean)
+  const failureLabel = labelFor('执行失败')
+  const prefix = ordered.some(item => item.delivery?.requestedMode === 'steer') ? uiAttribute('插话') : ''
+  const presentation = {
+    className: counts.has('未确认送达') ? 'is-unknown' : failureLabel ? 'is-failed' : counts.has('发送中') ? 'is-sending'
+      : counts.has('待发送') || counts.has('排队中') ? 'is-queued' : counts.has('已停止') ? 'is-stopped' : 'is-confirmed',
+    label: [prefix, ...ordinaryLabels, failureLabel].filter(Boolean).join(' · ')
+  }
   return (
     <div className="user-message-receipt-row">
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
-            className={`user-message-receipt ${presentation.className}${hasMixedStatus ? ' has-mixed-status' : ''}`}
+            className={`user-message-receipt ${presentation.className}`}
             type="button"
             aria-label={uiAttribute("查看消息处理状态，{0}", String(presentation.label))}
           >
-            {['is-progress', 'is-sending'].includes(presentation.className) ? <ExecutionIcon />
+            {presentation.className === 'is-sending' ? <RunInputIcon />
               : presentation.className === 'is-stopped' ? <ExecutionStatusGlyph status="stopped" />
               : presentation.className === 'is-failed' ? <ExecutionStatusGlyph status="failed" />
               : presentation.className === 'is-confirmed' ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6" /></svg>
@@ -8874,7 +8867,7 @@ function UserMessageDeliveryReceipt({
                   <circle cx="8" cy="8" r="5.6" /><path d="M8 4.7V8l2.2 1.4" />
                 </svg>}
             <span>
-              {ordinaryLabels.join(' · ')}
+              {prefix && `${prefix} · `}{ordinaryLabels.join(' · ')}
               {ordinaryLabels.length > 0 && failureLabel && <span aria-hidden="true"> · </span>}
               {failureLabel && <span className="user-message-receipt-failure">{failureLabel}</span>}
             </span>
@@ -8883,21 +8876,13 @@ function UserMessageDeliveryReceipt({
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="user-message-receipt-menu" sideOffset={5} align="end">
             <h3><UiText zh={"消息处理状态"} /></h3>
-            {ordered.map(({ agentId, run, delivery, status }) => {
+            {ordered.map(({ agentId, run, delivery, word }) => {
               const member = memberById.get(agentId)
               const displayName = member?.displayName ?? agentId
-              const statusLabel = status === 'failed' ? uiAttribute('执行失败')
-                : status === 'stopped' ? uiAttribute('已停止')
-                : status === 'pending' ? uiAttribute('待处理')
-                : delivery?.requestedMode === 'steer'
-                  ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收')
-                    : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('未确认送达')
-                    : uiAttribute('插话中')
-                  : userMessageRunStatusLabel(run)
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
-                <span><strong>{displayName}</strong><small>{statusLabel}</small></span>
-                {status === 'unknown' && delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} aria-busy={checking === delivery.id} onClick={async () => {
+                <span><strong>{displayName}</strong><small>{uiAttribute(word)}</small></span>
+                {delivery?.canReconcile && word === '未确认送达' && onReconcile && <button type="button" disabled={checking === delivery.id} aria-busy={checking === delivery.id} onClick={async () => {
                   setChecking(delivery.id); setCheckResult(null)
                   try {
                     const status = await onReconcile(delivery.id)
@@ -8906,7 +8891,8 @@ function UserMessageDeliveryReceipt({
                   finally { setChecking(null) }
                 }}>
                   <BusyLabel busy={checking === delivery.id}>{uiAttribute('核对结果')}</BusyLabel>
-                </button> : run && <DropdownMenu.Item asChild>
+                </button>}
+                {run && <DropdownMenu.Item asChild>
                   <button type="button" onClick={(event) => onOpenExecution(run, event.currentTarget)}><UiText zh={"查看执行"} /></button>
                 </DropdownMenu.Item>}
               </div>
@@ -11725,8 +11711,8 @@ function RunExecutionContent({
       {nonTerminal && !cancelling && run.waitReason === 'recovery_blocked' && (
         <div className="process-recovery-blocker" role="status">
           <div>
-            <strong><UiText zh={"执行异常，正在清理"} /></strong>
-            <p><UiText zh={"原请求不会自动重发；清理完成后，后续消息会按正常顺序继续执行。"} /></p>
+            <strong><UiText zh={"结果无法确认"} /></strong>
+            <p><UiText zh={"原请求不会自动重发。请先查看执行记录，再决定是否重新发送；清理完成后，后续消息会按正常顺序继续执行。"} /></p>
           </div>
         </div>
       )}
@@ -11805,6 +11791,7 @@ export function RunExecutionDisclosure({
     runtimeThinkingTitle: progress?.runtimeThinkingTitle
   }
   const recovery = useEditingRecovery()
+  const readStatus = useThreadRunStatus()
   const recoveryKey = `mobile-run:${threadId}:${run.id}`
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
@@ -11937,7 +11924,7 @@ export function RunExecutionDisclosure({
       <summary hidden={liveOpen} className={mobile ? 'mobile-run-summary' : undefined}>
         {mobile && <time className="mobile-run-time">{runIntervalLabel(run)}</time>}
         <span className="process-disclosure-label">{nonTerminal
-          ? liveSummary : mobile ? localizedAgentRunPresentation(run, cancelling).label
+          ? liveSummary : mobile ? uiAttribute(readStatus(run, cancelling).word)
             : executionRunSummary(run, run.updatedAt)}</span>
         {mobile && focused && nonTerminal && <span className="current-run-badge"><UiText zh={"当前执行"} /></span>}
         <span className="process-disclosure-slot" aria-hidden="true">
@@ -12530,6 +12517,7 @@ function RelatedTaskExecution({
   snapshot: ThreadSnapshot
   onOpenAgent(agentId: string, trigger?: HTMLButtonElement): void
 }): JSX.Element {
+  const readStatus = useThreadRunStatus()
   const runs = snapshot.agentRuns.filter((run) => run.taskId === task.taskId)
   const processes = agentExecutionProcesses(runs)
   const deliveries = snapshot.messageDeliveries.filter((delivery) => delivery.taskId === task.taskId)
@@ -12549,7 +12537,7 @@ function RelatedTaskExecution({
               key={process.agentId}
               onClick={(event) => onOpenAgent(process.agentId, event.currentTarget)}
             >
-              {memberName} · {run ? localizedAgentRunPresentation(run).label : uiAttribute("执行过程")}
+              {memberName} · {run ? uiAttribute(readStatus(run).word) : uiAttribute("执行过程")}
             </button>
           )
         })}

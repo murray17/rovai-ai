@@ -68,7 +68,7 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
     && state.page?.runAnchorMessageIds.includes(run.anchorMessageId))
   const timeline = conversationRunPresenceTimeline((state.page?.messages ?? []).map(message => ({
     kind: 'camp_message' as const, id: message.id, createdAt: message.createdAt, message, runtimeImageGroups: []
-  })), runs)
+  })), runs).items
   const copy = async (message: ThreadMessageView): Promise<void> => {
     try {
       await onCopy(message)

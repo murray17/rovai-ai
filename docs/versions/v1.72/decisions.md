@@ -8,6 +8,18 @@ last_updated: 2026-11-22
 
 # v1.72 版本决定
 
+<a id="v1-72-d93"></a>
+## V1.72-D93：公开会话按投递阶段与执行事实显示状态
+
+- 状态：accepted
+- 日期：2026-11-22
+- 当前权威：[Message Delivery v20](../../contracts/message-delivery-v20.md)、[Run Process Detail Surface v60](../../contracts/run-process-detail-surface-v60.md)、[会话工作区](../../ui/components/conversation-workspace.md)。
+
+插话可能绑定到尚未启动的执行，提前写“发送中”会让用户误判是否已投递。选择按实际阶段展示，
+异常直接写在行标题里，使触屏也能区分。普通失败与停止由已有执行行承接，执行行收起后仍可从回执和历史卡找回。
+只在确有待办或等待原因明确需要决定时提醒用户。现行恢复失败沿用普通失败和 Core 的重试资格。
+完整原因表与验收范围见 [R5 提案](status-convergence-proposal.md)。
+
 <a id="v1-72-d92"></a>
 ## V1.72-D92：在侧栏窗口末尾补显当前普通会话
 

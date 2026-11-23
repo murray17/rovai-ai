@@ -85,12 +85,12 @@ test('production composer uses Core per-target eligibility and honest receipt la
       if (['empty', 'attachment', 'idle', 'other-member', 'ready', 'not-ready'].includes(kind)) { report.push({ kind, actionLabel }); continue }
       const selector = '[data-message-id="steer-example"] .user-message-receipt'
       const summary = await browser.evaluate(`document.querySelector('${selector}').innerText`)
-      assert.match(summary, kind === 'unknown' ? /未确认送达/ : kind === 'queued' ? /待处理/ : /已插话/)
-      if (kind === 'mixed') assert.equal(summary, '已插话 1 · 待处理 1 · 未确认送达 1')
+      assert.match(summary, kind === 'unknown' ? /未确认送达/ : kind === 'queued' ? /排队中/ : /已收到/)
+      if (kind === 'mixed') assert.equal(summary, '插话 · 已收到 1 · 排队中 1 · 未确认送达 1')
       assert.equal(await browser.evaluate('!!document.querySelector("[data-message-id=steer-example] .message-withdraw-button")'), kind === 'queued')
       await click(selector); await pause(100)
       const receipt = await browser.evaluate('document.querySelector(".user-message-receipt-menu").innerText')
-      if (kind !== 'queued') assert.match(receipt, kind === 'unknown' ? /未确认送达/ : /运行时已接收/)
+      if (kind !== 'queued') assert.match(receipt, kind === 'unknown' ? /未确认送达/ : /已收到/)
       assert.equal(receipt.includes('撤回消息'), false, 'withdrawal belongs to the message actions')
       assert.doesNotMatch(receipt, /已消费|已加入当前执行/)
       await browser.capture(join(root, `${kind}-receipt.png`))
@@ -98,28 +98,30 @@ test('production composer uses Core per-target eligibility and honest receipt la
       await closeMenu()
     }
     const receiptCases = [
-      { routes: ['steer'], label: '已插话', appearance: 'is-confirmed' },
-      { routes: ['steer-pending'], label: '插话中', appearance: 'is-sending' },
-      { routes: ['steer-sending'], label: '插话中', appearance: 'is-sending' },
-      { routes: ['steer', 'steer-pending', 'steer-sending'], label: '已插话 1 · 插话中 2', appearance: 'is-sending' },
-      { routes: ['running', 'running'], label: '处理中 2', appearance: 'is-progress' },
-      { routes: ['steer', 'running'], label: '已插话 1 · 处理中 1', appearance: 'is-progress' },
-      { routes: ['failed'], label: '执行失败', appearance: 'is-failed' },
-      { routes: ['cancelled'], label: '已停止', appearance: 'is-stopped' },
+      { routes: ['steer'], label: '插话 · 爱丽丝已收到', appearance: 'is-confirmed' },
+      { routes: ['steer-pending'], label: '插话 · 待发送', appearance: 'is-queued' },
+      { routes: ['steer-sending'], label: '插话 · 发送中', appearance: 'is-sending' },
+      { routes: ['steer', 'steer-pending', 'steer-sending'], label: '插话 · 已收到 1 · 发送中 1 · 待发送 1', appearance: 'is-sending' },
+      { routes: ['steer', 'steer-sending', 'waiting'], label: '插话 · 已收到 1 · 发送中 1 · 排队中 1', appearance: 'is-sending' },
+      { routes: ['running', 'running'], label: null },
+      { routes: ['steer', 'running'], label: '插话 · 已收到 1', appearance: 'is-confirmed' },
+      { routes: ['failed'], label: null },
+      { routes: ['cancelled'], label: null },
       { routes: ['cancelled-before-run'], label: '已停止', appearance: 'is-stopped' },
-      { routes: ['cancelled', 'cancelled'], label: '已停止 2', appearance: 'is-stopped' },
-      { routes: ['cancelled', 'failed'], label: '已停止 1 · 执行失败 1', appearance: 'is-failed' },
-      { routes: ['cancelled', 'running'], label: '处理中 1 · 已停止 1', appearance: 'is-progress' },
-      { routes: ['cancelled', 'succeeded'], label: '已停止 1', appearance: 'is-stopped' },
-      { routes: ['steer-cancelled'], label: '已插话', appearance: 'is-confirmed' },
-      { routes: ['unknown-cancelled'], label: '未确认送达', appearance: 'is-unknown' },
-      { routes: ['steer', 'failed'], label: '已插话 1 · 执行失败 1', appearance: 'is-failed' },
-      { routes: ['steer', 'cancelled'], label: '已插话 1 · 已停止 1', appearance: 'is-stopped' },
-      { routes: ['steer-failed', 'failed-before-run', 'cancelled-before-run', 'unknown'], label: '已插话 1 · 未确认送达 1 · 已停止 1 · 执行失败 1', appearance: 'is-unknown' },
-      { routes: ['steer', 'running', 'waiting', 'failed'], label: '已插话 1 · 处理中 1 · 待处理 1 · 执行失败 1', appearance: 'is-failed' },
-      { routes: ['running', 'waiting'], label: '处理中 1 · 待处理 1', appearance: 'is-progress' },
-      { routes: ['steer', 'running', 'waiting', 'unknown'], label: '已插话 1 · 处理中 1 · 待处理 1 · 未确认送达 1', appearance: 'is-unknown' },
-      { routes: ['waiting', 'waiting'], label: '待处理 2', appearance: 'is-queued' }
+      { routes: ['cancelled', 'cancelled'], label: null },
+      { routes: ['cancelled', 'failed'], label: null },
+      { routes: ['cancelled', 'running'], label: null },
+      { routes: ['cancelled', 'succeeded'], label: null },
+      { routes: ['steer-cancelled'], label: '插话 · 爱丽丝已收到', appearance: 'is-confirmed' },
+      { routes: ['unknown-cancelled'], label: '插话 · 未确认送达', appearance: 'is-unknown' },
+      { routes: ['unknown-noncodex'], label: '插话 · 未确认送达', appearance: 'is-unknown' },
+      { routes: ['steer', 'failed'], label: '插话 · 已收到 1', appearance: 'is-confirmed' },
+      { routes: ['steer', 'cancelled'], label: '插话 · 已收到 1', appearance: 'is-confirmed' },
+      { routes: ['steer-failed', 'failed-before-run', 'cancelled-before-run', 'unknown'], label: '插话 · 已收到 1 · 未确认送达 1 · 已停止 1 · 执行失败 1', appearance: 'is-unknown' },
+      { routes: ['steer', 'running', 'waiting', 'failed'], label: '插话 · 已收到 1 · 排队中 1', appearance: 'is-queued' },
+      { routes: ['running', 'waiting'], label: '排队中 1', appearance: 'is-queued' },
+      { routes: ['steer', 'running', 'waiting', 'unknown'], label: '插话 · 已收到 1 · 排队中 1 · 未确认送达 1', appearance: 'is-unknown' },
+      { routes: ['waiting', 'waiting'], label: '排队中 2', appearance: 'is-queued' }
     ]
     const receiptSelector = '[data-message-id="receipt-example"] .user-message-receipt'
     const receiptGeometry = () => browser.evaluate(`(() => {
@@ -138,7 +140,8 @@ test('production composer uses Core per-target eligibility and honest receipt la
         for (const { routes, label, appearance } of receiptCases) {
           await browser.evaluate(`__presence.showReceiptCase(${JSON.stringify(routes)})`)
           await browser.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 10, y: 10 }); await pause(180)
-          assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').textContent`), label)
+          assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}')?.textContent ?? null`), label, routes.join(','))
+          if (label === null) continue
           assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').classList.contains('${appearance}')`), true, 'the icon reflects all targets')
           assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').getAttribute('aria-label')`), `查看消息处理状态，${label}`)
           if (appearance === 'is-stopped') {
@@ -149,7 +152,7 @@ test('production composer uses Core per-target eligibility and honest receipt la
           }
           const before = await receiptGeometry()
           assert.equal(before.copyOpacity, '0')
-          assert.equal(before.receiptOpacity, routes.every(route => route === 'running') ? '0' : '1')
+          assert.equal(before.receiptOpacity, '1')
           assert.ok(before.copyRight < before.left, 'copy precedes the unified receipt')
           assert.ok(Math.abs(before.right - before.bubbleRight) < 1, 'receipt owns the bubble right edge')
           assert.equal(await browser.evaluate('document.documentElement.scrollWidth > innerWidth'), false)
@@ -162,9 +165,18 @@ test('production composer uses Core per-target eligibility and honest receipt la
           if (routes[0] === 'cancelled') await browser.capture(join(root, `receipt-stopped-${routes.join('-')}-${theme}-${width}.png`))
           await click(receiptSelector); await pause(60)
           const detail = await browser.evaluate('document.querySelector(".user-message-receipt-menu").innerText')
-          if (routes.some(route => ['steer', 'steer-failed', 'steer-cancelled'].includes(route))) assert.match(detail, /运行时已接收/)
-          if (routes.some(route => route === 'steer-pending' || route === 'steer-sending')) assert.match(detail, /插话中/)
-          if (routes.includes('running')) assert.match(detail, /处理中/)
+          if (routes.includes('unknown-cancelled') || routes.includes('unknown-noncodex')) {
+            const buttons = await browser.evaluate('Array.from(document.querySelectorAll(".user-message-receipt-recipient button"), el => el.textContent)')
+            assert.deepEqual(buttons, routes.includes('unknown-cancelled') ? ['核对结果', '查看执行'] : ['查看执行'])
+            if (routes.includes('unknown-cancelled')) {
+              await click('.user-message-receipt-recipient button')
+              await browser.wait('document.querySelector(".user-message-receipt-menu [role=status]")?.textContent === "暂未确认送达"')
+            }
+          }
+          if (routes.some(route => ['steer', 'steer-failed', 'steer-cancelled'].includes(route))) assert.match(detail, /已收到/)
+          if (routes.includes('steer-pending')) assert.match(detail, /待发送/)
+          if (routes.includes('steer-sending')) assert.match(detail, /发送中/)
+          if (routes.includes('running')) assert.match(detail, /执行中/)
           if (routes.some(route => route.startsWith('unknown'))) assert.match(detail, /未确认送达/)
           if (routes.some(route => route.startsWith('failed'))) assert.match(detail, /执行失败/)
           if (routes.some(route => route.startsWith('cancelled'))) assert.match(detail, /已停止/)
@@ -186,14 +198,16 @@ test('production composer uses Core per-target eligibility and honest receipt la
     await browser.key('Enter'); await browser.wait('!!document.querySelector(".user-message-receipt-menu")'); await closeMenu()
     await click('[data-message-id=receipt-example] .message-copy-button')
     await browser.wait('document.querySelector("[data-message-id=receipt-example] .message-copy-button").getAttribute("aria-label") === "已复制这条消息"')
-    assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').textContent`), '已插话 1 · 处理中 1')
+    assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').textContent`), '插话 · 已收到 1')
     await browser.evaluate('__presence.showReceiptCase(["steer", "running"], true)'); await pause(120)
-    assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').textContent`), '已插话 1')
+    assert.equal(await browser.evaluate(`document.querySelector('${receiptSelector}').textContent`), '插话 · 已收到 1')
     await browser.evaluate('__presence.showReceiptCase(["running"], true)'); await pause(120)
     assert.equal(await browser.evaluate(`!!document.querySelector('${receiptSelector}')`), false)
-    await browser.evaluate('__presence.setLanguage("en"); __presence.showReceiptCase(["cancelled", "failed"])')
+    await browser.evaluate('__presence.setLanguage("en"); __presence.showReceiptCase(["steer-sending", "steer-sending"])')
+    await browser.wait(`document.querySelector('${receiptSelector}')?.textContent === 'Steer · Sending 2'`)
+    await browser.evaluate('__presence.showReceiptCase(["cancelled-before-run", "failed-before-run"])')
     await browser.wait(`document.querySelector('${receiptSelector}')?.textContent === 'Stopped 1 · Execution failed 1'`)
-    await browser.evaluate('__presence.showReceiptCase(["cancelled"])')
+    await browser.evaluate('__presence.showReceiptCase(["cancelled-before-run"])')
     await browser.wait(`document.querySelector('${receiptSelector}')?.textContent === 'Stopped'`)
     await browser.evaluate('__presence.setLanguage("zh-CN")')
     await browser.wait(`document.querySelector('${receiptSelector}')?.textContent === '已停止'`)
@@ -221,13 +235,19 @@ test('production composer uses Core per-target eligibility and honest receipt la
     assert.equal(await browser.evaluate(`document.querySelector('${row} [role=region]').scrollTop > 0`), true)
     await browser.key('Escape')
     assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('${row} > summary')`), true)
-    for (const status of ['sending', 'accepted', 'delivery_unknown', 'not_accepted', 'queued']) {
+    for (const [status, word, exceptional] of [
+      ['pending', '待发送', false], ['sending', '发送中', false], ['accepted', '已收到', false],
+      ['delivery_unknown', '未确认送达', true], ['not_accepted', '未送达', true], ['queued', '已转为排队', true]
+    ]) {
       await browser.evaluate(`__presence.updateSteerTimeline('${status}')`); await pause(80)
+      const statusTitle = await browser.evaluate(`document.querySelector('${row} .tool-call-title').textContent`)
+      assert.ok(statusTitle.startsWith(exceptional ? `插话 · ${word} · 采用这条更正。` : '插话 · 采用这条更正。'))
+      assert.equal(await browser.evaluate(`document.querySelector('${row} .tool-call-state').title`), word)
       assert.equal(await browser.evaluate(`document.querySelector('${row}') === window.savedInputRow`), true)
       assert.equal(await browser.evaluate(`document.querySelector('${row}').open`), true)
       assert.equal(await browser.evaluate('document.querySelectorAll(".tool-group-summary").length'), 2)
     }
-    assert.match(await browser.evaluate(`document.querySelector('${row} > summary').textContent`), /已转排队/)
+    assert.match(await browser.evaluate(`document.querySelector('${row} > summary').textContent`), /已转为排队/)
     for (const theme of ['day', 'night']) {
       await browser.evaluate(`__presence.setTheme('${theme}')`)
       await browser.send('Emulation.setDeviceMetricsOverride', { width: 1040, height: 760, deviceScaleFactor: 1, mobile: false }); await pause(80)

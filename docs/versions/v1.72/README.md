@@ -11,6 +11,13 @@ last_updated: 2026-11-22
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 公开会话回执与执行状态（2026-11-22）
+
+回执展示排队、插话送达或执行行未承接的异常。执行行与执行卡共用状态和原因，
+只在有用户待办时提示“需要你处理”。插话核对资格由 Core 按原执行轮投影。
+见 [R5 实施提案](status-convergence-proposal.md)、[版本决定 D93](decisions.md#v1-72-d93)、
+[Message Delivery v20](../../contracts/message-delivery-v20.md) 和 [Run Process Detail Surface v60](../../contracts/run-process-detail-surface-v60.md)。
+
 ## 侧栏补显当前会话
 
 从归档、搜索、历史记录或启动恢复打开窗口外的普通会话时，侧栏在所属组末尾补显并就近定位一次。
