@@ -375,6 +375,7 @@
       "warningsAsErrors": true
     },
     "dmg": {
+      "writeUpdateInfo": false,
       "title": "Rovai AI ${version}",
       "window": {
         "width": 540,
