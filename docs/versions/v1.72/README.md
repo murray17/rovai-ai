@@ -11,6 +11,11 @@ last_updated: 2026-11-23
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Codex 原生问卷（2026-11-23）
+
+普通队员的 Codex Host 启动时关闭同步和异步原生问卷。既有会话可沿原 Thread 继续，
+版本边界和升级验收见[兼容性记录](../../runtime-compatibility.md#2026-11-23-codex-原生问卷)，启动合同见 [Runtime Launch v98](../../contracts/runtime-launch-and-verification-v98.md)。
+
 ## 公屏发送与执行台（2026-11-23）
 
 公开 Thread 的 Charter 从发送场景中删去 `status`，并说明用户可在执行台实时查看 Runtime 输出。新会话按 [Charter revision 27](model-context-change-charter-console-visibility.md) 接收该文案。

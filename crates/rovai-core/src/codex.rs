@@ -50,6 +50,8 @@ use crate::{
     },
 };
 
+const NATIVE_QUESTIONNAIRE_OVERRIDE: &str = "tools.experimental_request_user_input.enabled=false";
+
 #[derive(Debug)]
 pub enum CodexIncoming {
     Message {
@@ -423,6 +425,8 @@ impl CodexHost {
                 "memories.generate_memories=false",
                 "-c",
                 "memories.use_memories=false",
+                "-c",
+                NATIVE_QUESTIONNAIRE_OVERRIDE,
                 "app-server",
                 "--listen",
                 "stdio://",
@@ -1761,9 +1765,9 @@ pub(crate) fn runtime_compatibility_digest(
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
     canonical_json_digest(&json!({
         "schemaVersion": 3,
-        // Retire Hosts launched without this policy, without rotating the
-        // independent Native Session binding or discarding its history.
+        // These policies belong to the Host. A replacement resumes the same Native Session.
         "nativeAutoMemoryPolicy": "disabled-v1",
+        "nativeQuestionnairePolicy": NATIVE_QUESTIONNAIRE_OVERRIDE,
         "adapterKind": frozen_runtime.adapter_kind,
         // The full Run digest includes model, reasoning and Fast audit data.
         // Codex receives those on thread/turn requests, not Host startup.
@@ -2527,19 +2531,22 @@ mod tests {
         let frozen = process_compatibility_runtime(&executable);
         let first_digest =
             runtime_compatibility_digest(&frozen, &root, &attachment_authorization).unwrap();
-        let legacy_digest = canonical_json_digest(&json!({
+        let mut host_inputs = json!({
             "schemaVersion": 3,
+            "nativeAutoMemoryPolicy": "disabled-v1",
             "adapterKind": frozen.adapter_kind,
             "hostConfigDigest": frozen.host_config_digest,
             "executionRoot": root.canonicalize().unwrap(),
             "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
             "attachmentOutputRoot": attachment_authorization.output_root,
-        }))
-        .unwrap();
+        });
+        let legacy_digest = canonical_json_digest(&host_inputs).unwrap();
         assert_ne!(
             first_digest, legacy_digest,
-            "pre-policy Hosts cannot be reused"
+            "a Host launched with native questionnaires cannot be reused"
         );
+        host_inputs["nativeQuestionnairePolicy"] = json!(NATIVE_QUESTIONNAIRE_OVERRIDE);
+        assert_eq!(first_digest, canonical_json_digest(&host_inputs).unwrap());
         let mut next = frozen.clone();
         next.model.model_id = "gpt-next".to_string();
         next.model.options = json!({"reasoning_effort": "high", "serviceTier": "default"});
@@ -2727,7 +2734,14 @@ mod tests {
             make_test_executable(&executable, &r#"#!/usr/bin/python3
 import json, os, sys
 root = os.path.dirname(__file__)
-assert sys.argv[1:] == ['-c', 'allow_login_shell=false', '-c', 'features.memories=false', '-c', 'memories.generate_memories=false', '-c', 'memories.use_memories=false', 'app-server', '--listen', 'stdio://']
+assert sys.argv[1:] == [
+    '-c', 'allow_login_shell=false',
+    '-c', 'features.memories=false',
+    '-c', 'memories.generate_memories=false',
+    '-c', 'memories.use_memories=false',
+    '-c', 'tools.experimental_request_user_input.enabled=false',
+    'app-server', '--listen', 'stdio://',
+]
 credential = open(os.path.join(root, 'credentials')).read()
 turn = 0
 for line in sys.stdin:
@@ -3345,7 +3359,14 @@ root = os.path.dirname(__file__)
 scenario = '__SCENARIO__'
 with open(os.path.join(root, 'starts'), 'a') as log: log.write('start\n')
 open(os.path.join(root, 'requests'), 'a').close()
-assert sys.argv[1:] == ['-c', 'allow_login_shell=false', '-c', 'features.memories=false', '-c', 'memories.generate_memories=false', '-c', 'memories.use_memories=false', 'app-server', '--listen', 'stdio://']
+assert sys.argv[1:] == [
+    '-c', 'allow_login_shell=false',
+    '-c', 'features.memories=false',
+    '-c', 'memories.generate_memories=false',
+    '-c', 'memories.use_memories=false',
+    '-c', 'tools.experimental_request_user_input.enabled=false',
+    'app-server', '--listen', 'stdio://',
+]
 if scenario == 'memory_rejected':
     print('memory configuration rejected', file=sys.stderr, flush=True)
     sys.exit(2)

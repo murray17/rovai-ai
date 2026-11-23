@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-17
+last_updated: 2026-11-23
 ---
 
 # Runtime Catalog Boundaries
@@ -23,6 +23,9 @@ Pi 已接入 `confirm / select / input / editor` 的当前运行问答，复用 
 请求仅保存在当前 Runtime 内存。审批和问答共用展示，权限决策和原生答案仍分流；
 不引入新 Prompt、重跑或跨重启恢复。精确状态、期限和提交边界由
 [Native Interactions v1](../contracts/native-interactions-v1.md)拥有。下述问卷禁用不扩展到该 Pi 路径。
+
+Rovai 启动 Codex App-Server 时传入原生问卷开关。Codex CLI 0.163.0 起，该开关同时关闭同步和异步问卷。策略参与 Host 复用判断，
+替换进程后通过原 Thread ID 续接。配置和恢复时的验收口径见 [Runtime Launch v98](../contracts/runtime-launch-and-verification-v98.md)。
 
 问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
 提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
