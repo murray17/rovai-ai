@@ -4,7 +4,7 @@ contract: native-session-bootstrap-v6
 status: accepted
 version: 6
 source_version: v1.72
-last_updated: 2026-11-23
+last_updated: 2026-11-02
 ---
 
 # Native Session Bootstrap v6
@@ -40,7 +40,7 @@ v6 stable-component digest 包含指引；恢复从不可变 Thread 启动材料
 
 Bootstrap contract `native_session_bootstrap_v6` / formatter **6**。Migration 213 保留旧 v3–v5 Evidence；
 旧 v5 和冻结 claim 恢复继续成立，v5 stable digest 计算不变，旧 Evidence 不倒填 Team 指引。
-现行 Session Charter 为 **27**。公开 Thread 的发送说明加入执行台实时可见性，完整措辞见[变更对照](../versions/v1.72/model-context-change-charter-console-visibility.md)。Binding Compatibility 为 **16**。动态输入的版本配对见
+现行 Session Charter 为 **27**，Binding Compatibility 为 **16**。动态输入的版本配对见
 [ContextManifest v45](context-manifest-evidence-v45.md)。
 
 ## Hermes 的 user 层投递例外
