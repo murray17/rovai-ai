@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-23
 ---
 
 # Built-in Tool Runtime Architecture
@@ -473,7 +473,7 @@ Codex 只使用 completed-turn items，Claude 只使用 matched success result�
 Core 在 successful terminal transaction 检查该 Run 的任意 accepted `thread.message.send`。有 send 则不
 发布；无 send 且 candidate 合格时写一条 recipient-free ThreadMessage，并且不创建 Delivery。
 候选缺失、超出 32 KiB 或 provenance 不匹配只改变 recovery decision，不改变 AgentRun success。
-该 safety net 不判断进度/最终意图，也不解除 Agent 在需要公开 answer/result/status/summary 时显式
+该 safety net 不判断进度/最终意图，也不解除 Agent 在需要公开 answer/result/summary 时显式
 `rovai send` 的 Charter 义务。
 
 ### Dispatch 前 Runtime drift 与 rebind
@@ -505,8 +505,8 @@ Session Charter 只说明：
 - 本地 `rovai` CLI 的稳定入口；用根帮助发现命令，用具体 operation 的精确 `--help` 查询 syntax，
   复用当前上下文中的 help，不在 Charter 维护业务命令枚举或介绍内部 Session 生命周期；
 - `thread.message.send` 使用当前 Run Thread，不能传入 Thread ID；
-- 对 `explicit_send_only` Runtime，narration/final response 只是私有执行证据；当前责任需要在 Thread
-  公开 answer/result/status/summary 时必须在结束前调用 `rovai send`，只有成功 send 才发布该回复；
+- 对 `explicit_send_only` Runtime，用户能在执行台实时查看 narration 和 final response，这些输出本身不进入 Thread。
+  当前责任需要在 Thread 公开 answer/result/summary 时，Agent 必须在本轮结束前成功调用 `rovai send`。
 - `rovai send` 永远发布一条公开 ThreadMessage；必须不唤醒 Agent 时使用 `--public-only`，只有当前消息产生
   新的未解决 User 决定、回答或行动，或履行其明确要求的重要结果通知时才使用 `--to-user`；
 - Agent addressing 不是 CC；acknowledgement、agreement、thanks、closure、standby、no-new-information、
@@ -538,6 +538,9 @@ Charter revision 23 按已确认的 [R3](../versions/v1.72/model-context-change-
 未知 provider 不追加。已有 Binding 从 Blob 复用冻结 Charter，不重新查询渠道，因此关闭绑定或
 从本地继续聊天不改写提示，也不触发 Session rotation。下一次正常新 Binding 才读取当前关系。
 精确文本见 [Send v27](../contracts/camp-message-send-v27.md#agent-文件引用与发送教学)。
+
+Charter revision 27 按已确认的 [R1](../versions/v1.72/model-context-change-charter-console-visibility.md)
+更新公开 Thread 的发送说明，从显式发送条件中删去 `status`，并说明用户能在执行台实时查看 Runtime 输出。
 
 Charter 不承载 Task 创建克制、字段权限、Thread-wide read、local planning/A2A、wake/send、Memory
 治理或具体 polling 操作指导；上面的等待队友回复时结束 Run 是通用停止条件。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
