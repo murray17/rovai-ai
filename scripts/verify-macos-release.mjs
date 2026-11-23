@@ -106,9 +106,11 @@ function verifyUpdateArtifacts() {
     manifestName: 'latest-mac.yml'
   })
   const zipName = basename(zipPath)
-  const zipEntry = Array.isArray(updateInfo.files)
-    ? updateInfo.files.find((entry) => entry?.url === zipName)
-    : null
+  if (!Array.isArray(updateInfo.files) || updateInfo.files.some((entry) =>
+    typeof entry?.url !== 'string' || !entry.url.endsWith('.zip'))) {
+    throw new Error('latest-mac.yml must contain only update ZIPs')
+  }
+  const zipEntry = updateInfo.files.find((entry) => entry.url === zipName)
   if (!zipEntry || typeof zipEntry.sha512 !== 'string' || zipEntry.sha512.length < 80) {
     throw new Error(`latest-mac.yml has no complete entry for ${zipName}`)
   }
@@ -253,6 +255,9 @@ try {
   const dmgPath = findDmg()
   const dmgSize = statSync(dmgPath).size
   if (dmgSize <= 0) throw new Error('DMG is empty')
+  const dmgFormat = run('/usr/bin/hdiutil', ['imageinfo', '-format', dmgPath])
+  if (dmgFormat !== 'ULMO') throw new Error(`expected ULMO release DMG, found ${dmgFormat}`)
+  report.push(`DMG format: ${dmgFormat}`)
 
   const packagedAppPath = findPackagedApp()
   const zipPath = verifyUpdateArtifacts()

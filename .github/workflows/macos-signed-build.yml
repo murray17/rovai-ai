@@ -163,15 +163,24 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: node scripts/retry-macos-build.mjs ${{ matrix.arch }}
 
-      - name: Notarize and staple release DMG
-        env:
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      - name: Compress and verify manual installer
+        id: dmg
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           DMG_PATH="dist/Rovai-AI-${VERSION}-${{ matrix.arch }}.dmg"
+          bash scripts/compress-macos-dmg.sh "$DMG_PATH"
+          printf 'path=%s\n' "$DMG_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize and staple release DMG
+        env:
+          DMG_PATH: ${{ steps.dmg.outputs.path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        shell: bash
+        run: |
+          set -euo pipefail
           test -s "$DMG_PATH"
           xcrun notarytool submit "$DMG_PATH" \
             --key "$APPLE_API_KEY" \

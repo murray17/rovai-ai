@@ -43,8 +43,10 @@ test('merges both macOS architectures with deterministic ZIP-first ordering', ()
   assert.match(mergeMacUpdateInfoYaml([updateInfo('arm64'), updateInfo('x64')]), /version: 0\.0\.2/)
 })
 
-test('merged YAML preserves release fields when read by electron-updater', () => {
-  const documents = [updateInfo('arm64'), updateInfo('x64')]
+test('electron-updater reads both ZIPs and release fields from the ZIP-only manifest', () => {
+  const documents = [updateInfo('arm64'), updateInfo('x64')].map((info) => ({
+    ...info, files: info.files.filter((file) => file.url.endsWith('.zip'))
+  }))
   const merged = mergeMacUpdateInfoDocuments(documents)
   const parsed = parseUpdateInfo(
     mergeMacUpdateInfoYaml(documents),
@@ -54,6 +56,9 @@ test('merged YAML preserves release fields when read by electron-updater', () =>
 
   // Older clients only accept a string date, so the published manifest must retain its type.
   assert.deepEqual(parsed, merged)
+  assert.deepEqual(parsed.files.map((file) => file.url), [
+    'Rovai-AI-0.0.2-x64.zip', 'Rovai-AI-0.0.2-arm64.zip'
+  ])
 })
 
 test('rejects version mismatches', () => {

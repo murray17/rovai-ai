@@ -125,11 +125,20 @@ test('release workflow requires a pinned Developer ID certificate and notarizati
   assert.match(workflow, /vars\.MAC_RELEASE_CERT_SHA256/)
   assert.match(workflow, /vars\.MAC_RELEASE_TEAM_ID/)
   assert.match(workflow, /secrets\.APPLE_API_KEY_BASE64/)
-  assert.match(workflow, /xcrun notarytool submit/)
-  assert.ok(workflow.includes('node scripts/retry-macos-build.mjs ${{ matrix.arch }}'))
-  assert.match(workflow, /node scripts\/retry-macos-ticket\.mjs staple "\$DMG_PATH"/)
+  const releaseSteps = [
+    'node scripts/retry-macos-build.mjs ${{ matrix.arch }}',
+    'bash scripts/compress-macos-dmg.sh "$DMG_PATH"',
+    'xcrun notarytool submit "$DMG_PATH"',
+    'node scripts/retry-macos-ticket.mjs staple "$DMG_PATH"',
+    'node scripts/verify-macos-release.mjs ${{ matrix.arch }}'
+  ]
+  let previous = -1
+  for (const command of releaseSteps) {
+    const index = workflow.indexOf(command)
+    assert.ok(index > previous, `missing or out-of-order release step: ${command}`)
+    previous = index
+  }
   assert.doesNotMatch(workflow, /add-trusted-cert/)
-  assert.match(workflow, /node scripts\/verify-macos-release\.mjs \$\{\{ matrix\.arch \}\}/)
   assert.match(verifier, /macos-signing-policy\.mjs/)
   for (const target of ['appPath', 'dmgPath', 'zipAppPath']) {
     assert.ok(verifier.includes(`runMacosTicket('validate', ${target}, { cwd: root })`))

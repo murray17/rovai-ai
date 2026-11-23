@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-11-02
+last_updated: 2026-11-23
 ---
 
 # macOS 构建、签名与打包
@@ -103,6 +103,10 @@ pnpm dist:mac
 `Rovai-AI-<version>-<arch>` 文件名；文件名由 `package.json#build.mac.artifactName` 决定，DMG
 内部仍是 `Rovai AI.app`。
 
+正式 arm64 和 x64 手动安装镜像使用 ULMO（LZMA）压缩。新安装、手动下载和需要手动迁移
+签名的用户会少下载数据。应用内升级下载各架构的 ZIP。`build.dmg.writeUpdateInfo` 设为
+`false`，让 electron-builder 仅为 ZIP 写入 macOS 更新清单，省去 DMG blockmap。
+
 ## 主动检查更新发布集合
 
 正式打包 App 在首个主窗口加载完成 5 秒后主动检查，之后在每轮完成 6 小时后再检查。Main 通过打包进
@@ -173,7 +177,7 @@ latest-mac.yml
 
 `.github/workflows/macos-signed-build.yml` 分架构构建并验证后，生成一个名为
 `rovai-macos-signed` 的组合 artifact。它的 `latest-mac.yml` 由
-`scripts/merge-macos-update-info.mjs` 合并，必须同时包含 arm64 与 x64 ZIP；发布者只能上传这份
+`scripts/merge-macos-update-info.mjs` 合并，只包含 arm64 与 x64 的更新 ZIP。发布者只能上传这份
 组合清单，不能任选一个架构构建出的单架构 `latest-mac.yml`。少任一 ZIP 或清单时，另一架构可能
 拿到错误更新包，因此发布必须 fail closed。每个架构的 `scripts/verify-macos-release.mjs` 还必须验证
 清单日志与源 Markdown 完全相同；合并器拒绝两个架构之间任何稳定 Release 元数据差异。
@@ -209,10 +213,18 @@ codesign --verify --strict \
 ```
 
 仓库签名 workflow 与本地安装入口相互独立：它从受保护的 `release-signing` 环境导入 Developer ID
-Application 证书，校验 SHA-256 指纹和 Team ID，使用现有 Hardened Runtime entitlements，分别公证并
-贴票 App 与 DMG。每个架构的 verifier 检查 Apple Developer ID 签名链、Team ID、designated requirement、
+Application 证书，校验 SHA-256 指纹和 Team ID，使用现有 Hardened Runtime entitlements。electron-builder
+完成 App 签名、公证及贴票后，workflow 调用 [镜像转换脚本](../../scripts/compress-macos-dmg.sh)，
+在原文件所在卷生成 ULMO 临时镜像。脚本验证镜像格式、完整性和转换前后解压整盘的 SHA-256，再原子替换
+DMG。整盘校验覆盖已签名的 App、Finder 窗口布局、背景图和 Applications 链接。
+随后 workflow 把最终 DMG 提交 Apple 公证并贴票。发布文件的下载校验值取自贴票后的最终文件。
+每个架构的 verifier 检查 ULMO 格式、Apple Developer ID 签名链、Team ID、designated requirement、
 App/Host/CLI 架构、App/DMG 票据和 Gatekeeper 准入；任何一项失败都不得发布。本地 daily 命令不得
 调用或放宽这两个 Release 入口。证书、密码和公证 API Key 不得写入仓库。
+
+本地可对 `pnpm dist:mac` 生成的 DMG 副本运行 `bash scripts/compress-macos-dmg.sh "<副本路径>"`。
+首次发布 ULMO 前，在 Intel Mac 或 macOS 14 上分别记录原包与候选包的首次校验挂载时间及复制 App
+到空目录的耗时，并检查复制后的 App 签名。LZMA 解压会增加安装时的 CPU 开销。
 
 DMG 贴票和 verifier 的 App、DMG、更新 ZIP 票据验证使用同一个有限重试入口。仅在
 Apple `NSURLErrorDomain` / `kCFErrorDomainCFNetwork` 明确报告超时、DNS、连接失败或
