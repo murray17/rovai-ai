@@ -1,41 +1,31 @@
-# Rovai AI v0.5.15
+# Rovai AI v0.5.16
 
 <!-- lang:zh-CN -->
 
-本次更新支持跨会话搜索公屏消息、归档会话与使命，以及编辑和删除已发送的消息。继续执行、会话读取和失败重试也有调整。
+这版缩小了 macOS 手动安装包，并加入后续版本的增量下载支持。公屏执行状态、侧栏和文件变更预览也有调整。
 
-感谢 @arschlochnop 在 Issue #1042 中提出会话归档和跨会话消息搜索的建议。
-
-- 【功能】**侧栏搜索支持查找会话、使命和公屏消息。** 桌面端和网页版均可使用。支持按标题、项目名、使命编号或消息正文查找，点击消息结果可跳到原文。也可用 `⌘K` / `Ctrl+K` 打开搜索。
-- 【功能】**支持归档会话和使命。** 归档后会停止相关执行，并从侧栏或使命列表中收起，消息、附件和草稿可在恢复后继续查看。
-- 【功能】**新增「设置 → 归档」管理页。** 可按项目筛选，按标题或会话 ID 查找，支持恢复或删除。刚归档时可以直接撤销，也可以点「查看」定位到对应记录。
-- 【功能】**已发送的消息可以原地编辑。** 可修改自己发到公屏上的正文、队员提及和附件，保存后显示「已编辑」。正在处理旧内容的相关执行会停止，修改后的消息重新排队。
-- 【功能】**支持删除自己和队员发到公屏上的消息。** 删除后，后续回复仍可查看，引用位置会显示「原消息已删除」。
-- 【交互】**侧栏会显示并定位当前会话。** 从搜索打开旧会话或恢复上次打开的会话时，即使它还没出现在当前列表里，侧栏也会补上该条目，并在需要时滚动到可见位置。
-- 【交互】**继续执行时按消息顺序排队。** 停止或失败后点击继续，原消息会回到对应队员的队列。已经在等待的同一条消息会复用原有排队项。
-- 【修复】**收到新回复时，仍可完成会话操作。** 修复确认删除、修改普通会话名称或更换队长期间，队员的新回复导致提交失败的问题。
-- 【修复】**改善会话读取失败后的恢复。** 会话刷新失败会自动重试，持续失败时可手动重试。网页版断线恢复后，如果上传文件需要重新选择，会在页面上给出提示。
-- 【性能】**减少长会话和执行详情的读取开销。** 执行卡片优先使用已加载的消息，需要时再读取更早的来源内容。
-- 【修复】**修复队员查找历史消息时的漏检。** 当前会话和跨会话的查找都按连续原文匹配，忽略英文大小写。
-- 【界面】**调整设置侧栏、操作提示和提交按钮。** 设置分类可独立滚动，操作提示可手动关闭。保存、删除等按钮在等待提交结果时保持原位和尺寸，减少界面跳动。
+- 【性能】**缩小 macOS 手动安装包。** 用 v0.5.15 的安装包重新压缩实测，Apple 芯片版约小 26%，Intel 版约小 21%。
+- 【功能】**macOS 应用内更新支持增量下载。** 从 v0.5.15 升到本版会下载整包。后续更新在本机缓存和更新索引匹配时，只下载变更部分。macOS 和 Windows 遇到异常的分段响应时，会自动改为下载整包。
+- 【交互】**统一公屏回执、执行条和执行卡的状态。** 自动恢复时显示「正在恢复」，需要审批、回答或手动处理时会说明原因。停止和失败优先在执行区显示，执行卡可查看具体原因。
+- 【功能】**插话可以查看送达进度。** 回执会区分「待发送」「发送中」「已收到」，转回队列时显示「排队中」。送达结果未确认时，符合条件的 Codex 插话可点「核对结果」。
+- 【界面】**调整侧栏搜索入口和会话高亮。** 桌面端和宽屏网页版的搜索图标移到侧栏顶部。项目展开时高亮当前会话，折叠时高亮所属项目。切到队员或团队等页面时，会保留最近选中的会话。
+- 【界面】**文件变更详情改用单行工具栏。** 窄窗口可通过文件路径搜索和切换文件，宽窗口可在左侧列表查看各文件的变更统计。差异正文直接展示，省去差异类型标签和修改编号。
+- 【交互】**简化从当前会话移出队员的流程。** 影响详情暂时读不到时，也可以确认移出。如果提交时队员名单已变化，会提示重新选择。
+- 【交互】**关闭 Codex 队员的原生问卷。** 使用 Codex CLI 0.163.0 及以上版本时，Rovai 会关闭同步和异步问卷。
+- 【交互】**简化队员的会话发送指引。** 执行过程留在执行台供实时查看，需要公开的答复、结果和总结再发到公屏。
 
 ---
 
 <!-- lang:en -->
 
-This release adds cross-conversation search for public messages, archiving for conversations and missions, and editing and deletion of sent messages. It also improves execution retries, conversation loading, and recovery after errors.
+This release reduces macOS installer downloads and adds differential downloads for future in-app updates. It also adjusts shared conversation status, the sidebar, and file change previews.
 
-Thanks to @arschlochnop for suggesting conversation archiving and cross-conversation message search in Issue #1042.
-
-- [Feature] **Find conversations, missions, and public messages from the sidebar.** On desktop and the web, search by title, project name, mission number, or message text. Open a message result to jump to the original. Use `⌘K` or `Ctrl+K` to open search.
-- [Feature] **Archive conversations and missions.** Archiving stops related executions and removes the item from the sidebar or mission list. Restore it to access its messages, attachments, and drafts.
-- [Feature] **Manage archived items in Settings → Archive.** Filter by project or search by title or conversation ID, then restore or delete an item. After archiving, use Undo or View to find the archived item.
-- [Feature] **Edit your sent messages in place.** Change the text, teammate mentions, or attachments on your public messages. Saved changes are marked Edited. Executions still processing the previous version stop, and the edited message is queued again.
-- [Feature] **Delete your own or a teammate’s public messages.** Subsequent replies stay visible, with a placeholder where they reference the deleted message.
-- [Interaction] **Show the current conversation in the sidebar.** When an older conversation opens from search or is restored at startup, the sidebar can add it to the visible list and scroll it into view.
-- [Interaction] **Resume executions in message order.** Continuing a stopped or failed execution returns its messages to the same teammate’s queue. A message that is already waiting keeps its queue entry.
-- [Fix] **Complete conversation actions when a new reply arrives.** Incoming replies no longer block a pending conversation deletion, rename, or change of team lead.
-- [Fix] **Recover from conversation loading errors.** Refresh failures retry automatically and offer a manual retry if they persist. The web app also tells you when files need to be selected again after reconnecting.
-- [Performance] **Reduce loading work for long conversations and execution details.** Execution cards reuse loaded messages and fetch older source messages only as needed.
-- [Fix] **Find previously missed messages in teammate searches.** Searches within and across conversations match contiguous text without regard to letter case.
-- [UI] **Update the Settings sidebar, notifications, and submit buttons.** Settings categories scroll independently, notifications can be dismissed, and buttons such as Save and Delete keep their size and position during submission.
+- [Performance] **Smaller macOS installers.** Recompressing the v0.5.15 DMGs reduced their download size by about 26% for Apple silicon and 21% for Intel.
+- [Feature] **Differential downloads for macOS in-app updates.** Updating from v0.5.15 downloads the full package. Future updates can download just the changed data when the cached package matches the update indexes. On macOS and Windows, an invalid partial download response triggers a full download.
+- [Interaction] **Consistent execution status in shared conversations.** Receipts, execution rows, and execution cards use the same status labels. Automatic recovery shows its progress, and actions such as approvals or questions explain what needs attention. Execution cards show the reason for a stop or failure when available.
+- [Feature] **See delivery progress for steering messages.** Receipts distinguish pending, sending, and received, and show when a message returns to the queue. If delivery is uncertain, eligible Codex messages offer a check.
+- [UI] **Updated sidebar search and selection.** Search moves to the top of the desktop and wide web sidebars. The current conversation is highlighted in expanded projects, and its project is highlighted when collapsed. Opening views such as Teammates or Teams retains the most recent conversation selection.
+- [UI] **A single-row toolbar for file change details.** In a narrow pane, select the file path to search and switch files. In a wider pane, each file's change counts appear in the sidebar. The diff opens directly without extra change-type labels or numbers.
+- [Interaction] **Simpler removal of teammates from the current conversation.** You can confirm a removal if its impact preview temporarily fails to load. If the roster has changed, Rovai asks you to select the teammate again.
+- [Interaction] **Disable native questionnaires for Codex teammates.** Rovai turns off both synchronous and asynchronous questionnaires with Codex CLI 0.163.0 and later.
+- [Interaction] **Simplified guidance for teammate messages.** The execution console shows work in progress. Teammates post answers, results, and summaries that need to be shared to the conversation.
