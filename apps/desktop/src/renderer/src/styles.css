@@ -524,7 +524,7 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
   border-radius: 7px;
 }
 .project-heading-row:hover { background: color-mix(in srgb, var(--surface-muted) 70%, transparent); }
-.project-heading-row.current-project { background: var(--surface-selected); }
+.project-heading-row[data-highlighted="true"] { background: var(--surface-selected); }
 .project-select-row {
   z-index: 1;
   display: flex;
@@ -549,6 +549,7 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 }
 .project-select-row:hover,
 .project-select-row[aria-current="true"] { color: var(--conversation-action-ink); }
+.project-select-row[aria-current="true"] { font-weight: 600; }
 .project-folder-glyph { width: 17px; height: 17px; flex: 0 0 17px; overflow: visible; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
 .project-folder-glyph .folder-fill { fill: color-mix(in srgb, var(--surface-selected) 70%, transparent); }
 .project-folder-open { display: none; }
@@ -8830,7 +8831,7 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
   :where(
     .rail-button[aria-current="page"],
     .camp-nav-row.selected,
-    .project-heading-row.current-project,
+    .project-heading-row[data-highlighted="true"],
     .command-palette-item.active,
     [role="option"][aria-selected="true"]
   ) {

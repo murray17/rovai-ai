@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-11-22
+last_updated: 2026-11-23
 ---
 
 # App Shell 与统一侧栏
@@ -36,8 +36,10 @@ last_updated: 2026-11-22
 
 普通侧栏依次显示置顶内容和 Project。每个 Project 行负责展开/折叠，不显示独立折叠图标；
 右侧保留沿用 New Chat 的笔记本与笔图标及三点菜单；两者默认隐藏，悬浮、键盘可见焦点或菜单打开时显示，
-当前 Project 也遵循此规则。Projects 分区的添加目录 `＋` 保留。标题与“查看更多 / 收起”不显示 Thread 数量。当前 Project
-使用中性文字与既有选择底色。选中 Thread 保留 `--surface-selected`，移除左侧竖线；侧栏 `--rail` 底色不变。
+当前 Project 也遵循此规则。Projects 分区的添加目录 `＋` 保留。标题与“查看更多 / 收起”不显示 Thread 数量。
+Desktop 与宽屏 Web 以中性文字、字重和文件夹标识当前新建对话的目标 Project。整行选中底色（`--surface-selected`）优先跟随所选普通会话：
+分组展开时只给会话行；折叠后由所属项目行承接，读屏可取得隐藏会话的标题；再次展开即交还会话行。
+单独置顶的会话始终由置顶行承接。没有可呈现的所选会话时，由当前目标 Project 承接。手机抽屉沿用透明项目行。
 未读提示点使用 `--conversation-unread`，表达未查看回复或用户显式保留的未读提醒。
 Hover 不能是发现行操作的唯一方式。
 

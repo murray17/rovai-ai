@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-22
+last_updated: 2026-11-23
 ---
 
 # v1.72 实施与验收
@@ -23,6 +23,7 @@ last_updated: 2026-11-22
 - Web 夹具覆盖离开与后退、分页恰好显示所有会话、单独置顶后保持原分组折叠、等待按 ID 读取时的手动滚动和异地归档。
   390×844 抽屉首次打开时目标行完整可见，第二次打开恢复手动停留的 240px。
 - 类型检查、Desktop/Web 构建、默认测试、桌面导航与启动夹具以及通用文档门禁通过。
+- 侧栏选中底色的 Electron 回归覆盖实际会话行、折叠后的所属项目、独立置顶行和高对比度轮廓；另选新对话的目标项目时保留阅读位置。
 
 ## 操作反馈
 
