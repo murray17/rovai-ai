@@ -1,10 +1,24 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-15
+last_updated: 2026-11-23
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-23 Codex 原生问卷
+
+Codex CLI 0.163.0 起，原生提问开关同时控制同步与异步工具。0.162.1 的异步工具仍按模型能力注册。
+版本边界见[上游修复](https://github.com/openai/codex/pull/51908)和[发布记录](https://github.com/openai/codex/releases/tag/rust-v0.163.0)。
+
+macOS 上的 0.170.0 和 0.171.0-alpha.13 均通过回环模型端点验证。使用各自支持异步问卷的
+`gpt-6.1-sol` 和 `gpt-6.2-sol` 模型配置，对照组成功发出两种提问。关闭后，在新建和恢复的
+Thread 中共 16 次强制调用均返回 `unsupported call`，同步问卷请求和异步问卷事件均为零。
+
+使用 Codex CLI 0.170.0、`gpt-6.2-sol` 和本机脚本化模型端点，在隔离数据目录通过 Rovai Core 发送普通队员消息。
+用户和项目配置均显式启用原生问卷。旧 Core 的模型请求列出两项工具。升级 Core 后，原 Thread 和 Binding 代次保持一致，
+新 Host 恢复历史并复用于下一轮。新建 Thread 的工具列表省略两项问卷。冷恢复、同进程续聊和新建 Thread 各强制调用两种工具，
+6 次均返回 `unsupported call`，问卷事件与审批均为零。三轮均成功完成，模型仍可见 `send_message_to_user_async`。
 
 ## 2026-11-15 Goose Linux x64 Preview
 
