@@ -1,13 +1,13 @@
 import { BusyLabel } from './BusyLabel'
 import { useThreadClient } from './camp-client'
 import { FileFindChangesAdapter } from './FileFindChangesAdapter'
-import { ChangedFileSelect } from './ChangedFileSelect'
+import { ChangedFilePath, ChangedFileSelect } from './ChangedFileSelect'
 import { fileChangeFindLineId } from './file-find-changes'
 import { selectPreviewContents } from './file-preview-selection'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { AgentRunFileChangesDetailView, AgentRunFileChangesView } from '@contracts'
 import { useFilePreview, type FileChangesPreviewTabModel } from './FilePreviewContext'
-import { agentRunFileChangesSummaryLabel, agentRunFileChangeModeLabel, agentRunFileChangeKindMark, agentRunFilePathParts, agentRunFilePathIsAbsolute, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
+import { agentRunFileChangeModeLabel, agentRunFileChangeKindMark, agentRunFilePathParts, inlineDiffLines, exactMutationDiffLines } from './file-changes-presentation'
 import { UiText, uiAttribute } from './interface-language'
 
 type AgentRunFileChangesDetailStatus = 'loading' | 'ready' | 'error'
@@ -91,10 +91,7 @@ export function AgentRunFileChangesReviewSurface({
   onRetry(): void
 }): JSX.Element {
   const root = useRef<HTMLElement>(null)
-  const selectedIndex = Math.max(0, changes.files.findIndex((file) =>
-    file.evidenceFileId === selectedEvidenceFileId
-  ))
-  const selectedFile = changes.files[selectedIndex] ?? null
+  const selectedFile = changes.files.find((file) => file.evidenceFileId === selectedEvidenceFileId) ?? changes.files[0]
   const selectedDetail = selectedFile
     ? detail?.files.find((file) => file.evidenceFileId === selectedFile.evidenceFileId) ?? null
     : null
@@ -102,43 +99,6 @@ export function AgentRunFileChangesReviewSurface({
   return (
     <section className={`agent-run-file-review${changes.files.length <= 1 ? ' has-single-file' : ''}`} aria-label={uiAttribute("File Change 详情")} ref={root}>
       <FileFindChangesAdapter root={root} detail={detail} selected={selectedFile?.evidenceFileId ?? null} select={onSelectEvidenceFileId} />
-      <header className="agent-run-file-review-header">
-        <div className="agent-run-file-review-heading">
-          <h2>File Change</h2>
-          <span>{agentRunFileChangesSummaryLabel(changes)}</span>
-        </div>
-        {changes.files.length > 1 && <div className="agent-run-file-review-navigation" aria-label={uiAttribute("切换变更文件")}>
-          <button
-            type="button"
-            aria-label={uiAttribute("上一文件")}
-            title={uiAttribute("上一文件")}
-            disabled={selectedIndex <= 0}
-            onClick={() => onSelectEvidenceFileId(
-              changes.files[selectedIndex - 1]?.evidenceFileId ?? selectedFile?.evidenceFileId ?? ''
-            )}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
-          </button>
-          <span className="agent-run-file-review-position">{selectedIndex + 1} / {changes.files.length}</span>
-          <button
-            type="button"
-            aria-label={uiAttribute("下一文件")}
-            title={uiAttribute("下一文件")}
-            disabled={selectedIndex < 0 || selectedIndex >= changes.files.length - 1}
-            onClick={() => onSelectEvidenceFileId(
-              changes.files[selectedIndex + 1]?.evidenceFileId ?? selectedFile?.evidenceFileId ?? ''
-            )}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg>
-          </button>
-        </div>}
-      </header>
-
-      {changes.files.length > 1 && <div className="agent-run-file-review-file-picker">
-        <ChangedFileSelect key={`${changes.agentRunId}:${changes.executionEpoch}`}
-          files={changes.files} value={selectedFile?.evidenceFileId ?? ''} onChange={onSelectEvidenceFileId} />
-      </div>}
-
       <div className="agent-run-file-review-content">
         <aside className="agent-run-file-review-sidebar" aria-label={uiAttribute("变更文件")}>
           <div className="agent-run-file-review-file-list">
@@ -160,15 +120,13 @@ export function AgentRunFileChangesReviewSurface({
                     <strong>{pathParts.basename}</strong>
                     <small>{pathParts.directory}</small>
                   </span>
-                  <span className="agent-run-file-review-file-aside" aria-hidden="true">
+                  <span className="agent-run-file-review-file-aside">
                     <span>
                       {file.additions !== undefined && file.deletions !== undefined
                         ? <><i className="addition">+{file.additions}</i><i className="deletion">−{file.deletions}</i></>
                         : uiAttribute("{0} 次", String(file.operationCount))}
                     </span>
-                    <small className={agentRunFilePathIsAbsolute(file.path) ? 'is-outside' : undefined}>
-                      {agentRunFileChangeModeLabel(file.presentationKind)}
-                    </small>
+                    {file.presentationKind !== 'full_net_diff' && <small>{agentRunFileChangeModeLabel(file.presentationKind)}</small>}
                   </span>
                 </button>
               )
@@ -182,12 +140,20 @@ export function AgentRunFileChangesReviewSurface({
                 <header className="agent-run-file-review-pane-header">
                   <div className="agent-run-file-review-selected-path">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10l6 6v10H4Z" /><path d="M14 4v6h6" /></svg>
-                    <code title={selectedFile.path}>{selectedFile.path}</code>
+                    <ChangedFilePath path={selectedFile.path} />
                   </div>
+                  {changes.files.length > 1 && (
+                    <div className="agent-run-file-review-file-picker">
+                      <ChangedFileSelect key={`${changes.agentRunId}:${changes.executionEpoch}`}
+                        files={changes.files} value={selectedFile.evidenceFileId} onChange={onSelectEvidenceFileId} />
+                    </div>
+                  )}
                   <div className="agent-run-file-review-pane-actions">
                     <span className="agent-run-file-review-pane-meta">
-                      <small>{agentRunFileChangeModeLabel(selectedFile.presentationKind)}</small>
-                      <span aria-hidden="true">
+                      {(selectedFile.presentationKind === 'operation_history' || selectedFile.presentationKind === 'operation_only') && (
+                        <small>{agentRunFileChangeModeLabel(selectedFile.presentationKind)}</small>
+                      )}
+                      <span>
                         {selectedFile.additions !== undefined && selectedFile.deletions !== undefined
                           ? <><i className="addition">+{selectedFile.additions}</i><i className="deletion">−{selectedFile.deletions}</i></>
                           : selectedFile.operationCount === 1
@@ -198,13 +164,15 @@ export function AgentRunFileChangesReviewSurface({
                     <button
                       className="agent-run-file-review-open-current"
                       type="button"
+                      aria-label={uiAttribute("打开当前文件")}
+                      title={uiAttribute("打开当前文件")}
                       disabled={openCurrentStatus === 'opening'}
                       aria-busy={openCurrentStatus === 'opening'}
                       onClick={onOpenCurrent}
                     >
                       <BusyLabel busy={openCurrentStatus === 'opening'}>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H4v16h16v-6" /></svg>
-                        {uiAttribute("打开当前文件")}
+                        <span className="agent-run-file-review-open-label">{uiAttribute("打开当前文件")}</span>
                       </BusyLabel>
                     </button>
                   </div>
@@ -304,7 +272,7 @@ function AgentRunFileReviewBlocks({
           block={block}
           index={reviewIndex}
           fileId={file.evidenceFileId}
-          showLabel={file.presentationKind !== 'full_net_diff' || blocks.length > 1}
+          numbered={reviewableBlocks.length > 1 || file.presentationKind === 'operation_history'}
         />
       ))}
     </div>
@@ -314,13 +282,13 @@ function AgentRunFileReviewBlocks({
 function AgentRunFileReviewBlock({
   block,
   index,
-  showLabel,
+  numbered,
   fileId
 }: {
   fileId: string
   block: AgentRunFileChangesDetailView['files'][number]['blocks'][number]
   index: number
-  showLabel: boolean
+  numbered: boolean
 }): JSX.Element | null {
   const reportedMutation = block.semantics === 'reported_mutation'
   const fragmentDiff = block.semantics === 'exact_mutation' || reportedMutation
@@ -330,9 +298,9 @@ function AgentRunFileReviewBlock({
   const lines = fragmentDiff ? exactMutationDiffLines(block.diff) : inlineDiffLines(block.diff)
   return (
     <section className={`agent-run-file-review-block${fragmentDiff ? ' is-exact-mutation' : ''}`}>
-      {showLabel && (
+      {(numbered || fragmentDiff) && (
         <header>
-          <strong><UiText zh={"修改 "} />{index + 1}</strong>
+          {numbered && <strong><UiText zh={"修改 "} />{index + 1}</strong>}
           <span title={reportedMutation ? uiAttribute('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。') : undefined}>{reportedMutation ? uiAttribute('补丁片段') : fragmentDiff ? uiAttribute("精确替换 · 无行号") : uiAttribute("完整文件差异")}</span>
         </header>
       )}

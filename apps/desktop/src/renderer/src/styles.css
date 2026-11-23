@@ -3999,45 +3999,39 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 
 .workspace-grid[hidden] { display: none; }
 .agent-run-file-review { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; color: var(--evidence-ink); background: var(--file-change-surface); }
-.agent-run-file-review-header { display: grid; min-width: 0; min-height: 44px; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 13px; border-bottom: 1px solid var(--line); background: var(--file-change-surface); }
-.agent-run-file-review-heading { display: flex; min-width: 0; align-items: baseline; gap: 11px; }
-.agent-run-file-review-heading h2 { overflow: hidden; margin: 0; color: var(--ink); font-size: 12px; font-weight: 550; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.agent-run-file-review-heading > span { overflow: hidden; color: var(--evidence-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.agent-run-file-review-navigation { display: flex; align-items: center; gap: 3px; }
-.agent-run-file-review-navigation button { display: grid; width: 28px; min-height: 28px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10.5px; }
-.agent-run-file-review-navigation button:hover:not(:disabled) { color: var(--ink); background: var(--file-change-hover); }
-.agent-run-file-review-position { color: var(--muted); padding: 0 3px; font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-.agent-run-file-review-navigation svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.agent-run-file-review-navigation button:disabled { cursor: default; opacity: .4; }
-.agent-run-file-review-content { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: 245px minmax(0, 1fr); overflow: hidden; }
+.agent-run-file-review-content { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: 224px minmax(0, 1fr); overflow: hidden; }
 .agent-run-file-review-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--line); background: var(--file-change-surface); }
 .agent-run-file-review-file-list { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 9px 7px; }
-.agent-run-file-review-file { display: grid; width: 100%; min-width: 0; min-height: 64px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 4px 8px; padding: 8px; margin-bottom: 3px; border: 1px solid transparent; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
+.agent-run-file-review-file { display: grid; width: 100%; min-width: 0; min-height: 46px; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 3px 6px; padding: 6px; margin-bottom: 3px; border: 1px solid transparent; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
 .agent-run-file-review-file:hover { background: var(--file-change-hover); }
 .agent-run-file-review-file[aria-current="true"] { background: var(--file-change-selected); border-color: var(--file-change-selected-line); }
 .agent-run-file-review-kind { display: grid; grid-column: 1; grid-row: 1; border: 1px solid var(--line); width: 18px; height: 18px; place-items: center; border-radius: 4px; color: var(--evidence-muted); background: transparent; font: 500 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.agent-run-file-review-file-copy { display: grid; grid-column: 2; grid-row: 1; min-width: 0; gap: 3px; }
+.agent-run-file-review-file-copy,
+.agent-run-file-review-file-aside { display: contents; }
 .agent-run-file-review-file-copy strong,
 .agent-run-file-review-file-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-run-file-review-file-copy strong { font: 500 11.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.agent-run-file-review-file-copy small { color: var(--evidence-muted); font: 10.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.agent-run-file-review-file-aside { display: flex; grid-column: 2; grid-row: 2; justify-content: space-between; gap: 8px; color: var(--evidence-muted); white-space: nowrap; }
-.agent-run-file-review-file-aside > span { display: inline-flex; gap: 5px; font: 10.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-run-file-review-file-copy strong { grid-area: 1 / 2; font: 500 11.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-run-file-review-file-copy small { grid-area: 2 / 2 / 3 / -1; color: var(--evidence-muted); font: 10.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-run-file-review-file:has(.agent-run-file-review-file-aside small) .agent-run-file-review-file-copy small { grid-column-end: 3; }
+.agent-run-file-review-file-aside > span { display: inline-flex; grid-area: 1 / 3; justify-self: end; gap: 5px; color: var(--evidence-muted); font: 10.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .agent-run-file-review-file-aside i,
 .agent-run-file-review-pane-meta i { font-style: normal; font-variant-numeric: tabular-nums; }
-.agent-run-file-review-file-aside small { color: var(--muted); font-size: 10.5px; }
-.agent-run-file-review-file-aside small.is-outside { color: var(--muted); }
+.agent-run-file-review-file-aside small { grid-area: 2 / 3; justify-self: end; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
 .agent-run-file-review .addition { color: var(--diff-add); }
 .agent-run-file-review .deletion { color: var(--diff-remove); }
 .agent-run-file-review-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--file-change-surface); }
-.agent-run-file-review-pane-header { display: grid; min-width: 0; min-height: 67px; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 5px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
-.agent-run-file-review-pane-header > div { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.agent-run-file-review-pane-header { display: grid; min-width: 0; min-height: 40px; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 3px 10px; border-bottom: 1px solid var(--line); }
+.agent-run-file-review-selected-path,
+.agent-run-file-review-pane-actions { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .agent-run-file-review-pane-header svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; color: var(--evidence-muted); }
-.agent-run-file-review-pane-header code { overflow: hidden; color: var(--evidence-ink); font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.changed-file-inline-path { display: flex; min-width: 0; align-items: baseline; color: var(--evidence-ink); font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.changed-file-inline-path small,
+.changed-file-inline-path strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.changed-file-inline-path small { color: var(--evidence-muted); font-size: 10.5px; }
+.changed-file-inline-path strong { max-width: 100%; flex: none; font-weight: 500; }
 .agent-run-file-review-pane-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .agent-run-file-review-pane-meta > small { color: var(--evidence-muted); font-size: 10.5px; font-weight: 400; white-space: nowrap; }
 .agent-run-file-review-pane-meta > span { display: inline-flex; gap: 6px; color: var(--evidence-muted); font: 10.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-.agent-run-file-review-pane-actions { justify-content: space-between; flex-wrap: wrap; }
 .agent-run-file-review-open-current { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 0 5px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 10.5px; font-weight: 400; white-space: nowrap; cursor: pointer; }
 .agent-run-file-review-open-current svg { width: 12px; height: 12px; flex-basis: 12px; }
 .agent-run-file-review-open-current:hover { color: var(--ink); background: var(--file-change-hover); }
@@ -4049,7 +4043,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .agent-run-file-review-truth-note button { min-height: 26px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: transparent; cursor: pointer; font: inherit; }
 .agent-run-file-review-truth-note button:hover { background: var(--file-change-hover); }
 .agent-run-file-review-scroll { min-width: 0; min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; background: var(--file-change-surface); }
-.agent-run-file-review-blocks { display: grid; min-width: max-content; width: 100%; gap: 16px; padding: 8px 0 28px; }
+.agent-run-file-review-blocks { display: grid; min-width: max-content; width: 100%; gap: 16px; padding: 0 0 28px; }
 .agent-run-file-review-block > header { display: flex; min-width: 0; min-height: 32px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--evidence-muted); background: var(--file-change-hunk); }
 .agent-run-file-review-block:first-child > header { border-top: 0; }
 .agent-run-file-review-block > header strong { color: var(--evidence-ink); font-size: 11px; font-weight: 500; }
@@ -4083,8 +4077,8 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .agent-run-file-review-state button:hover { background: var(--file-change-hover); }
 .agent-run-file-review.has-single-file .agent-run-file-review-content { grid-template-columns: minmax(0, 1fr); }
 .agent-run-file-review.has-single-file .agent-run-file-review-sidebar { display: none; }
-.agent-run-file-review-file-picker { display: none; min-width: 0; flex: 0 0 auto; padding: 5px 12px; border-bottom: 1px solid var(--line); }
-.changed-file-trigger { display: flex; width: 100%; min-width: 0; align-items: center; gap: 9px; padding: 5px 7px; border: 1px solid transparent; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
+.agent-run-file-review-file-picker { display: none; min-width: 0; }
+.changed-file-trigger { display: flex; max-width: 100%; min-width: 0; min-height: 29px; align-items: center; gap: 6px; padding: 3px 5px; border: 1px solid transparent; border-radius: 6px; color: var(--evidence-ink); background: transparent; text-align: left; cursor: pointer; }
 .changed-file-trigger:hover, .changed-file-trigger[data-state="open"] { background: var(--file-change-hover); }
 .changed-file-trigger svg { width: 16px; height: 16px; flex: 0 0 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .changed-file-trigger > svg:last-child { width: 13px; height: 13px; flex-basis: 13px; color: var(--muted); }
@@ -4104,9 +4098,16 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
   .agent-run-file-review-content { grid-template-columns: minmax(0, 1fr); }
   .agent-run-file-review-sidebar { display: none; }
   .agent-run-file-review-file-picker { display: flex; }
-  .agent-run-file-review-pane-header { min-height: 35px; padding: 3px 14px 7px; }
   .agent-run-file-review:not(.has-single-file) .agent-run-file-review-selected-path { display: none; }
-  .agent-run-file-review.has-single-file .agent-run-file-review-pane-header { min-height: 66px; padding-top: 9px; }
+}
+@container file-preview-pane (width > 760px) {
+  .agent-run-file-review:not(.has-single-file) .agent-run-file-review-pane-meta > span { display: none; }
+}
+@container file-preview-pane (max-width: 380px) {
+  .agent-run-file-review-pane-header { gap: 4px; padding-inline: 5px; }
+  .agent-run-file-review-pane-actions { gap: 3px; }
+  .agent-run-file-review-open-current { width: 28px; justify-content: center; padding: 0; }
+  .agent-run-file-review-open-label { display: none; }
 }
 
 .execution-disclosure { min-width: 0; max-width: 690px; color: var(--ink); }

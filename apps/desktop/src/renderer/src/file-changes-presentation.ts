@@ -68,10 +68,6 @@ export function agentRunFilePathParts(path: string): { basename: string; directo
   }
 }
 
-export function agentRunFilePathIsAbsolute(path: string): boolean {
-  return path.startsWith('/') || path.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(path)
-}
-
 type InlineDiffLine = {
   kind: 'context' | 'addition' | 'deletion' | 'hunk' | 'metadata'
   text: string
