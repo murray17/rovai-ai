@@ -37,7 +37,7 @@ jobs:
           import assert from 'node:assert/strict'
           import { createHash } from 'node:crypto'
           import { createReadStream } from 'node:fs'
-          import { mkdir, readdir, lstat } from 'node:fs/promises'
+          import { mkdir, readdir, lstat, writeFile } from 'node:fs/promises'
           import { execFile } from 'node:child_process'
           import { promisify } from 'node:util'
           import { join } from 'node:path'
@@ -58,7 +58,8 @@ jobs:
             assert.equal(run.conclusion, 'success')
             assert.equal(run.path, `.github/workflows/${paths[name]}`)
           }
-          const names = ['arm64.dmg', 'arm64.zip', 'x64.dmg', 'x64.zip', 'x64.exe'].map(suffix => `Rovai-AI-${manifest.version}-${suffix}`)
+          const prefix = `Rovai-AI-${manifest.version}`
+          const names = ['arm64.dmg', 'arm64.zip', 'arm64.zip.blockmap', 'x64.dmg', 'x64.zip', 'x64.zip.blockmap', 'x64.exe'].map(suffix => `${prefix}-${suffix}`)
           assert.deepEqual(manifest.files.map(file => file.name).sort(), names.sort())
           for (const file of manifest.files) {
             assert.match(file.sha256, /^[a-f0-9]{64}$/)
@@ -125,5 +126,27 @@ jobs:
             assert.equal(asset.size, file.size)
             assert.equal(asset.digest, `sha256:${file.sha256}`)
           }
+          // The unified checksum list also covers the small updater files and Server downloads.
+          const serverPrefix = `rovai-server-${manifest.version}-`
+          const checksumNames = [...names, `${prefix}-x64.exe.blockmap`, 'latest.yml', 'latest-mac.yml',
+            'install-server.sh', 'install-server.ps1',
+            ...['linux-x64.tar.gz', 'macos-arm64.tar.gz', 'macos-x64.tar.gz', 'windows-x64.zip'].map(suffix => serverPrefix + suffix)]
+          const checksums = checksumNames.sort().map(name => {
+            const asset = release.assets.find(item => item.name === name)
+            assert.equal(asset?.state, 'uploaded', `Missing draft asset: ${name}`)
+            assert.match(asset.digest, /^sha256:[0-9a-f]{64}$/)
+            return `${asset.digest.slice(7)}  ${name}\n`
+          }).join('')
+          const checksumName = 'SHA256SUMS.txt'
+          const checksumPath = join(root, checksumName)
+          const expectedDigest = 'sha256:' + createHash('sha256').update(checksums).digest('hex')
+          const prior = (await draft()).assets.find(asset => asset.name === checksumName)
+          if (!prior) {
+            await writeFile(checksumPath, checksums)
+            await gh(['release', 'upload', `v${manifest.version}`, checksumPath, '--repo', repo])
+          }
+          const uploaded = (await draft()).assets.find(asset => asset.name === checksumName)
+          assert.equal(uploaded?.state, 'uploaded')
+          assert.equal(uploaded.digest, expectedDigest, 'Draft SHA256SUMS.txt must match the verified assets')
           console.log('Verified Desktop binaries transferred. Draft remains unpublished; final publication checks are still required.')
           JS

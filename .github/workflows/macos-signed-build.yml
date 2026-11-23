@@ -66,6 +66,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Exercise MacUpdater with the native Electron transport
+        timeout-minutes: 3
+        env:
+          ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
+        run: |
+          fixture=$(mktemp -d "$RUNNER_TEMP/rovai-update.XXXXXX")
+          mkdir -p "$fixture/user-data/managed-skill-library"
+          pnpm exec electron --user-data-dir="$fixture/user-data" scripts/test-macos-differential-download.cjs
+
       - name: Prepare Developer ID signing and notarization
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -235,6 +244,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.zip
+            dist/*.zip.blockmap
             dist/latest-mac.yml
             dist/signing-report-*.txt
           if-no-files-found: error
@@ -279,12 +289,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/release
-          cp dist/intermediate/arm64/*.dmg dist/release/
-          cp dist/intermediate/arm64/*.zip dist/release/
-          cp dist/intermediate/arm64/signing-report-*.txt dist/release/
-          cp dist/intermediate/x64/*.dmg dist/release/
-          cp dist/intermediate/x64/*.zip dist/release/
-          cp dist/intermediate/x64/signing-report-*.txt dist/release/
+          version=$(node -p "require('./package.json').version")
+          for arch in arm64 x64; do
+            folder="dist/intermediate/$arch"
+            package="$folder/Rovai-AI-$version-$arch"
+            cp "$package.dmg" "$package.zip" "$package.zip.blockmap" "$folder/signing-report-$arch.txt" dist/release/
+          done
           node scripts/merge-macos-update-info.mjs \
             dist/release/latest-mac.yml \
             dist/intermediate/arm64/latest-mac.yml \

@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Exercise NSIS differential download and fallback on Windows
+        run: node --test scripts/lib/differential-update.test.mjs
+
       - name: Build and verify unsigned NSIS package
         run: pnpm dist:windows:x64
 

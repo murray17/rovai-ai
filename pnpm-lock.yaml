@@ -6,6 +6,7 @@ settings:
 
 patchedDependencies:
   '@larksuiteoapi/node-sdk@1.73.0': e9ce9fc20c6d676f5bcb082e3605cb40de5a872f30a477b7f1970acccc4eb376
+  electron-updater@6.8.9: 30952972f78e927bb9a80ee538636952f75e056ac6b8e008bba1cb98c4e770a1
 
 importers:
 
@@ -22,7 +23,7 @@ importers:
         version: 2.1.6-beta.1(supports-color@7.2.0)
       electron-updater:
         specifier: 6.8.9
-        version: 6.8.9(supports-color@7.2.0)
+        version: 6.8.9(patch_hash=30952972f78e927bb9a80ee538636952f75e056ac6b8e008bba1cb98c4e770a1)(supports-color@7.2.0)
       micromark-util-decode-string:
         specifier: 2.0.1
         version: 2.0.1
@@ -6771,7 +6772,7 @@ snapshots:
 
   electron-to-chromium@1.5.392: {}
 
-  electron-updater@6.8.9(supports-color@7.2.0):
+  electron-updater@6.8.9(patch_hash=30952972f78e927bb9a80ee538636952f75e056ac6b8e008bba1cb98c4e770a1)(supports-color@7.2.0):
     dependencies:
       builder-util-runtime: 9.7.0(supports-color@7.2.0)
       fs-extra: 10.1.0
