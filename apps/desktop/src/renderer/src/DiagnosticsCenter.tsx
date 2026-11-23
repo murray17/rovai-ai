@@ -525,7 +525,7 @@ export function diagnosticIssueCopy(check: DiagnosticCheck): { title: string; re
   if (check.id === 'mcp-config') return {
     title:uiAttribute("MCP 配置需要人工处理"),
     reason:uiAttribute("配置无法安全解析或不是普通文件；原始内容已保留。"),
-    impact:uiAttribute("后续新执行不会投影外部 MCP；现有 AgentRun 继续使用冻结的 Exposure Snapshot。")
+    impact:uiAttribute("新任务暂时无法使用这些外部工具，已开始的任务沿用原配置。")
   }
   if (check.id === 'database') return {
     title:uiAttribute("SQLite 数据需要人工检查"),

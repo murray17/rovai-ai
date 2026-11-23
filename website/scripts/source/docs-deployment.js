@@ -407,7 +407,7 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.rovai.server.
   topics.quickstart.sections.unshift(P('Choose the workspace first','先选择在哪份工作台开始',
     ['For work on this computer, open Desktop. To use an existing Desktop remotely, enable its Web service. For a separate host you keep running, install Server and prepare the Agent and project on that host. Then follow the same first-task steps below. Remote access does not copy Desktop data.'],
     ['在当前电脑工作就打开 Desktop；远程继续已有桌面工作，开启它的 Web 服务；使用独立主机时安装 Server，并在主机准备智能体和项目，再执行下方首次任务步骤。远程访问不会复制 Desktop 数据。']));
-  topics.quickstart.sections.push(related(['remote','server-install']));
+  topics.quickstart.sections.push(related(['collaboration','mechanism','remote','server-install']));
   topics.installation.sections.push(related(['server-install','remote']));
   topics.compatibility.sections.push(P('Server packages and Agent qualification','Server 包与智能体验收分别判断',
     ['Server 0.5.15 has public packages for macOS arm64/x64, Windows x64 and Linux x64 GNU. The Server installation guide lists prerequisites. A package being available does not certify every Agent or model on that OS; Linux Agent support retains its per-adapter preview/qualification boundary.'],

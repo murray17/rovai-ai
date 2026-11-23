@@ -84,11 +84,13 @@ describe('failureFeedback', () => {
     })
   })
 
-  it('distinguishes stopping, stale runs and a missing lead', () => {
+  it('distinguishes stopping, stale runs, a missing lead and denied member removal', () => {
     expect(failureFeedback('run.stop', normalizeFailure(rejection)).message).toBe('执行状态刚刚更新，请再点一次停止。')
     expect(failureFeedback('run.stop', normalizeFailure({ ...rejection, code: 'agent_run.turn_cancellation_in_progress' })).outcome).toBe('resolved')
     expect(failureFeedback('thread.lead.change', normalizeFailure({ ...rejection, code: 'camp.default_lead_unavailable' }), { subject: '奥黛丽' }))
       .toEqual({ message: '奥黛丽已不在当前会话，队长没有更换。', tone: 'neutral', outcome: 'gone' })
+    expect(failureFeedback('thread.member.remove', normalizeFailure({ ...rejection, code: 'command.capability_denied' })))
+      .toEqual({ message: '你没有权限从当前会话移出队员。', tone: 'danger', outcome: 'failed' })
   })
 
   it.each([

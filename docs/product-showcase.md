@@ -1,7 +1,7 @@
 ---
 document_type: user-guide
 authority: product-showcase
-last_updated: 2026-09-10
+last_updated: 2026-11-23
 ---
 
 # Rovai AI 产品展示
@@ -46,9 +46,13 @@ Rovai AI 将长期队员、共同会话、任务责任与原生 Agent 执行组�
 
 ## Skills 与 MCP
 
-Skills 将讨论、追问、评审等协作方法沉淀为可复用的工作指引。平台支持导入、启停、阅读 Skill 内容与管理生效范围。
+在 **设置 → Skills** 选择智能体，查看它已发现的技能并阅读说明。安装和管理原生技能，请使用该智能体自身的工具。
 
-![Skills 工作区展示技能目录、内容阅读及生效范围](assets/product-showcase/skills.png)
+![按智能体查看技能及内容说明](assets/product-showcase/skills.png)
+
+在 **设置 → 工具箱** 选择一项 Rovai 协作技能，再勾选使用它的队员。
+
+![在工具箱中为协作技能选择队员](assets/product-showcase/toolbox.png)
 
 MCP 为队员接入外部工具与信息来源。统一管理服务配置，并选择使用该能力的队员。
 

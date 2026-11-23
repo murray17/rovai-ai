@@ -11,6 +11,11 @@ last_updated: 2026-11-23
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 会话移出队员（2026-11-23）
+
+影响详情暂时不可用时，用户仍可确认从当前会话移出队员。提交核对用户选中时的名册与成员版本。
+行为边界见 [Camp Membership v4](../../contracts/camp-membership-v4.md)，取舍见[本版决定](decisions.md#v1-72-d95)。
+
 ## Codex 原生问卷（2026-11-23）
 
 普通队员的 Codex Host 启动时关闭同步和异步原生问卷。既有会话可沿原 Thread 继续，
@@ -972,7 +977,7 @@ User 已在消息 `23b13d59-00b5-4c6c-a6f9-992b59fd32d6` 确认 R4 并要求开�
 按 User 确认的同组件交互稿允许移出最后队员，并取消永久移除的 sole-member 阻止条件。
 保留历史、工作区、草稿与既有执行/任务收口；空会话没有隐式接收者，邀请后恢复。
 永久删除预览展示逐会话影响，失效接收者修复去掉指定长提示。
-当前合同见 [Camp Membership v3](../../contracts/camp-membership-v3.md)，验证见[实施记录](implementation-plan.md#空会话与队员移除2026-10-13)。
+当前合同见 [Camp Membership v4](../../contracts/camp-membership-v4.md)，验证见[实施记录](implementation-plan.md#空会话与队员移除2026-10-13)。
 
 ## 会话切换读取回归修复（2026-10-13）
 

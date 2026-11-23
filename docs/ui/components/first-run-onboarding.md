@@ -2,15 +2,15 @@
 document_type: ui-component-spec
 authority: first-run-onboarding-presentation
 status: accepted
-last_updated: 2026-11-09
+last_updated: 2026-11-23
 ---
 
-# 首次训练与“初次集结”
+# 首次设置与“初次集结”
 
 ## 结构
 
 Full Core authority ready 后，前三页才作为全窗口 mandatory gate 挂载；Core 检查、迁移或阻断期间只显示
-[Desktop Bootstrap Shell](bootstrap-shell.md)，不短暂显示训练页。训练页不显示普通侧栏、Thread、设置或可跳转步骤条：
+[Desktop Bootstrap Shell](bootstrap-shell.md)。首次设置的三个页面隐藏普通侧栏、会话和应用设置，只显示当前步骤。
 
 1. 欢迎页正文只有品牌、“选一位队员，开始你的第一次协作。”和“选择队员”，不显示设置之后可修改的重复说明；页头右侧提供“简体中文 / English”界面语言选择；
 2. 队员页以紧凑头像和身份文字展示当前选择，四条纯文字行选择内置队员，不展示独立半身像；
@@ -19,14 +19,14 @@ Full Core authority ready 后，前三页才作为全窗口 mandatory gate 挂�
 4. 第三页保存成功后进入普通 App Shell 中真实的 Active Quick Chat `初次集结`。
 
 页头显示只读的“1 / 3、2 / 3、3 / 3”进度及可访问的完整步骤提示，不提供跨步骤跳转。欢迎页品牌图形
-使用标准星芒、地平线与交汇点几何；为原生窗口控制预留的页头区域保持不变。
+使用共用的 [RovaiBrandMark 品牌图标](../../../apps/desktop/src/renderer/src/RovaiBrandMark.tsx)；为原生窗口控制预留的页头区域保持不变。
 
 界面语言与“设置 → 通用”共用一个偏好。欢迎页切换后立即更新当前文案及尚未保存的四位内置候选资料，
 保持已选角色、步骤和主题；偏好保存失败时回到最近保存的语言并在欢迎页显示可重试错误。开始
 provisioning 后不能再切换候选或语言。正常配置分支在完成前按所选语言初始化全部四位未经修改、未配置的
 默认队员；所选队员及其余未配置的内置队员使用同一份 Runtime、模型、推理参数和默认权限，仅所选队员加入首次会话。
 配置复制在「开始对话」后的初始化阶段完成，不增加页面；中断后从逐人检查点恢复。已有配置、已移除或期间被另行修改的
-目标不覆盖；已完成训练营的用户不自动补写。已编辑、已配置或已移除的队员保留原身份资料；训练结束后，
+目标不覆盖；已完成首次设置的用户不自动补写。已编辑、已配置或已移除的队员保留原身份资料；设置完成后，
 队员资料、输入草稿、消息、Runtime 输出和持久 Thread 标题不随界面语言变化。
 
 Desktop 用已完成 onboarding 快照中的 `quickChatThreadId` 识别首次会话；仅在该会话仍使用默认标题
@@ -43,7 +43,7 @@ Desktop 用已完成 onboarding 快照中的 `quickChatThreadId` 识别首次会
 目录与平台准入遵循 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md)，不增加实验性或资格提示。重新扫描位于面板标题右侧。
 
 欢迎页和队员页没有 Skip。Runtime 正常配置分支仍必须完成配置，按钮为“开始对话”；只有统一空结果页提供“稍后配置”，其
-语义是终止训练营并延后 Runtime 配置，不是跳过前置页或暂停。Back 只回到前一页，并且 provisioning 开始后
+作用是完成首次设置并延后 Runtime 配置。Back 只回到前一页，并且 provisioning 开始后
 不再允许更换前置选择或延后配置。用户重新打开 App 时先经过 Bootstrap capability gate；authority ready 后
 直接回到未完成页，不短暂展示普通业务工作区。
 

@@ -3,10 +3,20 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-22
+last_updated: 2026-11-23
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d95"></a>
+## V1.72-D95：当前会话移出队员可在影响详情不可用时确认
+
+- 状态：accepted
+- 日期：2026-11-23
+- 当前权威：[Camp Membership v4](../../contracts/camp-membership-v4.md)、[动态队员关系](../../architecture/dynamic-camp-membership.md)、[会话工作区](../../ui/components/conversation-workspace.md)。
+
+用户已经在当前名单中选定队员。再要求用户反复读取任务和执行数量，会把一次可选查询变成移出的前提。
+确认窗口保留所选关系的版本，Core 仍在实际提交时核对权限和名单。已知成员离开或名单冲突时，用户需重新选择。
 
 <a id="v1-72-d94"></a>
 ## V1.72-D94：桌面导航搜索从侧栏品牌行打开
