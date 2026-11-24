@@ -3836,8 +3836,15 @@ export interface NavigationThreadReadState {
   readThroughGlobalSequence: number
 }
 
+export interface NavigationProjectMove {
+  section: 'projects' | 'pinned'
+  projectKey: string
+  /** Null appends to the same section. */
+  beforeProjectKey: string | null
+}
+
 export interface NavigationPreferencesSnapshot {
-  schemaVersion: 6
+  schemaVersion: 7
   registeredProjects: string[]
   legacyProjectsSynced: boolean
   /** Read degradation only; never persisted. */
@@ -3845,11 +3852,13 @@ export interface NavigationPreferencesSnapshot {
   pins: NavigationPin[]
   removedProjects: RemovedNavigationProject[]
   projectOrder: string[] | null
+  pinnedProjectOrder: string[]
   projectNames: Record<string, string>
   threadReadStates: Record<string, NavigationThreadReadState>
 }
 
 export interface NavigationPreferencesApi {
+  moveProject(move: NavigationProjectMove): Promise<NavigationPreferencesSnapshot>
   registerProjects(projectPaths: string[], completeLegacy?: boolean): Promise<NavigationPreferencesSnapshot>
   get(): Promise<NavigationPreferencesSnapshot>
   setThreadReadState(threadId: string, state: NavigationThreadReadState | null): Promise<NavigationPreferencesSnapshot>

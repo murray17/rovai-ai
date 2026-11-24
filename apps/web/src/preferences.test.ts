@@ -114,6 +114,46 @@ it('merges concurrent directory writes and protects removal, completed migration
 })
 
 
+it('applies only the move to the latest JSON and skips stale, duplicate and failed writes', async () => {
+  const saved = new Map<string, string>()
+  const write = vi.fn((key: string, value: string) => { saved.set(key, value) })
+  vi.stubGlobal('localStorage', { getItem: (key: string) => saved.get(key) ?? null, setItem: write })
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  const transport = { request: vi.fn() } as unknown as ConsoleClient
+  const tab = () => browserPreferences('order', transport).preferences.navigationPreferences
+  const a = tab(), b = tab()
+  const move = { section: 'projects' as const, projectKey: 'directory:/b', beforeProjectKey: 'directory:/a' }
+  await a.registerProjects(['/a', '/b'])
+  await Promise.all([b.registerProjects(['/c']), a.moveProject(move)])
+  expect((await tab().get()).projectOrder).toEqual(['directory:/b', 'directory:/a', 'directory:/c'])
+  write.mockClear()
+  await a.moveProject(move)
+  expect(write).not.toHaveBeenCalled()
+  await b.removeProject('directory:/a', [])
+  write.mockClear()
+  await a.moveProject(move)
+  expect(write).not.toHaveBeenCalled()
+  write.mockImplementationOnce(() => { throw new Error('disk full') })
+  await expect(a.moveProject({ ...move, beforeProjectKey: null })).rejects.toThrow('disk full')
+  expect((await tab().get()).projectOrder).toEqual(['directory:/b', 'directory:/c'])
+  const events = new EventTarget()
+  vi.stubGlobal('window', events)
+  const changed = vi.fn()
+  const unsubscribe = a.onChanged(changed)
+  const laterOrder = ['directory:/b', 'directory:/c']
+  write.mockImplementationOnce((key, value) => {
+    saved.set(key, value)
+    queueMicrotask(() => {
+      // The other tab commits and delivers its storage event before our write receipt arrives.
+      saved.set(key, JSON.stringify({ ...JSON.parse(value), projectOrder: laterOrder }))
+      events.dispatchEvent(Object.assign(new Event('storage'), { storageArea: localStorage, key }))
+    })
+  })
+  expect((await a.moveProject({ ...move, beforeProjectKey: null })).projectOrder).toEqual(laterOrder)
+  expect(changed.mock.lastCall?.[0].projectOrder).toEqual(laterOrder)
+  unsubscribe()
+})
+
 it('persists fixed palettes independently of OS changes and restores system following', async () => {
   const entries = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => entries.set(key, value) })

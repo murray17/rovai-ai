@@ -555,6 +555,31 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .project-folder-open { display: none; }
 .project-heading-row[data-expanded="true"] .project-folder-closed { display: none; }
 .project-heading-row[data-expanded="true"] .project-folder-open { display: block; }
+[data-project-sort-key] .project-select-row { user-select: none; -webkit-user-select: none; }
+[data-project-sort-key] .project-folder-glyph { touch-action: none; }
+html[data-project-dragging], html[data-project-dragging] * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+@media (hover: hover) {
+  [data-project-dragging] .navigation-scroll .project-heading-row:not([data-highlighted="true"]):hover { background: transparent; }
+  [data-project-dragging] .navigation-scroll .project-heading-row :is(.group-menu-trigger, .group-create-button) { opacity: 0; }
+}
+.camp-nav-group[data-project-drag-source] { opacity: .2; }
+.camp-nav-group[data-project-drag-source] > .camp-group-children:not([hidden]) { filter: blur(.65px); pointer-events: none; }
+.project-drag-preview {
+  position: fixed; z-index: 10050; left: 0; top: 0; width: max-content; max-width: min(320px, calc(100vw - 16px));
+  pointer-events: none; overflow: hidden; border-radius: 7px; opacity: .7;
+  background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-menu);
+}
+.project-drag-preview > .project-heading-row { display: flex; min-height: 0; height: 100%; background: transparent; }
+.project-drag-preview .project-select-row { width: auto; min-height: 0; max-width: 100%; height: 100%; padding-inline: 8px; }
+.project-drag-preview .navigation-title { mask-image: none; -webkit-mask-image: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-insertion-line {
+  position: fixed; z-index: 10049; height: 2px; transform: translateY(-50%); border-radius: 2px;
+  color: CanvasText; background: currentColor; pointer-events: none;
+}
+.project-insertion-line::before {
+  content: ""; position: absolute; left: 0; top: 50%; transform: translate(-50%, -50%);
+  box-sizing: border-box; width: 8px; height: 8px; border: 2px solid currentColor; border-radius: 50%; background: var(--rail);
+}
 .group-create-button {
   z-index: 2;
   display: grid;

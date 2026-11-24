@@ -7,6 +7,8 @@ import { useShortcutAction, useShortcutLabel, useShortcuts } from './ShortcutPro
 import { useThreadClient } from './camp-client'
 import { useMobileLayout } from './MobileLayout'
 import { useNavigationPressMenu } from './useNavigationPressMenu'
+import { useProjectFolderDrag } from './use-project-folder-drag'
+import { orderedPinnedProjects } from '../../shared/navigation-preferences-model'
 import { navigationThreadHasUnread } from './navigation-unread'
 import { useInterruptionAttention } from './thread-interruption-attention'
 import {
@@ -22,6 +24,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AppUpdateSnapshot,
   NavigationPin,
+  NavigationProjectMove,
   NavigationThreadItem,
   NavigationThreadReadState,
   NavigationThreadTarget,
@@ -144,6 +147,28 @@ export function navigationGroupWindow(
   }
 }
 
+type ProjectOrdering = {
+  registeredProjects: readonly string[]
+  pinnedProjectOrder: readonly string[]
+  move(request: NavigationProjectMove): void
+}
+
+type ProjectMoveActions = { up?: () => void; down?: () => void }
+
+function projectMoveActions(projects: ProjectNavigationGroup[], registered: Set<string>, section: NavigationProjectMove['section'], ordering?: ProjectOrdering) {
+  const actions = new Map<string, ProjectMoveActions>()
+  if (!ordering) return actions
+  const keys = projects.filter(project => registered.has(project.projectPath)).map(project => project.projectKey)
+  keys.forEach((projectKey, index) => {
+    const before = (beforeProjectKey: string | null) => ordering.move({ section, projectKey, beforeProjectKey })
+    actions.set(projectKey, {
+      up: index > 0 ? () => before(keys[index - 1]) : undefined,
+      down: index + 1 < keys.length ? () => before(keys[index + 2] ?? null) : undefined
+    })
+  })
+  return actions
+}
+
 export function ThreadNavigation({
   navigationId = 'global-navigation',
   settingsNavigation,
@@ -164,6 +189,7 @@ export function ThreadNavigation({
   shellOnlyProjectPath = null,
   creatingConversation = false,
   pins = [],
+  projectOrdering,
   pinnedThreadItems = [],
   pinReadIssue,
   onRetryPins,
@@ -224,6 +250,7 @@ export function ThreadNavigation({
   shellOnlyProjectPath?: string | null
   creatingConversation?: boolean
   pins?: NavigationPin[]
+  projectOrdering?: ProjectOrdering
   pinnedThreadItems?: NavigationThreadItem[]
   pinReadIssue?: string | null
   onRetryPins?(): Promise<void>
@@ -271,6 +298,7 @@ export function ThreadNavigation({
   const navigationCollapsed = !mobile && collapsed
   const settingsSidebar = view === 'settings' && !mobile
   const navigationScroll = useRef<HTMLDivElement>(null)
+  useProjectFolderDrag(navigationScroll, disabled || settingsSidebar || navigationCollapsed ? undefined : projectOrdering?.move)
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<NavigationAction>(null)
@@ -311,9 +339,13 @@ export function ThreadNavigation({
     .filter((pin) => pin.kind === 'camp')
     .flatMap((pin) => campById.get(pin.targetKey) ?? [])
     .filter(thread => !thread.archivedAt)
-  const pinnedProjects = pins
-    .filter((pin) => pin.kind === 'project')
-    .flatMap((pin) => projectByKey.get(pin.targetKey) ?? [])
+  const pinnedKeys = orderedPinnedProjects(pins, projectOrdering?.pinnedProjectOrder ?? [])
+  const pinnedProjects = pinnedKeys.flatMap(key => projectByKey.get(key) ?? [])
+  const pinnedProjectKeys = new Set(pinnedKeys)
+  const ordinaryProjects = (navigation?.projects ?? []).filter(project => !pinnedProjectKeys.has(project.projectKey))
+  const registered = new Set(projectOrdering?.registeredProjects)
+  const pinnedMoves = projectMoveActions(pinnedProjects, registered, 'pinned', projectOrdering)
+  const ordinaryMoves = projectMoveActions(ordinaryProjects, registered, 'projects', projectOrdering)
   const quickChatTotalCount = navigation?.quickChat.totalCount ?? 0
   const currentThreadId = view === 'camp' ? activeThreadId : null
   const activeRow = activeThreadId
@@ -589,7 +621,7 @@ export function ThreadNavigation({
           <button className="mobile-icon-button" type="button" aria-label={uiAttribute("搜索对话、使命和消息")} onClick={() => setPaletteOpen(true)}><NavigationIcon name="search" /></button>
         </div></header>}
         {(pinnedThreads.length > 0 || pinnedProjects.length > 0 || pinReadIssue) && (
-          <section className="pinned-navigation" aria-labelledby="pinned-heading">
+          <section className="pinned-navigation" aria-labelledby="pinned-heading" data-project-sort-section="pinned">
             <div className="sidebar-group-title navigation-section-title">
               <span id="pinned-heading"><UiText zh={"置顶"} /></span>
             </div>
@@ -624,6 +656,7 @@ export function ThreadNavigation({
                 key={`pinned-${project.projectKey}`}
                 groupKey={groupKey}
                 pinTargetKey={project.projectKey}
+                moveActions={pinnedMoves.get(project.projectKey)}
                 label={project.name}
                 totalCount={project.totalCount}
                 {...window}
@@ -663,17 +696,17 @@ export function ThreadNavigation({
             })}
           </section>
         )}
-        <section className="navigation-projects" aria-labelledby="projects-heading">
+        <section className="navigation-projects" aria-labelledby="projects-heading" data-project-sort-section="projects">
           <div className="sidebar-group-title navigation-section-title"><span id="projects-heading"><UiText zh={"项目"} /></span><button className="section-create-button" type="button" aria-label={uiAttribute("选择工作目录")} title={uiAttribute("选择工作目录")} onClick={onOpenProject} disabled={state !== 'ready'}>＋</button></div>
-          {navigation?.projects.map((project) => {
+          {ordinaryProjects.map((project) => {
             const groupKey = projectKey(project)
-            if (pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)) return null
             const window = groupWindow(groupKey, project)
             return (
               <ThreadGroup
                 key={project.projectKey}
                 groupKey={groupKey}
                 pinTargetKey={project.projectKey}
+                moveActions={ordinaryMoves.get(project.projectKey)}
                 label={project.name}
                 totalCount={project.totalCount}
                 {...window}
@@ -686,7 +719,6 @@ export function ThreadNavigation({
                 currentProject={currentProjectKey === project.projectKey}
                 highlighted={highlightedProjectKey === groupKey}
                 createDisabled={creatingConversation}
-                pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
                 onShowMore={() => void showMore(groupKey)}
                 onCollapseThreads={() => collapseGroupThreads(groupKey)}
                 onToggleExpanded={() => toggleProjectGroup(groupKey)}
@@ -1012,6 +1044,7 @@ function UpdateBadgeIcon({
 function ThreadGroup({
   groupKey,
   pinTargetKey,
+  moveActions,
   label,
   totalCount,
   threads,
@@ -1050,6 +1083,7 @@ function ThreadGroup({
 }: {
   groupKey: string
   pinTargetKey?: string
+  moveActions?: ProjectMoveActions
   label: string
   totalCount: number
   threads: NavigationThreadItem[]
@@ -1088,6 +1122,16 @@ function ThreadGroup({
 }): JSX.Element {
   const mobile = useMobileLayout()
   const projectMenuLabels = projectNavigationMenuLabels(pinned, platform)
+  const folderButton = useRef<HTMLButtonElement>(null)
+  function moveFolder(direction: keyof ProjectMoveActions) {
+    const move = moveActions?.[direction]
+    if (!move) return
+    move()
+    requestAnimationFrame(() => {
+      folderButton.current?.focus({ preventScroll: true })
+      folderButton.current?.scrollIntoView({ block: 'nearest' })
+    })
+  }
   const projectMenuItems: SidebarActionMenuItem[] = pinTargetKey
     ? [{ key: 'new-chat', label: projectMenuLabels[0], icon: 'square-pen', onSelect: onCreate, disabled: createDisabled }]
     : []
@@ -1103,6 +1147,12 @@ function ThreadGroup({
   }
   if (onRenameProject) {
     projectMenuItems.push({ key: 'rename-project', label: projectMenuLabels[2], icon: 'edit', onSelect: onRenameProject })
+  }
+  if (moveActions) {
+    projectMenuItems.push(
+      { key: 'move-up', label: uiAttribute('上移项目'), icon: 'move-up', disabled: !moveActions.up, separatorBefore: true, onSelect: () => moveFolder('up') },
+      { key: 'move-down', label: uiAttribute('下移项目'), icon: 'move-down', disabled: !moveActions.down, onSelect: () => moveFolder('down') }
+    )
   }
   if (onRevealProject) projectMenuItems.push({ key: 'reveal-project', label: projectMenuLabels[3], icon: 'reveal', separatorBefore: true, onSelect: onRevealProject })
   if (onCopyProjectPath) projectMenuItems.push({ key: 'copy-path', label: projectMenuLabels[4], icon: 'copy', separatorBefore: !onRevealProject, onSelect: onCopyProjectPath })
@@ -1122,13 +1172,23 @@ function ThreadGroup({
   const hiddenSelection = highlighted && !mobile && !projectExpanded
     ? threads.find(thread => thread.id === activeThreadId) : undefined
   return (
-    <section className="camp-nav-group" data-group={groupKey}>
+    <section className="camp-nav-group" data-group={groupKey} data-project-sort-key={moveActions?.up || moveActions?.down ? pinTargetKey : undefined}>
       <div className={`project-heading-row ${currentProject ? 'current-project' : ''}`} data-menu-open={pressMenu.open || undefined}
         data-highlighted={highlighted || undefined}
         onContextMenu={(event) => { if (!event.defaultPrevented) pressMenu.rowProps.onContextMenu?.(event) }} data-expanded={projectExpanded ? 'true' : 'false'}>
         <button
           {...pressMenu.rowProps}
+          ref={folderButton}
           className="project-select-row"
+          aria-keyshortcuts={moveActions ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
+          onKeyDown={event => {
+            pressMenu.rowProps.onKeyDown?.(event)
+            if (!moveActions || !event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+              event.preventDefault()
+              moveFolder(event.key === 'ArrowUp' ? 'up' : 'down')
+            }
+          }}
           type="button"
           title={label}
           aria-current={currentProject ? 'true' : undefined}

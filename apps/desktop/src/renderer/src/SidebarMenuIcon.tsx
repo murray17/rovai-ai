@@ -2,13 +2,14 @@ import type { JSX } from 'react'
 import { ForkIcon } from './ForkIcon'
 import { NavigationIcon } from './NavigationIcon'
 
-export type SidebarMenuIconKind = 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export' | 'fork' | 'archive'
+export type SidebarMenuIconKind = 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export' | 'fork' | 'archive' | 'move-up' | 'move-down'
 
 export function SidebarMenuIcon({ kind, filled = false }: {
   kind: SidebarMenuIconKind
   filled?: boolean
 }): JSX.Element {
   if (kind === 'archive') return <NavigationIcon name="archive" />
+  if (kind === 'move-up' || kind === 'move-down') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={kind === 'move-up' ? 'M12 19V5m-6 6 6-6 6 6' : 'M12 5v14m-6-6 6 6 6-6'} /></svg>
   if (kind === 'square-pen') return <NavigationIcon name="square-pen" />
   if (kind === 'fork') return <ForkIcon className="sidebar-action-menu-icon" />
   if (kind === 'export') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5" /></svg>

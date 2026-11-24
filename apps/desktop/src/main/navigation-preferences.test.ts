@@ -16,6 +16,60 @@ afterEach(async () => {
 })
 
 describe('navigation preferences', () => {
+  it('keeps v6 read-only until a real move, preserves pinned slots, and restores order after restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-order-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const paths = ['/one/app', '/pinned', '/two/app', '/c']
+    const [a, p, b, c] = paths.map(path => `directory:${path}`)
+    const legacy = { schemaVersion: 6, registeredProjects: paths, legacyProjectsSynced: true,
+      projectOrder: [a, p, b, c], pins: [{ kind: 'project', targetKey: p, pinnedAt: '2026-10-01T00:00:00Z' }],
+      projectNames: { [a]: 'app', [b]: 'app' }, removedProjects: [], threadReadStates: {} }
+    const original = JSON.stringify(legacy)
+    await writeFile(file, original)
+    const store = await NavigationPreferencesStore.load(file)
+    expect(store.loadDegradation).toBeNull()
+    await store.moveProject({ section: 'projects', projectKey: a, beforeProjectKey: b })
+    expect(await readFile(file, 'utf8')).toBe(original)
+    const move = { section: 'projects' as const, projectKey: c, beforeProjectKey: a }
+    await Promise.all([store.registerProjects(['/added']), store.moveProject(move)])
+    const saved = { ...legacy, schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [...paths, '/added'],
+      projectOrder: [c, p, a, b, 'directory:/added'] }
+    expect((await NavigationPreferencesStore.load(file)).get()).toEqual(saved)
+    const inode = (await stat(file)).ino
+    await store.moveProject(move)
+    await store.moveProject({ ...move, beforeProjectKey: p })
+    await store.moveProject({ ...move, projectKey: 'directory:/gone' })
+    expect((await stat(file)).ino).toBe(inode)
+  })
+
+  it('moves pinned folders independently and appends a re-pinned folder in pin-time order', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-pins-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const store = NavigationPreferencesStore.defaults(file)
+    const paths = ['/a', '/b', '/c']
+    const keys = paths.map(path => `directory:${path}`)
+    const [a, b, c] = keys
+    const pins = keys.map((targetKey, i) => ({ kind: 'project' as const, targetKey, pinnedAt: `2026-10-01T00:00:0${i}Z` }))
+    await store.registerProjects(paths)
+    await store.replacePins(pins)
+    const partial = JSON.stringify({ ...store.get(), pinnedProjectOrder: [a, 'directory:/gone', a] })
+    await writeFile(file, partial)
+    const reloaded = await NavigationPreferencesStore.load(file)
+    expect(reloaded.loadDegradation).toBeNull()
+    expect(reloaded.get().pinnedProjectOrder).toEqual([a])
+    expect(await readFile(file, 'utf8')).toBe(partial)
+    await store.moveProject({ section: 'pinned', projectKey: c, beforeProjectKey: a })
+    expect((await NavigationPreferencesStore.load(file)).get()).toMatchObject({ projectOrder: keys, pinnedProjectOrder: [c, a, b], pins })
+    await store.replacePins(pins.slice(0, 2))
+    await store.replacePins([...pins.slice(0, 2), { ...pins[2], pinnedAt: '2026-11-01T00:00:00Z' }])
+    expect(store.get().pinnedProjectOrder).toEqual([a, b])
+    await store.moveProject({ section: 'pinned', projectKey: c, beforeProjectKey: b })
+    await store.removeProject(a, [])
+    expect(store.get().pinnedProjectOrder).toEqual([c, b])
+  })
+
   it('upgrades valid schema 4 without a degradation or rewriting the old file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-read-'))
     cleanup.push(directory)
@@ -73,7 +127,7 @@ describe('navigation preferences', () => {
     await writeFile(filePath, source)
     const store = await NavigationPreferencesStore.load(filePath)
     expect(store.loadDegradation).toBeNull()
-    expect(store.get()).toEqual({ schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {}, threadReadStates: {} })
+    expect(store.get()).toEqual({ schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {}, threadReadStates: {} })
     expect(await readFile(filePath, 'utf8')).toBe(source)
   })
 
@@ -158,7 +212,7 @@ describe('navigation preferences', () => {
     const snapshot = await readNavigationPreferences(filePath)
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [
@@ -194,7 +248,7 @@ describe('navigation preferences', () => {
     const snapshot = await store.removeProject('directory:/work/a', [CAMP_A])
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: ['/work/b'], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: ['/work/b'], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [
@@ -228,7 +282,7 @@ describe('navigation preferences', () => {
     const snapshot = await store.restoreProject('directory:/work/a')
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: ['/work/a'], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: ['/work/a'], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
@@ -261,7 +315,7 @@ describe('navigation preferences', () => {
     const snapshot = await store.reinstateRemovedProject(removedProject)
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
@@ -343,7 +397,7 @@ describe('navigation preferences', () => {
 
     const synchronized = await store.removeProject('directory:/work/b', [])
     expect(synchronized).toEqual({
-      schemaVersion: 6, registeredProjects: ['/work/a', '/work/c'], legacyProjectsSynced: true,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: ['/work/a', '/work/c'], legacyProjectsSynced: true,
       projectNames: {},
       threadReadStates: {},
       pins: [],

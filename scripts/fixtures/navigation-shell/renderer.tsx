@@ -6,10 +6,12 @@ import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadN
 import { createDesktopNavigation, type NavigationTarget } from '../../../apps/desktop/src/renderer/src/desktop-navigation'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
 import { navigationThreadReadState } from '../../../apps/desktop/src/renderer/src/navigation-unread'
+import { navigationWithProjectDirectories, navigationWithProjectOrder } from '../../../apps/desktop/src/renderer/src/new-conversation-preferences'
+import { EMPTY_SNAPSHOT } from '../../../apps/desktop/src/shared/navigation-preferences-model'
 import { createNavigationWindowReader, type NavigationGroupLimits } from '../../../apps/desktop/src/renderer/src/navigation-window-reader'
 import { browserPreferences } from '../../../apps/web/src/preferences'
 import type { ConsoleClient } from '../../../apps/web/src/client'
-import type { NavigationThreadItem, NavigationPin, NavigationSnapshot, NavigationSnapshotRequest, NavigationThreadReadState } from '@contracts'
+import type { NavigationThreadItem, NavigationPin, NavigationSnapshot, NavigationSnapshotRequest } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/styles.css'
 
@@ -94,12 +96,14 @@ function Fixture(): React.JSX.Element {
     readThreads: async () => ({ throughGlobalSequence: 2, groupKeys: [], threads: [] })
   }), [])
   useEffect(() => () => paginationReader.dispose(), [paginationReader])
-  const [threadReadStates, setReadStates] = useState<Record<string, NavigationThreadReadState>>({})
+  const [folderOrderFixture, setFolderOrderFixture] = useState(false)
+  const [savedPreferences, setSavedPreferences] = useState(EMPTY_SNAPSHOT)
+  const { threadReadStates } = savedPreferences
   const [running, setRunning] = useState(true)
   const [longLabels, setLongLabels] = useState(false)
   useEffect(() => {
-    void preferences.get().then(snapshot => setReadStates(snapshot.threadReadStates))
-    return preferences.onChanged(snapshot => setReadStates(snapshot.threadReadStates))
+    void preferences.get().then(setSavedPreferences)
+    return preferences.onChanged(setSavedPreferences)
   }, [])
   const [settings, setSettings] = useState(false)
   const [browser, setBrowser] = useState(false)
@@ -137,7 +141,7 @@ function Fixture(): React.JSX.Element {
     holdPaginationRead: () => { holdPaginationRead = true },
     releasePaginationRead: (fail: boolean) => releasePaginationRead?.(fail),
     revisePaginationTitles: () => { paginationTitleVersion++ },
-    threadReadStates, preferences,
+    threadReadStates, preferences, setFolderOrderFixture,
     projectPreferences: browserPreferences('project-concurrency-fixture', { request: async () => undefined } as unknown as ConsoleClient).preferences.navigationPreferences,
     hostNavigation: (direction: 'back' | 'forward') => navigationListeners.forEach(listener => listener(direction)),
     hostListenerCount: () => navigationListeners.size,
@@ -145,9 +149,12 @@ function Fixture(): React.JSX.Element {
   } })
   return <><WindowsApplicationMenu /><NavigationShell platform={platform} browser={browser} disabled={disabled} settings={settings} navigation={navigation} nativeWindowControls={browser ? undefined : window.rovai.windowControls}>
     <ThreadNavigation platform={platform} view={settings ? 'settings' : 'compose'} state="ready"
-      navigation={searchSnapshot}
+      navigation={folderOrderFixture
+        ? navigationWithProjectOrder(navigationWithProjectDirectories(searchSnapshot, savedPreferences), savedPreferences.projectOrder)
+        : searchSnapshot}
+      projectOrdering={folderOrderFixture ? { ...savedPreferences, move: preferences.moveProject } : undefined}
       groupLimits={pagination?.limits} onGroupLimitChange={pagination ? paginationReader.resizeGroup : undefined}
-      pins={pagination ? [{ kind: 'project', targetKey: 'directory:/fixture/pinned', pinnedAt: '' }] : navigationPins}
+      pins={folderOrderFixture ? savedPreferences.pins : pagination ? [{ kind: 'project', targetKey: 'directory:/fixture/pinned', pinnedAt: '' }] : navigationPins}
       activeThreadId={pagination ? runningCamp.id : pinnedCamp.id} pendingMemoryCount={0} threadReadStates={threadReadStates}
       onNewConversation={() => { actions.push('new-chat') }} onMembers={noop} onMemory={noop} onSettings={() => setSettings(true)} onSettingsBack={() => setSettings(false)}
       onCreateInProject={() => { actions.push('new-chat') }} onRenameProject={async () => undefined}

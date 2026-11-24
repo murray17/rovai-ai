@@ -105,6 +105,10 @@ function api(path = ''): unknown {
         return Promise.resolve(next)
       }
       if (path === 'navigationPreferences.get' && requestHandlers.has(path)) { calls.push(path); return Promise.resolve().then(() => requestHandlers.get(path)!(args)) }
+      if (path === 'navigationPreferences.moveProject' && requestHandlers.has(path)) {
+        calls.push(path)
+        return Promise.resolve().then(() => requestHandlers.get(path)!(args))
+      }
       if (path === 'navigationPreferences.get' && responses.has(path)) {
         calls.push(path)
         return Promise.resolve(sanitizeSnapshot(responses.get(path)))
@@ -343,6 +347,32 @@ Object.assign(window, { startupTest: {
     await add('/unsaved-after-completion')
     check(saved().legacyProjectsSynced && !visible('/unsaved-after-completion') && !document.querySelector('.error-banner'), 'A later save failure keeps the completed marker without a temporary row or persistent banner')
     cases.push('First preference read failure preserves ordinary navigation')
+    const paths = ['/a', '/b', '/c']
+    const [a, b, c] = paths.map(path => 'directory:' + path)
+    const initial = registerNavigationProjects(EMPTY_SNAPSHOT, paths, true)
+    let save = deferred<NavigationPreferencesSnapshot>()
+    await boot(initial, emptyNavigation, () => requestHandlers.set('navigationPreferences.moveProject', () => save.promise))
+    const order = () => Array.from(document.querySelectorAll<HTMLElement>('.navigation-projects > [data-project-sort-key]'), row => row.dataset.group).join()
+    const moveUp = async (id: string) => {
+      const row = document.querySelector<HTMLButtonElement>(`[data-project-sort-key="${id}"] .project-select-row`)!
+      row.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowUp', altKey: true }))
+      await flush()
+    }
+    await moveUp(c)
+    check(order() === [a, c, b].join(), 'The released folder moves while the save is pending')
+    const broadcast = { ...initial, projectOrder: [b, a, c] }
+    navigationPreferenceListeners.forEach(listener => listener(broadcast))
+    save.reject(new Error('fixture save failed'))
+    await flush()
+    check(order() === [b, a, c].join() && !document.querySelector('.app-toast'), 'Failure immediately restores the latest confirmed order')
+    save = deferred<NavigationPreferencesSnapshot>()
+    await moveUp(c)
+    const newer = { ...initial, projectOrder: [c, a, b] }
+    navigationPreferenceListeners.forEach(listener => listener(newer))
+    save.resolve({ ...initial, projectOrder: [b, c, a] })
+    await flush()
+    check(order() === [c, a, b].join(), 'A late move reply never overwrites a newer broadcast')
+    cases.push('Optimistic folder move, immediate rollback and late-reply handling in the production sidebar')
     return { ok: true, cases }
   },
 
@@ -669,7 +699,7 @@ Object.assign(window, { startupTest: {
     responses.set('members.list', [])
     responses.set('runtime.installations.list', [])
     responses.set('navigation.snapshot', { schemaVersion: 3, projects: [], quickChat: { recentThreads: [], totalCount: 0 } })
-    const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
+    const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
     responses.set('navigationPreferences.get', navPreferences)
     responses.set('memory.hearthReviewItems.list', [])
     responses.set('preferences.memory.get', { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 })

@@ -41,6 +41,7 @@ import type {
   RuntimeUsageSnapshot,
   NavigationPin,
   NavigationPreferencesSnapshot,
+  NavigationProjectMove,
   SaveMemberAvatarAssetInput,
   SettingsSection,
   StartupLocationMode,
@@ -1786,6 +1787,10 @@ ipcMain.handle('rovai:navigation-preferences-get', () =>
 
 ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: NavigationPin[]) =>
   projectAccessTransactions.run(() => requireNavigationPreferences().replacePins(pins).then(publishNavigationPreferences))
+)
+
+ipcMain.handle('rovai:navigation-preferences-move-project', (_event, move: NavigationProjectMove) =>
+  projectAccessTransactions.run(() => requireNavigationPreferences().moveProject(move).then(publishNavigationPreferences))
 )
 
 ipcMain.handle(

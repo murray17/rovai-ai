@@ -375,6 +375,9 @@ const api: RovaiApi = {
     }
   },
   navigationPreferences: {
+    moveProject(move) {
+      return ipcRenderer.invoke('rovai:navigation-preferences-move-project', move) as Promise<NavigationPreferencesSnapshot>
+    },
     registerProjects(paths, completeLegacy = false) {
       return ipcRenderer.invoke('rovai:navigation-preferences-register-projects', paths, completeLegacy)
     },

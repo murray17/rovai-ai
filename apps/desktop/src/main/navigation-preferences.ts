@@ -1,9 +1,10 @@
 import { isThreadId } from '@contracts'
-import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isTimestamp, isNavigationThreadReadState, registerNavigationProjects, sourceMatchesSupportedSnapshot } from '../shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isTimestamp, isNavigationThreadReadState, moveNavigationProject, registerNavigationProjects, sourceMatchesSupportedSnapshot } from '../shared/navigation-preferences-model'
 import { readFile } from 'node:fs/promises'
 import type {
   NavigationPin,
   NavigationPreferencesSnapshot,
+  NavigationProjectMove,
   NavigationThreadReadState,
   RemovedNavigationProject,
   StructuredError
@@ -110,6 +111,13 @@ export class NavigationPreferencesStore {
         pins
       })
       await this.#commit(next)
+      return this.get()
+    })
+  }
+
+  moveProject(move: NavigationProjectMove): Promise<NavigationPreferencesSnapshot> {
+    return this.#enqueue(async () => {
+      await this.#commit(moveNavigationProject(this.#snapshot, move))
       return this.get()
     })
   }

@@ -1,0 +1,93 @@
+const assert = require('node:assert/strict')
+
+module.exports = async function verifyFolderOrder({ run, other, mouse, key, frame, settle, point, context, selectItem }) {
+  const paths = ['/fixture/rovai-ai', '/b', '/c', '/d']
+  const [a, b, c, d] = paths.map(path => 'directory:' + path)
+  const row = id => `[data-group="${id}"] .project-select-row`
+  const domOrder = () => run("Array.from(document.querySelectorAll('.navigation-projects > [data-project-sort-key]'), group => group.dataset.group)")
+  const savedOrder = () => other('window.navigationTest.preferences.get().then(snapshot => snapshot.projectOrder)')
+  await run(`window.navigationTest.preferences.registerProjects(${JSON.stringify(paths)}, true)`)
+  await run('window.navigationTest.setFolderOrderFixture(true)')
+  await settle()
+  const held = await point(row(a))
+  const target = await point(row(d))
+  target.y -= 8
+  mouse('mouseDown', held)
+  mouse('mouseMove', target)
+  await frame()
+  assert.equal(await run("document.querySelector('.project-drag-preview')?.textContent"), 'rovai-ai')
+  assert.equal(await run("getComputedStyle(document.querySelector('[data-project-drag-source] .camp-group-children')).filter"), 'blur(0.65px)')
+  assert.deepEqual(await savedOrder(), [a, b, c, d])
+  // The other tab swaps C and D underneath the stationary pointer.
+  await other(`window.navigationTest.preferences.moveProject(${JSON.stringify({ section: 'projects', projectKey: d, beforeProjectKey: c })})`)
+  await settle()
+  assert.deepEqual(await domOrder(), [a, b, d, c])
+  assert.equal(await run(`(() => {
+    const line = document.querySelector('.project-insertion-line')
+    const left = document.querySelector('[data-group="${d}"]').getBoundingClientRect()
+    const right = document.querySelector('[data-group="${c}"]').getBoundingClientRect()
+    return !line.hidden && Math.abs(parseFloat(line.style.top) - (left.bottom + right.top) / 2) <= 1
+      && getComputedStyle(line).backgroundColor === 'rgb(0, 0, 0)'
+  })()`), true, 'The line marks the boundary immediately above the current folder')
+  mouse('mouseUp', target)
+  await settle()
+  assert.deepEqual(await savedOrder(), [b, d, a, c])
+  assert.deepEqual(await domOrder(), [b, d, a, c])
+  assert.equal(await run(`document.querySelector('${row(a)}').getAttribute('aria-expanded')`), 'true')
+  assert.equal(await run("document.querySelector('[data-group=\"quick-chat\"]').hasAttribute('data-project-sort-key')"), false)
+  await run(`document.querySelector('${row(a)}').focus()`)
+  await key('Up', ['alt'])
+  assert.deepEqual(await savedOrder(), [b, a, d, c])
+  const start = await point(row(c))
+  const end = await point(row(b))
+  mouse('mouseDown', start)
+  mouse('mouseMove', end)
+  await frame()
+  await key('Escape')
+  mouse('mouseUp', end)
+  await settle()
+  assert.deepEqual(await savedOrder(), [b, a, d, c])
+  assert.equal(await run("document.querySelector('.project-drag-preview') === null"), true)
+  // The source and its indicated anchor must both remain in their original section.
+  mouse('mouseDown', start)
+  mouse('mouseMove', { ...end, y: end.y - 8 })
+  await frame()
+  assert.equal(await run("!!document.querySelector('.project-insertion-line:not([hidden])')"), true)
+  const pins = [b, d].map((targetKey, i) => ({ kind: 'project', targetKey, pinnedAt: `2026-11-24T00:00:0${i}Z` }))
+  await other(`window.navigationTest.preferences.replacePins(${JSON.stringify(pins)})`)
+  await settle()
+  assert.equal(await run("document.querySelector('.project-drag-preview') === null"), true)
+  mouse('mouseUp', end)
+  await settle()
+  await context(row(b))
+  assert.equal(await run("Array.from(document.querySelectorAll('[role=menuitem]')).find(item => item.textContent === '上移项目').getAttribute('aria-disabled')"), 'true')
+  await selectItem('下移项目')
+  assert.deepEqual(await run("Array.from(document.querySelectorAll('.pinned-navigation > [data-project-sort-key]'), group => group.dataset.group)"), [d, b])
+  assert.deepEqual(await other('window.navigationTest.preferences.get().then(snapshot => snapshot.pinnedProjectOrder)'), [d, b])
+  assert.deepEqual(await savedOrder(), [b, a, d, c])
+  await run("window.navigationTest.preferences.replacePins([])")
+  await settle()
+  // A tall first group can still be under the pointer while its insertion boundary is clipped.
+  await run(`document.querySelector('.navigation-scroll').style.maxHeight = '200px'
+    document.querySelector('[data-group="${b}"]').style.minHeight = '240px'
+    document.querySelector('${row(c)}').scrollIntoView({ block: 'center' })`)
+  const source = await point(row(c))
+  mouse('mouseDown', source)
+  mouse('mouseMove', { ...source, x: source.x + 10 })
+  await frame()
+  const clipped = await run(`(() => {
+    const rail = document.querySelector('.navigation-scroll')
+    const bounds = rail.getBoundingClientRect()
+    rail.scrollTop += document.querySelector('[data-group="${b}"]').getBoundingClientRect().top - bounds.top + 30
+    return { x: Math.round(bounds.left + 45), y: Math.round(bounds.top + 65) }
+  })()`)
+  mouse('mouseMove', clipped)
+  await frame()
+  assert.equal(await run("document.querySelector('.project-insertion-line')?.hidden"), true)
+  mouse('mouseUp', clipped)
+  await settle()
+  assert.deepEqual(await savedOrder(), [b, a, d, c])
+  await run("document.querySelector('.navigation-scroll').style.maxHeight = ''")
+  await run('window.navigationTest.setFolderOrderFixture(false)')
+  await settle()
+}

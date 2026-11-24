@@ -1,38 +1,42 @@
 import { isThreadId } from '@contracts'
-import type { NavigationPin, NavigationPreferencesSnapshot, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
+import type { NavigationPin, NavigationPreferencesSnapshot, NavigationProjectMove, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
 import { normalizeProjectDisplayName, projectDisplayNameError } from './project-display-name'
 
 export const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
-  schemaVersion: 6,
+  schemaVersion: 7,
   registeredProjects: [],
   legacyProjectsSynced: false,
   pins: [],
   removedProjects: [],
   projectOrder: null,
+  pinnedProjectOrder: [],
   projectNames: {},
   threadReadStates: {}
 }
 
+function isSupportedVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= EMPTY_SNAPSHOT.schemaVersion
+}
+
 export function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot {
-  if (!isRecord(source)) return structuredClone(EMPTY_SNAPSHOT)
+  if (!isRecord(source) || !isSupportedVersion(source.schemaVersion)) return structuredClone(EMPTY_SNAPSHOT)
+  const version = source.schemaVersion
   const pins = sanitizePins(source)
-  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6
-    ? sanitizeRemovedProjects(source.removedProjects)
-    : []
-  const projectOrder = source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6
-    ? sanitizeProjectOrder(source.projectOrder)
-    : null
-  const projectNames = (source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6) ? sanitizeProjectNames(source.projectNames) : {}
-  const threadReadStates = (source.schemaVersion === 5 || source.schemaVersion === 6) ? sanitizeThreadReadStates(source.threadReadStates) : {}
-  const registeredProjects = source.schemaVersion === 6 && Array.isArray(source.registeredProjects)
+  const removedProjects = version >= 2 ? sanitizeRemovedProjects(source.removedProjects) : []
+  const projectOrder = version >= 3 ? sanitizeProjectOrder(source.projectOrder) : null
+  const projectNames = version >= 4 ? sanitizeProjectNames(source.projectNames) : {}
+  const threadReadStates = version >= 5 ? sanitizeThreadReadStates(source.threadReadStates) : {}
+  const registeredProjects = version >= 6 && Array.isArray(source.registeredProjects)
     ? [...new Set(source.registeredProjects.filter(isProjectPath))] : []
-  const legacyProjectsSynced = source.schemaVersion === 6 && source.legacyProjectsSynced === true
-  return { schemaVersion: 6, registeredProjects, legacyProjectsSynced, pins, removedProjects, projectOrder, projectNames, threadReadStates }
+  const legacyProjectsSynced = version >= 6 && source.legacyProjectsSynced === true
+  const pinned = new Set(pins.filter(pin => pin.kind === 'project').map(pin => pin.targetKey))
+  const pinnedProjectOrder = version >= 7 ? (sanitizeProjectOrder(source.pinnedProjectOrder) ?? []).filter(key => pinned.has(key)) : []
+  return { schemaVersion: 7, registeredProjects, legacyProjectsSynced, pins, removedProjects, projectOrder, pinnedProjectOrder, projectNames, threadReadStates }
 }
 
 export function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
   if (
-    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3 && source.schemaVersion !== 4 && source.schemaVersion !== 5 && source.schemaVersion !== 6)
+    !isSupportedVersion(source.schemaVersion)
     || !Array.isArray(source.pins)
   ) return []
   const seen = new Set<string>()
@@ -163,8 +167,8 @@ export function registerNavigationProjects(snapshot: NavigationPreferencesSnapsh
 }
 
 export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: NavigationPreferencesSnapshot): boolean {
-  if (!isRecord(source) || ![1, 2, 3, 4, 5, 6].includes(source.schemaVersion as number)) return false
-  const version = source.schemaVersion as number
+  if (!isRecord(source) || !isSupportedVersion(source.schemaVersion)) return false
+  const version = source.schemaVersion
   const expected: Record<string, unknown> = { schemaVersion: version, pins: snapshot.pins }
   if (version >= 2) expected.removedProjects = snapshot.removedProjects
   if (version >= 3) expected.projectOrder = snapshot.projectOrder
@@ -174,6 +178,37 @@ export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: Naviga
     expected.registeredProjects = snapshot.registeredProjects
     expected.legacyProjectsSynced = snapshot.legacyProjectsSynced
   }
+  if (version >= 7) {
+    // Pins own membership. Stale or repeated display-order entries can be skipped on read.
+    if (!Array.isArray(source.pinnedProjectOrder)) return false
+    expected.pinnedProjectOrder = source.pinnedProjectOrder
+  }
   return Object.keys(source).length === Object.keys(expected).length
     && Object.entries(expected).every(([key, value]) => JSON.stringify(source[key]) === JSON.stringify(value))
+}
+
+export function orderedPinnedProjects(pins: readonly NavigationPin[], order: readonly string[]): string[] {
+  const pinned = new Set(pins.filter(pin => pin.kind === 'project').map(pin => pin.targetKey))
+  return [...new Set([...order.filter(key => pinned.has(key)), ...pinned])]
+}
+
+export function moveNavigationProject(snapshot: NavigationPreferencesSnapshot, move: NavigationProjectMove): NavigationPreferencesSnapshot {
+  if (!move || (move.section !== 'projects' && move.section !== 'pinned') || !isProjectTargetKey(move.projectKey)
+    || (move.beforeProjectKey !== null && !isProjectTargetKey(move.beforeProjectKey))) throw new Error('Invalid project move')
+  const { section, projectKey, beforeProjectKey } = move
+  const registered = new Set(snapshot.registeredProjects.map(path => `directory:${path}`))
+  for (const removed of snapshot.removedProjects) registered.delete(removed.targetKey)
+  const pins = new Set(orderedPinnedProjects(snapshot.pins, snapshot.pinnedProjectOrder))
+  const base = section === 'pinned' ? [...pins] : [...new Set([...(snapshot.projectOrder ?? []), ...registered])]
+  const eligible = (key: string): boolean => registered.has(key) && pins.has(key) === (section === 'pinned')
+  const rows = base.filter(eligible)
+  const from = rows.indexOf(projectKey)
+  if (from < 0 || beforeProjectKey === projectKey || (rows[from + 1] ?? null) === beforeProjectKey
+    || (beforeProjectKey !== null && !rows.includes(beforeProjectKey))) return snapshot
+  rows.splice(from, 1)
+  rows.splice(beforeProjectKey === null ? rows.length : rows.indexOf(beforeProjectKey), 0, projectKey)
+  // Only replace this section's slots. Unpinning later restores the underlying project position.
+  let index = 0
+  const order = base.map(key => eligible(key) ? rows[index++] : key)
+  return section === 'pinned' ? { ...snapshot, pinnedProjectOrder: order } : { ...snapshot, projectOrder: order }
 }

@@ -19,7 +19,7 @@ import { AppToast, type AppToastAction, type AppToastValue } from './AppToast'
 import { ThreadForkOperation, type ThreadForkState } from './thread-fork'
 import { useForkLoading } from './use-fork-loading'
 export { AppToast } from './AppToast'
-import { EMPTY_SNAPSHOT, isProjectPath } from '../../shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, isProjectPath, moveNavigationProject } from '../../shared/navigation-preferences-model'
 import { useThreadUserAnchorCache } from './useThreadUserAnchors'
 import { hasPendingThreadDraftInput } from './pending-thread-draft'
 import { memberCreationHelper, memberCreationInitialDraft, navigationWithMemberCreationDrafts, type MemberCreationDraft } from './member-creation-flow'
@@ -83,6 +83,7 @@ import type {
   ThreadViewedAcknowledgement,
   NavigationPin,
   NavigationPreferencesSnapshot,
+  NavigationProjectMove,
   NavigationSnapshot,
   ProjectNavigationGroup,
   RestorableLocation,
@@ -1092,7 +1093,7 @@ export function BusinessApp({
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
-  const [projectOrder, setProjectOrder] = useState<string[] | null>(null)
+  const [pendingProjectMoves, setPendingProjectMoves] = useState<NavigationProjectMove[]>([])
   const [projectNames, setProjectNames] = useState<Record<string, string>>({})
   const [navigationPreferences, setNavigationPreferences] = useState<NavigationPreferencesSnapshot | null>(null)
   const navigationPreferencesRef = useRef<NavigationPreferencesSnapshot | null>(null)
@@ -1759,13 +1760,25 @@ export function BusinessApp({
       const next = new Set(snapshot.removedProjects.map(project => project.targetKey))
       return current.size === next.size && [...current].every(key => next.has(key)) ? current : next
     })
-    setProjectOrder(snapshot.projectOrder)
     setProjectNames(snapshot.projectNames)
     acceptThreadReadStates(snapshot)
     setRemovedProjectAuthorityReady(true)
   }, [acceptThreadReadStates])
 
   useEffect(() => uiPreferences.navigationPreferences.onChanged?.(applyNavigationPreferences), [uiPreferences, applyNavigationPreferences])
+
+  const moveProject = useCallback(async (move: NavigationProjectMove) => {
+    const previous = navigationPreferencesRef.current
+    setPendingProjectMoves(current => [...current, move])
+    try {
+      const saved = await uiPreferences.navigationPreferences.moveProject(move)
+      if (navigationPreferencesRef.current === previous) applyNavigationPreferences(saved)
+    } catch {
+      // Removing this move below reveals the latest confirmed order, including other windows' edits.
+    } finally {
+      setPendingProjectMoves(current => current.filter(pending => pending !== move))
+    }
+  }, [uiPreferences, applyNavigationPreferences])
 
   const registerProject = useCallback(async (projectPath: string, explicit = false): Promise<void> => {
     const current = navigationPreferencesRef.current
@@ -2466,6 +2479,9 @@ export function BusinessApp({
   const currentProjectPath = currentProject.kind === 'directory'
     ? currentProject.projectPath
     : null
+  const orderedPreferences = useMemo(() => navigationPreferences
+    && pendingProjectMoves.reduce(moveNavigationProject, navigationPreferences), [navigationPreferences, pendingProjectMoves])
+  const projectOrder = orderedPreferences?.projectOrder ?? null
   const visibleNavigation = useMemo(
     () => navigationWithProjectNames(navigationWithProjectOrder(
       navigationWithProjectDirectories(navigation, navigationPreferences),
@@ -4744,6 +4760,8 @@ export function BusinessApp({
     shellOnlyProjectPath={shellOnlyCurrentProjectPath}
     creatingConversation={busy === 'create-camp'}
     pins={navigationPins}
+    projectOrdering={orderedPreferences ? { registeredProjects: orderedPreferences.registeredProjects,
+      pinnedProjectOrder: orderedPreferences.pinnedProjectOrder, move: moveProject } : undefined}
     pinnedThreadItems={pinnedThreadItems}
     pinReadIssue={pinReadIssue}
     onRetryPins={loadPins}

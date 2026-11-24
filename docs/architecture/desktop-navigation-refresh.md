@@ -3,7 +3,7 @@ document_type: architecture
 architecture: desktop-navigation-refresh
 authority: desktop-navigation-invalidation-and-refresh-boundaries
 status: accepted
-last_updated: 2026-11-22
+last_updated: 2026-11-24
 ---
 
 # Desktop Navigation Refresh 架构
@@ -17,7 +17,7 @@ Navigation Preferences 拥有客户端目录清单、移除记录、项目顺序
 | --- | --- |
 | Core Navigation Read Model | 从 camp 摘要与现有业务表读取；目标行按 ID、分组按索引前缀；同一事务取得窗口与总数 |
 | Core mutation boundary | 事件序号确定后，同事务维护所属 Thread 的活动/完成摘要；提交后发带 scope 的失效提示 |
-| Electron Main | 原样转发，不组装业务状态；schema 6 私有原子 JSON 保存目录、一次性完成标记与其他导航偏好 |
+| Electron Main | 原样转发业务导航。私有原子 JSON 保存目录、一次性完成标记与其他导航偏好 |
 | Renderer window reader + refresh coordinator | 一处合并行/组/完整范围，串行执行、trailing、退避与窗口旧响应保护 |
 | Foreground safety refresh | 保留前台约 20 秒与聚焦完整性兜底，从摘要取完整快照；隐藏时停止 |
 | Overview loader | 首次建立完整导航与其他页面基础；普通 Thread 切换不调用 Overview |
@@ -124,6 +124,8 @@ Renderer 在启动成功取得完整导航后只尝试一次旧目录补齐，�
 `projectOrder` 保留原相对顺序，登记新路径时追加，主动移除时清理；消息、Run 或会话归零不改变
 目录登记与顺序。合法旧 schema 的 `null` 顺序在一次补齐时按已有目录和完整 Core 分组顺序建立。
 已登记空目录和普通目录使用同一展示投影，别名仍由 `projectNames` 覆盖。
+用户主动排序时，Renderer 提交源路径键和同区落点，并临时显示新位置。松手后的确认和其他窗口的偏好广播
+共用已有订阅。保存失败立即撤回本次移动，展示最近已确认的顺序。
 Desktop 在实际修改时复用 Main 串行队列、最新偏好读取和原子写入；Web 复用既有 IndexedDB store 的
 短互斥事务来保护原 localStorage JSON，不把目录保存到数据库。普通会话路径只判断已加载的内存偏好。
 
@@ -131,7 +133,7 @@ Desktop 在实际修改时复用 Main 串行队列、最新偏好读取和原子
 
 `projectNames: Record<string, string>` 使用既有 canonical `directory:<projectPath>` key 保存本机显示名称。
 合法 schema 2/3 在内存升级时补空映射，不因升级产生损坏提示，也不在读取时重写旧文件。schema 1 继续沿用
-已有恢复规则。后续成功写入输出 schema 6；名称与置顶、移除、恢复、顺序共用 Main 串行队列和原子文件写入。
+已有恢复规则。后续实际修改按当前 schema 保存。名称与置顶、移除、恢复、顺序共用 Main 串行队列和原子文件写入。
 写入失败保留旧快照；返回完整快照只发生在成功保存后。
 
 Main-owned `navigationPreferences.setProjectName(targetKey, name)` 接受字符串或 `null`；字符串去除首尾空白、
