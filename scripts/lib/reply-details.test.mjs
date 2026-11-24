@@ -211,7 +211,8 @@ async function runReplyDetails(t, splittersOnly = false) {
       assert.equal(afterReveal.draft, expectedDraft)
       assert.equal(afterResize.visible, true, `${name}: subsequent resize must preserve the destination`)
     }
-    await open({ loaded: true, wrapped: true, grouped: true, messageCount: 80 })
+    // Interrupt a long, nonvirtual scroll with a real wheel gesture.
+    await open({ loaded: true, wrapped: true, messageCount: 80 })
     const beforeNavigation = await b.evaluate('document.querySelector(".timeline-scroll").scrollTop')
     await click('[data-reply-message-id=reply-a] [aria-label="回到原文"]')
     await b.wait(`(() => { const e = document.querySelector('.timeline-scroll'); return e.scrollTop > 800 && e.scrollTop < ${beforeNavigation} - 800 })()`)

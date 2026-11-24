@@ -357,14 +357,17 @@ try {
   // Compare the actual message-action styles with the unchanged production view.
   await scenario('interleaved',3);await rest()
   const actions=()=>b.evaluate(`Array.from(document.querySelectorAll('.public-agent-message .message-actions,.agent-message-output>.message-actions')).map(e=>({id:e.closest('[data-message-id]')?.dataset.messageId||e.parentElement.dataset.messageOutputId,opacity:getComputedStyle(e).opacity,pointer:getComputedStyle(e).pointerEvents,persistent:e.classList.contains('is-persistent')}))`)
-  const proposal=await actions();assert.deepEqual(proposal.filter(e=>e.opacity==='1').map(e=>e.id),['reply-review'])
+  const alwaysVisible = await b.evaluate("matchMedia('(max-width: 760px), (hover: none), (pointer: coarse)').matches")
+  const proposal = await actions()
+  assert.deepEqual(proposal.filter(e => e.opacity === '1').map(e => e.id),
+    alwaysVisible ? ['history-alice', 'reply-alice', 'reply-review'] : ['reply-review'])
   await b.evaluate('__presence.setProposal(false)');await rest();assert.deepEqual(await actions(),proposal)
   await b.evaluate('__presence.setProposal(true)');await rest()
   const point=await b.evaluate(`(() => {const r=document.querySelector('[data-message-id=reply-alice] .message-bubble,[data-message-id=reply-alice] .final-copy').getBoundingClientRect();return {x:r.left+15,y:r.top+10}})()`)
   await b.send('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await settle();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,'1')
-  await rest();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,'0')
+  await rest();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,alwaysVisible ? '1' : '0')
   await b.evaluate('document.querySelector("[data-message-id=reply-alice] .message-copy-button").focus()');await settle();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,'1')
-  await rest();report.interactions.push({copyReplyVisibility:'production baseline, latest agent only; hover/focus retained',actions:proposal})
+  await rest();report.interactions.push({copyReplyVisibility:'actions match the input device and remain accessible by keyboard',actions:proposal})
 
   // V2's lightweight Stop requires confirmation; cancel/Escape are harmless.
   await scenario('parallel',2);await rest()
