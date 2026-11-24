@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { TaskCapabilityProvider } from '../../../apps/desktop/src/renderer/src/TaskCapabilityProvider'
+import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
 import type { AgentProfile, AgentRunView, ThreadComposerDraftView, ThreadMemberFastView, ThreadSnapshot, CoreEvent, ExecutionConsolePlacement, PendingThreadInputSubmissionOutcome } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { ThreadWorkspace, type ThreadInspectorTab } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
@@ -51,7 +53,7 @@ let deferredProjection: (() => void) | null = null
 const submissionOutcomes = new Map<string, PendingThreadInputSubmissionOutcome>()
 const eventListeners = new Set<(event: CoreEvent) => void>()
 const initial: ThreadSnapshot = {
-  schemaVersion: 35, throughGlobalSequence: 1,
+  schemaVersion: 35, throughGlobalSequence: 1, tasksEnabled: true,
   thread: { id: threadId, title: '响应模式与紧凑会话验收', activationState: 'active', projectBindingKind: 'directory',
     projectPath: '/fixture/workspace', defaultLeadAgentId: agents[0].agentId, membershipGeneration: 1, version: 1, createdAt: now, updatedAt: now },
   members: agents.map((agent, index) => ({ agentId: agent.agentId, displayName: agent.displayName, avatarRef: null,
@@ -103,6 +105,7 @@ Object.assign(window, { rovai: {
   },
   request: async (method: string, params?: Record<string, any>): Promise<unknown> => {
     requests.push({ method, params })
+    if (method === 'preferences.tasks.get') return { enabled: true, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
     if (method === 'monitoring.execution') return { schemaVersion: 1,
       runs: metricMode ? (params!.agentRunIds as string[]).flatMap(id => {
         const run = metricRuns.find(item => item.id === id)
@@ -208,7 +211,7 @@ function Fixture(): React.JSX.Element {
     </main>
   </div></MobileLayoutProvider>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+createRoot(document.getElementById('root')!).render(<TaskCapabilityProvider client={desktopThreadClient}><Fixture /></TaskCapabilityProvider>)
 const element = (selector: string): HTMLElement => document.querySelector(selector)!
 let bookmarkedButton: HTMLElement | null = null
 let releaseStop: (() => void) | null = null

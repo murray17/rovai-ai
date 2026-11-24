@@ -59,6 +59,8 @@ Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: (listener: (event: unknown) => void) => { events.add(listener); return () => events.delete(listener) }, clipboard: { write: async () => {} },
   request: async (method: string, params?: { messageId: string }) => {
     requests.push(method)
+    if (method === 'app.info') return { composerProjectFileReferenceVersion: 2 }
+    if (method === 'singleChat.list') return []
     if (method === 'thread.messages.anchors') {
       indexBodyMounted.push(Boolean(document.querySelector('[data-message-id]')))
       const items = fullMessages.filter(message => message.authorType === 'user' && !message.withdrawn)
@@ -159,6 +161,10 @@ Object.assign(window, { anchorsTest: {
   theme: async (theme: string) => { document.documentElement.dataset.theme = theme; await settle() },
   top: async () => { viewport().scrollTop = 0; await settle() },
   read: async (id: string) => {
+    if (!target(id)) {
+      markers().find(marker => marker.dataset.userMessageAnchor === id)!.click()
+      await settle()
+    }
     viewport().scrollTop += target(id).getBoundingClientRect().top - viewport().getBoundingClientRect().top - 18
     await settle()
   },

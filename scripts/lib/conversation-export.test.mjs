@@ -189,9 +189,9 @@ test('sidebar exports complete history through the existing preview without chan
     const layouts = []
     for (const theme of ['day', 'night', 'ember', 'horizon', 'classic-red']) {
       await b.evaluate(`__presence.setTheme(${JSON.stringify(theme)})`)
-      await b.wait(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`)
+      await b.wait(`document.documentElement.dataset.themeId===${JSON.stringify(theme)}`)
       await pause(100)
-      const layout = await b.evaluate(`(()=>{const d=document.querySelector('.message-export-dialog'),r=d.getBoundingClientRect();return {theme:document.documentElement.dataset.theme,left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:document.documentElement.scrollWidth>innerWidth}})()`)
+      const layout = await b.evaluate(`(()=>{const d=document.querySelector('.message-export-dialog'),r=d.getBoundingClientRect();return {theme:document.documentElement.dataset.themeId,left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:document.documentElement.scrollWidth>innerWidth}})()`)
       assert.equal(layout.overflow, false); layouts.push(layout)
     }
     for (const [width, height] of [[375, 812], [844, 390], [720, 620]]) {

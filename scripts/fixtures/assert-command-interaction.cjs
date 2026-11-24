@@ -44,7 +44,7 @@ module.exports = async function assertCommandInteraction(window, run, capture) {
     assert.equal(await run('document.querySelector(".tool-group-copy").textContent'), 'TOKEN=fixture-value echo 80')
     assert.equal(await run('document.querySelector(".tool-group-summary > .tool-call-icon").dataset.iconDomain'), 'terminal')
     assert.equal(await run('document.querySelectorAll(".tool-group-summary .tool-group-disclosure").length'), 0)
-    assert.equal(await run('getComputedStyle(document.querySelector(".tool-group-summary .running-text-highlight")).animationDuration'), '2.4s')
+    assert.equal(await run('getComputedStyle(document.querySelector(".tool-group-summary .running-text-highlight")).animationDuration'), '4.8s')
     const compactTop = await top(compact)
     await run('document.querySelector(".compaction-event > summary").click()')
     await waitFor('window.campOpenTest.pendingCommandResults() === 1')

@@ -85,27 +85,49 @@ export function UserMessageAnchors({ anchors, viewportRef, enabled, followingLat
     const ids = new Set(anchors.map(anchor => anchor.id))
     const parts = new Map<Element, string>()
     const intersecting = new Set<Element>()
-    const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        if (entry.isIntersecting && entry.intersectionRect.height > 0) intersecting.add(entry.target)
-        else intersecting.delete(entry.target)
-      }
+    const publish = (): void => {
       const next = new Set([...intersecting].map(part => parts.get(part)!).filter(Boolean))
       setVisibleIds(previous => previous.size === next.size && [...next].every(id => previous.has(id))
         ? previous : next)
-    }, { root: viewport, rootMargin: '-1px 0px', threshold: 0 })
-    for (const message of viewport.querySelectorAll<HTMLElement>('[data-message-id]')) {
-      const id = message.dataset.messageId!
-      if (!ids.has(id)) continue
-      // Observe actual content and identity, excluding the transparent action/receipt row.
-      for (const part of message.querySelectorAll<HTMLElement>(
-        ':scope > .current-user-profile-trigger, .bubble-meta, .message-surface > :not(.message-action-line)'
-      )) {
-        parts.set(part, id)
-        observer.observe(part)
-      }
     }
-    return () => observer.disconnect()
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (parts.has(entry.target) && entry.isIntersecting && entry.intersectionRect.height > 0) intersecting.add(entry.target)
+        else intersecting.delete(entry.target)
+      }
+      publish()
+    }, { root: viewport, rootMargin: '-1px 0px', threshold: 0 })
+    // Virtual scrolling and deferred content can replace DOM nodes without changing the message list.
+    const selector = '[data-message-id] > .current-user-profile-trigger, .bubble-meta, .message-surface > :not(.message-action-line)'
+    const observePart = (part: Element): void => {
+      const id = part.closest<HTMLElement>('[data-message-id]')?.dataset.messageId
+      if (!id || !ids.has(id) || parts.has(part)) return
+      parts.set(part, id)
+      observer.observe(part)
+    }
+    viewport.querySelectorAll(selector).forEach(observePart)
+    if (parts.size === 0) publish()
+    const mutations = new MutationObserver(records => {
+      if (records.some(record => Array.from(record.removedNodes).some(node => node instanceof Element))) {
+        let visibleRemoved = false
+        for (const part of parts.keys()) {
+          if (viewport.contains(part)) continue
+          observer.unobserve(part)
+          parts.delete(part)
+          if (intersecting.delete(part)) visibleRemoved = true
+        }
+        if (visibleRemoved) publish()
+      }
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element) || !viewport.contains(node)) continue
+          if (node.matches(selector)) observePart(node)
+          node.querySelectorAll(selector).forEach(observePart)
+        }
+      }
+    })
+    mutations.observe(viewport, { childList: true, subtree: true })
+    return () => { mutations.disconnect(); observer.disconnect() }
   }, [anchors, available, room.show, viewportRef, contentRevision])
 
   useLayoutEffect(() => {

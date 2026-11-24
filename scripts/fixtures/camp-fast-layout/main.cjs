@@ -182,25 +182,28 @@ app.whenReady().then(async () => {
       app.quit()
       return
     }
-    const previousProcess = '[data-agent-run-id="previous-agent-0"] .execution-disclosure'
+    const previousProcess = '[data-agent-run-id="previous-agent-0"] .execution-run-toggle'
+    const previousExpanded = () => run(`document.querySelector('${previousProcess}').getAttribute('aria-expanded')`)
     assert.equal(await run("document.querySelector('.execution-run-information')"), null, 'Run metadata no longer occupies a separate disclosure')
     assert.equal(await run("document.querySelectorAll('.execution-process-card').length"), 2, 'Completed and running Runs remain separate cards')
-    assert.equal(await run(`document.querySelector('${previousProcess}').open`), false, 'Completed process starts collapsed')
+    await click('.execution-history-toggle')
+    assert.equal(await previousExpanded(), 'false', 'Completed process starts collapsed')
     assert.equal(await run("Boolean(document.querySelector('[data-agent-run-id=\"previous-agent-0\"] .execution-process-node circle'))"), true, 'The completed Run retains its circular status glyph')
-    await click(`${previousProcess} > summary`)
+    await click(previousProcess)
+    assert.equal(await previousExpanded(), 'true')
     await run("window.bookmarkedExecutionDrawer = document.querySelector('.execution-drawer')")
     await run('window.fastTest.refresh()')
     await snapshot()
-    assert.equal(await run(`document.querySelector('${previousProcess}').open`), true, 'Projection refresh preserves the execution process disclosure')
+    assert.equal(await previousExpanded(), 'true', 'Projection refresh preserves the execution process disclosure')
     state = await key('Escape')
     assert.equal(state.panel.height, 0, 'Escape from execution details closes the floating panel')
-    assert.equal(await run("document.activeElement.matches('.camp-detail-entry[data-detail=\"execution\"]')"), true, 'Focus returns to the floating panel entry')
+    assert.equal(await run("document.activeElement.matches('.conversation-controls .structured-mention-editor')"), true, 'Keyboard dismissal restores Composer focus')
     await click('.camp-detail-entry[data-detail="execution"]')
     assert.equal(await run("window.bookmarkedExecutionDrawer === document.querySelector('.execution-drawer')"), true, 'Closing the panel does not remount execution details')
-    assert.equal(await run(`document.querySelector('${previousProcess}').open`), true, 'Reopening preserves the completed process disclosure')
-    await click(`${previousProcess} > summary`)
+    assert.equal(await previousExpanded(), 'true', 'Reopening preserves the completed process disclosure')
+    await click(previousProcess)
     await key('Enter')
-    assert.equal(await run(`document.querySelector('${previousProcess}').open`), true, 'The focused process summary opens with native keyboard input')
+    assert.equal(await previousExpanded(), 'true', 'The focused run opens with native keyboard input')
     await key('Enter')
     const executionFast = '.execution-drawer .camp-fast-toggle'
     const stopButton = '.execution-drawer [aria-label="停止当前运行"]'
@@ -229,7 +232,7 @@ app.whenReady().then(async () => {
         actions: document.querySelector('.execution-drawer-actions')?.textContent }
       probe.remove(); return result
     })()`)
-    assert.equal((await executionState()).pressed, 'mixed')
+    assert.equal((await executionState()).pressed, 'false')
     await click(executionFast)
     assert.equal((await executionState()).pressed, 'true')
     await click('.camp-detail-entry[data-detail="members"]')

@@ -44,11 +44,19 @@ module.exports = async (window, run, capture, output) => {
       if (await run(expression)) return
       await new Promise(resolve => setTimeout(resolve, 25))
     }
-    throw new Error(`Image menu condition timed out: ${expression}`)
+    const status = await run('Array.from(document.querySelectorAll(".image-lightbox-feedback, .image-action-notice"), node => node.textContent)')
+    throw new Error(`Image menu condition timed out: ${expression}. Feedback: ${JSON.stringify(status)}`)
   }
   const labels = () => run('Array.from(document.querySelectorAll(".image-context-menu [role=menuitem]"), item => item.textContent)')
   const choose = async label => {
-    await run(`Array.from(document.querySelectorAll('.image-context-menu [role=menuitem]')).find(item => item.textContent === ${JSON.stringify(label)}).click()`)
+    const point = await run(`(() => {
+      const item = Array.from(document.querySelectorAll('.image-context-menu [role=menuitem]')).find(item => item.textContent === ${JSON.stringify(label)})
+      const r = item.getBoundingClientRect()
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+    })()`)
+    window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+    window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
     await settle()
   }
   const key = async (keyCode, modifiers = []) => {
@@ -76,6 +84,18 @@ module.exports = async (window, run, capture, output) => {
   }
   const userTile = '.image-gallery-user-attachment .image-tile-preview'
   const agentTile = '.image-gallery-agent-output .image-tile:last-child .image-tile-preview'
+  const lightbox = '.image-gallery-lightbox'
+  const openPreview = async selector => {
+    const tile = `document.querySelector(${JSON.stringify(selector)})`
+    await run(`${tile}.scrollIntoView({block:'center'})`)
+    await waitFor(`${tile}.querySelector('img')?.naturalWidth > 0`)
+    await run(`${tile}.click()`)
+    await waitFor('!!document.querySelector(".image-gallery-lightbox img")')
+  }
+  const closePreview = async () => {
+    await run('document.querySelector(".image-gallery-lightbox .attachment-lightbox-close").click()')
+    await waitFor('!document.querySelector(".image-gallery-lightbox")')
+  }
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect x="32" y="32" width="576" height="296" rx="24" fill="#526f88"/><text x="80" y="194" fill="white" font-size="40">MESSAGE IMAGE</text></svg>'
   const image = { displayName: 'message-image.svg', mediaType: 'image/svg+xml', data: Buffer.from(svg).toString('base64') }
   try {
@@ -95,7 +115,11 @@ module.exports = async (window, run, capture, output) => {
     await new Promise(resolve => setTimeout(resolve, 350))
     await run('window.campOpenTest.scrollAttachmentSurface("user")')
     await waitFor(`document.querySelector(${JSON.stringify(userTile + ' img')})?.naturalWidth === 640`)
-    await openMenu(userTile, true)
+    await run(`document.querySelector(${JSON.stringify(userTile)}).focus()`)
+    await key('F10', ['shift'])
+    assert.equal(await run('!!document.querySelector(".image-context-menu")'), false, 'Timeline thumbnails open previews')
+    await openPreview(userTile)
+    await openMenu(lightbox, true)
     assert.deepEqual(await labels(), ['复制图片', '保存图片…', '复制完整路径', '在 Finder 中显示'])
     await key('End')
     assert.equal(await run('document.activeElement.textContent'), '在 Finder 中显示')
@@ -103,15 +127,15 @@ module.exports = async (window, run, capture, output) => {
     assert.equal(await run('document.activeElement.textContent'), '复制图片', 'keyboard navigation loops')
     await capture('image-menu-day')
     await key('Escape')
-    assert.equal(await run(`document.activeElement.matches(${JSON.stringify(userTile)})`), true, 'Escape returns to the real image')
+    assert.equal(await run('document.activeElement.matches(".image-gallery-lightbox")'), true, 'Escape returns to the preview')
 
-    await openMenu(userTile)
+    await openMenu(lightbox)
     await choose('复制图片')
-    await waitFor('document.querySelector(".image-action-notice")?.textContent === "已复制图片"')
-    assert.deepEqual(clipboard.readImage().getSize(), { width: 640, height: 360 }, '72px thumbnail copies the full image')
+    await waitFor('document.querySelector(".image-gallery-lightbox [role=status]")?.textContent === "已复制图片"')
+    assert.deepEqual(clipboard.readImage().getSize(), { width: 640, height: 360 }, 'The preview copies the full image')
     assert.equal(clipboard.readImage().toBitmap()[3], 0, 'transparent image corner stays transparent')
     await run(`(() => {
-      const input = document.createElement('textarea'); input.id = 'image-paste-target'; document.body.appendChild(input);
+      const input = document.createElement('textarea'); input.id = 'image-paste-target'; document.querySelector('.image-gallery-lightbox').appendChild(input);
       input.addEventListener('paste', event => { window.imagePasteTypes = [...event.clipboardData.files].map(file => file.type); event.preventDefault(); });
       input.focus();
     })()`)
@@ -127,37 +151,37 @@ module.exports = async (window, run, capture, output) => {
         item.once('done', (_event, state) => { clearTimeout(timer); resolve(state) })
       })
     })
-    await openMenu(userTile)
+    await openMenu(lightbox)
     await choose('保存图片…')
     assert.equal(await saved, 'completed')
     assert.equal(readFileSync(join(output, 'saved-image.svg'), 'utf8'), svg, 'saving retains original bytes and format')
-    await openMenu(userTile)
+    await openMenu(lightbox)
     await choose('在 Finder 中显示')
     assert.equal(await run('window.imageRevealCalls[0].owner'), 'message')
     assert.equal(await run('window.imageRevealCalls[0].attachmentRefId'), 'user-image-one')
 
-    await run(`document.querySelector(${JSON.stringify(userTile)}).click()`)
-    await waitFor('document.querySelector(".image-gallery-lightbox") !== null')
-    await openMenu('.image-gallery-lightbox')
+    await openMenu(lightbox)
     const previewMenu = await run(`(() => {const p=document.querySelector('.image-gallery-lightbox').getBoundingClientRect(),m=document.querySelector('.image-context-menu').getBoundingClientRect();return {expectedX:Math.round(p.left+24)+5,expectedY:Math.round(p.top+24),x:m.left,y:m.top}})()`)
     assert.ok(Math.abs(previewMenu.x-previewMenu.expectedX) <= 2 && Math.abs(previewMenu.y-previewMenu.expectedY) <= 2, 'lightbox transforms do not offset the pointer menu')
     await capture('image-menu-lightbox')
-    assert.deepEqual(await labels(), ['复制图片', '保存图片…', '复制完整路径', '在 Finder 中显示'], 'thumbnail and lightbox share the same image actions')
+    assert.deepEqual(await labels(), ['复制图片', '保存图片…', '复制完整路径', '在 Finder 中显示'])
     await choose('复制图片')
     await waitFor('document.querySelector(".image-gallery-lightbox [role=status]")?.textContent === "已复制图片"')
     assert.deepEqual(clipboard.readImage().getSize(), { width: 640, height: 360 })
     await openMenu('.image-gallery-lightbox', true)
     await key('Escape')
     assert.equal(await run('Boolean(document.querySelector(".image-gallery-lightbox"))'), true, 'first Escape only dismisses the menu')
-    await run('document.querySelector(".attachment-lightbox-close").click()')
-    await settle()
+    await closePreview()
+    await waitFor(`document.activeElement.matches(${JSON.stringify(userTile)})`)
 
     await run('document.documentElement.dataset.theme = "night"')
-    await openMenu(agentTile)
+    await openPreview(agentTile)
+    await openMenu(lightbox)
     assert.deepEqual(await labels(), ['复制图片', '保存图片…'], 'Runtime images only offer copy and save')
     assert.equal(await run('document.querySelectorAll(".image-context-menu [role=separator]").length'), 0, 'no empty file-action group')
     await capture('image-menu-night-runtime')
     await key('Escape')
+    await closePreview()
 
     const composerTile = '.composer-image-attachment .attachment-open'
     await run('document.documentElement.dataset.theme = "day"')
@@ -235,30 +259,32 @@ module.exports = async (window, run, capture, output) => {
     await waitFor('document.querySelector(".image-action-notice")?.textContent.includes("未能复制图片")')
     assert.equal(await run('window.campOpenTest.localDraftState().body'), draftBefore)
     await capture('composer-image-copy-failure')
-    await openMenu(userTile)
+    await openPreview(userTile)
+    await openMenu(lightbox)
     await choose('复制图片')
-    await waitFor('document.querySelector(".image-action-notice")?.textContent.includes("未能复制图片")')
+    await waitFor('document.querySelector(".image-gallery-lightbox .image-lightbox-feedback")?.textContent.includes("未能复制图片")')
     await capture('image-menu-copy-failure')
+    await closePreview()
     await run('navigator.clipboard.write = window.originalImageClipboardWrite; void 0')
 
     await run(`window.campOpenTest.showImages({displayName:'broken.png',mediaType:'image/png',data:'AQID'})`)
     const broken = '[data-message-id="image-message-1"] .image-tile-preview'
     await run(`document.querySelector(${JSON.stringify(broken)}).scrollIntoView({block:'center'})`)
     await waitFor(`document.querySelector(${JSON.stringify(broken)})?.textContent.includes("不可用")`)
-    await openMenu(broken, true)
-    assert.equal(await run('document.querySelector(".image-context-menu [role=menuitem]").getAttribute("aria-disabled")'), 'true')
-    assert.equal((await labels()).includes('刷新图片'), false)
-    await key('Escape')
+    assert.equal(await run(`document.querySelector(${JSON.stringify(broken)}).getAttribute('aria-disabled')`), 'true')
+    await run(`document.querySelector(${JSON.stringify(broken)}).click()`)
+    assert.equal(await run('!!document.querySelector(".image-gallery-lightbox, .image-context-menu")'), false)
     await run(`window.campOpenTest.showImages(${JSON.stringify(image)})`)
     await run('window.dispatchEvent(new Event("focus"))')
     await waitFor(`document.querySelector(${JSON.stringify(broken + ' img')})?.naturalWidth === 640`)
+    await openPreview(broken)
 
     window.webContents.debugger.attach('1.3')
     await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     window.setContentSize(1040, 700)
     window.webContents.setZoomFactor(2)
     await settle()
-    await run(`document.querySelector(${JSON.stringify(broken)}).dispatchEvent(new MouseEvent('contextmenu', {bubbles:true,cancelable:true,clientX:innerWidth-2,clientY:innerHeight-2}))`)
+    await run(`document.querySelector(${JSON.stringify(lightbox)}).dispatchEvent(new MouseEvent('contextmenu', {bubbles:true,cancelable:true,clientX:innerWidth-2,clientY:innerHeight-2}))`)
     await settle()
     await waitFor(`(() => {const r=document.querySelector('.image-context-menu')?.getBoundingClientRect();return r && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight})()`)
     const bounds = await run(`(() => {const r=document.querySelector('.image-context-menu').getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight}})()`)
@@ -266,6 +292,7 @@ module.exports = async (window, run, capture, output) => {
     assert.equal(await run('getComputedStyle(document.querySelector(".image-context-menu")).animationName'), 'none')
     await capture('image-menu-night-200-percent')
     await key('Escape')
+    await closePreview()
     window.webContents.setZoomFactor(1)
     window.setContentSize(1200, 800)
     await run(`(() => {

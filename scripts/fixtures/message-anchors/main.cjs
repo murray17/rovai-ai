@@ -168,7 +168,8 @@ app.whenReady().then(async () => {
       assert.equal(located.title, null)
     })
     await check('background replies preserve the draft and historical reading; a user input adds one marker', async () => {
-      await run('window.anchorsTest.read("user-120"); window.anchorsTest.draft("保留的输入草稿")')
+      await run('window.anchorsTest.read("user-120")')
+      await run('window.anchorsTest.draft("保留的输入草稿")')
       const before = await state()
       await run('window.anchorsTest.appendAgent()')
       const after = await state()
@@ -238,7 +239,11 @@ app.whenReady().then(async () => {
       await run('window.anchorsTest.upInput()')
       assert.deepEqual(await run('window.anchorsTest.earlierCursors()'), [981 * 3])
       assert.equal((await state()).markers.length, 1000)
-      assert.ok((await run('window.anchorsTest.loadedIds()')).includes('user-961'))
+      const aroundBeforeJump = (await state()).requests.filter(method => method === 'thread.messages.around').length
+      await run('window.anchorsTest.jump("user-961")')
+      assert.equal((await state()).focusedMessage, 'user-961')
+      assert.equal((await state()).requests.filter(method => method === 'thread.messages.around').length, aroundBeforeJump,
+        'The earlier page is already loaded even when its first row is outside the virtual viewport')
       await run('window.anchorsTest.jump("user-300")')
       await capture('05-complete-index-independent-window')
     })
@@ -257,7 +262,9 @@ app.whenReady().then(async () => {
       assert.equal((await state()).title, null)
     })
     assert.deepEqual(errors, [])
-    assert.ok((await state()).requests.every(method => ['skills.list', 'skills.deliveryGroups.list', 'camp.pendingInputs.get', 'thread.messages.anchors', 'thread.messages.anchorPreview', 'thread.messages.around'].includes(method)))
+    const reads = new Set(['app.info', 'singleChat.list', 'skills.list', 'skills.deliveryGroups.list',
+      'camp.pendingInputs.get', 'thread.messages.anchors', 'thread.messages.anchorPreview', 'thread.messages.around'])
+    assert.deepEqual((await state()).requests.filter(method => !reads.has(method)), [])
     const report = { ok: true, checks }
     writeFileSync(join(evidence, 'verification.json'), JSON.stringify(report, null, 2))
     console.log(JSON.stringify(report))
