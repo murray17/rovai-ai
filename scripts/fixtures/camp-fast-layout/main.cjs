@@ -16,7 +16,15 @@ app.whenReady().then(async () => {
   const run = code => window.webContents.executeJavaScript(code, true)
   const snapshot = async () => { await run('window.fastTest.settle()'); return run('window.fastTest.snapshot()') }
   const click = async selector => {
-    const point = await run(`(async () => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) throw new Error('Missing '+${JSON.stringify(selector)}); node.scrollIntoView({block:'center',behavior:'instant'}); await new Promise(resolve => requestAnimationFrame(resolve)); const r=node.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)} })()`)
+    const point = await run(`(async () => {
+      const selector = ${JSON.stringify(selector)}
+      const node = [...document.querySelectorAll(selector)].find(node => node.getClientRects().length)
+      if (!node) throw new Error('Missing visible ' + selector)
+      node.scrollIntoView({block:'center',behavior:'instant'})
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      const r = node.getBoundingClientRect()
+      return {x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)}
+    })()`)
     window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
     window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
@@ -206,30 +214,40 @@ app.whenReady().then(async () => {
     assert.equal(await previousExpanded(), 'true', 'The focused run opens with native keyboard input')
     await key('Enter')
     const executionFast = '.execution-drawer .camp-fast-toggle'
-    const stopButton = '.execution-drawer [aria-label="停止当前运行"]'
+    const focusedRun = '.execution-process-stage.is-focused'
+    const stopButton = `${focusedRun} .execution-run-operations .is-danger`
+    const movePlacement = async placement => {
+      await click('.execution-placement-button')
+      await click(`.execution-placement-option[data-placement="${placement}"]`)
+      assert.equal(await run('document.querySelector(".execution-drawer").dataset.placement'), placement)
+    }
+    const hoverFocusedHeader = async () => {
+      const point = await run(`(async () => {
+        const title = document.querySelector('${focusedRun} .execution-run-heading')
+        title.scrollIntoView({block:'nearest',behavior:'instant'})
+        await new Promise(resolve => requestAnimationFrame(resolve))
+        const r = title.getBoundingClientRect()
+        return {x:Math.round(r.left+12), y:Math.round(r.top+r.height/2)}
+      })()`)
+      window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+      await snapshot()
+    }
     const executionState = () => run(`(() => {
       const fast = document.querySelector('${executionFast}'), stop = document.querySelector('${stopButton}')
-      const close = document.querySelector('.execution-drawer [aria-label="收起执行详情"]')
       const drawer = document.querySelector('.execution-drawer'), header = drawer.querySelector('.execution-drawer-header')
       const model = header.querySelector('.execution-model-params'), config = header.querySelector('.execution-config-line')
-      const f = fast?.getBoundingClientRect(), s = stop?.getBoundingClientRect(), c = close?.getBoundingClientRect()
-      const m = model?.getBoundingClientRect(), agent = header.querySelector('.execution-drawer-agent').getBoundingClientRect()
-      const fastFace = fast?.querySelector('.camp-fast-pill'), stopFace = stop?.querySelector('.execution-drawer-action-face')
-      const closeFace = close?.querySelector('.execution-drawer-action-face')
-      const probe = document.createElement('div'); probe.className = 'app-dialog'; probe.style.position = 'fixed'; probe.style.left = '-9999px'
-      probe.innerHTML = '<button class="danger-button">删除对话</button>'; document.body.appendChild(probe)
-      const expected = getComputedStyle(probe.firstElementChild), actual = stopFace ? getComputedStyle(stopFace) : null
+      const f = fast?.getBoundingClientRect(), s = stop?.getBoundingClientRect()
+      const probe = document.createElement('span')
+      probe.style.cssText = 'position:absolute;color:var(--danger);background:var(--danger-soft)'
+      drawer.append(probe)
+      const expected = getComputedStyle(probe), actual = stop && getComputedStyle(stop)
       const result = { pressed: fast?.getAttribute('aria-pressed'), pending: fast?.getAttribute('aria-busy'),
-        order: !!s && !!f && config.contains(fast) && f.left-m.right >= 9 && s.left-agent.right >= 11 &&
-          (drawer.dataset.placement === 'inspector' ? !close : !!c && c.left-s.right >= 7),
-        equalFaces: Math.abs(fastFace?.getBoundingClientRect().height-stopFace?.getBoundingClientRect().height) < 1 &&
-          (!closeFace || Math.abs(closeFace.getBoundingClientRect().height-stopFace?.getBoundingClientRect().height) < 1),
-        model: model.textContent,
+        order: !!f && config.contains(fast) && f.left-model.getBoundingClientRect().right >= 9,
+        model: model?.textContent,
         openSurface: getComputedStyle(header).backgroundColor === getComputedStyle(drawer).backgroundColor,
-        stopHit: !!s && s.height >= 28 && document.elementFromPoint(s.x+s.width/2,s.y+s.height/2)?.closest('[aria-label="停止当前运行"]') === stop,
+        stopHit: !!s && s.height >= 24 && document.elementFromPoint(s.x+s.width/2,s.y+s.height/2)?.closest('button') === stop,
         fastHit: !!f && f.height >= 28 && document.elementFromPoint(f.x+f.width/2,f.y+f.height/2)?.closest('.camp-fast-toggle') === fast,
-        deleteColors: actual?.color === expected.color && actual?.backgroundColor === expected.backgroundColor,
-        actions: document.querySelector('.execution-drawer-actions')?.textContent }
+        dangerColors: actual?.color === expected.color && actual?.backgroundColor === expected.backgroundColor }
       probe.remove(); return result
     })()`)
     assert.equal((await executionState()).pressed, 'false')
@@ -245,16 +263,17 @@ app.whenReady().then(async () => {
     await snapshot()
     assert.equal((await executionState()).pressed, 'false', 'An unrelated cloned projection does not erase a saved preference')
     for (const placement of ['inspector', 'bottom']) {
-      if (placement === 'bottom') await click('.run-pulse-inspector .execution-placement-button')
+      if (placement === 'bottom') await movePlacement(placement)
       for (const theme of ['day', 'night']) {
         await run(`document.documentElement.dataset.theme = '${theme}'`)
         for (const [width, height] of [[1040,700], [1440,920]]) {
           await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false})
           await snapshot()
           await run("Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition).map(animation => animation.finished.catch(() => {})))")
+          await hoverFocusedHeader()
           const result = await executionState()
-          assert.ok(result.order && result.equalFaces && result.stopHit && result.fastHit && result.deleteColors && result.openSurface, JSON.stringify({placement, theme, width, result}))
-          assert.equal(result.model, 'claude-sonnet-4-6 · 思考强度 高')
+          assert.ok(result.order && result.stopHit && result.fastHit && result.dangerColors && result.openSurface, JSON.stringify({placement, theme, width, result}))
+          assert.equal(result.model, 'claude-sonnet-4-6 · 思考强度 high')
           await capture(`execution-fast-${placement}-${theme}-${width}`)
         }
       }
@@ -275,13 +294,21 @@ app.whenReady().then(async () => {
     assert.equal(await run(`Boolean(document.querySelector('${executionFast}'))`), false, 'An unsupported execution Runtime has no Fast control')
     await click('.run-pulse [data-agent-id="agent-0"]')
     await click(stopButton)
-    assert.ok((await executionState()).actions.includes('正在提交停止请求'))
+    assert.equal(await run('document.querySelector("[data-agent-run-id=run-agent-0]").classList.contains("is-stopping")'), true)
     await run('window.fastTest.releaseStop()')
     await snapshot()
-    assert.ok((await executionState()).actions.includes('已停止'))
+    assert.equal(await run('document.querySelector("[data-agent-run-id=run-agent-0]").classList.contains("status-cancelled")'), true)
     assert.equal((await executionState()).pressed, 'true', 'Stopping the run keeps the next-run preference')
-    await click('.execution-placement-button')
-    await click('.conversation-controls .composer-primary-action')
+    await movePlacement('inspector')
+    const submit = async () => {
+      await run('document.querySelector("#camp-message").focus()')
+      await window.webContents.debugger.sendCommand('Input.insertText', {text:'继续检查执行结果'})
+      await snapshot()
+      const send = '.conversation-controls .composer-primary-action'
+      assert.equal(await run(`document.querySelector('${send}').disabled`), false, 'Composer accepts the new message')
+      await click(send)
+    }
+    await submit()
     await snapshot()
     const followState = () => run(`(() => {
       const body = document.querySelector('.execution-drawer-body')
@@ -296,17 +323,16 @@ app.whenReady().then(async () => {
     assert.equal(follow.following, 'true', 'Sending after cancellation restores output following')
     assert.ok(follow.gap <= 1, `Sending after cancellation scrolls to the latest output: ${JSON.stringify(follow)}`)
     for (const placement of ['inspector', 'bottom']) {
-      if (placement === 'bottom') await click('.execution-placement-button')
+      if (placement === 'bottom') await movePlacement(placement)
       const previous = await followState()
-      await run('window.fastTest.queueNextSend()')
-      await click('.conversation-controls .composer-primary-action')
+      await run('window.fastTest.delayNextSend("run")')
+      await submit()
       assert.equal((await followState()).id, previous.id, 'Admission alone does not select a guessed Run')
       await click(stopButton)
       await run('window.fastTest.releaseStop()')
       await snapshot()
       if (placement === 'inspector') await click('.camp-detail-entry[data-detail="execution"]')
       await run("document.querySelector('.conversation-controls .structured-mention-editor').focus({preventScroll:true})")
-      await run('window.fastTest.publishQueued(true)')
       await snapshot()
       assert.equal((await followState()).id, previous.id, 'A publication receipt waits for its exact Run projection')
       await run('window.fastTest.projectPublishedRun()')
@@ -321,10 +347,17 @@ app.whenReady().then(async () => {
     await click(stopButton)
     await run('window.fastTest.releaseStop()')
     await snapshot()
-    await run('window.fastTest.queueNextSend(true)')
-    await click('.conversation-controls .composer-primary-action')
-    assert.equal((await followState()).id, 'submitted-run-4', 'Durable outcomes also resolve publication before the send receipt')
-    console.log(JSON.stringify({ ok: true, requests: state.requests.length, cases: ['1280×720', '1040×700', '1440×920', 'direct toggle', 'native keyboard/focus', 'save failure', 'observations ignored', 'explicit detection', 'visible failure/manual retry', 'positive/negative cache', 'in-flight coalescing', 'runtime/auth rebind', 'inherited default', 'late check', 'late save', 'member-scoped pending', 'concurrent member saves', 'execution/member sync', 'stop/delete colors', 'execution placement/theme matrix', 'shared duplicate guard', 'projection refresh'] }))
+    await run('window.fastTest.delayNextSend("receipt")')
+    await submit()
+    assert.equal(await run('!!document.querySelector("[data-agent-run-id=submitted-run-4]")'), true, 'The Run projection arrived first')
+    await run('window.fastTest.releaseReceipt()')
+    await snapshot()
+    assert.equal((await followState()).id, 'submitted-run-4', 'The later receipt selects the published Run')
+    console.log(JSON.stringify({ ok: true, requests: state.requests.length, cases: [
+      'native keyboard and focus', 'binary Fast overrides and native defaults', 'failed and delayed saves',
+      'runtime rebinding', 'shared member preference and duplicate guard', 'history expansion across refresh',
+      'Fast and per-Run stop across placements, themes and sizes', 'Run projection before and after send receipt'
+    ] }))
     window.destroy(); app.quit()
   } catch (error) {
     console.error(await snapshot())

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { TaskCapabilityProvider } from '../../../apps/desktop/src/renderer/src/TaskCapabilityProvider'
 import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
-import type { AgentProfile, AgentRunView, ThreadComposerDraftView, ThreadMemberFastView, ThreadSnapshot, CoreEvent, ExecutionConsolePlacement, PendingThreadInputSubmissionOutcome } from '@contracts'
+import type { AgentProfile, AgentRunView, ThreadComposerDraftView, ThreadMemberFastView, ThreadSnapshot, CoreEvent, ExecutionConsolePlacement } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { ThreadWorkspace, type ThreadInspectorTab } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -46,11 +46,9 @@ let clearNotice: () => void
 let updateSnapshot: (snapshot: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) => void
 let updateAgents: (agents: AgentProfile[]) => void
 let sendSequence = 0
-let queueNextSend = false
-let publishBeforeReceipt = false
-let queuedPublication: ((deferProjection?: boolean) => void) | null = null
+let delayNext: 'run' | 'receipt' | null = null
 let deferredProjection: (() => void) | null = null
-const submissionOutcomes = new Map<string, PendingThreadInputSubmissionOutcome>()
+let deferredReceipt: (() => void) | null = null
 const eventListeners = new Set<(event: CoreEvent) => void>()
 const initial: ThreadSnapshot = {
   schemaVersion: 35, throughGlobalSequence: 1, tasksEnabled: true,
@@ -99,6 +97,7 @@ const delayResponse = async (): Promise<void> => {
   await new Promise<void>(resolve => { releaseResponse = resolve })
 }
 Object.assign(window, { rovai: {
+  composerAttachments: { discard: async () => {} },
   platform: 'darwin', onEvent: (listener: (event: CoreEvent) => void) => {
     eventListeners.add(listener)
     return () => eventListeners.delete(listener)
@@ -120,14 +119,7 @@ Object.assign(window, { rovai: {
         usedTokens: null, windowTokens: null, nativeRatio: metricGeneration === 1 ? 0.25 : 0.32,
         source: 'fixture', dialectId: 'fixture', observedAt: now }] : [] }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
-    if (method === 'camp.pendingInputs.get') return {threadId, executionActive: false,
-      items: [...submissionOutcomes.values()].filter(item => item.state === 'queued').map((item, index) => ({
-        id: item.pendingInputId, threadId, enqueueSequence: index + 1, revision: 1, state: 'queued',
-        content: draft.content, body: draft.body, quotes: [], replyIntent: null, recipientSelectionRequired: false,
-        lastAttemptErrorCode: null, attachments: []
-      })), editSession: null,
-      submissionOutcomes: (params?.submittedInputIds ?? []).map((id: string) => submissionOutcomes.get(id)
-        ?? { pendingInputId: id, state: 'missing', threadTurnId: null, addressedAgentIds: [] })}
+    if (method === 'camp.pendingInputs.get') return { threadId, executionActive: false, items: [], editSession: null, submissionOutcomes: [] }
     if (method === 'camp.composerDraft.get') return draft
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
     if (method === 'threads.members.fast.set') {
@@ -164,10 +156,12 @@ function Fixture(): React.JSX.Element {
         onSend={async () => {
           const id = `submitted-run-${++sendSequence}`
           const threadTurnId = `submitted-turn-${sendSequence}`
+          const threadMessageId = `submitted-message-${sendSequence}`
           const createdAt = `2026-09-01T00:00:0${sendSequence}Z`
           const publish = () => setSnapshot(current => {
             const run: AgentRunView = { ...current.agentRuns.find(item => item.agentId === 'agent-0')!,
-              id, threadTurnId, status: 'running', waitReason: null, cancelRequestedAt: null,
+              id, threadTurnId, inputMessageIds: [threadMessageId], anchorMessageId: threadMessageId,
+              status: 'running', waitReason: null, cancelRequestedAt: null,
               cancelReasonCode: null, cancelAcknowledgedAt: null, endedAt: null, createdAt, startedAt: createdAt,
               updatedAt: createdAt }
             return { ...current, agentRuns: [...current.agentRuns, run],
@@ -179,27 +173,15 @@ function Fixture(): React.JSX.Element {
               contentBlobId: null, contentByteCount: 0, isTruncated: false, occurredAt: createdAt
             }] }
           })
-          if (queueNextSend) {
-            queueNextSend = false
-            const pendingInputId = `pending-${sendSequence}`
-            submissionOutcomes.set(pendingInputId, { pendingInputId, state: 'queued', threadTurnId: null, addressedAgentIds: [] })
-            queuedPublication = (defer = false) => {
-              if (defer) deferredProjection = publish
-              else publish()
-              submissionOutcomes.set(pendingInputId, { pendingInputId, state: 'published', threadTurnId, addressedAgentIds: ['agent-0'] })
-              for (const listener of eventListeners) listener({ method: 'camp.pendingInputs.changed', params: { threadId, reason: 'published' } })
-            }
-            if (publishBeforeReceipt) {
-              publishBeforeReceipt = false
-              queuedPublication()
-              queuedPublication = null
-            }
-            return { pendingInputId, threadTurnId: null, agentRunIds: [], addressedAgentIds: ['agent-0'] }
-          }
-          publish()
-          return { threadTurnId, agentRunIds: [id], addressedAgentIds: ['agent-0'] }
+          const delay = delayNext
+          delayNext = null
+          if (delay === 'run') deferredProjection = publish
+          else publish()
+          if (delay === 'receipt') await new Promise<void>(resolve => { deferredReceipt = resolve })
+          return { threadMessageId, deliveryIds: [`delivery-${threadMessageId}`],
+            agentRunIds: delay === 'run' ? [] : [id], addressedAgentIds: ['agent-0'] }
         }} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
-        executionPlacement={placement} onExecutionPlacementChange={async value => { setPlacement(value); return value }}
+        executionPlacement={placement} executionAutoOpen onExecutionPlacementChange={async value => { setPlacement(value); return value }}
         onCancelAgentRun={async run => {
           await new Promise<void>(resolve => { releaseStop = resolve })
           setSnapshot(current => ({ ...current, agentRuns: current.agentRuns.map(item => item.id === run.id
@@ -250,8 +232,8 @@ Object.assign(window, { fastTest: {
     for (const listener of eventListeners) listener({ method: 'monitoring.changed', params: { reason: 'fixture_session_rotation' } })
   },
   metricsRequests: () => requests.filter(request => request.method.startsWith('monitoring.')),
-  queueNextSend: (earlyPublication = false) => { queueNextSend = true; publishBeforeReceipt = earlyPublication },
-  publishQueued: (deferProjection = false) => { queuedPublication?.(deferProjection); queuedPublication = null },
+  delayNextSend: (part: 'run' | 'receipt') => { delayNext = part },
+  releaseReceipt: () => { deferredReceipt?.(); deferredReceipt = null },
   projectPublishedRun: () => { deferredProjection?.(); deferredProjection = null },
   settle: async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) },
   bookmark: () => { bookmarkedButton = element('.camp-fast-toggle[aria-pressed]') },

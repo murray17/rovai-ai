@@ -736,10 +736,10 @@ Object.assign(window, { campOpenTest: {
       message(3, ''), message(4, '这里补充交付说明，复制和回复仍对应这一条消息。'),
       { ...message(5, '新一轮任务重新显示身份。'), threadTurnId: 'next-turn', sourceAgentRunId: null },
       { ...message(6, '我来检查这些文件。'), authorId: agents[1].agentId, sourceAgentRunId: null }]
-    groupMessages[2].attachments = Array.from({ length: scenario === 'files' ? 4 : 2 }, (_, index) =>
+    groupMessages[2].attachments = Array.from({ length: scenario === 'files' ? 3 : 2 }, (_, index) =>
       attachmentFile(`group-file-${index}`, `设计说明-${index + 1}.md`, 'text/markdown'))
     if (scenario === 'files') {
-      groupMessages[2].body = '请核对附件里的四份设计说明，包括文件名、按钮布局和窄屏阅读顺序。'.repeat(3)
+      groupMessages[2].body = '请核对附件里的三份设计说明，包括文件名、按钮布局和窄屏阅读顺序。'.repeat(5)
       groupMessages[2].content = [{ kind: 'text', text: groupMessages[2].body }]
     }
     if (scenario === 'long') {
