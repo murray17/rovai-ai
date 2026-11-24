@@ -44,8 +44,10 @@ module.exports = async (window, run, capture, output) => {
       if (await run(expression)) return
       await new Promise(resolve => setTimeout(resolve, 25))
     }
-    const status = await run('Array.from(document.querySelectorAll(".image-lightbox-feedback, .image-action-notice"), node => node.textContent)')
-    throw new Error(`Image menu condition timed out: ${expression}. Feedback: ${JSON.stringify(status)}`)
+    const status = await run(`({ focused: document.activeElement?.outerHTML.split('>')[0],
+      menu: document.querySelector('.image-context-menu')?.dataset.state, documentFocused: document.hasFocus(),
+      feedback: [...document.querySelectorAll('.image-lightbox-feedback, .image-action-notice')].map(node => node.textContent) })`)
+    throw new Error(`Image menu condition timed out: ${expression}. ${JSON.stringify(status)}`)
   }
   const labels = () => run('Array.from(document.querySelectorAll(".image-context-menu [role=menuitem]"), item => item.textContent)')
   const choose = async label => {
@@ -80,7 +82,8 @@ module.exports = async (window, run, capture, output) => {
     }
     await waitFor('document.querySelector(".image-context-menu") !== null')
     await settle()
-    await new Promise(resolve => setTimeout(resolve, 180))
+    await run(`Promise.all(document.querySelector('.image-context-menu').getAnimations().map(animation => animation.finished)).then(() => true)`)
+    if (keyboard) await waitFor(`Boolean(document.activeElement?.closest('.image-context-menu'))`)
   }
   const userTile = '.image-gallery-user-attachment .image-tile-preview'
   const agentTile = '.image-gallery-agent-output .image-tile:last-child .image-tile-preview'
@@ -101,6 +104,9 @@ module.exports = async (window, run, capture, output) => {
   try {
     window.show()
     window.focus()
+    window.webContents.focus()
+    window.webContents.debugger.attach('1.3')
+    await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await run(`(() => {
       const request = window.rovai.request;
       window.imageLocationCalls = []; window.imageRevealCalls = [];
@@ -122,9 +128,9 @@ module.exports = async (window, run, capture, output) => {
     await openMenu(lightbox, true)
     assert.deepEqual(await labels(), ['复制图片', '保存图片…', '复制完整路径', '在 Finder 中显示'])
     await key('End')
-    assert.equal(await run('document.activeElement.textContent'), '在 Finder 中显示')
+    await waitFor(`document.activeElement?.matches('.image-context-menu [role=menuitem]') && document.activeElement.textContent === '在 Finder 中显示'`)
     await key('Down')
-    assert.equal(await run('document.activeElement.textContent'), '复制图片', 'keyboard navigation loops')
+    await waitFor(`document.activeElement?.matches('.image-context-menu [role=menuitem]') && document.activeElement.textContent === '复制图片'`)
     await capture('image-menu-day')
     await key('Escape')
     assert.equal(await run('document.activeElement.matches(".image-gallery-lightbox")'), true, 'Escape returns to the preview')
@@ -279,7 +285,6 @@ module.exports = async (window, run, capture, output) => {
     await waitFor(`document.querySelector(${JSON.stringify(broken + ' img')})?.naturalWidth === 640`)
     await openPreview(broken)
 
-    window.webContents.debugger.attach('1.3')
     await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     window.setContentSize(1040, 700)
     window.webContents.setZoomFactor(2)
