@@ -442,7 +442,13 @@ app.whenReady().then(async () => {
       const waitFor = async expression => {
         const deadline = Date.now() + 4000
         do { await settle(); if (await run(expression)) return } while (Date.now() < deadline)
-        assert.fail(`Execution window condition: ${expression}`)
+        const geometry = await run(`(() => {
+          const body = document.querySelector('.execution-drawer-body')
+          return body && { top: body.scrollTop, height: body.clientHeight, total: body.scrollHeight,
+            following: body.dataset.followingLatest, adjusted: body.dataset.executionAdjustedTop,
+            rows: body.querySelectorAll('[data-execution-virtual-key]').length }
+        })()`)
+        assert.fail(`Execution window condition: ${expression}\n${JSON.stringify(geometry)}`)
       }
       const report = []
       const initialPositions = []

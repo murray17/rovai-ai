@@ -38,6 +38,11 @@ export function ExecutionVirtualList<T extends { key: string }>({ items, childre
     const element = root.current
     const host = element?.closest<HTMLElement>('.execution-drawer-body')
     if (!element || !host || !enabled) return undefined
+    // Row measurements change spacer heights on the next React commit.
+    if (host.dataset.followingLatest === 'true' && host.dataset.executionDisclosureAnchor !== 'true') {
+      host.scrollTop = host.scrollHeight
+      host.dataset.executionAdjustedTop = String(host.scrollTop)
+    }
     let frame = 0
     const update = () => {
       frame = 0
@@ -77,11 +82,10 @@ export function ExecutionVirtualList<T extends { key: string }>({ items, childre
       }
       if (dirty) {
         // Disclosure geometry has one owner, after the new measurements commit.
-        if (host.dataset.executionDisclosureAnchor !== 'true') {
-          if (host.dataset.followingLatest === 'true') host.scrollTop = host.scrollHeight
-          else if (adjustment) host.scrollTop += adjustment
+        if (adjustment && host.dataset.followingLatest !== 'true' && host.dataset.executionDisclosureAnchor !== 'true') {
+          host.scrollTop += adjustment
+          host.dataset.executionAdjustedTop = String(host.scrollTop)
         }
-        host.dataset.executionAdjustedTop = String(host.scrollTop)
         measure(value => value + 1)
       }
       schedule()
