@@ -21,7 +21,9 @@ test('real project browser links the file entry and sidecar, preserves resizing,
     await build({ configFile: false, root: source, base: './', logLevel: 'error', plugins: [react()], resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } }, build: { outDir: join(fixture, 'ui'), emptyOutDir: true } })
     const require = createRequire(import.meta.url), esbuild = createRequire(require.resolve('vite'))('esbuild')
     await esbuild.build({ stdin: { contents: "export {FilePreviewService} from './apps/desktop/src/main/file-preview/file-preview-service'; export {CoreFilePreviewSourceAuthority} from './apps/desktop/src/main/file-preview/file-preview-authority'", resolveDir: root, loader: 'ts' }, outfile: join(fixture, 'service.cjs'), bundle: true, platform: 'node', format: 'cjs' })
-    child = spawn(electron, [join(source, 'main.cjs'), root, fixture], { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', 'pipe', 'pipe'] })
+    child = spawn(electron, [join(source, 'main.cjs'), root, fixture,
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : [])],
+    { cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close'); let output = ''
     child.stdout.on('data', data => { output += data }); child.stderr.on('data', data => { output += data })
     const [code] = await closed
