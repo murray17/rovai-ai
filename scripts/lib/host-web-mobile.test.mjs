@@ -239,9 +239,20 @@ test('phone project folders drag by their icon, keep label gestures, and survive
     const initial = await browser.evaluate(groups + '.map(group => group.dataset.group)')
     await browser.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
     await browser.wait("document.documentElement.dataset.theme === 'night'")
-    const icon = await point(1, '.project-folder-glyph'), target = await point(0, '.project-folder-glyph')
-    await touch('touchStart', icon)
-    await touch('touchMove', { x: icon.x, y: icon.y - 9 })
+    const hit = await browser.evaluate(`(() => {
+      const row = ${groups}[1]
+      const handle = row.querySelector('.project-folder-touch-target')
+      const rect = handle.getBoundingClientRect()
+      const start = { x: rect.left + 2, y: rect.top + rect.height / 2 }
+      return { width: rect.width, height: rect.height, start,
+        inside: handle.contains(document.elementFromPoint(start.x, start.y)),
+        leftOfIcon: start.x < row.querySelector('.project-folder-glyph').getBoundingClientRect().left,
+        clearOfLabel: rect.right <= row.querySelector('.navigation-title').getBoundingClientRect().left }
+    })()`)
+    assert.deepEqual([hit.width, hit.height, hit.inside, hit.leftOfIcon, hit.clearOfLabel], [44, 48, true, true, true])
+    const target = await point(0, '.project-folder-glyph')
+    await touch('touchStart', hit.start)
+    await touch('touchMove', { x: hit.start.x, y: hit.start.y - 9 })
     await touch('touchMove', target)
     await browser.wait("!!document.querySelector('.project-insertion-line:not([hidden])')")
     assert.equal(await browser.evaluate("getComputedStyle(document.querySelector('.project-insertion-line')).backgroundColor"), 'rgb(255, 255, 255)')

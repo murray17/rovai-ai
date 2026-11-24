@@ -373,6 +373,17 @@ Object.assign(window, { startupTest: {
     await flush()
     check(order() === [c, a, b].join(), 'A late move reply never overwrites a newer broadcast')
     cases.push('Optimistic folder move, immediate rollback and late-reply handling in the production sidebar')
+    const longPath = 'C:/' + 'a/'.repeat(4_094) + 'x'
+    const longKey = 'directory:' + longPath
+    const withLongPath = registerNavigationProjects(EMPTY_SNAPSHOT, ['/a', longPath], true)
+    save = deferred<NavigationPreferencesSnapshot>()
+    await boot(withLongPath, emptyNavigation, () => requestHandlers.set('navigationPreferences.moveProject', () => save.promise))
+    await moveUp(longKey)
+    check(order() === [longKey, a].join(), 'A maximum-length folder stays visible during an optimistic move')
+    save.resolve({ ...withLongPath, projectOrder: [longKey, a] })
+    await flush()
+    check(order() === [longKey, a].join(), 'The saved long folder remains in its new position')
+    cases.push('Maximum-length project paths remain usable during sidebar reorder')
     return { ok: true, cases }
   },
 
@@ -985,8 +996,28 @@ Object.assign(window, { startupTest: {
     await flush()
     cases.push('The Skill picker loads its catalog on demand')
     check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 B', 'Camp switches share the same history')
-    await back(); check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Back restores the Camp ID and title')
-    check(manualUnread('A') === false, 'Explicit history navigation clears the reminder after the full projection opens')
+    {
+      const previous = responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot
+      const folders = registerNavigationProjects(previous, ['/alpha', '/beta'])
+      const publishPreferences = (next: NavigationPreferencesSnapshot) => {
+        responses.set('navigationPreferences.get', next)
+        navigationPreferenceListeners.forEach(listener => listener(next))
+      }
+      publishPreferences(folders)
+      const opening = deferred<unknown>()
+      campRequest = id => id === 'A' ? opening.promise : campProjection(id)
+      await back()
+      publishPreferences({ ...structuredClone(folders), projectOrder: [...folders.projectOrder!].reverse() })
+      await flush()
+      check(manualUnread('A'), 'A pending open retains the reminder when another window moves a folder')
+      opening.resolve(campProjection('A'))
+      await flush(); await flush()
+      check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Back restores the Camp ID and title')
+      check(manualUnread('A') === false && !document.querySelector('[data-thread-id="A"] .camp-unread-dot'),
+        'A folder-only broadcast cannot prevent the open Thread clearing its reminder')
+      publishPreferences({ ...previous, threadReadStates: (responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot).threadReadStates })
+    }
+    cases.push('Reordering folders in another window lets an in-flight Thread open clear its manual unread reminder')
     const delayedCamp = deferred<unknown>()
     campRequest = id => id === 'C' ? delayedCamp.promise : campProjection(id)
     await clickNavigation('导航会话 C', '.camp-nav-open')

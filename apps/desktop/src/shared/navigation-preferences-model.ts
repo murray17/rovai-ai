@@ -2,6 +2,9 @@ import { isThreadId } from '@contracts'
 import type { NavigationPin, NavigationPreferencesSnapshot, NavigationProjectMove, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
 import { normalizeProjectDisplayName, projectDisplayNameError } from './project-display-name'
 
+const MAX_PROJECT_PATH_LENGTH = 8_192
+const PROJECT_KEY_PREFIX = 'directory:'
+
 export const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
   schemaVersion: 7,
   registeredProjects: [],
@@ -115,13 +118,8 @@ export function sanitizeRemovedProjects(source: unknown): RemovedNavigationProje
 }
 
 export function isProjectTargetKey(value: unknown): value is string {
-  return isStableId(value) && value.startsWith('directory:')
-}
-
-export function isStableId(value: unknown): value is string {
-  return typeof value === 'string'
-    && value.trim().length > 0
-    && value.length <= 8_192
+  return typeof value === 'string' && value.startsWith(PROJECT_KEY_PREFIX)
+    && value.length <= PROJECT_KEY_PREFIX.length + MAX_PROJECT_PATH_LENGTH
 }
 
 export function isTimestamp(value: unknown): value is string {
@@ -148,7 +146,7 @@ export function sanitizeThreadReadStates(source: unknown): Record<string, Naviga
 }
 
 export function isProjectPath(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 8192
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_PROJECT_PATH_LENGTH
     && !value.includes('\0') && (/^\//.test(value) || /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value))
     && !value.split(/[\\/]/).some(part => part === '.' || part === '..')
 }
@@ -194,7 +192,7 @@ export function orderedPinnedProjects(pins: readonly NavigationPin[], order: rea
 
 export function moveNavigationProject(snapshot: NavigationPreferencesSnapshot, move: NavigationProjectMove): NavigationPreferencesSnapshot {
   if (!move || (move.section !== 'projects' && move.section !== 'pinned') || !isProjectTargetKey(move.projectKey)
-    || (move.beforeProjectKey !== null && !isProjectTargetKey(move.beforeProjectKey))) throw new Error('Invalid project move')
+    || (move.beforeProjectKey !== null && !isProjectTargetKey(move.beforeProjectKey))) return snapshot
   const { section, projectKey, beforeProjectKey } = move
   const registered = new Set(snapshot.registeredProjects.map(path => `directory:${path}`))
   for (const removed of snapshot.removedProjects) registered.delete(removed.targetKey)

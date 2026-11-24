@@ -36,15 +36,17 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
     refreshNavigation(); publishNavigation()
   }
   const commitNavigation = async (update: (current: NavigationPreferencesSnapshot) => Partial<NavigationPreferencesSnapshot>): Promise<NavigationPreferencesSnapshot> => {
-    await withBrowserPreferenceWrite(key, () => {
+    const changed = await withBrowserPreferenceWrite(key, () => {
       refreshNavigation()
       if (navigation.readError) throw new Error(navigation.readError)
       const next = sanitizeSnapshot({ ...navigation, ...update(navigation) })
-      if (JSON.stringify(next) !== JSON.stringify(navigation)) write('navigation', next)
+      if (JSON.stringify(next) === JSON.stringify(navigation)) return false
+      write('navigation', next)
       navigation = next
+      return true
     })
     // A storage event may already have supplied a newer snapshot while the lock was released.
-    publishNavigation()
+    if (changed) publishNavigation()
     return structuredClone(navigation)
   }
   const media = matchMedia('(prefers-color-scheme: dark)')

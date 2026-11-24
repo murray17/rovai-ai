@@ -1105,9 +1105,15 @@ export function BusinessApp({
   const threadReadStatesRef = useRef(threadReadStates)
   const threadReadGeneration = useRef(0)
   const acceptThreadReadStates = useCallback((snapshot: NavigationPreferencesSnapshot): void => {
+    const next = snapshot.threadReadStates ?? {}
+    const current = threadReadStatesRef.current
+    const ids = Object.keys(next)
+    if (ids.length === Object.keys(current).length && ids.every(id =>
+      current[id]?.manualUnread === next[id].manualUnread
+      && current[id]?.readThroughGlobalSequence === next[id].readThroughGlobalSequence)) return
     ++threadReadGeneration.current
-    threadReadStatesRef.current = snapshot.threadReadStates ?? {}
-    setThreadReadStates(threadReadStatesRef.current)
+    threadReadStatesRef.current = next
+    setThreadReadStates(next)
   }, [])
 
   const [pinnedThreadItems, setPinnedThreadItems] = useState<NavigationThreadItem[]>([])

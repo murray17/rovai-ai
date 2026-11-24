@@ -104,15 +104,21 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
       }
     }
 
+    function currentGroups(held: FolderDrag) {
+      const groups = Array.from(held.section.querySelectorAll<HTMLElement>(':scope > [data-project-sort-key]'))
+      if (!rail.contains(held.group) || !groups.includes(held.group)) return
+      if (before != null && !groups.some(group => group.dataset.projectSortKey === before)) return
+      return groups
+    }
+
     function paint() {
       if (!drag || !carry) return
-      carry.preview.style.transform = `translate3d(${drag.x - carry.grabX}px,${drag.y - carry.grabY}px,0)`
-      const groups = Array.from(drag.section.querySelectorAll<HTMLElement>(':scope > [data-project-sort-key]'))
-      if (!rail.contains(drag.group) || !groups.includes(drag.group)
-        || (before != null && !groups.some(group => group.dataset.projectSortKey === before))) {
+      const groups = currentGroups(drag)
+      if (!groups) {
         finish()
         return
       }
+      carry.preview.style.transform = `translate3d(${drag.x - carry.grabX}px,${drag.y - carry.grabY}px,0)`
       const position = dropPosition(drag, rail, groups)
       before = position?.before
       carry.line.hidden = !position
@@ -149,8 +155,7 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
       if (!row || !group || !section || (lane !== 'pinned' && lane !== 'projects') || row.parentElement?.dataset.menuOpen) return
       const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
       if (touch) {
-        const icon = row.querySelector('.project-folder-glyph')!.getBoundingClientRect()
-        if (event.target.closest('.navigation-title') || Math.abs(event.clientX - icon.left - icon.width / 2) > 22) return
+        if (!event.target.closest('.project-folder-touch-target')) return
         event.stopPropagation() // The label keeps the existing scroll and long-press menu.
       }
       drag = { section, lane, group, row, key: group.dataset.projectSortKey!, pointerId: event.pointerId, touch,
@@ -175,13 +180,13 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
     }
     function up(event: PointerEvent) {
       if (!drag || event.pointerId !== drag.pointerId) return
-      if (carry) {
-        event.preventDefault()
-        drag.x = event.clientX
-        drag.y = event.clientY
-        paint()
-      }
-      finish(true)
+      if (!carry) { finish(); return }
+      event.preventDefault()
+      drag.x = event.clientX
+      drag.y = event.clientY
+      // Release can invalidate the displayed line, but cannot introduce a new destination.
+      const groups = currentGroups(drag)
+      finish(before !== undefined && !!groups && dropPosition(drag, rail, groups)?.before === before)
     }
     function cancel() { finish() }
     const listeners = new AbortController()

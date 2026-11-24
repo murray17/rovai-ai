@@ -1123,7 +1123,7 @@ function ThreadGroup({
   const mobile = useMobileLayout()
   const projectMenuLabels = projectNavigationMenuLabels(pinned, platform)
   const folderButton = useRef<HTMLButtonElement>(null)
-  function moveFolder(direction: keyof ProjectMoveActions) {
+  function moveFocusedFolder(direction: keyof ProjectMoveActions) {
     const move = moveActions?.[direction]
     if (!move) return
     move()
@@ -1150,8 +1150,8 @@ function ThreadGroup({
   }
   if (moveActions) {
     projectMenuItems.push(
-      { key: 'move-up', label: uiAttribute('上移项目'), icon: 'move-up', disabled: !moveActions.up, separatorBefore: true, onSelect: () => moveFolder('up') },
-      { key: 'move-down', label: uiAttribute('下移项目'), icon: 'move-down', disabled: !moveActions.down, onSelect: () => moveFolder('down') }
+      { key: 'move-up', label: uiAttribute('上移项目'), icon: 'move-up', disabled: !moveActions.up, separatorBefore: true, onSelect: () => moveActions.up?.() },
+      { key: 'move-down', label: uiAttribute('下移项目'), icon: 'move-down', disabled: !moveActions.down, onSelect: () => moveActions.down?.() }
     )
   }
   if (onRevealProject) projectMenuItems.push({ key: 'reveal-project', label: projectMenuLabels[3], icon: 'reveal', separatorBefore: true, onSelect: onRevealProject })
@@ -1186,7 +1186,7 @@ function ThreadGroup({
             if (!moveActions || !event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
             if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
               event.preventDefault()
-              moveFolder(event.key === 'ArrowUp' ? 'up' : 'down')
+              moveFocusedFolder(event.key === 'ArrowUp' ? 'up' : 'down')
             }
           }}
           type="button"
@@ -1198,16 +1198,18 @@ function ThreadGroup({
           data-sidebar-focus-target={`project-row:${groupKey}`}
           onClick={() => activateProjectNavigationRow(onSelectProject, onToggleExpanded)}
         >
-          <svg className="project-folder-glyph" viewBox="0 0 24 24" aria-hidden="true">
-            <g className="project-folder-closed">
-              <path className="folder-fill" d="M3.75 7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.75c-1.1 0-2-.9-2-2Z" />
-              <path d="M3.9 9.1h16.2" />
-            </g>
-            <g className="project-folder-open">
-              <path d="M3.75 9V7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v1" />
-              <path className="folder-fill" d="M6.55 9.8h13.7l-1.65 6.85a2 2 0 0 1-1.95 1.55H5.6a1.9 1.9 0 0 1-1.85-2.35l1.05-4.5A1.8 1.8 0 0 1 6.55 9.8Z" />
-            </g>
-          </svg>
+          <span className="project-folder-touch-target" aria-hidden="true">
+            <svg className="project-folder-glyph" viewBox="0 0 24 24">
+              <g className="project-folder-closed">
+                <path className="folder-fill" d="M3.75 7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.75c-1.1 0-2-.9-2-2Z" />
+                <path d="M3.9 9.1h16.2" />
+              </g>
+              <g className="project-folder-open">
+                <path d="M3.75 9V7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v1" />
+                <path className="folder-fill" d="M6.55 9.8h13.7l-1.65 6.85a2 2 0 0 1-1.95 1.55H5.6a1.9 1.9 0 0 1-1.85-2.35l1.05-4.5A1.8 1.8 0 0 1 6.55 9.8Z" />
+              </g>
+            </svg>
+          </span>
           <NavigationTitle>{label}</NavigationTitle>
         </button>
         {pinTargetKey && projectMenuItems.length > 0 && (

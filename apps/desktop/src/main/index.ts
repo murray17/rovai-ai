@@ -1790,7 +1790,7 @@ ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: Navig
 )
 
 ipcMain.handle('rovai:navigation-preferences-move-project', (_event, move: NavigationProjectMove) =>
-  projectAccessTransactions.run(() => requireNavigationPreferences().moveProject(move).then(publishNavigationPreferences))
+  projectAccessTransactions.run(() => requireNavigationPreferences().moveProject(move, publishNavigationPreferences))
 )
 
 ipcMain.handle(

@@ -1,7 +1,7 @@
 import { stat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   NavigationPreferencesStore,
   readNavigationPreferences
@@ -29,18 +29,40 @@ describe('navigation preferences', () => {
     await writeFile(file, original)
     const store = await NavigationPreferencesStore.load(file)
     expect(store.loadDegradation).toBeNull()
-    await store.moveProject({ section: 'projects', projectKey: a, beforeProjectKey: b })
+    const changed = vi.fn()
+    await store.moveProject({ section: 'projects', projectKey: a, beforeProjectKey: b }, changed)
+    expect(changed).not.toHaveBeenCalled()
     expect(await readFile(file, 'utf8')).toBe(original)
     const move = { section: 'projects' as const, projectKey: c, beforeProjectKey: a }
-    await Promise.all([store.registerProjects(['/added']), store.moveProject(move)])
+    await Promise.all([store.registerProjects(['/added']), store.moveProject(move, changed)])
     const saved = { ...legacy, schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [...paths, '/added'],
       projectOrder: [c, p, a, b, 'directory:/added'] }
     expect((await NavigationPreferencesStore.load(file)).get()).toEqual(saved)
     const inode = (await stat(file)).ino
-    await store.moveProject(move)
-    await store.moveProject({ ...move, beforeProjectKey: p })
-    await store.moveProject({ ...move, projectKey: 'directory:/gone' })
+    expect(await store.moveProject(move, changed)).toEqual(saved)
+    await store.moveProject({ ...move, beforeProjectKey: p }, changed)
+    await store.moveProject({ ...move, projectKey: 'directory:/gone' }, changed)
+    expect(changed.mock.calls).toEqual([[saved]])
     expect((await stat(file)).ino).toBe(inode)
+  })
+
+  it('moves and reloads a maximum-length path as both the folder and the insertion point', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-long-project-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const store = await NavigationPreferencesStore.load(file)
+    const path = 'C:/' + 'a/'.repeat(4_094) + 'x'
+    const long = 'directory:' + path
+    const short = 'directory:/short'
+    await store.registerProjects(['/short', path])
+    expect((await store.moveProject({ section: 'projects', projectKey: long, beforeProjectKey: short })).projectOrder).toEqual([long, short])
+    const saved = await store.moveProject({ section: 'projects', projectKey: short, beforeProjectKey: long })
+    expect(saved.projectOrder).toEqual([short, long])
+    await expect(store.registerProjects([path + 'x'])).rejects.toThrow('Invalid project directories')
+    expect(await store.moveProject({ section: 'projects', projectKey: long + 'x', beforeProjectKey: short })).toEqual(saved)
+    const reopened = await NavigationPreferencesStore.load(file)
+    expect(reopened.loadDegradation).toBeNull()
+    expect(reopened.get()).toEqual(saved)
   })
 
   it('moves pinned folders independently and appends a re-pinned folder in pin-time order', async () => {
@@ -54,7 +76,7 @@ describe('navigation preferences', () => {
     const pins = keys.map((targetKey, i) => ({ kind: 'project' as const, targetKey, pinnedAt: `2026-10-01T00:00:0${i}Z` }))
     await store.registerProjects(paths)
     await store.replacePins(pins)
-    const partial = JSON.stringify({ ...store.get(), pinnedProjectOrder: [a, 'directory:/gone', a] })
+    const partial = JSON.stringify({ ...store.get(), pinnedProjectOrder: [null, a, {}, 'directory:/gone', a] })
     await writeFile(file, partial)
     const reloaded = await NavigationPreferencesStore.load(file)
     expect(reloaded.loadDegradation).toBeNull()

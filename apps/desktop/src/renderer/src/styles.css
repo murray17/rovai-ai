@@ -556,7 +556,11 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .project-heading-row[data-expanded="true"] .project-folder-closed { display: none; }
 .project-heading-row[data-expanded="true"] .project-folder-open { display: block; }
 [data-project-sort-key] .project-select-row { user-select: none; -webkit-user-select: none; }
-[data-project-sort-key] .project-folder-glyph { touch-action: none; }
+.project-folder-touch-target { display: contents; }
+[data-project-sort-key] .project-folder-touch-target {
+  display: flex; flex: none; align-self: stretch; align-items: center; touch-action: none;
+  margin-inline: -20px -7px; padding-inline: 20px 7px;
+}
 html[data-project-dragging], html[data-project-dragging] * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
 @media (hover: hover) {
   [data-project-dragging] .navigation-scroll .project-heading-row:not([data-highlighted="true"]):hover { background: transparent; }

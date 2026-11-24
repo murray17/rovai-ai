@@ -10,6 +10,38 @@ module.exports = async function verifyFolderOrder({ run, other, mouse, key, fram
   await run('window.navigationTest.setFolderOrderFixture(true)')
   await settle()
   const held = await point(row(a))
+  const sourceC = await point(row(c))
+  const overB = await point(row(b))
+  const beforeB = { ...overB, y: overB.y - 8 }
+  const beforeA = { ...held, y: held.y - 8 }
+  // A pointerup can arrive at a new coordinate without a preceding pointermove.
+  for (const [hover, hidden] of [[{ ...sourceC, x: sourceC.x + 10 }, true], [beforeB, false]]) {
+    mouse('mouseDown', sourceC)
+    mouse('mouseMove', hover)
+    await frame()
+    assert.equal(await run("document.querySelector('.project-insertion-line')?.hidden"), hidden)
+    mouse('mouseUp', beforeA)
+    await settle()
+    assert.deepEqual(await savedOrder(), [a, b, c, d], 'Release cannot introduce a destination that was never indicated')
+    assert.deepEqual(await domOrder(), [a, b, c, d])
+  }
+  const previousScroll = await run("document.querySelector('.navigation-scroll').scrollTop")
+  const tail = await run(`(() => {
+    const last = document.querySelector('[data-group="${d}"]')
+    last.scrollIntoView({ block: 'center' })
+    const rect = last.getBoundingClientRect()
+    return { x: Math.round(rect.left + 30), y: Math.floor(rect.bottom - 3) }
+  })()`)
+  mouse('mouseDown', await point(row(c)))
+  mouse('mouseMove', tail)
+  await frame()
+  assert.equal(await run("document.querySelector('.project-insertion-line')?.hidden"), false)
+  mouse('mouseUp', tail)
+  await settle()
+  assert.deepEqual(await savedOrder(), [a, b, d, c], 'The visible line after the last folder accepts a drop')
+  await other(`window.navigationTest.preferences.moveProject(${JSON.stringify({ section: 'projects', projectKey: c, beforeProjectKey: d })})`)
+  await run(`document.querySelector('.navigation-scroll').scrollTop = ${previousScroll}`)
+  await settle()
   const target = await point(row(d))
   target.y -= 8
   mouse('mouseDown', held)
@@ -38,6 +70,7 @@ module.exports = async function verifyFolderOrder({ run, other, mouse, key, fram
   await run(`document.querySelector('${row(a)}').focus()`)
   await key('Up', ['alt'])
   assert.deepEqual(await savedOrder(), [b, a, d, c])
+  assert.equal(await run(`document.activeElement === document.querySelector('${row(a)}')`), true, 'Keyboard movement keeps the folder focused')
   const start = await point(row(c))
   const end = await point(row(b))
   mouse('mouseDown', start)
@@ -62,6 +95,7 @@ module.exports = async function verifyFolderOrder({ run, other, mouse, key, fram
   await context(row(b))
   assert.equal(await run("Array.from(document.querySelectorAll('[role=menuitem]')).find(item => item.textContent === '上移项目').getAttribute('aria-disabled')"), 'true')
   await selectItem('下移项目')
+  assert.equal(await run(`document.activeElement === document.querySelector('${row(b)}')`), false, 'A pointer menu move does not force focus onto the folder')
   assert.deepEqual(await run("Array.from(document.querySelectorAll('.pinned-navigation > [data-project-sort-key]'), group => group.dataset.group)"), [d, b])
   assert.deepEqual(await other('window.navigationTest.preferences.get().then(snapshot => snapshot.pinnedProjectOrder)'), [d, b])
   assert.deepEqual(await savedOrder(), [b, a, d, c])

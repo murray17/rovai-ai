@@ -124,8 +124,14 @@ it('applies only the move to the latest JSON and skips stale, duplicate and fail
   const a = tab(), b = tab()
   const move = { section: 'projects' as const, projectKey: 'directory:/b', beforeProjectKey: 'directory:/a' }
   await a.registerProjects(['/a', '/b'])
+  const events = new EventTarget()
+  vi.stubGlobal('window', events)
+  const changed = vi.fn()
+  const unsubscribe = a.onChanged(changed)
   await Promise.all([b.registerProjects(['/c']), a.moveProject(move)])
   expect((await tab().get()).projectOrder).toEqual(['directory:/b', 'directory:/a', 'directory:/c'])
+  expect(changed).toHaveBeenCalledTimes(1)
+  changed.mockClear()
   write.mockClear()
   await a.moveProject(move)
   expect(write).not.toHaveBeenCalled()
@@ -136,10 +142,7 @@ it('applies only the move to the latest JSON and skips stale, duplicate and fail
   write.mockImplementationOnce(() => { throw new Error('disk full') })
   await expect(a.moveProject({ ...move, beforeProjectKey: null })).rejects.toThrow('disk full')
   expect((await tab().get()).projectOrder).toEqual(['directory:/b', 'directory:/c'])
-  const events = new EventTarget()
-  vi.stubGlobal('window', events)
-  const changed = vi.fn()
-  const unsubscribe = a.onChanged(changed)
+  expect(changed).not.toHaveBeenCalled()
   const laterOrder = ['directory:/b', 'directory:/c']
   write.mockImplementationOnce((key, value) => {
     saved.set(key, value)
