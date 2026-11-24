@@ -181,6 +181,7 @@ let bookmarkedTimeline: HTMLElement
 let bookmarkedLink: HTMLElement
 let anchorMessageId: string | null = null
 let trace: number[] = []
+let traceObserver: ResizeObserver | null = null
 Object.assign(window, { navigationTest: {
   settle,
   async openChanges() { previewController.openFileChanges(threadId, changes); await settle() },
@@ -189,13 +190,12 @@ Object.assign(window, { navigationTest: {
   async scrollArtifacts() { for (const node of artifacts()) node.scrollLeft = node.scrollWidth; await settle() },
   trace() {
     trace = []
-    const deadline = performance.now() + 3_000
-    const sample = () => requestAnimationFrame(() => setTimeout(() => {
-      trace.push(link().getBoundingClientRect().top)
-      if (performance.now() < deadline) sample()
-    }, 0))
-    sample()
+    // Sample each delivered layout after the workspace's resize observer restores its anchor.
+    traceObserver = new ResizeObserver(() => trace.push(link().getBoundingClientRect().top))
+    traceObserver.observe(timeline())
+    traceObserver.observe(element('.timeline-track'))
   },
+  stopTrace() { traceObserver?.disconnect(); traceObserver = null },
   async bookmark() {
     const scroll = timeline()
     scroll.scrollTop += link().getBoundingClientRect().top - scroll.getBoundingClientRect().top - 160

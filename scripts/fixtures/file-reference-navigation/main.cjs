@@ -120,6 +120,7 @@ app.whenReady().then(async () => {
     await run('document.querySelector(".file-preview-resize-handle").focus({ preventScroll: true })')
     for (let index = 0; index < 6; index += 1) closeTo((await key('ArrowLeft')).linkY, before.linkY, 'Resize')
     closeTo((await drag(60)).linkY, before.linkY, 'Pointer resize')
+    await run('window.navigationTest.stopTrace()')
     const traced = await state()
     assert.ok(traced.trace.length >= 10, 'Continuous layout must be sampled across frames')
     for (const y of traced.trace) closeTo(y, before.linkY, 'Continuous layout Y')

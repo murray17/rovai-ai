@@ -828,7 +828,7 @@ app.whenReady().then(async () => {
       let files = await settledGroups()
       assert.ok(files.messages[2].height < 320, `Wide file message height: ${files.messages[2].height}`)
       assert.equal(files.messages[3].head, false)
-      await run('document.querySelector(".timeline-track").style.width = "420px"')
+      await run('document.querySelector(".timeline-track").style.width = "360px"')
       files = await settledGroups()
       assert.ok(files.messages[2].height >= 320, `Wrapped file message crosses 320px: ${files.messages[2].height}`)
       assert.equal(files.messages[3].head, true)

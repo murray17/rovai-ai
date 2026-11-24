@@ -145,7 +145,7 @@ export function MarkdownMermaidBlock({ source, theme, renderReady = true }: { so
             <div className="markdown-mermaid-reader file-preview-document-panel">
               {/* Keep both viewports mounted and measured, so switching preserves their reading state. */}
               <div className="markdown-mermaid-reader-image" data-active={!sourceMode} aria-hidden={sourceMode} inert={sourceMode}>
-                {image && <PreviewImage src={image.url} contentKey={source} alt={t('Mermaid 图表')} onError={failImage} />}
+                {image && <PreviewImage key={source} src={image.url} alt={t('Mermaid 图表')} onError={failImage} />}
               </div>
               <div className="markdown-mermaid-reader-source" data-active={sourceMode} aria-hidden={!sourceMode} inert={!sourceMode}>
                 <ReadonlyCodeViewer fileName="diagram.mmd" text={source} theme={theme} registerFileFind={false} />

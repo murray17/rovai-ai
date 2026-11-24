@@ -170,7 +170,23 @@ app.whenReady().then(async () => {
     assert.equal(before.imageScale, 1.25)
     assert.equal(before.imageScrollLeft, 420)
     assert.equal(before.imageScrollTop, 310)
-    await run('window.previewTest.rebuildPreview()')
+    // Hold the new image until the pane has a size, as on a cold decode.
+    await run(`(() => {
+      const observer = new MutationObserver(() => {
+        const image = document.querySelector('.file-preview-image-content img')
+        if (!image?.src || image === previousImage) return
+        observer.disconnect()
+        const src = image.src
+        image.removeAttribute('src')
+        window.finishImageLoad = () => { image.src = src }
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+      window.previewTest.rebuildPreview()
+    })()`)
+    await waitForExecution(`typeof window.finishImageLoad === 'function'
+      && document.querySelector('.file-preview-image-scroll')?.clientHeight > 0`)
+    assert.equal(await run('document.querySelector(".file-preview-image-content img").naturalWidth'), 0)
+    await run('window.finishImageLoad()')
     await waitForExecution(`(() => {
       const image = document.querySelector('.file-preview-image-content img')
       const scroll = document.querySelector('.file-preview-image-scroll')

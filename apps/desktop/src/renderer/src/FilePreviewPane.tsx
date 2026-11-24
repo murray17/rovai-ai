@@ -136,9 +136,10 @@ function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const content = tab.content?.kind === 'image' ? tab.content : null
   const { saveReading } = useFilePreview()
   if (!content) return <div className="file-preview-empty-content" />
-  return <PreviewImage src={content.url} alt={tab.presentation.fileName}
+  return <PreviewImage key={content.url} src={content.url} alt={tab.presentation.fileName}
     errorHint={uiAttribute('可以从文件标签页菜单使用系统默认应用打开。')}
     info={tab.file ? fileSizeLabel(tab.file.size) : ''} initialScale={tab.reading?.imageScale ?? null}
+    initialScroll={tab.reading && { left: tab.reading.imageScrollLeft ?? 0, top: tab.reading.imageScrollTop ?? 0 }}
     onScale={imageScale => saveReading(tab.id, { imageScale })} />
 }
 
@@ -491,8 +492,6 @@ function ReadingPanel({ tab, children }: { tab: import('./FilePreviewContext').P
       }
       const body = node.querySelector<HTMLElement>('.file-preview-markdown, .file-preview-content, .agent-run-file-review-scroll, .mission-activity-document')
       if (body) { body.scrollTop = reading.scrollTop ?? 0; body.scrollLeft = reading.scrollLeft ?? 0 }
-      const image = node.querySelector<HTMLElement>('.file-preview-image-scroll')
-      if (image) { image.scrollTop = reading.imageScrollTop ?? 0; image.scrollLeft = reading.imageScrollLeft ?? 0 }
       restoring.current = false
       observer.disconnect()
     }

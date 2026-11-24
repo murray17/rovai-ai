@@ -1,23 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useUiText } from './interface-language'
 
 /** Shared image reading controls; file ownership and image URL lifetime stay with the caller. */
-export function PreviewImage({ src, contentKey = src, alt, info = '', errorHint, initialScale = null, onScale, onError }: {
+export function PreviewImage({ src, alt, info = '', errorHint, initialScale = null, initialScroll, onScale, onError }: {
   src: string; alt: string; info?: string; errorHint?: string; initialScale?: number | null
-  /** Stable across presentation-only replacements, such as a diagram theme change. */
-  contentKey?: string
+  initialScroll?: { left: number; top: number }
   onScale?(scale: number | null): void
   onError?(): void
 }): React.JSX.Element {
   const t = useUiText()
   const viewport = useRef<HTMLDivElement>(null)
+  const pendingScroll = useRef(initialScroll)
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [scale, setScale] = useState<number | null>(initialScale)
   const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    setDimensions(null); setFailed(false); setScale(initialScale)
-  }, [contentKey])
   useEffect(() => {
     const element = viewport.current
     if (!element) return
@@ -27,6 +24,12 @@ export function PreviewImage({ src, contentKey = src, alt, info = '', errorHint,
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
+  useLayoutEffect(() => {
+    // Before the decoded image has its scaled size, the browser clamps scroll offsets to zero.
+    if (!pendingScroll.current || !dimensions || !size.width || !size.height || !viewport.current) return
+    viewport.current.scrollTo(pendingScroll.current)
+    pendingScroll.current = undefined
+  }, [dimensions, size])
   const fit = dimensions && size.width && size.height
     ? Math.min(1, Math.max(1, size.width - 48) / dimensions.width, Math.max(1, size.height - 48) / dimensions.height) : 1
   const effectiveScale = scale ?? fit
