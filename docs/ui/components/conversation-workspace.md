@@ -888,7 +888,7 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 精确 Agent/Run。关闭详情只清除当前 selection，保留上次 Tab、位置和队员入口；隐藏 Inspector 只改变可见性，再次
 显示时保留“执行”Tab、Agent 与 Run。位置切换后焦点进入另一位置的对应切换控件；底部详情关闭/Escape
 优先返回仍连接的真实过程入口，无法返回时落到当前位置切换控件。浮层内 Escape 在子菜单和工具结果
-处理后关闭整个浮层，返回顶部执行入口，保留 Agent/Run selection、已展开记录与滚动位置。
+处理后关闭整个浮层，焦点按会话详情浮层规则恢复到原输入位置，保留 Agent/Run selection、已展开记录与滚动位置。
 
 命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。已读取 Evidence 中的 Tool chronology
 按窗口呈现。顶部“加载更早记录”复用会话区的文字箭头、已显示计数与原位加载／重试样式；向下滚动自动恢复

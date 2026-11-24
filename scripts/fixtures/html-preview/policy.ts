@@ -31,7 +31,9 @@ export async function policyAcceptance(window: BrowserWindow, userData: string, 
   const frame = () => window.webContents.mainFrame.framesInSubtree.find(frame => frame.url.startsWith(origin + '/'))!
   const limited = await snapshot()
   const before = await frame().executeJavaScript(`({timeOrigin:performance.timeOrigin,csp:document.querySelector('meta[http-equiv="Content-Security-Policy"]').content})`)
-  await frame().executeJavaScript(`document.getElementById('retained-input').value='诊断受限后保留的输入';document.getElementById('increment').click();scrollTo(0,150)`)
+  await frame().executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  const initialTop = await frame().executeJavaScript(`document.getElementById('retained-input').value='诊断受限后保留的输入';
+    document.getElementById('increment').click();scrollTo({top:150,behavior:'instant'});scrollY`)
   // Observe browser CSP events beyond all three former backoffs. Server request
   // counts alone cannot prove this: CSP prevents those requests reaching it.
   await new Promise(resolve => setTimeout(resolve, 8500))
@@ -45,8 +47,9 @@ export async function policyAcceptance(window: BrowserWindow, userData: string, 
       && retained.events.length === 1 && retained.events[0].trusted && retained.events[0].directive === 'connect-src'
       && retained.events[0].sourceFile.includes('/__rovai-preview/bridge/')
       && retained.csp === "connect-src 'none'" && retained.csp === before.csp
-      && retained.timeOrigin === before.timeOrigin && retained.input === '诊断受限后保留的输入' && retained.count === '1' && retained.top === 150,
-    evidence: { limited, before, retained } })
+      && retained.timeOrigin === before.timeOrigin && retained.input === '诊断受限后保留的输入' && retained.count === '1'
+      && initialTop === 150 && retained.top === initialTop,
+    evidence: { limited, before, initialTop, retained } })
   await new Promise(resolve => setTimeout(resolve, 100))
   await writeFile(join(userData, 'diagnostic-policy-day.png'), (await window.webContents.capturePage()).toPNG())
   await run(`document.documentElement.dataset.theme='night'`)

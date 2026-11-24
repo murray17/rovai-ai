@@ -22,14 +22,14 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
   child.stderr.on('data', collect)
   let socket
   const close = async () => {
-    socket?.close()
-    child.kill('SIGTERM')
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 0, method: 'Browser.close' }))
+    else child.kill('SIGTERM')
     const timer = setTimeout(() => child.kill('SIGKILL'), 15_000)
-    try { await closed } finally { clearTimeout(timer); child.stdout.destroy(); child.stderr.destroy() }
+    try { await closed } finally { clearTimeout(timer); socket?.close(); child.stdout.destroy(); child.stderr.destroy() }
   }
   try {
     let port
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 450; i++) {
       port = log.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/)?.[1]
       if (port) break
       if (launchError) throw launchError

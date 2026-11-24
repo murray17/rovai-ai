@@ -41,7 +41,7 @@ app.whenReady().then(async () => {
   let systemOpens = 0
   const native = { selectRoot: async () => null, confirmOpen: async () => false, openPath: async () => { systemOpens++; return '' }, revealPath() {}, copyText() {}, publishExternalUpdate: (id, event) => { if (window && !window.isDestroyed()) window.webContents.send('file-update', event) } }
   service = new FilePreviewService(new CoreFilePreviewSourceAuthority(host), native)
-  window = new BrowserWindow({ width: 1640, height: 920, show: false, useContentSize: true, webPreferences: { preload: join(root, 'scripts/fixtures/project-files/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+  window = new BrowserWindow({ width: 1640, height: 920, show: process.platform === 'linux', useContentSize: true, webPreferences: { preload: join(root, 'scripts/fixtures/project-files/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
   window.webContents.on('console-message', event => { if (event.level === 'error') console.error(event.message) })
   ipcMain.handle('thread', () => threadId)
   const browseRequests = []

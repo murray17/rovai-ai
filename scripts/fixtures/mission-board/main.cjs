@@ -45,6 +45,12 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 1000 })
   }
   const settle = () => window.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 250))', true)
+  const capture = async name => {
+    const inspector = window.webContents.debugger
+    if (!inspector.isAttached()) inspector.attach('1.3')
+    const { data } = await inspector.sendCommand('Page.captureScreenshot', { format: 'png' })
+    writeFileSync(join(dirname(userData), name), Buffer.from(data, 'base64'))
+  }
   if (mode === 'archive') {
     const run = code => window.webContents.executeJavaScript(code, true)
     const card = '.mission-board-card[data-mission-id="mission-1"]'
@@ -225,7 +231,7 @@ app.whenReady().then(async () => {
     try {
       await require('./web-links.cjs')({ window, userData, waitFor, click, settle })
     } catch (error) {
-      writeFileSync(join(dirname(userData), 'mission-web-links-failure.png'), (await window.webContents.capturePage()).toPNG())
+      await capture('mission-web-links-failure.png')
       console.error(await window.webContents.executeJavaScript('JSON.stringify({errors:window.missionQA.errors,description:document.querySelector(".mission-description")?.outerHTML,body:document.body.innerText.slice(-1600),calls:window.missionQA.calls.slice(-4)})'))
       throw error
     }
@@ -344,7 +350,7 @@ app.whenReady().then(async () => {
     for (const theme of ['day', 'night']) {
       await window.webContents.executeJavaScript(`document.documentElement.dataset.theme = '${theme}'`, true)
       await settle()
-      writeFileSync(join(dirname(userData), `mission-board-${theme}.png`), (await window.webContents.capturePage()).toPNG())
+      await capture(`mission-board-${theme}.png`)
     }
     await window.webContents.executeJavaScript("document.documentElement.dataset.theme = 'day'", true)
     stage = 'narrow resize'
@@ -391,7 +397,7 @@ app.whenReady().then(async () => {
     for (const theme of ['day', 'night']) {
       await window.webContents.executeJavaScript(`document.documentElement.dataset.theme = '${theme}'`, true)
       await settle()
-      writeFileSync(join(dirname(userData), `mission-mentions-${theme}.png`), (await window.webContents.capturePage()).toPNG())
+      await capture(`mission-mentions-${theme}.png`)
     }
   }
   if (mode === 'mentions' || mode === 'large-diff' || mode === 'checkout-view' || mode === 'delete') {

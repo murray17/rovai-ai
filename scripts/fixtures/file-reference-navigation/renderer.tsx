@@ -181,6 +181,7 @@ let bookmarkedTimeline: HTMLElement
 let bookmarkedLink: HTMLElement
 let anchorMessageId: string | null = null
 let trace: number[] = []
+let finishTrace: (() => void) | undefined
 Object.assign(window, { navigationTest: {
   settle,
   async openChanges() { previewController.openFileChanges(threadId, changes); await settle() },
@@ -188,14 +189,23 @@ Object.assign(window, { navigationTest: {
   async surface(value: FixtureSurface) { setSurface(value); await settle() },
   async scrollArtifacts() { for (const node of artifacts()) node.scrollLeft = node.scrollWidth; await settle() },
   trace() {
+    finishTrace?.()
     trace = []
-    const deadline = performance.now() + 3_000
-    const sample = () => requestAnimationFrame(() => setTimeout(() => {
-      trace.push(link().getBoundingClientRect().top)
-      if (performance.now() < deadline) sample()
-    }, 0))
-    sample()
+    // Sample each frame after layout and the workspace's anchor correction, even when only scrollTop changes.
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position:fixed;top:0;left:0;height:1px;visibility:hidden;pointer-events:none;contain:strict'
+    document.body.append(probe)
+    const observer = new ResizeObserver(() => trace.push(link().getBoundingClientRect().top))
+    observer.observe(probe)
+    let frame: number
+    const tick = () => {
+      probe.style.width = probe.style.width === '1px' ? '2px' : '1px'
+      frame = requestAnimationFrame(tick)
+    }
+    tick()
+    finishTrace = () => { cancelAnimationFrame(frame); observer.disconnect(); probe.remove() }
   },
+  stopTrace() { finishTrace?.(); finishTrace = undefined },
   async bookmark() {
     const scroll = timeline()
     scroll.scrollTop += link().getBoundingClientRect().top - scroll.getBoundingClientRect().top - 160

@@ -1654,7 +1654,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 `pnpm test:camp-fast-layout` 使用生产 ThreadWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
 关闭的模拟 API 只提供成员偏好与 Draft；临时 userData 与日常 App 完全分离，不调用模型。
 它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、直接静默切换、旧观测不影响偏好与初始默认。
-同一 owner 验证打开/切换零资格请求、三态保存、同成员保存去重、跨成员并发、绑定与迟到回执隔离；
+同一 owner 验证打开/切换零资格请求、开和关两种偏好的保存、同成员保存去重、跨成员并发、绑定与迟到回执隔离；
 Claude/Codex 无历史证据仍有入口，其他 Runtime 不显示，原生反馈在 Run 中展示且不反写偏好。
 `ROVAI_KEEP_FAST_FIXTURE=1` 保留本次临时截图供排错；成功默认自动清理。手动 Full check 的 Linux job 通过 `xvfb-run -a` 执行。
 
@@ -2002,7 +2002,7 @@ Antigravity 原取消 owner 同时覆盖初始化期间取消及接收后终止�
 `cargo test -p rovai-core --lib delivery_queue::` 与 `cargo test -p rovai-core --lib antigravity::`。
 完整切片结果记录在当前版本实施计划，合成测试不替代真实账户、CLI 与跨平台验收。
 
-`ROVAI_FAST_CHECK_ONLY=1 pnpm test:camp-fast-layout` 使用原隔离 Electron fixture 验证零资格检查、直接三态保存、
+`ROVAI_FAST_CHECK_ONLY=1 pnpm test:camp-fast-layout` 使用原隔离 Electron fixture 验证零资格检查、直接保存开关偏好、
 绑定与迟到响应 fence、保存去重、两处界面共享偏好及原生键鼠/主题/响应式布局。默认无此变量时继续执行原有完整布局与 Stop 回归，
 不将旧夹具的其他失败静默跳过；两种范围的结果分别记录。
 

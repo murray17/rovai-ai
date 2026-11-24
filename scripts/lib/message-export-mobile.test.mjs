@@ -35,7 +35,7 @@ test('MobileUI exports through the production drawer with a fluid HTML reader an
   }
   const layouts = []
   const checkLayout = async (width, height) => {
-    const layout = await b.evaluate(`(()=>{const dialog=document.querySelector('.message-export-dialog'),r=dialog.getBoundingClientRect(),reader=document.querySelector('.message-export-document'),preview=document.querySelector('.message-export-preview'),buttons=[...dialog.querySelectorAll('.app-dialog-footer button')].map(e=>e.getBoundingClientRect().height);return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,rect:[r.left,r.top,r.right,r.bottom],pageOverflow:document.documentElement.scrollWidth>innerWidth,readerWidth:reader.getBoundingClientRect().width,readerOverflow:reader.scrollWidth>preview.clientWidth+1,buttons}})()`)
+    const layout = await b.evaluate(`(()=>{const dialog=document.querySelector('.message-export-dialog'),r=dialog.getBoundingClientRect(),reader=document.querySelector('.message-export-document'),preview=document.querySelector('.message-export-preview'),buttons=[...dialog.querySelectorAll('.app-dialog-footer button')].map(e=>e.getBoundingClientRect().height);return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.themeId,rect:[r.left,r.top,r.right,r.bottom],pageOverflow:document.documentElement.scrollWidth>innerWidth,readerWidth:reader.getBoundingClientRect().width,readerOverflow:reader.scrollWidth>preview.clientWidth+1,buttons}})()`)
     assert.deepEqual([layout.width, layout.height], [width, height])
     assert.equal(layout.pageOverflow, false); assert.equal(layout.readerOverflow, false)
     assert.ok(layout.rect[0] >= 0 && layout.rect[1] >= 0 && layout.rect[2] <= width + 1 && layout.rect[3] <= height + 1)
@@ -72,7 +72,7 @@ test('MobileUI exports through the production drawer with a fluid HTML reader an
     await button('网页 HTML')
     for (const theme of ['day', 'night', 'ember', 'horizon', 'classic-red']) {
       await b.evaluate(`__presence.setTheme(${JSON.stringify(theme)})`)
-      await b.wait(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`); await pause(100)
+      await b.wait(`document.documentElement.dataset.themeId===${JSON.stringify(theme)}`); await pause(100)
       await checkLayout(390, 844)
       if (theme === 'night') await b.capture(join(root, 'mobile-preview-night.png'))
     }
@@ -85,12 +85,13 @@ test('MobileUI exports through the production drawer with a fluid HTML reader an
     assert.equal(await b.evaluate('!!document.querySelector(".mobile-conversation-drawer")'), true)
     await b.wait('document.activeElement?.classList.contains("camp-nav-open")')
     assert.equal(await b.evaluate('document.querySelector("[contenteditable=true]").textContent'), draft)
-    await b.evaluate('__presence.controls.exportReadDelay=450')
+    await b.evaluate('__presence.controls.exportReadGate = new Promise(resolve => { window.releaseExportRead = resolve }); true')
     await open(); await b.wait('!!document.querySelector(".message-export-read-spinner")')
     assert.equal(await b.evaluate('document.querySelector(".message-export-preview").textContent.trim()'), '')
-    await click('.message-export-dialog .app-dialog-close'); await pause(1000)
+    await click('.message-export-dialog .app-dialog-close')
+    await b.evaluate('window.releaseExportRead(); __presence.controls.exportReadGate = null')
     assert.equal(await b.evaluate('!!document.querySelector(".message-export-dialog")'), false)
-    await b.evaluate('__presence.controls.exportReadDelay=0;__presence.showFullExportCase(150,"gapped");__presence.controls.failNextExportPage=true')
+    await b.evaluate('__presence.showFullExportCase(150,"gapped");__presence.controls.failNextExportPage=true')
     await open(); await b.wait('!!document.querySelector(".message-export-read-state [role=alert]")')
     await button('重试'); await b.wait('document.querySelectorAll(".message-export-entry").length===148')
     await click('.message-export-dialog .app-dialog-close')

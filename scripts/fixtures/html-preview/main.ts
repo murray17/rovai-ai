@@ -22,7 +22,7 @@ const service = new FilePreviewService({ async resolve(request) {
     rawReference: request.rawReference, allowChildren: true }
 } }, { selectRoot: async () => null, confirmOpen: async () => true, openPath: async () => '', revealPath() {}, copyText() {}, publishExternalUpdate() {} })
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: {
+  const window = new BrowserWindow({ show: process.platform === 'linux', width: 1280, height: 900, webPreferences: {
     preload, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false
   } })
   const navigation = new FilePreviewFrameNavigation(url => service.ownsHtmlPreviewOrigin(window.webContents.id, url))

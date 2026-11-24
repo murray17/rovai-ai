@@ -4,6 +4,8 @@ import { composerDocumentToStructuredContent } from '../../../apps/desktop/src/r
 import { ReturnToLatest } from '../../../apps/desktop/src/renderer/src/ReturnToLatest'
 import { ExecutionLatestContext } from '../../../apps/desktop/src/renderer/src/useExecutionWindow'
 import { createRoot } from 'react-dom/client'
+import { TaskCapabilityProvider } from '../../../apps/desktop/src/renderer/src/TaskCapabilityProvider'
+import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
 import type {
   AgentProfile,
   ComposerDocument,
@@ -164,7 +166,7 @@ const messages: ThreadOpenProjection['messages'] = Array.from({ length: 61 }, (_
 }))
 const coverage = (count: number) => ({ loadedCount: count, totalCount: count, omittedCount: 0, complete: true })
 const projection = (count: number): ThreadOpenProjection => ({
-  schemaVersion: 7, throughGlobalSequence: count,
+  schemaVersion: 7, throughGlobalSequence: count, tasksEnabled: true,
   thread: { id: threadId, title: '仅业务投影的会话刷新', activationState: 'active', projectBindingKind: 'directory',
     projectPath: '/fixture/workspace', defaultLeadAgentId: agent.agentId, membershipGeneration: 1, version: 1,
     createdAt: now, updatedAt: now },
@@ -333,8 +335,8 @@ function installAttachmentSurfaceState(result: FixtureImageResult): void {
     }, {
       ...messages[1], id: 'attachment-surface-agent', sequence: 102, authorType: 'agent', authorId: agent.agentId,
       sourceAgentRunId: 'attachment-output-run',
-      body: '已按交互稿整理：正文在前，图片单独成组，十类交付文件在下方使用两列布局。',
-      content: [{ kind: 'text', text: '已按交互稿整理：正文在前，图片单独成组，十类交付文件在下方使用两列布局。' }],
+      body: '已按交互稿整理：正文在前，图片单独成组，十类交付文件在下方按行排列。',
+      content: [{ kind: 'text', text: '已按交互稿整理：正文在前，图片单独成组，十类交付文件在下方按行排列。' }],
       attachments: [agentFiles[0], ...agentImages, ...agentFiles.slice(1)]
     }],
     agentRunImages: [{
@@ -367,6 +369,7 @@ Object.assign(window, { rovai: {
     limit?: number
   }): Promise<unknown> => {
     if (singleChatEntryMode && method.startsWith('singleChat.')) singleChatEntryReads.push(method)
+    if (method === 'preferences.tasks.get') return { enabled: true, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
     if (method === 'singleChat.list') {
       if (!singleChatEntryMode) return []
       await singleChatEntryGate
@@ -523,7 +526,7 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
   updateMessageHistory = setMessageHistory
   completeEntrySnapshot = () => setEntrySnapshotReady(true)
   closeTask = () => setOpen(false)
-  return <CurrentUserProfileContext.Provider value={{
+  return <TaskCapabilityProvider client={desktopThreadClient}><CurrentUserProfileContext.Provider value={{
     profile, ready: true, error: null, reload: () => {},
     save: async (next) => { setProfile(next); return next }
   }}><div className="app-shell app-shell-camp">
@@ -565,7 +568,7 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
         onInspectorTabChange={setTab}
         onOpenInspector={next => { setTab(next); setOpen(true) }} onCloseInspector={() => setOpen(false)} />
     </main>
-  </div></CurrentUserProfileContext.Provider>
+  </div></CurrentUserProfileContext.Provider></TaskCapabilityProvider>
 }
 function StaticExecutionWindow({ placement }: { placement: string }) {
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -733,8 +736,12 @@ Object.assign(window, { campOpenTest: {
       message(3, ''), message(4, '这里补充交付说明，复制和回复仍对应这一条消息。'),
       { ...message(5, '新一轮任务重新显示身份。'), threadTurnId: 'next-turn', sourceAgentRunId: null },
       { ...message(6, '我来检查这些文件。'), authorId: agents[1].agentId, sourceAgentRunId: null }]
-    groupMessages[2].attachments = Array.from({ length: scenario === 'files' ? 6 : 2 }, (_, index) =>
+    groupMessages[2].attachments = Array.from({ length: scenario === 'files' ? 3 : 2 }, (_, index) =>
       attachmentFile(`group-file-${index}`, `设计说明-${index + 1}.md`, 'text/markdown'))
+    if (scenario === 'files') {
+      groupMessages[2].body = '请核对附件里的三份设计说明，包括文件名、按钮布局和窄屏阅读顺序。'.repeat(5)
+      groupMessages[2].content = [{ kind: 'text', text: groupMessages[2].body }]
+    }
     if (scenario === 'long') {
       groupMessages[2].attachments = []
       groupMessages[2].body = Array.from({ length: 24 }, (_, index) => `第 ${index + 1} 段说明：正文内容按实际呈现高度判断。`).join('\n\n')
@@ -775,7 +782,8 @@ Object.assign(window, { campOpenTest: {
       return { id: node.dataset.messageId, height: content.getBoundingClientRect().height,
         head: getComputedStyle(meta).display !== 'none', continuation: node.classList.contains('is-group-continuation'),
         label: node.getAttribute('aria-label'), background: body ? getComputedStyle(body).backgroundColor : null,
-        contentBackground: getComputedStyle(content).backgroundColor, buttons: actions?.querySelectorAll('button').length,
+        contentBackground: getComputedStyle(content).backgroundColor,
+        actions: Array.from(actions?.querySelectorAll('button') ?? [], button => button.getAttribute('aria-label')),
         actionPosition: actions ? getComputedStyle(actions).position : null,
         left: content.getBoundingClientRect().left, top: node.getBoundingClientRect().top,
         bottom: node.getBoundingClientRect().bottom }
@@ -963,6 +971,8 @@ Object.assign(window, { campOpenTest: {
     const composerCards = Array.from(document.querySelectorAll<HTMLElement>('.composer-attachment-card'))
     const composerFileCards = composerCards.filter(card => !card.classList.contains('composer-image-attachment'))
     const fileGroup = agent.querySelector<HTMLElement>('.agent-output-file-grid')!
+    const themeColor = document.createElement('span').style
+    themeColor.backgroundColor = getComputedStyle(fileGroup).getPropertyValue('--surface-raised').trim()
     const userAttachmentBounds = userAttachments.getBoundingClientRect()
     const userBodyBounds = userBody.getBoundingClientRect()
     const userAvatarBounds = userAvatar.getBoundingClientRect()
@@ -1002,7 +1012,7 @@ Object.assign(window, { campOpenTest: {
             title: longUserFileName.title
           }
         : null,
-      userFileDetails: user.querySelectorAll('.user-timeline .attachment-copy small').length,
+      userFormatLabels: user.querySelectorAll('.user-timeline .file-extension-label').length,
       agentFileCount: agent.querySelectorAll('.agent-timeline').length,
       agentIconTypes: Array.from(agent.querySelectorAll('.agent-artifact-icon')).map(icon =>
         Array.from(icon.classList).find(name => name.startsWith('type-'))),
@@ -1017,9 +1027,10 @@ Object.assign(window, { campOpenTest: {
       agentOutputWidth: Math.round(agent.querySelector<HTMLElement>('.agent-message-outputs')!.getBoundingClientRect().width),
       agentFileGroupLabel: fileGroup.getAttribute('aria-label'),
       agentVisibleHeadingCount: agent.querySelectorAll('.agent-delivery-heading').length,
-      agentOpenCueDisplay: getComputedStyle(agent.querySelector<HTMLElement>('.agent-file-open-cue')!).display,
-      agentCardBackground: getComputedStyle(agent.querySelector<HTMLElement>('.agent-timeline')!).backgroundColor,
-      surfaceRaised: getComputedStyle(document.documentElement).getPropertyValue('--surface-raised').trim(),
+      agentFileOpenButtons: fileGroup.querySelectorAll('button.attachment-open').length,
+      agentListWidth: Math.round(fileGroup.getBoundingClientRect().width),
+      agentListBackground: getComputedStyle(fileGroup).backgroundColor,
+      surfaceRaised: themeColor.backgroundColor,
       theme: document.documentElement.dataset.theme ?? '',
       overflow: document.documentElement.scrollWidth > innerWidth
     }

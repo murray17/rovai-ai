@@ -46,7 +46,13 @@ const stopGeometry = () => b.evaluate(`(() => {
     inside:bubble.getBoundingClientRect().left>=0&&bubble.getBoundingClientRect().right<=innerWidth&&bubble.getBoundingClientRect().bottom<=innerHeight,
     spinner:!!bubble.querySelector('.run-presence-stop-busy'),busy:bubble.getAttribute('aria-busy')};
 })()`)
-const identity = () => b.evaluate(`(() => {const row=document.querySelector('${row}');return {continuation:row.dataset.continuation,avatar:!!row.querySelector('.member-avatar'),after:Array.from(document.querySelectorAll('[data-message-id]')).filter(e=>Boolean(e.compareDocumentPosition(row)&Node.DOCUMENT_POSITION_FOLLOWING)).at(-1)?.dataset.messageId,top:row.getBoundingClientRect().top}})()`)
+const identity = () => b.evaluate(`(() => {
+  const row = document.querySelector('${row}')
+  const previous = [...document.querySelectorAll('[data-message-id]')]
+    .filter(message => message.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1)
+  return { continuation: row.dataset.continuation, avatar: !!row.querySelector('.member-avatar'),
+    after: previous?.dataset.messageId, gap: previous ? row.getBoundingClientRect().top - previous.getBoundingClientRect().bottom : null }
+})()`)
 try {
   await b.send('Page.navigate',{url:pathToFileURL(join(root,'rovai-teammate-presence.html')).href})
   await b.wait('!!window.__presence && !!document.querySelector(".composer-box")')
@@ -318,7 +324,7 @@ try {
   await b.evaluate(`window.savedRow=document.querySelector('${row}');document.querySelector('${row} .run-presence-open').focus()`)
   await b.capture(join(out,'same-run-continuation.png'))
   await stage(3)
-  let after=await identity();assert.equal(after.continuation,'true');assert.equal(after.avatar,false);assert.equal(after.after,'reply-alice');assert.equal(after.top,before.top)
+  let after=await identity();assert.equal(after.continuation,'true');assert.equal(after.avatar,false);assert.equal(after.after,'reply-alice');assert.equal(after.gap,before.gap)
   assert.equal(await b.evaluate(`document.querySelector('${row}')===window.savedRow`),true)
   assert.equal(await b.evaluate(`document.activeElement===document.querySelector('${row} .run-presence-open')`),true)
   await rest();await b.capture(join(out,'other-member-interrupts.png'))
@@ -351,14 +357,17 @@ try {
   // Compare the actual message-action styles with the unchanged production view.
   await scenario('interleaved',3);await rest()
   const actions=()=>b.evaluate(`Array.from(document.querySelectorAll('.public-agent-message .message-actions,.agent-message-output>.message-actions')).map(e=>({id:e.closest('[data-message-id]')?.dataset.messageId||e.parentElement.dataset.messageOutputId,opacity:getComputedStyle(e).opacity,pointer:getComputedStyle(e).pointerEvents,persistent:e.classList.contains('is-persistent')}))`)
-  const proposal=await actions();assert.deepEqual(proposal.filter(e=>e.opacity==='1').map(e=>e.id),['reply-review'])
+  const alwaysVisible = await b.evaluate("matchMedia('(max-width: 760px), (hover: none), (pointer: coarse)').matches")
+  const proposal = await actions()
+  assert.deepEqual(proposal.filter(e => e.opacity === '1').map(e => e.id),
+    alwaysVisible ? ['history-alice', 'reply-alice', 'reply-review'] : ['reply-review'])
   await b.evaluate('__presence.setProposal(false)');await rest();assert.deepEqual(await actions(),proposal)
   await b.evaluate('__presence.setProposal(true)');await rest()
   const point=await b.evaluate(`(() => {const r=document.querySelector('[data-message-id=reply-alice] .message-bubble,[data-message-id=reply-alice] .final-copy').getBoundingClientRect();return {x:r.left+15,y:r.top+10}})()`)
   await b.send('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await settle();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,'1')
-  await rest();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,'0')
+  await rest();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,alwaysVisible ? '1' : '0')
   await b.evaluate('document.querySelector("[data-message-id=reply-alice] .message-copy-button").focus()');await settle();assert.equal((await actions()).find(e=>e.id==='reply-alice').opacity,'1')
-  await rest();report.interactions.push({copyReplyVisibility:'production baseline, latest agent only; hover/focus retained',actions:proposal})
+  await rest();report.interactions.push({copyReplyVisibility:'actions match the input device and remain accessible by keyboard',actions:proposal})
 
   // V2's lightweight Stop requires confirmation; cancel/Escape are harmless.
   await scenario('parallel',2);await rest()

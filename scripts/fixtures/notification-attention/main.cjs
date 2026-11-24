@@ -9,13 +9,18 @@ app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, width: 1040, height: 700, useContentSize: true,
+  const window = new BrowserWindow({ show: process.platform === 'linux', width: 1040, height: 700, useContentSize: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   window.webContents.on('console-message', event => console.error(event.message))
   const run = code => window.webContents.executeJavaScript(code, true)
   const state = async () => { await wait(180); return run('window.notificationTest.state()') }
   const click = async selector => {
-    const point = await run(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`)
+    const point = await run(`(() => {
+      const target = document.querySelector(${JSON.stringify(selector)})
+      target.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+      const r = target.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
     window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
     window.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })

@@ -56,7 +56,10 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('rovai:window-close', createWindowCloseRequestHandler('win32', () => owner, () => window))
   window.on('close', event => owner.handleClose(event))
-  const run = expression => window.webContents.executeJavaScript(expression, true)
+  const run = async expression => {
+    try { return await window.webContents.executeJavaScript(expression, true) }
+    catch (error) { throw new Error(`Window-close renderer failed: ${expression}`, { cause: error }) }
+  }
   const wait = async expression => {
     for (let n = 0; n < 80; n++) { if (await run(`Boolean(${expression})`)) return; await pause(40) }
     console.error('UI timeout evidence:', JSON.stringify({ owner: owner.get(), visible: window.isVisible(), minimized: window.isMinimized(), focused: window.isFocused(), renderer: await run(`({text:document.querySelector('.window-close-dialog')?.textContent,focus:document.activeElement?.outerHTML,ratio:devicePixelRatio})`) }))

@@ -195,6 +195,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     await b.wait('!!document.querySelector("[data-message-id=export-code]")')
     assert.equal(await b.evaluate('!!document.querySelector(".message-export-dialog, .message-selection-dock")'), false, 'Returning to a thread must not resurrect its previous export selection')
 
+    const copySize = await b.evaluate("matchMedia('(hover: none), (pointer: coarse)').matches ? 36 : 28")
     // Open the downloaded document in isolation; links and self-contained image zoom remain useful.
     await b.send('Page.navigate', { url: pathToFileURL(join(root, 'export.html')).href })
     await b.wait('!!document.querySelector("article img")')
@@ -214,7 +215,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
         const pre=frame.querySelector('pre'),button=frame.querySelector('button[data-copy-code]'),p=pre.getBoundingClientRect(),b=button.getBoundingClientRect();
         return {separate:p.right<=b.left,scrollable:pre.scrollWidth>pre.clientWidth,button:[b.width,b.height],outside:!pre.contains(button)};
       })()`)
-      assert.deepEqual(codeLayout, { separate: true, scrollable: true, button: [28, 28], outside: true }, 'Long code and its copy action occupy separate areas at ' + width)
+      assert.deepEqual(codeLayout, { separate: true, scrollable: true, button: [copySize, copySize], outside: true }, 'Long code and its copy action occupy separate areas at ' + width)
       assert.equal(await b.evaluate(`Array.from(document.querySelectorAll('article .ref-message-link')).every(ref=>{const icon=ref.querySelector('svg')?.getBoundingClientRect(),label=ref.querySelector('.reference-token-label')?.getBoundingClientRect();return !!icon&&!!label&&icon.top<label.bottom&&label.top<icon.bottom})`), true, 'Reference icons stay on the same line as their titles')
       await b.capture(join(root, `standalone-${width}.png`))
     }

@@ -72,7 +72,8 @@ jobs:
       - name: Run real Electron integration suite
         env:
           ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
-        run: xvfb-run -a pnpm test:desktop:integration
+        # The largest desktop fixture opens a 2560 × 1440 native window.
+        run: xvfb-run -a -s '-screen 0 2560x1600x24' pnpm test:desktop:integration
 
   desktop-windows:
     name: Windows Desktop

@@ -274,8 +274,8 @@ export function useExecutionWindow(enabled: boolean, threadId: string, run: Agen
       const previous = lastScrollTop.current
       lastScrollTop.current = host.scrollTop
       const adjusted = host.dataset.executionAdjustedTop
-      delete host.dataset.executionAdjustedTop
       if (adjusted !== undefined && Math.abs(Number(adjusted) - host.scrollTop) < 1) return
+      delete host.dataset.executionAdjustedTop
       delete host.dataset.executionAnchorKey
       if (!hasRecentExecutionReadingIntent(host)) return
       const current = store.current
@@ -287,6 +287,7 @@ export function useExecutionWindow(enabled: boolean, threadId: string, run: Agen
       if (host.scrollTop < previous && !readingHistory.current) {
         initialFillActive.current = false
         readingHistory.current = true
+        setFollowingLatest?.(false)
         changed(value => value + 1)
       }
       // Direction is required: initial layout, resize and prefetched data never

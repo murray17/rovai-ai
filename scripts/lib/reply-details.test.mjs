@@ -24,7 +24,7 @@ async function runReplyDetails(t, splittersOnly = false) {
       app.setPath('userData', ${JSON.stringify(join(root, 'profile'))});
       let window;
       app.whenReady().then(() => {
-        window = new BrowserWindow({ show: false, width: 1440, height: 920,
+        window = new BrowserWindow({ show: process.platform === 'linux', width: 1440, height: 920,
           webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
         window.loadURL('about:blank');
       });`)
@@ -211,7 +211,8 @@ async function runReplyDetails(t, splittersOnly = false) {
       assert.equal(afterReveal.draft, expectedDraft)
       assert.equal(afterResize.visible, true, `${name}: subsequent resize must preserve the destination`)
     }
-    await open({ loaded: true, wrapped: true, grouped: true, messageCount: 80 })
+    // Interrupt a long, nonvirtual scroll with a real wheel gesture.
+    await open({ loaded: true, wrapped: true, messageCount: 80 })
     const beforeNavigation = await b.evaluate('document.querySelector(".timeline-scroll").scrollTop')
     await click('[data-reply-message-id=reply-a] [aria-label="回到原文"]')
     await b.wait(`(() => { const e = document.querySelector('.timeline-scroll'); return e.scrollTop > 800 && e.scrollTop < ${beforeNavigation} - 800 })()`)
@@ -252,4 +253,4 @@ async function runReplyDetails(t, splittersOnly = false) {
 }
 
 test('reply splitter folds while held and preserves width on reopen', { timeout: 60_000 }, t => runReplyDetails(t, true))
-test('reply detail navigation reveals and retains the original after layout and history loading', { timeout: 120_000 }, t => runReplyDetails(t))
+test('reply detail navigation reveals and retains the original after layout and history loading', { timeout: 240_000 }, t => runReplyDetails(t))

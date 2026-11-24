@@ -442,7 +442,13 @@ app.whenReady().then(async () => {
       const waitFor = async expression => {
         const deadline = Date.now() + 4000
         do { await settle(); if (await run(expression)) return } while (Date.now() < deadline)
-        assert.fail(`Execution window condition: ${expression}`)
+        const geometry = await run(`(() => {
+          const body = document.querySelector('.execution-drawer-body')
+          return body && { top: body.scrollTop, height: body.clientHeight, total: body.scrollHeight,
+            following: body.dataset.followingLatest, adjusted: body.dataset.executionAdjustedTop,
+            rows: body.querySelectorAll('[data-execution-virtual-key]').length }
+        })()`)
+        assert.fail(`Execution window condition: ${expression}\n${JSON.stringify(geometry)}`)
       }
       const report = []
       const initialPositions = []
@@ -451,6 +457,8 @@ app.whenReady().then(async () => {
       const initialFeedback = []
       for (const placement of ['bottom', 'inspector']) {
         await run(`document.documentElement.dataset.theme = '${placement === 'bottom' ? 'day' : 'night'}'; window.campOpenTest.showRunningExecution('${placement}', -1, 0)`)
+        await waitFor('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]") !== null')
+        await run('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]").click()')
         await waitFor("document.querySelector('.process-action.current')?.textContent === '执行中'")
         await waitForContent()
         const feedback = await run(`(() => {
@@ -481,6 +489,31 @@ app.whenReady().then(async () => {
           }; })()`)
           assert.ok(position.top > 0 && position.gap < 8, `${placement} sample ${sample}: asynchronous first page and full bodies follow latest: ${JSON.stringify(position)}`)
           initialPositions.push({ placement, sample, ...position })
+          if (placement === 'inspector' && sample === 2) {
+            const client = window.webContents.debugger
+            client.attach('1.3')
+            await client.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1440, height: 765, deviceScaleFactor: 1, mobile: false })
+            await settle()
+            const host = 'document.querySelector(".execution-drawer-body")'
+            const gap = `(${host}.scrollHeight - ${host}.clientHeight - ${host}.scrollTop)`
+            await waitFor(`${gap} < 2 && ${host}.dataset.followingLatest === 'true'`)
+            const point = await run(`(() => { const rect = ${host}.getBoundingClientRect();
+              return { x: rect.left + 20, y: rect.top + rect.height * .58 } })()`)
+            const wheel = deltaY => client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY })
+            await wheel(-6)
+            await waitFor(`${gap} >= 5 && ${host}.dataset.followingLatest === 'false'`)
+            for (let i = 1; i < 16; i++) { await wheel(-6); await settle() }
+            await waitFor(`${gap} >= 92`)
+            const readingTop = await run(`${host}.scrollTop`)
+            const changeReads = await run('window.campOpenTest.executionWindowState().changes.length')
+            await run('window.campOpenTest.appendExecution(8)')
+            await waitFor(`window.campOpenTest.executionWindowState().changes.length > ${changeReads}`)
+            assert.ok(Math.abs(await run(`${host}.scrollTop`) - readingTop) < 2, 'New output preserves the manual reading position')
+            await wheel(800)
+            await waitFor(`${gap} < 2 && ${host}.dataset.followingLatest === 'true'`)
+            await client.sendCommand('Emulation.clearDeviceMetricsOverride')
+            client.detach()
+          }
           if (sample === 1) {
             await run('new Promise(resolve => setTimeout(resolve, 450))')
             const initial = await run(`(() => { const root = document.querySelector('.process-content'); return {
@@ -501,8 +534,9 @@ app.whenReady().then(async () => {
             await settle()
             await run('document.querySelector("button[aria-label^=打开][aria-label*=执行过程]").click()')
             await waitFor(`Number(document.querySelector('.process-content')?.dataset.executionLoadedCount) === ${initial.count + 129}`)
-            assert.equal((await run('window.campOpenTest.executionWindowState()')).requests.length, 0,
-              'remount restores cached execution without initial or historical page reads')
+            const { requests } = await run('window.campOpenTest.executionWindowState()')
+            assert.ok(requests.length <= 1 && requests.every(page => page.limit === 1 && page.beforeSequence === null),
+              'remount restores cached history and permits only the single-block activity preview')
             await waitFor('document.querySelector(".execution-drawer-body").scrollHeight - document.querySelector(".execution-drawer-body").clientHeight - document.querySelector(".execution-drawer-body").scrollTop < 8')
           }
           if (sample === 0) {
@@ -546,15 +580,30 @@ app.whenReady().then(async () => {
         await run('document.querySelector(".execution-drawer-body").scrollTop = 630')
         await settle()
         await capture(`execution-history-loader-${placement}`)
-        const anchor = await run(`(() => { const n = document.querySelector('[data-execution-item-key]'); return {key:n.dataset.executionItemKey, top:n.getBoundingClientRect().top}; })()`)
+        const anchor = await run(`(() => {
+          const content = document.querySelector('.process-content[data-execution-first-sequence]')
+          const viewport = content.closest('.execution-drawer-body').getBoundingClientRect()
+          const rows = [...content.querySelectorAll('[data-execution-item-key]')].filter(row => {
+            const rect = row.getBoundingClientRect()
+            return !row.querySelector('[data-execution-item-key]') && rect.height > 0
+              && rect.top >= viewport.top && rect.bottom <= viewport.bottom
+          })
+          const row = rows[Math.floor(rows.length / 2)]
+          return row && { key: row.dataset.executionItemKey, top: row.getBoundingClientRect().top,
+            firstSequence: Number(content.dataset.executionFirstSequence) }
+        })()`)
+        assert.ok(anchor, `${placement}: an execution row is visible before keyboard paging`)
         await run('document.querySelector(".execution-history-loader button").focus({preventScroll:true})')
         window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
         window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
         window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
-        await waitFor('window.campOpenTest.executionWindowState().requests.length === 3')
+        await waitFor(`window.campOpenTest.executionWindowState().requests.length === 3
+          && Number(document.querySelector('.process-content[data-execution-first-sequence]').dataset.executionFirstSequence) < ${anchor.firstSequence}`)
+        await waitForContent()
         assert.equal(await run('document.activeElement.matches(".execution-history-loader button")'), true, 'paging retains keyboard focus')
         const after = await run('document.querySelector(' + JSON.stringify(`[data-execution-item-key="${anchor.key}"], [data-execution-item-keys~="${anchor.key}"]`) + ').getBoundingClientRect().top')
-        assert.ok(Math.abs(after - anchor.top) < 2, `anchor preserved: ${after - anchor.top}`)
+        assert.ok(Math.abs(after - anchor.top) < 2,
+          `${placement}: paging moved visible row ${anchor.key} from ${anchor.top} to ${after}`)
         for (let index = 0; index < 3; index++) {
           await run('document.querySelector(".execution-history-loader button").click()')
           await settle()
@@ -786,7 +835,11 @@ app.whenReady().then(async () => {
           assert.equal(grouped.overflow, false)
           assert.equal(grouped.emptyBubbles, 0)
           assert.deepEqual(grouped.messages.filter(item => item.head).map(item => item.id), ['group-1', 'group-5', 'group-6'])
-          assert.ok(grouped.messages.every(item => item.label && item.buttons === 2))
+          for (const message of grouped.messages) {
+            assert.ok(message.label)
+            assert.match(message.actions[0], /^(?:已)?复制这条消息$/)
+            assert.deepEqual(message.actions.slice(1), ['回复这条消息', '多选消息'])
+          }
           const bubbleSurface = await run('(() => { const probe = document.createElement("span"); ' +
             'probe.style.color = "var(--conversation-user-message-surface)"; document.body.append(probe); ' +
             'const color = getComputedStyle(probe).color; probe.remove(); return color })()')
@@ -819,11 +872,11 @@ app.whenReady().then(async () => {
       window.setContentSize(1440, 920)
       await run('document.documentElement.dataset.theme = "day"; window.campOpenTest.showMessageGroups("files")')
       let files = await settledGroups()
-      assert.ok(files.messages[2].height < 320)
+      assert.ok(files.messages[2].height < 320, `Wide file message height: ${files.messages[2].height}`)
       assert.equal(files.messages[3].head, false)
-      await run('document.querySelector(".timeline-track").style.width = "420px"')
+      await run('document.querySelector(".timeline-track").style.width = "360px"')
       files = await settledGroups()
-      assert.ok(files.messages[2].height >= 320, 'Stacked files cross the height boundary')
+      assert.ok(files.messages[2].height >= 320, `Wrapped file message crosses 320px: ${files.messages[2].height}`)
       assert.equal(files.messages[3].head, true)
       await capture('message-groups-narrow-files')
       await run('document.querySelector(".timeline-track").style.width = ""; window.campOpenTest.showMessageGroups("image")')
@@ -1069,30 +1122,30 @@ app.whenReady().then(async () => {
     assert.equal(attachmentState.composerImageCount, 3)
     assert.equal(attachmentState.userFileCount, 6)
     assert.deepEqual(attachmentState.userFileHeights, [46, 46, 46, 46, 46, 46])
-    assert.ok(attachmentState.userFileWidths.every(width => width <= 280))
+    assert.ok(attachmentState.userFileWidths.every(width => width <= 224))
     assert.ok(new Set(attachmentState.userFileWidths).size > 1, 'User files use content-sized widths')
     assert.ok(attachmentState.longUserFile, 'Long user attachment fixture is present')
-    assert.equal(attachmentState.longUserFile.cardWidth, 280)
+    assert.equal(attachmentState.longUserFile.cardWidth, 224)
     assert.equal(
       attachmentState.longUserFile.title,
       'rovai-file-reference-and-tab-icons-md-doc-code-larger.html'
     )
     assert.ok(attachmentState.longUserFile.nameScrollWidth > attachmentState.longUserFile.nameClientWidth,
       'Long user attachment names are visibly truncated')
-    assert.equal(attachmentState.userFileDetails, 0)
+    assert.equal(attachmentState.userFormatLabels, 6)
     assert.equal(attachmentState.agentFileCount, 10)
-    assert.ok(attachmentState.agentOutputWidth > 650, 'Agent deliveries use the full artifact track')
+    assert.equal(attachmentState.agentListWidth, Math.min(620, attachmentState.agentOutputWidth))
     assert.equal(attachmentState.agentFileGroupLabel, 'Agent 交付文件：10 个')
     assert.equal(attachmentState.agentVisibleHeadingCount, 0, 'File count is accessible without an extra visible heading')
-    assert.equal(attachmentState.agentOpenCueDisplay, 'grid')
-    assert.equal(attachmentState.agentColumns, 2)
+    assert.equal(attachmentState.agentFileOpenButtons, 10)
+    assert.equal(attachmentState.agentColumns, 1)
     assert.deepEqual(new Set(attachmentState.agentIconTypes), new Set([
       'type-web', 'type-code', 'type-notes', 'type-pdf', 'type-word', 'type-sheet',
       'type-slide', 'type-image', 'type-archive', 'type-generic'
     ]))
     assert.deepEqual(attachmentState.composerHeights, [48, 48, 48, 48, 48, 48, 48, 48, 48])
     assert.deepEqual(attachmentState.composerImageWidths, [48, 48, 48])
-    assert.ok(attachmentState.composerFileWidths.every(width => width >= 128 && width <= 280))
+    assert.ok(attachmentState.composerFileWidths.every(width => width >= 128 && width <= 224))
     assert.ok(new Set(attachmentState.composerFileWidths).size > 1,
       'Composer files use content-sized widths')
     assert.equal(attachmentState.composerText, '请按交互稿核对附件尺寸、顺序、图标和视觉层级。')
@@ -1129,7 +1182,8 @@ app.whenReady().then(async () => {
     await new Promise(resolve => setTimeout(resolve, 160))
     const nightAttachmentState = await run('window.campOpenTest.attachmentSurfaceState()')
     assert.equal(nightAttachmentState.theme, 'night')
-    assert.equal(nightAttachmentState.agentCardBackground, 'rgb(27, 34, 39)')
+    assert.equal(nightAttachmentState.agentListBackground, nightAttachmentState.surfaceRaised)
+    assert.notEqual(nightAttachmentState.agentListBackground, attachmentState.agentListBackground)
     await capture('attachments-night-agent')
     await run('window.campOpenTest.setAgentOutputWidth(520)')
     await run('window.campOpenTest.settle()')
@@ -1143,7 +1197,7 @@ app.whenReady().then(async () => {
     await run('window.campOpenTest.settle()')
     const zoomedAttachmentState = await run('window.campOpenTest.attachmentSurfaceState()')
     assert.equal(zoomedAttachmentState.overflow, false, 'Attachment surfaces do not overflow at 200% zoom')
-    assert.equal(zoomedAttachmentState.agentColumns, 1, 'Agent files collapse to one column at 200% zoom')
+    assert.equal(zoomedAttachmentState.agentColumns, 1, 'Agent files retain one column at 200% zoom')
     await capture('attachments-night-200-percent')
     window.webContents.setZoomFactor(1)
     assert.deepEqual(errors, [], 'No React key, rendering or fixture API errors')
