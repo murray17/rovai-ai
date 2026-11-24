@@ -555,15 +555,30 @@ app.whenReady().then(async () => {
         await run('document.querySelector(".execution-drawer-body").scrollTop = 630')
         await settle()
         await capture(`execution-history-loader-${placement}`)
-        const anchor = await run(`(() => { const n = document.querySelector('[data-execution-item-key]'); return {key:n.dataset.executionItemKey, top:n.getBoundingClientRect().top}; })()`)
+        const anchor = await run(`(() => {
+          const content = document.querySelector('.process-content[data-execution-first-sequence]')
+          const viewport = content.closest('.execution-drawer-body').getBoundingClientRect()
+          const rows = [...content.querySelectorAll('[data-execution-item-key]')].filter(row => {
+            const rect = row.getBoundingClientRect()
+            return !row.querySelector('[data-execution-item-key]') && rect.height > 0
+              && rect.top >= viewport.top && rect.bottom <= viewport.bottom
+          })
+          const row = rows[Math.floor(rows.length / 2)]
+          return row && { key: row.dataset.executionItemKey, top: row.getBoundingClientRect().top,
+            firstSequence: Number(content.dataset.executionFirstSequence) }
+        })()`)
+        assert.ok(anchor, `${placement}: an execution row is visible before keyboard paging`)
         await run('document.querySelector(".execution-history-loader button").focus({preventScroll:true})')
         window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
         window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
         window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
-        await waitFor('window.campOpenTest.executionWindowState().requests.length === 3')
+        await waitFor(`window.campOpenTest.executionWindowState().requests.length === 3
+          && Number(document.querySelector('.process-content[data-execution-first-sequence]').dataset.executionFirstSequence) < ${anchor.firstSequence}`)
+        await waitForContent()
         assert.equal(await run('document.activeElement.matches(".execution-history-loader button")'), true, 'paging retains keyboard focus')
         const after = await run('document.querySelector(' + JSON.stringify(`[data-execution-item-key="${anchor.key}"], [data-execution-item-keys~="${anchor.key}"]`) + ').getBoundingClientRect().top')
-        assert.ok(Math.abs(after - anchor.top) < 2, `anchor preserved: ${after - anchor.top}`)
+        assert.ok(Math.abs(after - anchor.top) < 2,
+          `${placement}: paging moved visible row ${anchor.key} from ${anchor.top} to ${after}`)
         for (let index = 0; index < 3; index++) {
           await run('document.querySelector(".execution-history-loader button").click()')
           await settle()
