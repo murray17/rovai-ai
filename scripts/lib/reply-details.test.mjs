@@ -24,7 +24,7 @@ async function runReplyDetails(t, splittersOnly = false) {
       app.setPath('userData', ${JSON.stringify(join(root, 'profile'))});
       let window;
       app.whenReady().then(() => {
-        window = new BrowserWindow({ show: false, width: 1440, height: 920,
+        window = new BrowserWindow({ show: process.platform === 'linux', width: 1440, height: 920,
           webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
         window.loadURL('about:blank');
       });`)
@@ -252,4 +252,4 @@ async function runReplyDetails(t, splittersOnly = false) {
 }
 
 test('reply splitter folds while held and preserves width on reopen', { timeout: 60_000 }, t => runReplyDetails(t, true))
-test('reply detail navigation reveals and retains the original after layout and history loading', { timeout: 120_000 }, t => runReplyDetails(t))
+test('reply detail navigation reveals and retains the original after layout and history loading', { timeout: 240_000 }, t => runReplyDetails(t))

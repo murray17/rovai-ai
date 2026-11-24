@@ -21,7 +21,7 @@ function contrastRatio(foreground, background) {
 }
 
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ width: 1440, height: 920, useContentSize: true, show: false, webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
+  const window = new BrowserWindow({ width: 1440, height: 920, useContentSize: true, show: process.platform === 'linux', webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
   const errors=[]
   window.webContents.on('console-message', (_event, _level, message) => { if(message.includes('Uncaught'))errors.push(message) })
   const run = async expression => {
@@ -41,7 +41,11 @@ app.whenReady().then(async () => {
   const key=async (keyCode,modifiers=[])=>{window.webContents.sendInputEvent({type:'keyDown',keyCode,modifiers});if(keyCode==='Return')window.webContents.sendInputEvent({type:'char',keyCode:'\r',modifiers});window.webContents.sendInputEvent({type:'keyUp',keyCode,modifiers});await pause(60)}
   const active=()=>run('document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId')
   const row=id=>click(`document.querySelector('[data-thread-id="${id}"] .camp-nav-open')`)
-  const menu=async()=>{await click('document.querySelector("[data-message-id=review-message-2] .message-more-button")');await wait('!!document.querySelector(".message-action-menu")');await pause(140)}
+  const menu = async () => {
+    await click('document.querySelector("[data-message-id=review-message-2] .message-more-button")')
+    await wait('!!document.querySelector(".message-action-menu")')
+    await run('Promise.all(document.querySelector(".message-action-menu").getAnimations().map(animation => animation.finished)).then(() => true)')
+  }
   const select=()=>click('document.querySelector(".message-action-menu [role=menuitem]")')
   const fork=async()=>{await run('forkQA.hold()');await menu();await select();await wait('!!document.querySelector(".app-toast-spinner")')}
   const quiet=()=>wait('!document.querySelector(".app-toast")')

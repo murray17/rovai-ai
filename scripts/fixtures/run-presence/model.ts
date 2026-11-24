@@ -260,6 +260,7 @@ const controls = { holdExportImage: false, steerReview: false, holdContinue: fal
   persistServer: false, continuationMode: 'normal', stopError: false,
   executionReads: [] as any[], hiddenMessages: [] as any[], visibleSources: [] as any[],
   exportHistory: null as any[] | null, exportReadDelay: 0, failNextExportPage: false, exportReads: [] as any[],
+  exportReadGate: null as Promise<void> | null,
   exportImageGroups: [] as any[],
   continueAttempts: [] as any[], stopAttempts: [] as any[], receipts: new Map<string, any>() }
 export const model = {
@@ -743,6 +744,7 @@ export const model = {
             requestedBeforeSequence: input.beforeSequence, messages, hasMore, nextBeforeSequence: hasMore ? rows[0].sequence : null }
         const fail = method === 'thread.messages.page' && controls.failNextExportPage
         if (fail) controls.failNextExportPage = false
+        if (controls.exportReadGate) await controls.exportReadGate
         if (controls.exportReadDelay) await new Promise(resolve => setTimeout(resolve, controls.exportReadDelay))
         if (fail) throw new Error('Simulated export read failure')
         return result

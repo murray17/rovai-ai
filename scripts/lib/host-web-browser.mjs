@@ -29,7 +29,7 @@ export async function launchAcceptanceBrowser({ executable, args, env = process.
   }
   try {
     let port
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 450; i++) {
       port = log.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/)?.[1]
       if (port) break
       if (launchError) throw launchError

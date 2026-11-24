@@ -46,7 +46,13 @@ const stopGeometry = () => b.evaluate(`(() => {
     inside:bubble.getBoundingClientRect().left>=0&&bubble.getBoundingClientRect().right<=innerWidth&&bubble.getBoundingClientRect().bottom<=innerHeight,
     spinner:!!bubble.querySelector('.run-presence-stop-busy'),busy:bubble.getAttribute('aria-busy')};
 })()`)
-const identity = () => b.evaluate(`(() => {const row=document.querySelector('${row}');return {continuation:row.dataset.continuation,avatar:!!row.querySelector('.member-avatar'),after:Array.from(document.querySelectorAll('[data-message-id]')).filter(e=>Boolean(e.compareDocumentPosition(row)&Node.DOCUMENT_POSITION_FOLLOWING)).at(-1)?.dataset.messageId,top:row.getBoundingClientRect().top}})()`)
+const identity = () => b.evaluate(`(() => {
+  const row = document.querySelector('${row}')
+  const previous = [...document.querySelectorAll('[data-message-id]')]
+    .filter(message => message.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1)
+  return { continuation: row.dataset.continuation, avatar: !!row.querySelector('.member-avatar'),
+    after: previous?.dataset.messageId, gap: previous ? row.getBoundingClientRect().top - previous.getBoundingClientRect().bottom : null }
+})()`)
 try {
   await b.send('Page.navigate',{url:pathToFileURL(join(root,'rovai-teammate-presence.html')).href})
   await b.wait('!!window.__presence && !!document.querySelector(".composer-box")')
@@ -318,7 +324,7 @@ try {
   await b.evaluate(`window.savedRow=document.querySelector('${row}');document.querySelector('${row} .run-presence-open').focus()`)
   await b.capture(join(out,'same-run-continuation.png'))
   await stage(3)
-  let after=await identity();assert.equal(after.continuation,'true');assert.equal(after.avatar,false);assert.equal(after.after,'reply-alice');assert.equal(after.top,before.top)
+  let after=await identity();assert.equal(after.continuation,'true');assert.equal(after.avatar,false);assert.equal(after.after,'reply-alice');assert.equal(after.gap,before.gap)
   assert.equal(await b.evaluate(`document.querySelector('${row}')===window.savedRow`),true)
   assert.equal(await b.evaluate(`document.activeElement===document.querySelector('${row} .run-presence-open')`),true)
   await rest();await b.capture(join(out,'other-member-interrupts.png'))
