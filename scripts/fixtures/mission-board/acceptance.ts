@@ -546,15 +546,22 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   await until(() => !document.querySelector('.mission-create-dialog'), 'Fresh creation dialog closes')
   Array.from(document.querySelectorAll<HTMLElement>('.mission-board-card')).find(card => card.textContent?.includes('无描述使命'))!.click()
   await until(() => document.querySelector('.mission-drawer .mission-start'), 'Created Mission opens with a start action')
+  const startMission = async () => {
+    let release!: () => void
+    qa.holdMissionStart(new Promise<void>(resolve => { release = resolve }))
+    const start = button('开始使命')
+    start.click()
+    await until(() => start.disabled && start.getAttribute('aria-busy') === 'true'
+      && start.querySelector('.busy-label[data-busy="true"]'), 'Starting disables the action and shows its busy indicator')
+    release()
+  }
   qa.failNextMissionStart()
   const rejectedStartCalls = qa.calls.filter((call:any) => call.method === 'missions.start' && call.p.command?.missionId === created.missionId).length
-  button('开始使命').click()
-  await until(() => button('正在开始…')?.disabled && button('正在开始…')?.getAttribute('aria-busy') === 'true', 'Start disables immediately with accessible pending feedback')
+  await startMission()
   await until(() => qa.calls.filter((call:any) => call.method === 'missions.start' && call.p.command?.missionId === created.missionId).length === rejectedStartCalls + 1 && button('开始使命') && document.querySelector('.app-toast[role=alert]')?.textContent?.includes('mission.lead_unavailable'), 'Rejected start restores the action and reports the error')
   const acceptedStartCalls = qa.calls.filter((call:any) => call.method === 'missions.start' && call.p.command?.missionId === created.missionId).length
-  button('开始使命').click()
-  await until(() => button('正在开始…')?.disabled, 'Accepted start also enters the immediate pending state')
-  await until(() => qa.calls.filter((call:any) => call.method === 'missions.start' && call.p.command?.missionId === created.missionId).length === acceptedStartCalls + 1 && !button('开始使命') && !button('正在开始…'), 'Accepted start hides the action before any AgentRun is claimed')
+  await startMission()
+  await until(() => qa.calls.filter((call:any) => call.method === 'missions.start' && call.p.command?.missionId === created.missionId).length === acceptedStartCalls + 1 && !document.querySelector('.mission-start'), 'Accepted start hides the action before any AgentRun is claimed')
   check(created.status === 'not_started', 'Start leaves the explicitly managed Mission status unchanged')
   check(created.runningAgentIds.length === 0 && !Array.from(document.querySelectorAll<HTMLElement>('.mission-board-card')).find(card => card.textContent?.includes('无描述使命'))?.querySelector('.mission-running'), 'Waiting start Delivery is not presented as executing')
   check(!document.querySelector(`[data-message-id="${created.missionId}-mission-start"]`) && !document.querySelector('.mission-commission'), 'Start does not insert a visible user-authored message')

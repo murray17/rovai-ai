@@ -60,6 +60,7 @@ let notificationSequence = 0
 let nextArchiveFailure: 'transport' | 'rejected' | undefined
 let threadOpenGate: Promise<void> | undefined
 let releaseThreadOpen: (() => void) | undefined
+let missionStartGate: Promise<void> | undefined
 const snapshots=new Map(),drafts=new Map()
 function snapshot(m:MissionRecord):ThreadOpenProjection {
  if(snapshots.has(m.threadId)) return snapshots.get(m.threadId)
@@ -225,7 +226,9 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
   return {pending:!!row,scheduled:false}
  }
  if(method==='missions.start'){
-  await new Promise(resolve=>setTimeout(resolve,80))
+  const gate = missionStartGate
+  missionStartGate = undefined
+  await gate
   if(failNextMissionStart){failNextMissionStart=false;return {...applied({missionId:m!.missionId}),status:'rejected',code:'mission.lead_unavailable'}}
   const s=snapshot(m!),sequence=Math.max(0,...s.messages.map((message:any)=>message.sequence))+1
   const trigger={...structuredClone(s.messages[0]),id:`${m!.missionId}-mission-start`,sequence,authorType:'user',authorId:'local_user',sourceAgentRunId:null,body:'开始使命',content:{schemaVersion:1,segments:[{kind:'text',text:'开始使命'}]},attachments:[],missionStart:{missionId:m!.missionId,title:m!.title,description:m!.description},createdAt:new Date().toISOString()}
@@ -309,6 +312,7 @@ const environment:any={client,files:{...model.fileApi,open:async(req:any)=>{call
  seedScrollableLanes,clearScrollableLanes,
  failNextMissionRefresh:()=>{failNextMissionRefresh=true},missionRefreshPending:()=>missionRefreshPending,
  failNextMissionStart:()=>{failNextMissionStart=true},
+ holdMissionStart:(gate: Promise<void>)=>{missionStartGate=gate},
  claimMissionRun:(missionId:string)=>{const m=items.find(item=>item.missionId===missionId)!;m.runningAgentIds=[m.defaultLeadAgentId!];m.startAvailable=false;changed()},
  delayNextMissionChanges:()=>{delayNextMissionChanges=true},failNextMissionChanges:()=>{failNextMissionChanges=true},missionChangesInFlight:()=>missionChangesInFlight,missionChangesMaxInFlight:()=>missionChangesMaxInFlight,setCheckoutBranch:(branch:string)=>{checkoutBranch=branch},
  failMissionCleanup:(missionId:string,partial=false)=>{const m=items.find(item=>item.missionId===missionId)!;m.workspaceCleanup={state:'failed',worktreeRemoved:partial,branchRemoved:false,diagnostic:partial?'mission.branch_changed: expected branch identity changed':'mission.git_failed: worktree could not be removed'};m.workspaceResourcesPresent=true;m.cleanupAvailable=false;changed()},
