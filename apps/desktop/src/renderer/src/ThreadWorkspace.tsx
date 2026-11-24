@@ -8092,7 +8092,7 @@ function ExecutionDrawer({
         resumeFollowingLatestFrames.current = null
         const body = drawerBodyRef.current
         if (!body || !latestRun || !NON_TERMINAL_RUNS.has(latestRun.status)) return
-        if (executionDrawerIsNearBottom(body.scrollTop, body.scrollHeight, body.clientHeight)) {
+        if (executionDrawerIsNearBottom(body.scrollTop, body.scrollHeight, body.clientHeight, 1)) {
           setFollowingLatest(true)
         }
       })

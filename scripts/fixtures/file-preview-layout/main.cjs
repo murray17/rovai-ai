@@ -199,6 +199,28 @@ app.whenReady().then(async () => {
     assert.deepEqual(position, { left: 420, top: 310, width: 3250 })
     await capture('image-reading-restored')
   })
+  await check('automatic image refresh keeps keyboard focus and retries a failed decode', async () => {
+    const panel = '.file-preview-tab-panel:not([hidden]) .file-preview-image-stage'
+    const region = `document.querySelector('${panel} .file-preview-image-scroll')`
+    await run('window.previewTest.openFindFixture("refresh.png")')
+    await waitForExecution(`${region}?.querySelector('img')?.naturalWidth > 0`)
+    await run(`${region}.focus({preventScroll:true})`)
+    const original = await run(`${region}.querySelector('img').src`)
+    const refreshed = await run('window.previewTest.refreshActive()')
+    assert.equal(refreshed.imageWidth, refreshed.revision * 10)
+    assert.notEqual(await run(`${region}.querySelector('img').src`), original)
+    assert.equal(await run(`document.activeElement === ${region}`), true, 'Refresh keeps focus in the image')
+    await key('=')
+    await waitForExecution('window.previewTest.imageReading()?.imageScale === 1.25')
+    const zoomButton = `document.querySelector('${panel} button[aria-label="放大"]')`
+    await run(`${zoomButton}.focus()`)
+    await run('window.previewTest.refreshActive()')
+    assert.equal(await run(`document.activeElement === ${zoomButton}`), true, 'Refresh also preserves toolbar focus')
+    await run(`${region}.querySelector('img').src = 'data:image/png;base64,AAAA'`)
+    await waitForExecution(`Boolean(${region}.querySelector('[role=alert]'))`)
+    const repaired = await run('window.previewTest.refreshActive()')
+    assert.equal(repaired.imageWidth, repaired.revision * 10, 'A valid new source replaces a decode error')
+  })
   if (process.env.ROVAI_FILE_PREVIEW_CASE === 'image-reading') {
     console.log(JSON.stringify({ ok: true, cases }))
     app.exit(0)

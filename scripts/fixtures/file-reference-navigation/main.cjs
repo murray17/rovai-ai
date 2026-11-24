@@ -129,6 +129,16 @@ app.whenReady().then(async () => {
     assert.equal((await state()).draft, '保留原有草稿')
     assert.equal((await state()).overflow, false)
   })
+  await check('the frame trace detects a temporary link jump without a resize', async () => {
+    await run('window.navigationTest.trace()')
+    const before = await state()
+    await run('window.navigationTest.scrollBy(40)')
+    await run('window.navigationTest.scrollBy(-40)')
+    await run('window.navigationTest.stopTrace()')
+    const after = await state()
+    closeTo(after.linkY, before.linkY, 'Link returns to its starting position')
+    assert.ok(after.trace.some(y => Math.abs(y - (before.linkY - 40)) <= 2), 'Trace includes the 40px displacement')
+  })
   await check('normal history scrolling replaces the clicked anchor with the visible message', async () => {
     await run('window.navigationTest.scrollBy(220); window.navigationTest.rememberMessage()')
     const before = await state()

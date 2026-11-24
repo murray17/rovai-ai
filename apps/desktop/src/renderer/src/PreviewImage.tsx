@@ -14,7 +14,8 @@ export function PreviewImage({ src, alt, info = '', errorHint, initialScale = nu
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [scale, setScale] = useState<number | null>(initialScale)
-  const [failed, setFailed] = useState(false)
+  const [failedSource, setFailedSource] = useState<string | null>(null)
+  const failed = failedSource === src
   useEffect(() => {
     const element = viewport.current
     if (!element) return
@@ -47,8 +48,11 @@ export function PreviewImage({ src, alt, info = '', errorHint, initialScale = nu
       {failed ? <div className="file-preview-error" role="alert"><strong>{t('无法显示图片')}</strong>{errorHint && <span>{errorHint}</span>}</div>
         : <div className="file-preview-image-content"><img src={src} alt={alt} draggable={false}
           style={dimensions ? { width: dimensions.width * effectiveScale, height: dimensions.height * effectiveScale } : undefined}
-          onLoad={event => setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-          onError={() => { setFailed(true); onError?.() }} /></div>}
+          onLoad={event => {
+            setFailedSource(null)
+            setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+          }}
+          onError={() => { setDimensions(null); setFailedSource(src); onError?.() }} /></div>}
     </div>
     <div className="file-preview-image-toolbar" data-file-find-exclude>
       <div className="file-preview-image-info" aria-live="polite">

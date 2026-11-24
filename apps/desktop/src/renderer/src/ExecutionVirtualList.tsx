@@ -34,15 +34,26 @@ export function ExecutionVirtualList<T extends { key: string }>({ items, childre
   const start = virtual ? Math.min(retainedIndex < 0 ? range.start : retainedIndex, Math.max(0, items.length - 1)) : 0
   const end = virtual ? Math.min(items.length, Math.max(start + 1, start + range.end - range.start)) : items.length
 
+  const hasRows = items.length > 0
+  useLayoutEffect(() => {
+    const list = root.current
+    const host = list?.closest<HTMLElement>('.execution-drawer-body')
+    if (!enabled || !hasRows || !list || !host) return
+    // Follow changes to the rendered scroll space, including committed spacers and viewport resizes.
+    const observer = new ResizeObserver(() => {
+      if (host.dataset.followingLatest !== 'true' || host.dataset.executionDisclosureAnchor === 'true') return
+      host.scrollTop = host.scrollHeight
+      host.dataset.executionAdjustedTop = String(host.scrollTop)
+    })
+    observer.observe(list)
+    observer.observe(host)
+    return () => observer.disconnect()
+  }, [enabled, hasRows])
+
   useLayoutEffect(() => {
     const element = root.current
     const host = element?.closest<HTMLElement>('.execution-drawer-body')
     if (!element || !host || !enabled) return undefined
-    // Row measurements change spacer heights on the next React commit.
-    if (host.dataset.followingLatest === 'true' && host.dataset.executionDisclosureAnchor !== 'true') {
-      host.scrollTop = host.scrollHeight
-      host.dataset.executionAdjustedTop = String(host.scrollTop)
-    }
     let frame = 0
     const update = () => {
       frame = 0

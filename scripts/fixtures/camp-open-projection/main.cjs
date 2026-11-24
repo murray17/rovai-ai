@@ -489,6 +489,31 @@ app.whenReady().then(async () => {
           }; })()`)
           assert.ok(position.top > 0 && position.gap < 8, `${placement} sample ${sample}: asynchronous first page and full bodies follow latest: ${JSON.stringify(position)}`)
           initialPositions.push({ placement, sample, ...position })
+          if (placement === 'inspector' && sample === 2) {
+            const client = window.webContents.debugger
+            client.attach('1.3')
+            await client.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1440, height: 765, deviceScaleFactor: 1, mobile: false })
+            await settle()
+            const host = 'document.querySelector(".execution-drawer-body")'
+            const gap = `(${host}.scrollHeight - ${host}.clientHeight - ${host}.scrollTop)`
+            await waitFor(`${gap} < 2 && ${host}.dataset.followingLatest === 'true'`)
+            const point = await run(`(() => { const rect = ${host}.getBoundingClientRect();
+              return { x: rect.left + 20, y: rect.top + rect.height * .58 } })()`)
+            const wheel = deltaY => client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY })
+            await wheel(-6)
+            await waitFor(`${gap} >= 5 && ${host}.dataset.followingLatest === 'false'`)
+            for (let i = 1; i < 16; i++) { await wheel(-6); await settle() }
+            await waitFor(`${gap} >= 92`)
+            const readingTop = await run(`${host}.scrollTop`)
+            const changeReads = await run('window.campOpenTest.executionWindowState().changes.length')
+            await run('window.campOpenTest.appendExecution(8)')
+            await waitFor(`window.campOpenTest.executionWindowState().changes.length > ${changeReads}`)
+            assert.ok(Math.abs(await run(`${host}.scrollTop`) - readingTop) < 2, 'New output preserves the manual reading position')
+            await wheel(800)
+            await waitFor(`${gap} < 2 && ${host}.dataset.followingLatest === 'true'`)
+            await client.sendCommand('Emulation.clearDeviceMetricsOverride')
+            client.detach()
+          }
           if (sample === 1) {
             await run('new Promise(resolve => setTimeout(resolve, 450))')
             const initial = await run(`(() => { const root = document.querySelector('.process-content'); return {
