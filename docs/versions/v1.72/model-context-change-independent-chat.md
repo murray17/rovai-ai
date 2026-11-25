@@ -2,14 +2,14 @@
 document_type: model-context-change
 version: v1.72
 change_id: independent-chat
-revision: 6
+revision: 7
 confirmation_status: pending
 authority: proposed-model-input-change-statement
 implementation_baseline: 3000b971f22bae67f45ded8e2d051bc85cc61803
 last_updated: 2026-11-25
 ---
 
-# 独立聊天的模型输入 R6
+# 独立聊天的模型输入 R7
 
 本稿规定队员实际读到的文字。聊天页面、侧栏、已读位置、排队展示和公开操作的回执归[聊天后端提案](chat-backend-proposal.md)。
 
@@ -21,13 +21,11 @@ last_updated: 2026-11-25
 
 ### 新建原生会话
 
-Charter 用一句话介绍 Rovai AI，再说明队员在当前私聊答复用户。产品介绍只放在 Bootstrap。[产品定位](../../../PRODUCT.md#product-purpose)
-
 下面是**首次开聊的完整 Bootstrap 示例**。假设用户选择了只填姓名的阿澈，且已开启 Rovai Memory。`/example/rovai/skills` 是示例路径，实际值取自执行 Host。两个技能的说明取自基线中的受管文件。
 
 ```text
 [SESSION_CHARTER]
-Rovai AI is a workspace for long-lived coding-agent teams. Reply in this private chat.
+You are in Rovai. Reply in this private chat.
 [/SESSION_CHARTER]
 
 [MEMBER_IDENTITY]
@@ -102,4 +100,4 @@ Host 将本话题自有目录设为 Runtime 的实际工作目录，续聊和插
 
 ## 二次确认
 
-R6 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
+R7 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
