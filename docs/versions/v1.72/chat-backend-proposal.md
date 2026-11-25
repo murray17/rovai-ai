@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 2
+revision: 3
 last_updated: 2026-11-24
 ---
 
@@ -11,89 +11,111 @@ last_updated: 2026-11-24
 
 **一段独立聊天就是一条 `conversation`，`chatId = conversation.id`。** 从左栏选人只打开草稿，首次发送成功才有聊天记录。用户明确要求「新建一个团队会话」时，队员才调用 `rovai thread create` 创建公开 Thread。
 
-本稿以 v1.72、Core `a181754bc8` 为基线。首版只新增 `chat_topic` 和 `chat_action` 两张业务表。前者负责左栏和归档，后者负责跨 Thread 写操作的回执与重试。
+本稿基于 `b1c20641a` 的七节修订稿，代码基线为 v1.72 的 Core `a181754bc8`。独立聊天只新增 `chat_topic` 一张业务表。排队和 Steer 共用现有输入记录，跨 Thread 操作沿用工具请求、命令回执和公开投递状态。
 
 ## 1. 数据归属
 
 | 数据 | 存储与约束 |
 | --- | --- |
 | 聊天身份 | `conversation.kind='chat'` 要求 `camp_id IS NULL`，`agent_id` 固定为所选队员。每个话题用自己的 `native_binding_id` 和绑定代次。同一用户与同一队员可以开多个话题。 |
-| 左栏话题 | `chat_topic.conversation_id` 同时是主键和指向 `conversation.id` 的外键，只接收 `chat`。其余字段为 `owner_user_id`、`title`、`archived_at`、`last_activity_sequence`、`version`。队员和头像经 Conversation 查 `agent_profile`。 |
+| 左栏话题 | `chat_topic.conversation_id` 同时是主键和指向 `conversation.id` 的外键，只接收 `chat`。其余字段为 `owner_user_id`、`title`、`archived_at`、`last_activity_sequence`、`version`，永久删除受理时记录 `deletion_operation_id`。队员和头像经 Conversation 查 `agent_profile`。 |
 | 用户消息和最终答复 | `conversation_message` 按 `(conversation_id, sequence)` 排序，保存正文、引用和附件引用。Core 把正常答复写回 Run 的目的 Conversation。`rovai send` 用于显式发布到公开 Thread。 |
 | 执行过程 | `agent_run` 直接引用 `conversation_id` 和 `trigger_conversation_message_id`。聊天 Run 的 `camp_id`、`camp_turn_id` 均为空。`agent_run_execution_evidence` 按 Run 和 `execution_epoch` 保存可展示的工具调用、进度与输出。 |
-| 排队输入 | 沿用 `single_chat_pending_input` 及其编辑记录。只有需要等待的发送才占队列位置，发布后关联正式消息和 Run。 |
-| 委托回执 | `chat_action` 只登记需持久回执、可单项重试的委托写操作。普通问答、公开 Thread 读取和聊天历史查询均为零行。 |
+| 忙时输入 | `single_chat_pending_input` 保存 FIFO 输入和指定活动 Run 的 Steer 输入。仅 FIFO 输入进入下一轮队列。运行端是否已接收以 `runtime_input_delivery` 为准。 |
+| 公开业务结果 | `event_log` 的 `command.result` 关联已有工具请求与结果。任务读 `task`，消息和逐收件人投递读 `camp_message`、`camp_message_delivery`。 |
 
-对 `camp`、`camp_member`、`camp_turn`，首发均为零写入。用户侧的每次详情读取、改名、停止、归档和删除都核对 `chat_topic.owner_user_id` 与宿主认证用户。工作目录按 `chatId` 管理，引用 Thread 只定位业务对象。置顶与已读沿用本机偏好，以聊天类型保存 ID。
+私下问答的整个过程，包括首发、排队、Steer 和最终回复，对 `camp`、`camp_member`、`camp_turn` 均为零写入。用户侧的每次详情读取、改名、停止、归档和删除都核对 `chat_topic.owner_user_id` 与宿主认证用户。工作目录按 `chatId` 管理，引用 Thread 只定位业务对象。置顶与已读沿用本机偏好，以聊天类型保存 ID。
 
-## 2. 首发、续聊与命令重放
+## 2. 首发、排队与补充当前执行
 
-选人时只读队员资料。本机按用户和队员保留未发送草稿，两个窗口打开同一草稿时共用 `draftId`。首发前冻结正文、结构化引用及有序附件引用。Core 验证用户、队员、Runtime 可用性及附件归属，在一个事务内分配 Conversation ID，写入 Conversation、话题、首条用户消息、首轮 Run 和命令回执。标题取首句，最多 20 个用户可见字符。纯附件取首个文件名，纯引用取引用标题。这两类输入都可单独发送。此后只允许用户按话题版本手动改名。
+**首发。** 选人只读队员资料。本机按用户与队员保存未发送草稿，同一份草稿跨窗口共用 `draftId`。首次发送时，Core 校验用户、队员、配置授权、引用及附件，在一个事务内写入 `conversation`、`chat_topic`、首条 `conversation_message`、首个 `agent_run` 和命令回执。标题取首句，最多 20 个用户可见字符。纯附件取首个文件名，纯引用取引用标题。此后由用户按话题版本手动改名。续聊沿用原 ID，另起话题用新草稿，成功首发时才分配新 ID。
 
-**首发去重复用 `event_log` 的 `command.result`。** Host 用认证用户和 `draftId` 派生唯一首发 `commandId`，两个窗口的请求号可以不同。Core 用 `canonical_json_digest` 对队员、正文、引用和有序附件标识计算摘要。在 `event_log` 的命令回执中保存草稿标识、摘要和原结果，判重范围跨同一用户的窗口。旧网关按命令类型、身份和作用域重放，载荷变化也会返回首次结果。首发须在快速重放和写事务内的二次查重两处，都先核对草稿标识和摘要。匹配就返回原 `chatId, messageId, runId`，不匹配就返回冲突并保留后提交窗口的输入。可修正的首发失败回滚，不占用首发键。客户端收到成功回执时只清除已发送的草稿版本。[现有重放逻辑](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L495)
+**临时离线也受理。** 已选定且获准的 Runtime 暂时离线时，首发仍返回同一条消息和已建立的 Run，界面显示「等待运行端」。Run 保持 `queued`，`chats.open` 将暂不可派发的原因投影为 `waiting_runtime`。保存已获准的 Runtime 选择、权限和配置版本，此时尚未开始投递。恢复时重新核对归档、权限、安装身份及绑定，相符才领取这个 Run，补齐可执行快照并派发一次。未配置、已禁用或授权撤销时返回具体原因并保留草稿。等待期间撤权则停止派发。`resolve_frozen_runtime` 的配置校验与实时可达性判断需在聊天准入处分开。[队员运行配置](../../../crates/rovai-core/src/agent_profile.rs)
 
-`chats.send` 的目标二选一，首发传 `draftId, agentId`，续聊传原 `chatId`。成功回执也只有两种形状。`started {chatId, messageId, runId}` 表示消息已发表，首发另带标题。`queued {chatId, inputId}` 表示已持久入队，尚无消息或 Run。空闲且无更早队列项时直接发表。续聊以该次发送的 `commandId` 重试。另起话题使用新草稿，首次成功时分配新 ID。
+**首发去重。** Host 按认证用户和 `draftId` 派生首发 `commandId`，使用 `canonical_json_digest` 对队员、正文、引用及有序附件标识求摘要。`event_log` 的 `command.result` 保存草稿标识、摘要和结果。快速重放与写事务内查重都校验两者。相同快照返回原三个 ID，异内容返回冲突，后提交窗口保留输入。可修正的拒绝回滚，草稿仍可首发。成功时客户端只清除已发送的草稿版本。[现有重放逻辑](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L495)
+
+`chats.send` 首发传 `draftId, agentId`，续聊传 `chatId`。`mode=start` 在空闲且无更早排队项时开一轮，忙时对应「排队发送」。`mode=steer` 对应「补充当前执行」，须带用户当前看到的 `runId, executionEpoch`。Core 在写事务核对该 Run 正在此用户的这个话题中执行。同一命令号的重放须匹配最初提交的模式、目标及内容摘要。已变化的 Run 或不支持 Steer 的目标返回具体原因，保留输入供用户选择排队。
+
+| 成功回执 | 界面显示及含义 |
+| --- | --- |
+| `started {chatId, messageId, runId, runStatus}` | 已开启新一轮。首发另带标题，等待运行端按 `runStatus` 单独显示。 |
+| `queued {chatId, inputId}` | 已排队。此时只有持久输入，轮到它时再建立消息和新 Run。 |
+| `steer_submitted {chatId, inputId, runId, executionEpoch}` | 已向当前轮提交补充。先显示待发送或发送中，取得原生 `accepted` 回执后才显示已收到。 |
 
 ## 3. 没有 Camp 和 Turn 的运行链路
 
-投影 schema 182 需要改以下写入、约束和查询。迁移从现有表复制数据并重建受影响的索引与触发器，保留旧记录的 kind、已发布关联、绑定和冻结策略。[Conversation 与 Run 的现有约束](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/db.rs#L7376-L7625)
+从投影 schema 182 迁移，复制旧记录并重建受影响的约束、索引和触发器。旧队列记录的 `requested_mode` 回填为 `start`，Steer 目标字段留空。会话内单聊继续使用活动 Camp、成员、Turn 和冻结的 `single_chat_v1` 策略。
 
-| 环节 | 具体改动 |
+| 环节 | 需要调整的现有依赖 |
 | --- | --- |
-| Conversation 与 Run | 重建 `conversation`，允许 `camp_id` 为空且仅 `kind='chat'` 时为空，保留既有成员和活动单聊的部分唯一索引。扩展 `agent_run` 的类型、投递、策略及路由不可变约束。`invocation_kind='chat'` 固定 `operation_policy='chat_v1'`、`response_delivery='conversation_message'`、`destination_conversation_id=conversation_id`，触发消息必须是该话题的用户消息。为聊天建立按 Conversation 唯一的活动 Run 索引，覆盖 `queued/running/waiting`。 |
-| 入队与发布 | 现有入队触发器只认 `single_chat`，`published` 还强制有 Turn。扩展 `single_chat_pending_input_scope_insert`，独立聊天检查所有者与 `chat_topic.archived_at`。重建队列表，保留 FIFO 唯一键和状态约束。发布必须有同话题的消息和 Run。非发布态三项发布引用全空。插入和更新触发器按所属 Conversation 分支，旧单聊发布必须有匹配的 `published_camp_turn_id`，独立聊天始终要求该列为空。附件写入守卫放行两类私有用户消息。 |
-| 消息准入与恢复 | 拆出 `admit_single_chat_message` 中共同的消息序号、消息和 Run 写入。`load_active_target` 和 `single_chat_has_active_run` 按来源类型取目标及检查忙闲。聊天从 `agent_profile` 冻结队员能力与版本，替换 `build_effective_config` 对 `camp_member` 的强制连接。发布把队首改为 `published` 与建消息、Run 同事务提交。`ready_pending_inputs` 保留旧 `JOIN camp` 分支，另按 `conversation JOIN chat_topic` 读未归档聊天。候选、发布命令和唤醒通知改为带来源类型。独立聊天只传 `conversationId`，只通知获准的用户端。取得写锁后重查归档、活动 Run、队首及编辑版本。`needs_repair` 阻塞该话题后项，修正或移除后继续。 |
-| 派发、停止和重启 | 派发扫描 `list_dispatchable_agent_runs_scoped`、领取 `load_claimable_run`、执行读取 `load_agent_run_execution` 和启动清理 `cancel_interrupted_single_chat_runs` 都按 Camp／Turn 取目标。给这些入口增加按 Conversation 取聊天的分支，领取时重查归档。配置及上下文从话题绑定、队员和当前输入构造，公共上下文水位取零。停止按 `chatId, runId, executionEpoch` 定位，取消 Run 并释放其 lease。启动时分别对账活动 Run 和未发表输入，已取消或已接受但结果未知的 Run 不重新投递。 |
-| 最终答复与证据 | `load_terminal_target` 与 `persist_single_chat_success` 目前会读取 Camp 并重算 Turn。聊天终态事务只核对 Conversation、目的地、绑定代次、Run 状态和 epoch。成功时将可见答复写入 `conversation_message` 并设置 `agent_run.final_conversation_message_id`，无最终文字则仅结算 Run。只允许活动代次在未取消且 `final_conversation_message_id IS NULL` 时结算，条件更新失败一并回滚。每轮至多一条最终回复。停止或归档后的迟到回调只记诊断。执行窗口、展开输出和附件读取均按所有者、话题、Run／消息校验归属。 |
+| Conversation 与 Run | `conversation.camp_id` 仅在 `kind='chat'` 时为空。聊天 `agent_run` 固定 `invocation_kind='chat'`、`operation_policy='chat_v1'`、`response_delivery='conversation_message'`、`destination_conversation_id=conversation_id`。触发消息属于该话题，两个 Camp 引用均为空。每个聊天 Conversation 至多一个 `queued/running/waiting` Run。保留旧类型的唯一索引、原生绑定和路由不可变约束。 |
+| 首发、直接发表与 FIFO | 从 `admit_single_chat_message` 拆出共同的消息序号和 Run 写入。`load_active_target`、`single_chat_has_active_run` 识别聊天，`build_effective_config` 从 `agent_profile` 取获准配置。`single_chat_pending_input_scope_insert` 校验用户和未归档话题。`published` 须有同话题的消息和 Run，旧单聊另须有匹配的 `published_camp_turn_id`，聊天要求为空。插入与更新均校验，未发表时三个发布引用全空。普通排队发布在同一事务建消息、新 Run 并结算队首。 |
+| 扫描、领取与停止 | `ready_pending_inputs` 保留旧单聊的 `JOIN camp`，独立聊天改连 `chat_topic`。FIFO 只取 `requested_mode=start`，写锁内重查归档、活动 Run、最早序号及编辑版本，`needs_repair` 挡住本话题后项。`list_dispatchable_agent_runs_scoped`、`load_claimable_run`、`load_agent_run_execution` 和 `cancel_interrupted_single_chat_runs` 增加按 Conversation 取目标的分支。离线等待没有 lease，恢复后只领取原 Run。停止按所有者、话题、Run、epoch 取消执行并释放 lease，迟到输出只记入原代次的诊断。 |
+| 最终答复和附件 | `persist_single_chat_success` 现按非空文字决定是否写消息。给 `SucceedAgentRunCommand` 增加可选的 `finalAttachments`。适配器上报本轮明确交付的文件，Host 将其登记为归属该 Run 的附件引用并校验可读性，输出目录中的其他文件不参与终态。文字非空或有有效附件时，在同一终态事务写 **一条** `conversation_message` 并设置 `final_conversation_message_id`。纯附件消息的正文可为空。未声明任何输出时只结算 Run，声明的附件校验失败则保留具体错误。`source_attachments_json` 的守卫允许当前话题的用户附件及本轮 Agent 最终附件，读取时重验归属。Run/epoch、目的地、取消及唯一终态检查防止重复回复。 |
 
-旧会话内单聊继续要求活动 Camp、有效成员和配套 Turn，使用原 `single_chat_v1` 策略。迁移连同 schema 准入检查一起更新。执行记录的分块、增量读取和终态折叠可以继续复用。[排队表与类型触发器](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/db.rs#L26574-L26679) · [队列恢复](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L1991-L2036) · [运行与终态](../../../crates/rovai-core/src/runtime.rs) · [上下文读取](../../../crates/rovai-core/src/context.rs) · [执行窗口](../../../crates/rovai-core/src/execution_window.rs)
+**Steer 的私有输入来源。** 在 `single_chat_pending_input` 增加 `requested_mode` 和目标 Run／代次，`inputId` 也是补充输入的稳定标识。`active_input_availability` 目前限定 `batch`，为 `chat` 接入同一套冻结的适配器、协议、版本和绑定检查。`canSteer` 允许登记意图，`ready` 还须同一绑定、代次的初始输入已接收。启动中的绑定按既有预计代次等待。发送前再验原目标，每条按提交顺序单独投递。私有路径对 `camp_message` 和 `camp_message_delivery` 均为零写入。
 
-## 4. 历史、导航和归档
+公开 Steer 的 `context_manifest.source_delivery_id` 引用公开 Delivery。给同表增加互斥的私有 `source_chat_input_id`，外键指向上述输入。两种来源都为空才是初始 Manifest，每个私有来源只能建立一个补充 Manifest。同步修改部分唯一索引、来源不可变守卫、输入构造器和 `input_kind` 判定。复用 `runtime_input_delivery(input_kind='steer', input_sequence)` 的准备、发出及接收回执。登记 Steer 后冻结这份输入，只有尚待 FIFO 发表的输入沿用队列编辑入口。私有补充从原输入取正文及附件，绕开 `agent_run_input` 对公开消息和 Delivery 的外键。执行窗口通过私有来源读写现有 `agent_run_execution_evidence`，按 `inputId` 合并步骤。模型输入与 Manifest 的版本调整按现有流程记录。[Steer 资格与结算](../../../crates/rovai-core/src/steer.rs) · [来源约束](../../../crates/rovai-core/src/db_steer.rs) · [模型上下文变更](../../development/model-context-change-governance.md)
 
-**历史只随当前 Run。** `rovai chat history` 只接受分页参数。Core 从有效 Run 和认证绑定取得 Conversation，以触发用户消息的序号为排他上界，查询此前的用户消息、最终回复和附件摘要。游标绑定该话题和上界。传入 `chatId` 或另一话题的游标均拒绝。下一条排队输入在上一轮终态提交后才分配序号，因此能读到上一轮答复。
+获得 `accepted` 时在同一事务将输入关联到**原 Run**，追加一条私有用户消息并标记已发表，原 Run 的触发消息保持原值。仅在现有规则确认未提交或 `not_accepted` 且允许回队时，才把同一输入一次性改为 `start` 并保留 FIFO 序号。`accepted`、`delivery_unknown` 及已经开始发送但没有确定结果的输入均不得再次入队或重发。符合 `canReconcile` 的未知项只核对原生回执，确证后只结算原 `inputId`，重复或迟到的 ACK 不再追加消息。切换聊天、归档、重启或后继 Run 均不改变输入归属。[现有 Steer 核对合同](../../contracts/message-delivery-v20.md) · [已接收输入恢复](../../contracts/accepted-input-recovery-v9.md)
 
-**导航只搜标题和队员名。** `navigation.search` 先在 `chat_topic` 限定认证用户和 `archived_at IS NULL`，再连接 `conversation`、`agent_profile` 匹配标题和 `display_name`，返回 `kind:'chat', chatId`。话题列表按活动序号降序、ID 稳定分页，支持按队员过滤。用户消息或最终回复发表时，在同一事务以 `event_log` 的全局序号更新话题排序。`navigation.searchMessages` 继续只读 `camp_message`。首版沿用现有搜索入口，无需正文索引或搜索表。[导航搜索合同](../../contracts/navigation-search-v1.md)
+共享执行证据继续按 `runId + executionEpoch` 保存和展开。普通答复、仅附件答复及忙时补充都只对话题所有者可见。[排队表与类型触发器](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/db.rs#L26574-L26679) · [私有准入与队列恢复](../../../crates/rovai-core/src/single_chat.rs) · [运行与终态](../../../crates/rovai-core/src/runtime.rs)
 
-**归档沿用「设置 → 归档」。** 在同一事务设置 `chat_topic.archived_at`、取消活动 Run，提交后停止相应 Runtime。普通列表、搜索、发送、队列领取和派发都检查此字段。尚未发表的输入保留原队列状态。设置页按所有者读取归档话题，返回带 `kind:'chat'` 的摘要。手动恢复只清除归档时间并唤醒队列，沿用原 ID、历史和草稿。已取消 Run 保留终态。[现有归档行为](../../contracts/thread-archive-v1.md)
+## 4. 历史、导航、归档与删除
 
-**永久删除按 `chatId` 清理。** 先隔离活动执行，按外键顺序清理私有输入、消息、Run、步骤、动作回执、话题与 Conversation，提交后幂等清理本机草稿、受管文件和释放的文件引用。首发回执擦除私有内容，仅留去重所需的标识及已删除状态，旧请求无法重建话题。公开目标已发布的消息、任务、经办署名及其文件保留。
+**历史。** `rovai chat history` 只接受分页参数。Core 从有效 Run 和原生绑定反查目的 Conversation，以触发用户消息序号为排他上界，返回此前已发表的用户消息、最终答复和附件摘要。当前轮的补充从该轮 Steer 输入送达。下一轮能够读到此前已确认的补充和最终答复。游标绑定话题及上界，传入另一个 `chatId` 或跨话题游标均拒绝。详情页从消息、忙时输入和执行证据还原逐轮记录。
+
+**导航。** `navigation.search` 先按认证用户和 `chat_topic.archived_at IS NULL` 筛选，再连接 `conversation`、`agent_profile` 匹配标题和队员名。结果为 `kind:'chat', chatId`。左栏按活动序号降序、ID 稳定分页，可按队员过滤。已发表的消息在同一事务以 `event_log` 的全局序号推进话题排序。`navigation.searchMessages` 继续只搜 `camp_message`。[导航搜索合同](../../contracts/navigation-search-v1.md)
+
+**归档。** 在同一事务设置 `archived_at`、取消活动 Run、关闭新输入和派发。尚未发表的 FIFO 输入保留原序号。对在途 Steer 保留原 Run／代次及真实回执，已接收或结果未知的补充不会转入恢复后的队列。设置页按所有者显示 `kind:'chat'` 的归档摘要。手动恢复后沿用原 ID、历史与草稿，唤醒尚未派发的 FIFO，已取消轮次保持终态。[现有归档行为](../../contracts/thread-archive-v1.md)
+
+**删除与文件清理同事务交接。** Core 记录删除操作 ID，封住聊天读写并隔离活动 Run。业务删除事务先向现有 `camp_attachment_view_operation` 和 `camp_attachment_view_operation_entry` 登记待清理的受管根、文件相对路径和所有权标识，再清理私有消息、Run、证据、输入、话题属性和 Conversation，两者一起提交或回滚。为现有 journal 增加 `chat_delete_cleanup` 和独立的 `chatId` 归属，允许此类记录的 `camp_id` 为空。清单在话题删除后仍可读取。启动恢复先接续尚未交接的删除标记，再按操作 ID 扫描未完成清单，核对根身份后逐项清理，已删项视为完成。清单只含聊天独占文件，外部原文件和公开目标仍持有的文件保留。提交后按 `chatId` 清掉本机草稿。话题内的创建回执随话题清理，已创建的全局队员档案保留。首发回执仅保留去重标识与已删除状态。[现有删除交接合同](../../contracts/camp-permanent-deletion-v4.md) · [恢复扫描](../../../crates/rovai-core/src/camp_deletion.rs)
 
 ## 5. 31 项 Agent CLI 与授权
 
-现有 30 项中接入 29 项，加上 `chat history` 和 `thread create` 共 **31 项**。`single-chat history` 专供会话内单聊。下表省略可执行文件前缀 `rovai`。[当前 CLI 目录](../../../crates/rovai-core/src/builtin_tool_transport.rs)
+现有 30 项中开放 29 项，再加 `chat history` 和 `thread create`，共 **31 项**。`single-chat history` 专供会话内单聊。下表省略可执行文件前缀 `rovai`。[当前 CLI 目录](../../../crates/rovai-core/src/builtin_tool_transport.rs)
 
 | 操作 | 聊天 Run 的规则 |
 | --- | --- |
 | `chat history` | 只读当前话题，见 §4。 |
-| `thread list`、`history search` | 在用户有权读取的公开范围发现目标，返回稳定 ID。 |
-| `thread search / read / runs`、`send` | 必传 `--thread-id`。读消息或回复链核对所属 Thread。发布可显式选 `--public-only` 或 `--to`，收件人须在目标 Thread 有效。 |
-| `task list / create / get / update` | 四项均必传 `--thread-id`，核对任务归属、负责人、能力开关和状态。建任务、通知负责人分两次写。 |
-| `member list / get / create / update` | 全局档案按原权限操作。查某个 Thread 的成员须传 `--thread-id`。 |
-| `mission list / get / update / status` | 列举与按使命 ID 读取沿用既有范围。修改和状态变更须传 `--thread-id`，同时提供的使命 ID 必须匹配。 |
-| `memory view / search / read / write` | 按实际执行队员授权。依赖 Thread 成员关系时须传 `--thread-id` 并验证成员关系。 |
-| `automation list / get / create / run / close / update / delete` | 按现有计划权限、版本及运行配置执行。涉及已有 Thread 的目标须显式给出。 |
-| `thread create` | 用户明确要求新建团队会话时启用委托创建入口。Core 分配新公开 `threadId`，按用户指定配置创建 Thread 和成员。后续操作显式使用返回的 ID。 |
+| `thread list`、`history search` | 在用户可读的公开范围发现目标，返回稳定 ID。 |
+| `thread search / read / runs`、`send` | 必传 `--thread-id`，核对目标和子对象归属。`--public-only` 只发布，`--to` 核验目标 Thread 的有效收件人。 |
+| `task list / create / get / update` | 四项均必传 `--thread-id`。按目标核对任务、负责人、能力开关和状态转换。建任务与通知负责人是两次独立操作。 |
+| `member list` | 无 `--thread-id` 时只列话题所有者通过队员名册可见的未移除队员摘要，全局结果省略 `threadId` 和队长标记。指定公开 Thread 时须先有名册读取权，再列其有效成员及真实队长。 |
+| `member get` | 无 Thread 时可读当前聊天队员，或经 `member_creation` 证明由该队员在本话题创建的档案。显式指定 Thread 时可读用户有权查看的目标成员。只投影身份字段，未知和无权目标返回相同的不可用结果。 |
+| `member create` | 仅允许该话题所有者直接请求并确认最终队员卡。用原 `creationKey` 重放，同键改内容报冲突。写全局 `agent_profile` 和现有 `member_creation` 私有来源回执，成员关系仅在另外获准的入组操作中建立。 |
+| `member update` | 先按 `get` 的范围核对目标，再检查用户有权编辑且直接要求修改。只允许既有身份字段 PATCH，必传 `requestId` 与 `expectedVersion`。写事务重验目标、版本与头像来源，禁止借此修改 Runtime、权限或成员关系。 |
+| `mission list / get / update / status` | 全局发现或按使命 ID 读取。修改及状态变更须传 `--thread-id`，同时给出的使命 ID 必须匹配。 |
+| `memory view / search / read / write` | 按实际执行队员授权。依赖 Thread 的记忆须传 `--thread-id`，验证成员关系及记忆可见性。 |
+| `automation list / get / create / run / close / update / delete` | 沿用计划权限、版本、显式用户要求和运行配置。涉及已有 Thread 的参数须指明目标。 |
+| `thread create` | 接到用户明确的新建团队会话请求后，专用授权入口核对用户创建资格，复用 `create_camp_in_tx` 创建公开 Thread 并返回新 ID。 |
 
-**来源与目标分别校验。** 现有工具认证会连接 `camp`、`camp_member`。Core 只为 `chat` Run 增加来源分支，由有效 lease、epoch、原生绑定和 `chat_topic.owner_user_id` 取得委托用户与经办队员。`--thread-id` 只定位已有目标。Core 再验证用户在目标的操作权限、对象归属和收件人。只有明确支持委托的 `send`、任务写入、使命修改和 `thread create` 能以用户权限办理，队员无须先加入目标。个人记忆等能力继续按实际队员校验。[现有工具身份校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/team_tool.rs#L1553-L1596)
+`member.list` 现行实现必连来源 Camp，`get/update` 的目标检查依赖 Camp 成员或同 Camp 创建凭据，`has_direct_user_input` 只查公开消息。聊天分支改从绑定 Run 的私有触发消息或已接收的该轮补充取用户输入。`member_creation` 的来源扩为 `camp_id` 与 `conversation_id` 二选一，保留创建者和 `creationKey`。名册发现、档案读取、档案修改分别鉴权，重放也须重查范围。[队员工具](../../../crates/rovai-core/src/member_tool.rs) · [直接用户输入与创建回执](../../../crates/rovai-core/src/member_studio.rs) · [现有创建回执约束](../../../crates/rovai-core/src/db_member_creation.rs)
 
-委托写入入口只接受 Core 构造的委托身份。建任务复用任务领域校验，照旧检查负责人和来源 Run 配额。创建公开 Thread 时由该入口把认证所有者传给 `create_camp_in_tx`。普通 Agent 建任务仍受来源和队长检查，通用 Thread 创建仍要求 User。Core 的授权测试用同一目标 B 覆盖两条路径。获授权的独立聊天可以代发，普通 Thread A 的 Agent 即使显式传 B 也被拒绝，B 的消息与投递计数保持原值。[任务创建权限](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/collaboration.rs#L1888-L1918) · [公开 Thread 创建权限](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/collaboration.rs#L3465-L3479)
+**跨 Thread 的授权来自这次聊天。** Core 从有效 lease、epoch、原生绑定及 `chat_topic.owner_user_id` 确定来源、用户与实际队员。`--thread-id` 负责定位，再按操作核对用户在目标的权限、业务开关、收件人及子对象归属。聊天专用入口允许受托队员在获准的目标发言、办理任务或修改使命，执行队员可未加入目标，此项授权不创建成员关系。普通 Thread A 的 Agent 继续按原来源和队长规则执行，显式传 B 也不会得到跨 Thread 写权。[现有工具身份](../../../crates/rovai-core/src/team_tool.rs) · [领域授权](../../../crates/rovai-core/src/collaboration.rs)
 
-## 6. 跨 Thread 写入与单项重试
+## 6. 公开署名与失败恢复
 
-每个委托写操作先取得一个稳定 `actionId`。`chat_action` 以来源 `runId` 和逻辑调用键去重，保存操作、目标、冻结的最小重试参数、参数摘要、状态及业务结果 ID。`thread create` 可先为这项动作分配目标 ID，执行成功才写 `camp`。同一动作换目标或参数返回冲突。读取公开 Thread 只在执行步骤留下记录。
+用户对阿澈说「告诉发布组，今天五点发版」，目标 Thread 的 `camp_message.author_type='agent'`、`author_id=阿澈的 ID`。阿澈建任务时，`task.created_by_type='agent'`、`created_by_id=阿澈的 ID`。Core 将真实来源 Run 传给原任务配额查询，在同一写事务检查**该 Run 已建任务数上限 32**（跨所有目标合计）和**目标 Thread 非终态任务数上限 512**。按同一请求重放原任务只返回结果，不重复计数。[现有任务写入与配额](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/collaboration.rs#L1939-L2004)
 
-Core 在提交时重查权限和来源状态，将目标业务写入与动作成功回执放进同一事务。`camp_message` 的作者、`task` 的创建者记委托用户，两种目标记录各增可空的经办队员字段，公屏可显示「由阿澈代发」。私有聊天和 Run ID 只在来源侧关联。定向通知按现有规则原子写入公开消息及各收件人的 `camp_message_delivery`，用户可从聊天打开获准访问的目标。[公开消息与投递](../../architecture/public-a2a-message-delivery.md)
+目标只投影队员署名、公开正文、明确发布的文件、任务和该目标的投递。此类消息的 `camp_message.agent_run_id` 留空，回复锚点只取目标 Thread 的公开消息。小林的回复按发布组的投递规则处理。公开详情、`camp_message.sent` 事件、搜索、工具结果与深链均省略私有 `chatId`、来源 Run、问题、步骤和未发布的文件路径。Core 内部保留来源供鉴权、配额及回执对账。删除源聊天时，目标消息及投递仍按自身 ID 存活。对 `task.source_agent_run_id`、`closed_by_agent_run_id` 的外键及 Agent 非空约束增加私有来源删除条件。新写必须绑定真实 Run，只有删除事务核实来源后才能标记引用已清理并置空，创建人、关闭人和任务状态照常保留。[公开消息与投递](../../architecture/public-a2a-message-delivery.md) · [任务现有约束](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/db.rs#L14928-L14986)
 
-建任务和发通知各有一个 `actionId`。重启后，用户点哪条失败回执，Core 就按当前用户权限重试哪一项，沿用冻结参数，不重启原 Run。并发重试按动作状态条件更新。有任务、消息或投递 ID 时先对账，成功返回原对象，结果未明则等待确认，避免重复外发。
+**建任务，再通知小林。** 两个工具请求分别使用既有 `requestId`。进程内精确重放核对请求和参数摘要，进程重启后按原绑定、命令身份、来源和目标查询持久 `event_log.command.result`。任务读取已返回的 `taskId`。定向消息与 `camp_message_delivery` 在目标事务中一并登记，之后按 `messageId` 及各 `deliveryId` 查状态。过期 lease 只可按既有规则核对已存结果，新写必须来自有效授权。公开写入成功与收件人已处理分别展示。[工具请求重放](../../../crates/rovai-core/src/builtin_tool_runtime.rs) · [持久命令回执](../../../crates/rovai-core/src/team_tool.rs)
 
-## 7. 五个端到端用例与最小接口
+| 通知的已知事实 | 后续行为 |
+| --- | --- |
+| 确认未发出，例如已收到写入前的拒绝 | 保留成功的任务和 `taskId`。按现有工具规则，在有效授权的 Run 中只提交通知。 |
+| 已提交，响应丢失 | 用原请求查回同一条公开消息及各收件人的 Delivery，显示已有状态。等待中的原 Delivery 继续由原投递器处理。 |
+| 结果未知，缺少可靠回执或关联 ID | 停止重发并显示结果待确认。消息正文相似、时间接近或一次查询为空，都不足以证明未发出。 |
 
-下表按数据流列出业务读写，最右列是由该用例需要的界面接口。Desktop 与认证 Web 共用这些接口。现有执行窗口、停止和导航接口增加带类型的聊天目标，旧 Thread 请求保持原合同。[现有共享接口](../../../packages/contracts/src/index.ts)
+## 7. 五个端到端用例与接口
 
-| 用例 | 实际读取 | 事务写入与结果 | 由此需要的接口 |
-| --- | --- | --- | --- |
-| ① 选人后退出 | `agent_profile`。从队员页续最近话题时才查 `chat_topic`、`conversation`。 | 仅写本机草稿。Core 的聊天、消息、Run、队列及 Thread 均新增 **0** 条。 | 复用队员名册。`chats.list(agentId?, cursor?)` 同时供左栏和最近话题使用。 |
-| ② 同一草稿首发双击 | `event_log` 的首发回执、`agent_profile` 及 Runtime 配置。 | 首次各写 1 条 `conversation`、`chat_topic`、`conversation_message`、`agent_run`，`event_log` 同事务记回执。第二次同内容返回原三个 ID，异内容返回冲突。空闲发送不写队列。 | `chats.send` 的两种回执见 §2。`chats.rename(chatId, title, version)` 只处理手动改名。 |
-| ③ 同一队员的话题 A、B 相互隔离 | A 的 `agent_run`、`conversation` 和绑定、`chat_topic`、A 的触发消息及之前的 `conversation_message`。 | `chat history` 查询本身零写入。传 B 的 ID 或游标被拒，只返回 A 的历史。运行过程可写 A 的 `agent_run_execution_evidence`，正常结束至多追加一条 A 的最终回复，`chat_action` 为零。 | `chats.open(chatId, beforeSequence?)` 兼顾首屏与旧消息。复用 `agentRunExecution.page / changes` 及 `agentRunEvidence.getContent`。 |
-| ④ 归档期间重启 | `conversation`、`chat_topic`、`agent_run`、`single_chat_pending_input` 及其 `single_chat_pending_input_edit_session`。 | 忙时先写队列。归档更新 `chat_topic`、取消活动 `agent_run` 并记 `event_log`。重启不发表队首、不新建 Run。手动恢复后才写新 `conversation_message`、新 `agent_run` 并更新该队列项为 `published`，Turn 引用为空。 | `chats.setArchived(chatId, archived)`、`chats.delete`。复用 `threads.archive.list`、`navigation.search`、`agentRuns.cancel` 和队列编辑能力。 |
-| ⑤ 建任务成功、通知失败后重启 | 由 `agent_run`、`conversation`、`chat_topic` 核实来源。读目标 `camp`、`camp_member`、`task` 和两条 `chat_action`，用已存 ID 对账 `camp_message`、`camp_message_delivery`。 | 第一次将 `task` 和建任务回执一起提交，通知失败只更新通知动作。点击重试只执行通知动作。通知尚未发布时，更新目标 `camp` 的序号，写 1 条 `camp_message` 和该收件人的 `camp_message_delivery`，需要时建立其目标成员 `conversation`。已有公开消息则沿用原消息和投递 ID。只更新通知回执与 `event_log`。原任务仍为 **1** 条。 | `chats.actions.retry(chatId, actionId)`。`chats.open` 随这轮答复返回两项回执。 |
+| 用例 | 业务读写及可观察的结果 | 接口 |
+| --- | --- | --- |
+| ① 选人退出、同草稿双击首发 | 只选人读 `agent_profile`、存本机草稿，Core 新增零条。双击时从 `event_log` 去重，只创建一组 `conversation`、`chat_topic`、首条 `conversation_message`、首个 `agent_run`。两次同快照得到相同 ID，异内容保留输入并报冲突。已配置获准的 Runtime 暂离时仍返回 `started` 并显示等待，恢复后只派发这一个 Run。 | `chats.list`、`chats.send`、`chats.rename` |
+| ② 同一队员的 A、B 两段聊天历史隔离 | A 的 Run 经 `conversation`、`chat_topic`、触发消息定位历史，传 B 的 ID 或游标被拒。若 A 的最终答复只有一个附件，`conversation_message` 只新增一条含附件的 Agent 消息，关联 A 的 `final_conversation_message_id`，迟到或重复终态不再追加。 | `chat history`、`chats.open`、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
+| ③ 忙时分别选排队和 Steer | 给同一活动 Run 先排队 Q，再补充 S。Q 在 `single_chat_pending_input` 等待。S 绑定原 Run／代次，私有 `context_manifest` 与 `runtime_input_delivery` 记录 `steer`。S 确认接收只写原轮用户消息，Run 数不变。原轮结束后仅 Q 按 FIFO 开新 Run。换代次不能投给后继 Run。S 获准回队时沿用原 `inputId` 且只入队一次。结果未知时重启也不重发或入队。这一流程 `camp`、`camp_member`、`camp_turn`、`camp_message`、公开 Delivery 新增均为零。 | `chats.send` 三种回执、`chats.open`，合资格时 `runtimeInputs.reconcile` |
+| ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描读取 `single_chat_pending_input` 及在途补充回执，归档中不派发，普通列表与搜索均找不到。手动恢复原 ID，只发布尚未派发的 FIFO 输入。删除另走同事务清单交接，在删库提交后、清文件前退出，重启仍可从 `camp_attachment_view_operation` 及明细完成清理。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
+| ⑤ 任务已建，补通知不重复建任务 | `task` 中只有一条阿澈创建的任务。查建任务和通知各自的 `event_log` 回执，再按 `camp_message`、`camp_message_delivery` 区分 §6 三种结果。确认未发出只补通知，已提交只取原消息，未知即停。即使重启，任务始终一条、公开通知至多一条，目标只能看到阿澈及公开结果。 | 既有 `task create / get`、`send` 及命令结果对账 |
+
+上述入口共用于 Desktop 和认证 Web。`chats.open` 返回队列状态、当前 Run 的 Steer 能力与进度、最终附件和逐轮执行窗口。§5 的四项 `member` 命令还需分别覆盖无 Camp 的名册读取、越权档案读取、确认创建，以及缺少直接用户要求或版本不符的修改。旧 Thread 调用沿用原接口。[现有共享接口](../../../packages/contracts/src/index.ts)
