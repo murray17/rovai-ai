@@ -54,8 +54,16 @@ test('the production App presents the full-window brand loader without weakening
     assert.equal(code, 0, `Desktop startup regression failed:\n${stdout}\n${stderr}`)
     const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('{')))
     assert.equal(report.ok, true)
-    if (process.env.ROVAI_PROJECT_DIRECTORIES_ONLY === '1') { assert.equal(report.cases.length, 4); return }
-    assert.ok(report.cases.length >= 8)
+    for (const required of [
+      'Empty directories survive switching and restart; completed migration performs no reads or writes during navigation refresh',
+      'An empty completed list stays empty until an explicit add',
+      'Failed import keeps legacy projects; failed adds remain absent until a successful add',
+      'First preference read failure preserves ordinary navigation',
+      'Optimistic folder move, immediate rollback and late-reply handling in the production sidebar',
+      'Maximum-length project paths remain usable during sidebar reorder'
+    ]) assert.ok(report.cases.includes(required), required)
+    if (process.env.ROVAI_PROJECT_DIRECTORIES_ONLY === '1') return
+    assert.ok(report.cases.includes('Reordering folders in another window lets an in-flight Thread open clear its manual unread reminder'))
     assert.ok(report.cases.includes('Desktop cold restore locates the unpinned off-screen active row once and preserves it through pagination'))
     assert.ok(report.cases.includes('Cached and off-page Thread selection respects current-page ownership, manual scrolling and folding'))
     assert.ok(report.cases.includes('Ordinary Camp switching reads only the target row without unrelated queries'))

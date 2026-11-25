@@ -263,6 +263,8 @@
   "取消置顶": "Unpin",
   "取消置顶项目": "Unpin project",
   "置顶项目": "Pin project",
+  "上移项目": "Move project up",
+  "下移项目": "Move project down",
   "默认队长当前不可用": "Default lead is unavailable",
   "未能保存，仍在底部。": "Save failed, still at the bottom.",
   "未能保存，仍在右侧。": "Save failed, still on the right.",

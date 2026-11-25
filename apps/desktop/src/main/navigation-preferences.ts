@@ -1,9 +1,10 @@
 import { isThreadId } from '@contracts'
-import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isTimestamp, isNavigationThreadReadState, registerNavigationProjects, sourceMatchesSupportedSnapshot } from '../shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isTimestamp, isNavigationThreadReadState, moveNavigationProject, registerNavigationProjects, sourceMatchesSupportedSnapshot } from '../shared/navigation-preferences-model'
 import { readFile } from 'node:fs/promises'
 import type {
   NavigationPin,
   NavigationPreferencesSnapshot,
+  NavigationProjectMove,
   NavigationThreadReadState,
   RemovedNavigationProject,
   StructuredError
@@ -111,6 +112,15 @@ export class NavigationPreferencesStore {
       })
       await this.#commit(next)
       return this.get()
+    })
+  }
+
+  moveProject(move: NavigationProjectMove, onChanged?: (snapshot: NavigationPreferencesSnapshot) => void): Promise<NavigationPreferencesSnapshot> {
+    return this.#enqueue(async () => {
+      const changed = await this.#commit(moveNavigationProject(this.#snapshot, move))
+      const snapshot = this.get()
+      if (changed) onChanged?.(snapshot)
+      return snapshot
     })
   }
 
@@ -230,11 +240,12 @@ export class NavigationPreferencesStore {
     })
   }
 
-  async #commit(next: NavigationPreferencesSnapshot): Promise<void> {
+  async #commit(next: NavigationPreferencesSnapshot): Promise<boolean> {
     if (this.loadDegradation) throw new Error(this.loadDegradation.message)
-    if (JSON.stringify(next) === JSON.stringify(this.#snapshot)) return
+    if (JSON.stringify(next) === JSON.stringify(this.#snapshot)) return false
     await writePrivateJson(this.#filePath, next)
     this.#snapshot = next
+    return true
   }
 
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {

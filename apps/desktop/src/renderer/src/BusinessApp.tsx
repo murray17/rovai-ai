@@ -19,7 +19,7 @@ import { AppToast, type AppToastAction, type AppToastValue } from './AppToast'
 import { ThreadForkOperation, type ThreadForkState } from './thread-fork'
 import { useForkLoading } from './use-fork-loading'
 export { AppToast } from './AppToast'
-import { EMPTY_SNAPSHOT, isProjectPath } from '../../shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, isProjectPath, moveNavigationProject } from '../../shared/navigation-preferences-model'
 import { useThreadUserAnchorCache } from './useThreadUserAnchors'
 import { hasPendingThreadDraftInput } from './pending-thread-draft'
 import { memberCreationHelper, memberCreationInitialDraft, navigationWithMemberCreationDrafts, type MemberCreationDraft } from './member-creation-flow'
@@ -83,6 +83,7 @@ import type {
   ThreadViewedAcknowledgement,
   NavigationPin,
   NavigationPreferencesSnapshot,
+  NavigationProjectMove,
   NavigationSnapshot,
   ProjectNavigationGroup,
   RestorableLocation,
@@ -1092,7 +1093,7 @@ export function BusinessApp({
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
-  const [projectOrder, setProjectOrder] = useState<string[] | null>(null)
+  const [pendingProjectMoves, setPendingProjectMoves] = useState<NavigationProjectMove[]>([])
   const [projectNames, setProjectNames] = useState<Record<string, string>>({})
   const [navigationPreferences, setNavigationPreferences] = useState<NavigationPreferencesSnapshot | null>(null)
   const navigationPreferencesRef = useRef<NavigationPreferencesSnapshot | null>(null)
@@ -1102,11 +1103,20 @@ export function BusinessApp({
   const [legacySelectedProject] = useState(() => readCurrentProject())
   const [threadReadStates, setThreadReadStates] = useState<NavigationPreferencesSnapshot['threadReadStates']>({})
   const threadReadStatesRef = useRef(threadReadStates)
-  const threadReadGeneration = useRef(0)
-  const acceptThreadReadStates = useCallback((snapshot: NavigationPreferencesSnapshot): void => {
-    ++threadReadGeneration.current
-    threadReadStatesRef.current = snapshot.threadReadStates ?? {}
-    setThreadReadStates(threadReadStatesRef.current)
+  const threadReadRevisions = useRef(new Map<string, symbol>())
+  const acceptThreadReadStates = useCallback((next: NavigationPreferencesSnapshot['threadReadStates']): void => {
+    const current = threadReadStatesRef.current
+    let changed = false
+    for (const id of new Set([...Object.keys(next), ...Object.keys(current)])) {
+      if (current[id]?.manualUnread === next[id]?.manualUnread
+        && current[id]?.readThroughGlobalSequence === next[id]?.readThroughGlobalSequence) continue
+      if (next[id]) threadReadRevisions.current.set(id, Symbol())
+      else threadReadRevisions.current.delete(id)
+      changed = true
+    }
+    if (!changed) return
+    threadReadStatesRef.current = next
+    setThreadReadStates(next)
   }, [])
 
   const [pinnedThreadItems, setPinnedThreadItems] = useState<NavigationThreadItem[]>([])
@@ -1357,18 +1367,26 @@ export function BusinessApp({
     threadId: string,
     state: NavigationPreferencesSnapshot['threadReadStates'][string] | null
   ): Promise<void> => {
-    const generation = ++threadReadGeneration.current
+    const revision = Symbol()
+    threadReadRevisions.current.set(threadId, revision)
     const { snapshot, confirmed } = await saveNavigationThreadReadState(uiPreferences.navigationPreferences, threadId, state)
-    if (snapshot && generation === threadReadGeneration.current) acceptThreadReadStates(snapshot)
+    if (snapshot && threadReadRevisions.current.get(threadId) === revision) {
+      // A late receipt only owns the one Thread that was written.
+      const next = { ...threadReadStatesRef.current }
+      const saved = snapshot.threadReadStates[threadId]
+      if (saved) next[threadId] = saved
+      else delete next[threadId]
+      acceptThreadReadStates(next)
+    }
     if (!confirmed) throw new Error(uiAttribute('本机阅读状态的保存结果尚未确认，请重试。'))
   }, [uiPreferences, acceptThreadReadStates])
 
-  const clearThreadUnreadReminder = useCallback(async (threadId: string, generation: number): Promise<void> => {
+  const clearThreadUnreadReminder = useCallback(async (threadId: string, revision: symbol | undefined): Promise<void> => {
     const current = threadReadStatesRef.current[threadId]
     // Only an explicit navigation with a full projection clears the reminder.
     // Startup restoration and automatic observation never enter this transition.
     if (campSnapshotRef.current?.thread.id === threadId && !campSnapshotEntryPreviewRef.current
-      && generation === threadReadGeneration.current && current?.manualUnread) {
+      && revision === threadReadRevisions.current.get(threadId) && current?.manualUnread) {
       await saveThreadReadState(threadId, { ...current, manualUnread: false })
     }
   }, [saveThreadReadState])
@@ -1759,13 +1777,25 @@ export function BusinessApp({
       const next = new Set(snapshot.removedProjects.map(project => project.targetKey))
       return current.size === next.size && [...current].every(key => next.has(key)) ? current : next
     })
-    setProjectOrder(snapshot.projectOrder)
     setProjectNames(snapshot.projectNames)
-    acceptThreadReadStates(snapshot)
+    acceptThreadReadStates(snapshot.threadReadStates ?? {})
     setRemovedProjectAuthorityReady(true)
   }, [acceptThreadReadStates])
 
   useEffect(() => uiPreferences.navigationPreferences.onChanged?.(applyNavigationPreferences), [uiPreferences, applyNavigationPreferences])
+
+  const moveProject = useCallback(async (move: NavigationProjectMove) => {
+    const previous = navigationPreferencesRef.current
+    setPendingProjectMoves(current => [...current, move])
+    try {
+      const saved = await uiPreferences.navigationPreferences.moveProject(move)
+      if (navigationPreferencesRef.current === previous) applyNavigationPreferences(saved)
+    } catch {
+      // Removing this move below reveals the latest confirmed order, including other windows' edits.
+    } finally {
+      setPendingProjectMoves(current => current.filter(pending => pending !== move))
+    }
+  }, [uiPreferences, applyNavigationPreferences])
 
   const registerProject = useCallback(async (projectPath: string, explicit = false): Promise<void> => {
     const current = navigationPreferencesRef.current
@@ -2143,7 +2173,7 @@ export function BusinessApp({
     threadId: string,
     options: ActivateThreadOptions = {}
   ): Promise<boolean> => {
-    const readGeneration = threadReadGeneration.current
+    const readRevision = threadReadRevisions.current.get(threadId)
     const sameThread = viewRef.current === 'camp' && activeThreadIdRef.current === threadId
     const navigate = sameThread && (campSnapshotEntryPreviewRef.current || options.navigationFind)
       ? desktopNavigation.replace : desktopNavigation.push
@@ -2165,7 +2195,7 @@ export function BusinessApp({
       if (campSnapshotRef.current?.thread.missionId && options.missionPresentation) {
         setMissionPresentation(options.missionPresentation)
       }
-      await clearThreadUnreadReminder(threadId, readGeneration)
+      await clearThreadUnreadReminder(threadId, readRevision)
       return true
     }
     return activated
@@ -2466,6 +2496,9 @@ export function BusinessApp({
   const currentProjectPath = currentProject.kind === 'directory'
     ? currentProject.projectPath
     : null
+  const orderedPreferences = useMemo(() => navigationPreferences
+    && pendingProjectMoves.reduce(moveNavigationProject, navigationPreferences), [navigationPreferences, pendingProjectMoves])
+  const projectOrder = orderedPreferences?.projectOrder ?? null
   const visibleNavigation = useMemo(
     () => navigationWithProjectNames(navigationWithProjectOrder(
       navigationWithProjectDirectories(navigation, navigationPreferences),
@@ -3308,7 +3341,7 @@ export function BusinessApp({
 
   applyNavigationRef.current = async (target, transaction, context) => {
     if (shuttingDownRef.current) return
-    const readGeneration = threadReadGeneration.current
+    const readRevision = target.kind === 'camp' ? threadReadRevisions.current.get(target.threadId) : undefined
     // Invalidate older Thread reads immediately, including reads waiting behind a leave guard.
     const selectionGeneration = ++campSelectionGeneration.current
     clearThreadOpenFeedback()
@@ -3318,12 +3351,12 @@ export function BusinessApp({
         if (viewRef.current === 'camp' && activeThreadIdRef.current === target.threadId && !campSnapshotEntryPreviewRef.current) {
           if (transaction.commit()) {
             setNavigationFind(context?.campOptions?.navigationFind ?? null)
-            if (!context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+            if (!context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readRevision)
           }
           return
         }
         const opened = await activateThreadWithoutLeaveGuard(target.threadId, context?.campOptions ?? {}, selectionGeneration, transaction)
-        if (opened && transaction.isCurrent() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+        if (opened && transaction.isCurrent() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readRevision)
         return
       }
       const previous = desktopNavigation.getSnapshot()
@@ -4744,6 +4777,8 @@ export function BusinessApp({
     shellOnlyProjectPath={shellOnlyCurrentProjectPath}
     creatingConversation={busy === 'create-camp'}
     pins={navigationPins}
+    projectOrdering={orderedPreferences ? { registeredProjects: orderedPreferences.registeredProjects,
+      pinnedProjectOrder: orderedPreferences.pinnedProjectOrder, move: moveProject } : undefined}
     pinnedThreadItems={pinnedThreadItems}
     pinReadIssue={pinReadIssue}
     onRetryPins={loadPins}

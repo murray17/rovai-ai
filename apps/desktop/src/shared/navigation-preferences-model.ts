@@ -1,38 +1,45 @@
 import { isThreadId } from '@contracts'
-import type { NavigationPin, NavigationPreferencesSnapshot, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
+import type { NavigationPin, NavigationPreferencesSnapshot, NavigationProjectMove, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
 import { normalizeProjectDisplayName, projectDisplayNameError } from './project-display-name'
 
+const MAX_PROJECT_PATH_LENGTH = 8_192
+const PROJECT_KEY_PREFIX = 'directory:'
+
 export const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
-  schemaVersion: 6,
+  schemaVersion: 7,
   registeredProjects: [],
   legacyProjectsSynced: false,
   pins: [],
   removedProjects: [],
   projectOrder: null,
+  pinnedProjectOrder: [],
   projectNames: {},
   threadReadStates: {}
 }
 
+function isSupportedVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= EMPTY_SNAPSHOT.schemaVersion
+}
+
 export function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot {
-  if (!isRecord(source)) return structuredClone(EMPTY_SNAPSHOT)
+  if (!isRecord(source) || !isSupportedVersion(source.schemaVersion)) return structuredClone(EMPTY_SNAPSHOT)
+  const version = source.schemaVersion
   const pins = sanitizePins(source)
-  const removedProjects = source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6
-    ? sanitizeRemovedProjects(source.removedProjects)
-    : []
-  const projectOrder = source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6
-    ? sanitizeProjectOrder(source.projectOrder)
-    : null
-  const projectNames = (source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6) ? sanitizeProjectNames(source.projectNames) : {}
-  const threadReadStates = (source.schemaVersion === 5 || source.schemaVersion === 6) ? sanitizeThreadReadStates(source.threadReadStates) : {}
-  const registeredProjects = source.schemaVersion === 6 && Array.isArray(source.registeredProjects)
+  const removedProjects = version >= 2 ? sanitizeRemovedProjects(source.removedProjects) : []
+  const projectOrder = version >= 3 ? sanitizeProjectOrder(source.projectOrder) : null
+  const projectNames = version >= 4 ? sanitizeProjectNames(source.projectNames) : {}
+  const threadReadStates = version >= 5 ? sanitizeThreadReadStates(source.threadReadStates) : {}
+  const registeredProjects = version >= 6 && Array.isArray(source.registeredProjects)
     ? [...new Set(source.registeredProjects.filter(isProjectPath))] : []
-  const legacyProjectsSynced = source.schemaVersion === 6 && source.legacyProjectsSynced === true
-  return { schemaVersion: 6, registeredProjects, legacyProjectsSynced, pins, removedProjects, projectOrder, projectNames, threadReadStates }
+  const legacyProjectsSynced = version >= 6 && source.legacyProjectsSynced === true
+  const pinned = new Set(pins.filter(pin => pin.kind === 'project').map(pin => pin.targetKey))
+  const pinnedProjectOrder = version >= 7 ? (sanitizeProjectOrder(source.pinnedProjectOrder) ?? []).filter(key => pinned.has(key)) : []
+  return { schemaVersion: 7, registeredProjects, legacyProjectsSynced, pins, removedProjects, projectOrder, pinnedProjectOrder, projectNames, threadReadStates }
 }
 
 export function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
   if (
-    (source.schemaVersion !== 1 && source.schemaVersion !== 2 && source.schemaVersion !== 3 && source.schemaVersion !== 4 && source.schemaVersion !== 5 && source.schemaVersion !== 6)
+    !isSupportedVersion(source.schemaVersion)
     || !Array.isArray(source.pins)
   ) return []
   const seen = new Set<string>()
@@ -111,13 +118,8 @@ export function sanitizeRemovedProjects(source: unknown): RemovedNavigationProje
 }
 
 export function isProjectTargetKey(value: unknown): value is string {
-  return isStableId(value) && value.startsWith('directory:')
-}
-
-export function isStableId(value: unknown): value is string {
-  return typeof value === 'string'
-    && value.trim().length > 0
-    && value.length <= 8_192
+  return typeof value === 'string' && value.startsWith(PROJECT_KEY_PREFIX)
+    && isProjectPath(value.slice(PROJECT_KEY_PREFIX.length))
 }
 
 export function isTimestamp(value: unknown): value is string {
@@ -144,9 +146,10 @@ export function sanitizeThreadReadStates(source: unknown): Record<string, Naviga
 }
 
 export function isProjectPath(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 8192
-    && !value.includes('\0') && (/^\//.test(value) || /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value))
-    && !value.split(/[\\/]/).some(part => part === '.' || part === '..')
+  if (typeof value !== 'string' || value.length > MAX_PROJECT_PATH_LENGTH || value.includes('\0')) return false
+  const isPosixPath = value.startsWith('/')
+  if (!isPosixPath && !/^[A-Za-z]:[\\/]/.test(value) && !value.startsWith('\\\\')) return false
+  return !value.split(isPosixPath ? '/' : /[\\/]/).some(part => part === '.' || part === '..')
 }
 
 export function registerNavigationProjects(snapshot: NavigationPreferencesSnapshot, paths: string[], completeLegacy = false): NavigationPreferencesSnapshot {
@@ -163,8 +166,12 @@ export function registerNavigationProjects(snapshot: NavigationPreferencesSnapsh
 }
 
 export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: NavigationPreferencesSnapshot): boolean {
-  if (!isRecord(source) || ![1, 2, 3, 4, 5, 6].includes(source.schemaVersion as number)) return false
-  const version = source.schemaVersion as number
+  if (!isRecord(source) || !isSupportedVersion(source.schemaVersion)) return false
+  const version = source.schemaVersion
+  // A stray folder pin does not prevent the remaining preferences from being edited.
+  const pins = Array.isArray(source.pins) ? source.pins.filter(pin =>
+    !isRecord(pin) || pin.kind !== 'project' || isProjectTargetKey(pin.targetKey)) : source.pins
+  const comparable: Record<string, unknown> = { ...source, pins }
   const expected: Record<string, unknown> = { schemaVersion: version, pins: snapshot.pins }
   if (version >= 2) expected.removedProjects = snapshot.removedProjects
   if (version >= 3) expected.projectOrder = snapshot.projectOrder
@@ -174,6 +181,40 @@ export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: Naviga
     expected.registeredProjects = snapshot.registeredProjects
     expected.legacyProjectsSynced = snapshot.legacyProjectsSynced
   }
+  if (version >= 7) {
+    // Pins own membership. Stale or repeated display-order entries can be skipped on read.
+    if (!Array.isArray(source.pinnedProjectOrder)) return false
+    expected.pinnedProjectOrder = source.pinnedProjectOrder
+  }
   return Object.keys(source).length === Object.keys(expected).length
-    && Object.entries(expected).every(([key, value]) => JSON.stringify(source[key]) === JSON.stringify(value))
+    && Object.entries(expected).every(([key, value]) => JSON.stringify(comparable[key]) === JSON.stringify(value))
+}
+
+export function orderedPinnedProjects(pins: readonly NavigationPin[], order: readonly string[]): string[] {
+  const pinned = new Set(pins.filter(pin => pin.kind === 'project').map(pin => pin.targetKey))
+  return [...new Set([...order.filter(key => pinned.has(key)), ...pinned])]
+}
+
+export function moveNavigationProject(snapshot: NavigationPreferencesSnapshot, move: NavigationProjectMove): NavigationPreferencesSnapshot {
+  if (!move || (move.section !== 'projects' && move.section !== 'pinned') || !isProjectTargetKey(move.projectKey)
+    || (move.beforeProjectKey !== null && !isProjectTargetKey(move.beforeProjectKey))) return snapshot
+  const { section, projectKey, beforeProjectKey } = move
+  const registered = new Set(snapshot.registeredProjects.map(path => `directory:${path}`))
+  for (const removed of snapshot.removedProjects) registered.delete(removed.targetKey)
+  const pins = new Set(orderedPinnedProjects(snapshot.pins, snapshot.pinnedProjectOrder))
+  const base = section === 'pinned' ? [...pins] : [...new Set([...(snapshot.projectOrder ?? []), ...registered])]
+  const rows = section === 'pinned' ? base : base.filter(key => !pins.has(key))
+  const movable = rows.filter(key => registered.has(key))
+  const from = movable.indexOf(projectKey)
+  if (from < 0 || beforeProjectKey === projectKey || (movable[from + 1] ?? null) === beforeProjectKey
+    || (beforeProjectKey !== null && !movable.includes(beforeProjectKey))) return snapshot
+  // Keep visible legacy rows between their neighbours. The tail line is directly
+  // after the last movable folder, including when legacy rows follow it.
+  const order = rows.filter(key => key !== projectKey)
+  const insert = beforeProjectKey === null ? order.indexOf(movable[movable.length - 1]) + 1 : order.indexOf(beforeProjectKey)
+  order.splice(insert, 0, projectKey)
+  if (section === 'pinned') return { ...snapshot, pinnedProjectOrder: order }
+  // Pinned folders keep their underlying position for a later unpin.
+  let index = 0
+  return { ...snapshot, projectOrder: base.map(key => pins.has(key) ? key : order[index++]) }
 }
