@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 10
+revision: 11
 last_updated: 2026-11-25
 ---
 
@@ -87,7 +87,9 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 | `isProcessing` | 从本话题的 `agent_run` 判断是否有 `queued/running/waiting` 的活动轮，供侧栏显示转圈。只有尚未派发的 FIFO 时为 `false`。 |
 | `lastReplySequence` | 取本话题最近一条已发表的队员最终答复的 `conversation_message.sequence`，没有答复时为 `0`。与同一 `chatId` 的本机已读消息序号比较，较大时显示未读蓝点。自己发送、排队、插话、工具进度和空正文结束均不推进这个值。 |
 
-实际查看答复时，本机已读位置推进到已展示的答复序号。手动标为已读时取当前已知的最新答复序号。手动标为未读仍沿用本机偏好。图标栏对全部未归档聊天按同一规则汇总蓝点，包含当前页外的话题。
+`chats.list` 的每次响应同时返回分页的 `items` 和完整的 `replyIndex: [{chatId, lastReplySequence}]`。两者取自同一读快照。索引只含本用户全部未归档聊天的这两个字段，包含答复序号为 0 的聊天，不受页码、游标、队员筛选或置顶分组影响。图标栏直接判断索引里是否有任意一项被本机手动标为未读，或其 `lastReplySequence` 大于该 `chatId` 的本机已读位置（初始为 0）。已归档、已删除或仅有本机草稿的聊天不在索引中。
+
+打开应用时即读取一次列表，即使聊天面板收起也能显示总蓝点。收到 `chats.listChanged` 或重连后，用最新响应整体替换索引，丢弃迟到的旧响应。实际查看答复时，本机已读位置推进到已展示的答复序号，手动标为已读时取当前已知的最新答复序号。任一窗口修改已读偏好，立即用缓存索引重算，无需翻页或将已读位置发送给 Core。
 
 新增 `chats.listChanged {chatId}`，只通知该聊天所属用户。提交使列表行的内容、排序、转圈或可见性改变时，Core 才发事件，包括新建、输入受理、Run 状态变化、最终答复、改名、归档、恢复或删除。客户端收到后重读受影响的行或排序窗口，重连后从 `chats.list` 补齐。回滚和命令重放不发事件，本机已读变更沿用现有偏好通知。[导航提交后刷新及本机已读规则](../../architecture/desktop-navigation-refresh.md)
 
@@ -143,7 +145,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 | 用例 | 业务读写及可观察的结果 | 接口 |
 | --- | --- | --- |
-| ① 选人退出、同草稿双击首发 | 退出只读 `agent_profile`、存本机草稿，聊天记录为零条。双击经 `event_log` 去重，只建一组 `conversation`、`chat_topic`、首条 `conversation_message` 和首个 `agent_run`。相同内容得到同一组 ID，异内容保留输入并报冲突。列表只新增一行，显示活动轮，最后答复序号为 0。 | `chats.list`、`chats.listChanged`、`chats.send`、`chats.rename` |
+| ① 选人退出、同草稿双击首发 | 退出只读 `agent_profile`、存本机草稿，聊天记录为零条。双击经 `event_log` 去重，只建一组 `conversation`、`chat_topic`、首条 `conversation_message` 和首个 `agent_run`。相同内容得到同一组 ID，异内容保留输入并报冲突。列表只新增一行，显示活动轮，最后答复序号为 0。只加载列表第一页时，第二页聊天的新答复仍由 `replyIndex` 点亮图标栏。在本机将它标为已读，或归档这段聊天后刷新索引，若其余聊天均已读，总蓝点熄灭。 | `chats.list`、`chats.listChanged`、`chats.send`、`chats.rename` |
 | ② 同一队员的 A、B 两段聊天历史隔离 | A、B 同属本机用户。A 的 Run 经 `conversation`、`chat_topic` 和触发消息定位历史，传 B 的 ID 或游标被拒。打开有 50 个折叠轮次的 A，只取本页消息、插话位置与摘要，展开一轮只读该轮的步骤，传 B 的 Run 或证据 ID 被拒。A 的答复含报告链接和本地图片时，`conversation_message` 只存一份原文。重开可预览 A 目录内的文件，指向 B 或外部目录的链接和图片只显示路径。若工具写了文件而最终正文为空，步骤保存在 `agent_run_execution_evidence`，本轮最终消息为零条。 | `chat history`、`chats.open`、聊天消息文件预览、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
 | ③ 先排队 Q、再插话 S，然后重启 | `single_chat_pending_input` 保存 Q、S，`agent_run_execution_evidence` 记录 S 的位置，私有 `context_manifest` 绑定原 Run／代次。Q 在输入框上方标「排队中」。签收前重启并打开原轮，仍在原位置看到一条 S，之前启动的命令结束后仍在上段，后续步骤和答复在下段。正常签收或对原 `runtime_input_delivery` 事后确证均只发表一条原轮的 `conversation_message`。若送达仍未知，S 在原位标「未确认送达」且不重发。若确证未接收且可回队，S 从原轮移除，排在 Q 之后标「已转为排队」，两项均可编辑、删除。保留 Q 时，它只开启一次下一轮。Q、S 提交各推进一次排序，自己的输入不点亮蓝点，只有新发表的队员答复推进答复序号。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message`、`camp_message_delivery` 零写入。 | `chats.send`、`chats.open`、`chats.pendingInputs.edit`、`chats.list`、`chats.listChanged`，合资格时 `runtimeInputs.reconcile` |
 | ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描 `single_chat_pending_input` 和原 `runtime_input_delivery`，归档中不派发，普通列表与搜索找不到该聊天。已签收的插话作为普通用户消息留在原位，未知的保留「未确认送达」。手动恢复原 ID，只唤醒未派发的 FIFO。删除前，队员向已加入的 Thread 发送自有目录的报告和用户指定的外部清单。删库后重启，按 `camp_attachment_view_operation` 登记的目录身份清理。目录已删就结清该项。目标 `camp_message` 保留两个原引用，报告随目录删除，外部清单在原路径仍可读时可以打开。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
