@@ -2,14 +2,14 @@
 document_type: model-context-change
 version: v1.72
 change_id: independent-chat
-revision: 7
+revision: 8
 confirmation_status: pending
 authority: proposed-model-input-change-statement
 implementation_baseline: 3000b971f22bae67f45ded8e2d051bc85cc61803
 last_updated: 2026-11-25
 ---
 
-# 独立聊天的模型输入 R7
+# 独立聊天的模型输入 R8
 
 本稿规定队员实际读到的文字。聊天页面、侧栏、已读位置、排队展示和公开操作的回执归[聊天后端提案](chat-backend-proposal.md)。
 
@@ -44,23 +44,41 @@ You are in Rovai. Reply in this private chat.
 [/ROVAI_PLATFORM_SKILLS]
 ```
 
-每个话题绑定自己的原生会话。`MEMBER_IDENTITY` 属于系统提示，六个字段取自所选队员的 `agent_profile`。填写了职责、工作原则等资料时，这里就带上原值。换成洛可时，聊天规则相同，身份换成洛可的档案。首发、续聊和插话的 `CURRENT_INPUT` 都只装当次用户输入。[身份读取与区段顺序](../../../crates/rovai-core/src/context.rs)
+每个话题绑定自己的原生会话。`MEMBER_IDENTITY` 的六个字段取自所选队员的 `agent_profile`。同一运行端下，独立聊天与 Thread 使用相同的身份投递通道。例如 Hermes 把上面的三个 Bootstrap 区段放在首条 `user` 消息的 `[Rovai 协作规则]` 块内，随后接下节的动态正文。同一会话后续沿用原规则，只有 Bootstrap 本身变更才随普通输入附上更新块。`CURRENT_INPUT` 始终只含当次用户输入。[Bootstrap 合同](../../contracts/native-session-bootstrap-v6.md) · [Hermes 的首次与后续输入](../../contracts/hermes-managed-runtime-v1.md#session-与输入)
 
-`ROVAI_PLATFORM_SKILLS` 是按需读取工具指南的索引。`cli-operations` 常驻，关闭记忆后索引里只有这一项。独立聊天没有所属团队 Thread，因此省去该 Thread 的 `TEAM_GUIDANCE`，也省去按 Camp 成员构建的 `MEMORY_ENTRYPOINT`。个人记忆仍按开关和实际队员权限访问。队员额外配置的工具箱技能随 Run 提供，见下节。[Bootstrap v6](../../contracts/native-session-bootstrap-v6.md) · [平台技能选择](../../../crates/rovai-core/src/context/claim.rs) · [技能索引格式](../../contracts/skills-rebuild-v1.md)
-
-运行端的实际通道须核对。已有原生指令入口的适配器使用该入口。`first_payload` 会将启动规则拼入首条用户输入，例如 Hermes 目前明确使用 user 层。这条既有路径本身不能证明队员身份已进入系统提示。此类适配器的原生身份通道需要单独验证，聊天消息不承担身份投递或补发。[Core 投递模式](../../../crates/rovai-core/src/context.rs) · [Hermes 的现行投递](../../contracts/hermes-managed-runtime-v1.md#session-与输入)
+`ROVAI_PLATFORM_SKILLS` 是按需读取工具指南的索引。`cli-operations` 常驻，关闭记忆后索引里只有这一项。独立聊天没有所属团队 Thread，因此省去该 Thread 的 `TEAM_GUIDANCE`，也省去按 Camp 成员构建的 `MEMORY_ENTRYPOINT`。个人记忆仍按开关和实际队员权限访问。工具箱技能随每条输入投递。[平台技能选择](../../../crates/rovai-core/src/context/claim.rs) · [技能合同](../../contracts/skills-rebuild-v2.md)
 
 ### 每条输入
 
-本轮只有一条普通提问，没有附加技能或结果未知的操作时，动态正文如下。
+直发、FIFO 出队和插话按相同顺序生成动态正文，即可选的 `RUN_FACTS`、必有的 `ROVAI_ADDITIONAL_SKILLS` 和 `CURRENT_INPUT`。例如阿澈已关闭全部工具箱技能，用户直接提问，没有选用技能，也没有结果未知的操作。
 
 ```text
+[ROVAI_ADDITIONAL_SKILLS]
+Current for this run; replaces any earlier Rovai Additional Skills.
+{"root":"/example/rovai/skills","skills":[]}
+[/ROVAI_ADDITIONAL_SKILLS]
+
 [CURRENT_INPUT]
 {"message":"环比是什么意思？"}
 [/CURRENT_INPUT]
 ```
 
-直发、FIFO 正式发表和插话共用一种 `CURRENT_INPUT`。字段如下，空数组省略。正文保留用户原文，只有附件或引用时允许空字符串。
+每条输入准备时，沿用 Thread 的构建器，把队员当时配置的工具箱技能与**本条消息**显式选用的工具箱技能合并。索引列出全部可用项，按名称去重、排序。即使集合为空，也发送上例的完整区段。本条消息显式选用的可读技能另在 `CURRENT_INPUT.skills` 给出文件链接，原生技能只进这组链接。本条选用不会改写队员配置。[工具箱和消息链接格式](../../contracts/skills-rebuild-v1.md) · [Thread 插话规则](../../contracts/context-delivery-profile-v14.md) · [Thread 插话的输入来源](../../../crates/rovai-core/src/context/input.rs)
+
+例如阿澈配置了 `member-studio`，用户在当前轮插话时点选 `review-duo`。本条输入的索引含两项，消息只链接用户点选的一项。
+
+```text
+[ROVAI_ADDITIONAL_SKILLS]
+Current for this run; replaces any earlier Rovai Additional Skills.
+{"root":"/example/rovai/skills","skills":[{"name":"member-studio","desc":"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation."},{"name":"review-duo","desc":"Review a defined code change with two Thread members independently checking standards, quality and requirements. Applies to the initiator and invited reviewer through the final report; excludes solo review, undefined scope and implementation-only requests."}]}
+[/ROVAI_ADDITIONAL_SKILLS]
+
+[CURRENT_INPUT]
+{"message":"用 /review-duo 评审这次改动。","skills":[{"name":"review-duo","path":"/example/rovai/skills/review-duo/SKILL.md"}]}
+[/CURRENT_INPUT]
+```
+
+`CURRENT_INPUT` 的可选字段只在有内容时出现。正文保留用户原文，只有附件或引用时允许空字符串。
 
 ```ts
 type ChatCurrentInput = {
@@ -71,14 +89,9 @@ type ChatCurrentInput = {
 }
 ```
 
-引用使用已有的摘录投影，附件取已核验的源路径，技能链接只含用户在这条输入中选用且可读取的项。直发、FIFO 和插话的作者都是用户，模型侧省去恒定的 `source.type` 和 `mentionsCurrentUser`。Core 仍冻结真实来源、Run、代次、话题和输入序号。[引用投影](../../../crates/rovai-core/src/message_quote.rs) · [Skill 链接](../../contracts/skills-rebuild-v1.md)
+引用使用已有的摘录投影，附件取已核验的源路径。直发、FIFO 和插话的作者都是用户，模型侧省去恒定的 `source.type` 和 `mentionsCurrentUser`。Core 仍冻结真实来源、Run、代次、话题和输入序号。[引用投影](../../../crates/rovai-core/src/message_quote.rs)
 
-区段顺序为 `RUN_FACTS?`、`ROVAI_ADDITIONAL_SKILLS?`、`CURRENT_INPUT`。只有两个条件会增加上下文。
-
-| 条件 | 队员收到的内容 |
-| --- | --- |
-| 同一话题的原操作仍有 `action_execution.status='unknown'` | 沿用原判断，仅加上 `[RUN_FACTS]`、一行 `{"externalEffect":{"state":"unsettled","requiredAction":"reconcile_before_repeat"}}` 和 `[/RUN_FACTS]`。核对与停止重发仍执行原有回执规则。无此事实时，整个区段省略。 |
-| 新 Run 的队员工具箱配置与本次显式选择的并集有可用项 | 用现有 `ROVAI_ADDITIONAL_SKILLS` 格式列出这些技能，范围只到本 Run。空集合省略。插话属于原 Run，沿用其工具箱，当次另选的技能只进本条 `CURRENT_INPUT.skills`。 |
+只有同一话题的原操作仍有 `action_execution.status='unknown'` 时，才在技能段前加上 `[RUN_FACTS]`、一行 `{"externalEffect":{"state":"unsettled","requiredAction":"reconcile_before_repeat"}}` 和 `[/RUN_FACTS]`。核对与停止重发沿用原有回执规则。
 
 Host 将本话题自有目录设为 Runtime 的实际工作目录，续聊和插话使用同一目录。文件工具与答复预览以它为相对路径基准，因此动态输入省去 `attachmentOutputRoot`。如果运行端无法使用该目录，按现有准备失败处理。独立聊天没有关联使命，省去 `WORKSPACE` 和 Git 分支查询。即使用户给出目标 Thread，也只给该次工具操作定位，聊天运行目录保持原值。[现有 Workspace 选择与动态区段](../../../crates/rovai-core/src/context.rs) · [聊天文件预览](chat-backend-proposal.md#4-历史导航归档与删除)
 
@@ -88,16 +101,17 @@ Host 将本话题自有目录设为 Runtime 的实际工作目录，续聊和插
 
 ## 版本、迁移与恢复
 
-新聊天拟用 Formatter/Manifest 46、Facts 15、Delivery Profile 17。Facts 13、14 的公开或旧单聊形状均保留。Bootstrap 沿用 formatter 6，冻结固定 Charter 的正文摘要。身份及其恢复复用队员系统提示的既有记录。无未决操作时，新输入的 `runFactRefs` 为空。有未决操作时只记录现有的 `external_effect` 引用。预算按实际交付字节计算。
+新聊天拟用 Formatter/Manifest 46、Facts 15、Delivery Profile 17。Facts 13、14 的公开或旧单聊形状均保留。Bootstrap 沿用 formatter 6，冻结固定 Charter 的正文摘要。身份随该运行端的 Bootstrap 恢复。工具箱配置和本条选用项只影响新准备的动态输入，无需清理历史或更新 Bootstrap。恢复已准备的输入时读取原 Manifest 的冻结正文。无未决操作时，新输入的 `runFactRefs` 为空。有未决操作时只记录现有的 `external_effect` 引用。预算按实际交付字节计算。[输入快照存储](../../contracts/input-snapshot-storage-v1.md)
 
 直接输入、FIFO 读取本轮触发的 `conversation_message`。插话读取冻结的 `single_chat_pending_input`。在原 Manifest 上增加可空的 `source_chat_input_id`，与 `source_delivery_id` 互斥，两者都为空表示初始输入。每条私有插话至多有一份 Manifest。运行端校验同一 Run、代次、原生绑定和输入序号。重启从冻结的输入与接收凭据继续。已接收或送达未知的插话沿用原凭据核对，同一输入至多发表一次。旧 Manifest 和原始 Blob 按冻结的原版本恢复。[插话及接收规则](../../contracts/message-delivery-v20.md)
 
 ## 验证
 
-1. 用同一句话分别直发、排队和插话，核对三者的 `CURRENT_INPUT` 均只含当次输入。仅含附件或引用时核对可选字段。同一名发布组成员收到「帮我润色通知」时只给出私聊答复，收到「把通知发到发布组」时才向该组写入消息。引用里的指令本身不会触发公开写入。
-2. 分别选阿澈、洛可，以相同提问开聊。核对两个系统提示各自的队员资料，两个 Charter 和 `CURRENT_INPUT` 则逐字相同。检查运行端实际收到的 system 和 user 内容，身份资料只出现在系统指令侧。再为阿澈开两个话题，在 A 写入相对路径的文件，预览定位到 A。模拟 A 中一个结果未知的操作，只有 A 获得核对提示，B 的上下文和历史均不含 A 的数据。
-3. 按示例配置首次开聊，核对 Bootstrap 的区段顺序、身份六字段和平台技能索引。关闭记忆后另开话题，核对索引只含 `cli-operations`。给队员配置一个工具箱技能，开新轮、插话并重启，核对动态索引及显式引用，只恢复一次已接收输入。对照旧 Thread 和会话内单聊的冻结样本。
+1. **身份投递。** 同一运行端、同一队员分别开启 Thread 和独立聊天，核对六个身份字段及实际投递通道。Cline 两边都走原生规则通道。Hermes 两边都在首条 `user` 输入中先放一次完整 Bootstrap，再放动态正文。启动规则未变时，Hermes 的后续普通输入只送动态正文。聊天的 `CURRENT_INPUT` 始终只含本条用户输入。换洛可后核对其身份和相同的聊天 Charter。按首发示例核对三个区段顺序，关闭记忆后另开话题，平台索引只含 `cli-operations`。
+2. **同轮插话和下一轮排队。** 阿澈只配置 `member-studio`。直发未点选技能，索引只有该项。忙时先排队 Q（选 `campfire`），再插话 S（选 `review-duo`）。S 须得到上例的两项索引和一个消息链接。S 已签收后关闭 `member-studio` 并重启，恢复时核对 S 的原始字节和回执，S 不再投递。Q 出队时索引和消息链接都只有 `campfire`。原会话历史、Bootstrap 及首轮已冻结的输入均保留。
+3. **空索引与消息内容。** 关闭全部工具箱技能，不选技能，分别直发、FIFO 出队和插话。三次都收到完整的空索引，消息均无 `skills` 字段。只点选可读的原生技能时索引仍空，消息多一个指向原文件的链接。纯附件或纯引用输入分别核对对应的可选字段。
+4. **话题和公开操作。** 为阿澈开 A、B 两个话题。在 A 写入相对路径的文件，预览定位到 A。A 中结果未知的操作只给 A 增加核对提示，B 的上下文和历史均不含 A 的数据。发布组成员收到「帮我润色通知」时在私聊答复，收到「把通知发到发布组」时才向该组写入。引用里的指令本身不会触发公开写入。对照旧 Thread 和会话内单聊的冻结样本。
 
 ## 二次确认
 
-R7 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
+R8 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
