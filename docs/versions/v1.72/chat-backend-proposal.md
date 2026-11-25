@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 3
+revision: 4
 last_updated: 2026-11-24
 ---
 
@@ -39,8 +39,8 @@ last_updated: 2026-11-24
 | 成功回执 | 界面显示及含义 |
 | --- | --- |
 | `started {chatId, messageId, runId, runStatus}` | 已开启新一轮。首发另带标题，等待运行端按 `runStatus` 单独显示。 |
-| `queued {chatId, inputId}` | 已排队。此时只有持久输入，轮到它时再建立消息和新 Run。 |
-| `steer_submitted {chatId, inputId, runId, executionEpoch}` | 已向当前轮提交补充。先显示待发送或发送中，取得原生 `accepted` 回执后才显示已收到。 |
+| `queued {chatId, inputId}` | 已排队。输入按提交顺序显示在「待处理」，正式发表时移到下一轮开头，此时才建立消息和新 Run。 |
+| `steer_submitted {chatId, inputId, runId, executionEpoch}` | 已向当前轮提交补充。本轮下的「补充当前执行」先显示「待发送」或「发送中」，收到运行端 `accepted` 回执后原位更新为「已收到」。 |
 
 ## 3. 没有 Camp 和 Turn 的运行链路
 
@@ -63,11 +63,11 @@ last_updated: 2026-11-24
 
 ## 4. 历史、导航、归档与删除
 
-**历史。** `rovai chat history` 只接受分页参数。Core 从有效 Run 和原生绑定反查目的 Conversation，以触发用户消息序号为排他上界，返回此前已发表的用户消息、最终答复和附件摘要。当前轮的补充从该轮 Steer 输入送达。下一轮能够读到此前已确认的补充和最终答复。游标绑定话题及上界，传入另一个 `chatId` 或跨话题游标均拒绝。详情页从消息、忙时输入和执行证据还原逐轮记录。
+**历史。** `rovai chat history` 只接受分页参数。Core 从有效 Run 和原生绑定反查目的 Conversation，以触发用户消息序号为排他上界，返回此前已发表的用户消息、最终答复和附件摘要。当前轮的补充从该轮 Steer 输入送达。下一轮能够读到此前已确认的补充和最终答复。游标绑定话题及上界，传入另一个 `chatId` 或跨话题游标均拒绝。详情页按 Run 展示消息与执行步骤。重开聊天时，按 `inputId` 及其关联的已发表消息还原待处理项和轮内消息，同一输入只显示一次。
 
-**导航。** `navigation.search` 先按认证用户和 `chat_topic.archived_at IS NULL` 筛选，再连接 `conversation`、`agent_profile` 匹配标题和队员名。结果为 `kind:'chat', chatId`。左栏按活动序号降序、ID 稳定分页，可按队员过滤。已发表的消息在同一事务以 `event_log` 的全局序号推进话题排序。`navigation.searchMessages` 继续只搜 `camp_message`。[导航搜索合同](../../contracts/navigation-search-v1.md)
+**导航。** `navigation.search` 先按认证用户和 `chat_topic.archived_at IS NULL` 筛选，再连接 `conversation`、`agent_profile` 匹配标题和队员名。结果为 `kind:'chat', chatId`。左栏按活动序号降序、ID 稳定分页，可按队员过滤。直接发送、FIFO 入队或 Steer 提交成功时，以及队员发表最终回复时，各在同一事务将该事件的 `event_log.global_sequence` 写入 `chat_topic.last_activity_sequence`。同一输入只计一次，命令重放、FIFO 正式发表和 Steer 签收不重复计入。打开聊天、展开步骤和改名均不参与排序。`navigation.searchMessages` 继续只搜 `camp_message`。[导航搜索合同](../../contracts/navigation-search-v1.md)
 
-**归档。** 在同一事务设置 `archived_at`、取消活动 Run、关闭新输入和派发。尚未发表的 FIFO 输入保留原序号。对在途 Steer 保留原 Run／代次及真实回执，已接收或结果未知的补充不会转入恢复后的队列。设置页按所有者显示 `kind:'chat'` 的归档摘要。手动恢复后沿用原 ID、历史与草稿，唤醒尚未派发的 FIFO，已取消轮次保持终态。[现有归档行为](../../contracts/thread-archive-v1.md)
+**归档。** 在同一事务设置 `archived_at`、取消活动 Run、关闭新输入和派发。设置页按所有者显示 `kind:'chat'` 的归档项。已取消的原轮显示「已停止」。补充沿用原 Run／代次的回执，`accepted` 显示「已收到」，`delivery_unknown` 显示「送达未确认」。有尚未派发的 FIFO 时提示「恢复后将继续发送排队中的消息」。手动恢复沿用原 ID、历史与草稿，只按原顺序唤醒这些 FIFO，已取消的轮次保持终态。[现有归档行为](../../contracts/thread-archive-v1.md)
 
 **删除与文件清理同事务交接。** Core 记录删除操作 ID，封住聊天读写并隔离活动 Run。业务删除事务先向现有 `camp_attachment_view_operation` 和 `camp_attachment_view_operation_entry` 登记待清理的受管根、文件相对路径和所有权标识，再清理私有消息、Run、证据、输入、话题属性和 Conversation，两者一起提交或回滚。为现有 journal 增加 `chat_delete_cleanup` 和独立的 `chatId` 归属，允许此类记录的 `camp_id` 为空。清单在话题删除后仍可读取。启动恢复先接续尚未交接的删除标记，再按操作 ID 扫描未完成清单，核对根身份后逐项清理，已删项视为完成。清单只含聊天独占文件，外部原文件和公开目标仍持有的文件保留。提交后按 `chatId` 清掉本机草稿。话题内的创建回执随话题清理，已创建的全局队员档案保留。首发回执仅保留去重标识与已删除状态。[现有删除交接合同](../../contracts/camp-permanent-deletion-v4.md) · [恢复扫描](../../../crates/rovai-core/src/camp_deletion.rs)
 
@@ -114,7 +114,7 @@ last_updated: 2026-11-24
 | --- | --- | --- |
 | ① 选人退出、同草稿双击首发 | 只选人读 `agent_profile`、存本机草稿，Core 新增零条。双击时从 `event_log` 去重，只创建一组 `conversation`、`chat_topic`、首条 `conversation_message`、首个 `agent_run`。两次同快照得到相同 ID，异内容保留输入并报冲突。已配置获准的 Runtime 暂离时仍返回 `started` 并显示等待，恢复后只派发这一个 Run。 | `chats.list`、`chats.send`、`chats.rename` |
 | ② 同一队员的 A、B 两段聊天历史隔离 | A 的 Run 经 `conversation`、`chat_topic`、触发消息定位历史，传 B 的 ID 或游标被拒。若 A 的最终答复只有一个附件，`conversation_message` 只新增一条含附件的 Agent 消息，关联 A 的 `final_conversation_message_id`，迟到或重复终态不再追加。 | `chat history`、`chats.open`、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
-| ③ 忙时分别选排队和 Steer | 给同一活动 Run 先排队 Q，再补充 S。Q 在 `single_chat_pending_input` 等待。S 绑定原 Run／代次，私有 `context_manifest` 与 `runtime_input_delivery` 记录 `steer`。S 确认接收只写原轮用户消息，Run 数不变。原轮结束后仅 Q 按 FIFO 开新 Run。换代次不能投给后继 Run。S 获准回队时沿用原 `inputId` 且只入队一次。结果未知时重启也不重发或入队。这一流程 `camp`、`camp_member`、`camp_turn`、`camp_message`、公开 Delivery 新增均为零。 | `chats.send` 三种回执、`chats.open`，合资格时 `runtimeInputs.reconcile` |
+| ③ 先排队、再补充，然后重启 | 同一轮先排队 Q，再补充 S，两次受理各推进一次话题排序。Q 在 `single_chat_pending_input` 等待，S 的私有 `context_manifest` 和 `runtime_input_delivery` 绑定原 Run／代次。S 已签收、Q 尚未发表时重启。重开后原轮只显示一条 S，Q 仍排在原来的位置。原轮结算后，Q 只开启一轮，该轮历史可读 S。S 签收和 Q 发表均不重复推进排序。若 S 送达未确认，重启也不重发或入队。只有 §3 允许回队时才用原 `inputId` 入队一次。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message` 和公开 Delivery 零写入。 | `chats.send` 三种回执、`chats.open`，合资格时 `runtimeInputs.reconcile` |
 | ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描读取 `single_chat_pending_input` 及在途补充回执，归档中不派发，普通列表与搜索均找不到。手动恢复原 ID，只发布尚未派发的 FIFO 输入。删除另走同事务清单交接，在删库提交后、清文件前退出，重启仍可从 `camp_attachment_view_operation` 及明细完成清理。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
 | ⑤ 任务已建，补通知不重复建任务 | `task` 中只有一条阿澈创建的任务。查建任务和通知各自的 `event_log` 回执，再按 `camp_message`、`camp_message_delivery` 区分 §6 三种结果。确认未发出只补通知，已提交只取原消息，未知即停。即使重启，任务始终一条、公开通知至多一条，目标只能看到阿澈及公开结果。 | 既有 `task create / get`、`send` 及命令结果对账 |
 
