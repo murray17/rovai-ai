@@ -76,10 +76,13 @@ describe('navigation preferences', () => {
     const pins = keys.map((targetKey, i) => ({ kind: 'project' as const, targetKey, pinnedAt: `2026-10-01T00:00:0${i}Z` }))
     await store.registerProjects(paths)
     await store.replacePins(pins)
-    const partial = JSON.stringify({ ...store.get(), pinnedProjectOrder: [null, a, {}, 'directory:/gone', a] })
+    const malformed = ['directory:relative', 'directory:' + 'r'.repeat(8_192)]
+    const partial = JSON.stringify({ ...store.get(), pins: [...pins, ...malformed.map(targetKey => ({ ...pins[0], targetKey }))],
+      pinnedProjectOrder: [null, a, {}, ...malformed, 'directory:/gone', a] })
     await writeFile(file, partial)
     const reloaded = await NavigationPreferencesStore.load(file)
     expect(reloaded.loadDegradation).toBeNull()
+    expect(reloaded.get().pins).toEqual(pins)
     expect(reloaded.get().pinnedProjectOrder).toEqual([a])
     expect(await readFile(file, 'utf8')).toBe(partial)
     await store.moveProject({ section: 'pinned', projectKey: c, beforeProjectKey: a })
@@ -90,6 +93,25 @@ describe('navigation preferences', () => {
     await store.moveProject({ section: 'pinned', projectKey: c, beforeProjectKey: b })
     await store.removeProject(a, [])
     expect(store.get().pinnedProjectOrder).toEqual([c, b])
+  })
+
+  it('honors visible insertion points among legacy folders while preserving the underlying slots of pinned folders', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-partial-directory-order-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const store = await NavigationPreferencesStore.load(file)
+    const registered = await store.registerProjects(['/a', '/b', '/c', '/pinned'])
+    const [a, b, c, pinned] = registered.projectOrder!
+    const x = 'directory:/legacy', trailing = 'directory:/last-legacy'
+    const base = [a, pinned, b, x, c, trailing]
+    await writeFile(file, JSON.stringify({ ...registered, projectOrder: base,
+      pins: [{ kind: 'project', targetKey: pinned, pinnedAt: '2026-10-01T00:00:00Z' }] }))
+    const moved = await store.moveProject({ section: 'projects', projectKey: a, beforeProjectKey: c })
+    expect(moved.projectOrder).toEqual([b, pinned, x, a, c, trailing])
+    const atEnd = await store.moveProject({ section: 'projects', projectKey: b, beforeProjectKey: null })
+    expect(atEnd.projectOrder).toEqual([x, pinned, a, c, b, trailing])
+    expect(atEnd.registeredProjects).toEqual(registered.registeredProjects)
+    expect((await NavigationPreferencesStore.load(file)).get()).toEqual(atEnd)
   })
 
   it('upgrades valid schema 4 without a degradation or rewriting the old file', async () => {

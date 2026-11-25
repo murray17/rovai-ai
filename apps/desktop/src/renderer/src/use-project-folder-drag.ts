@@ -79,7 +79,10 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
     let carry: ReturnType<typeof createPreview> | undefined
     let before: string | null | undefined
     let frame = 0
+    let needsPaint = false
     let suppressClick = false
+
+    function invalidate() { needsPaint = true }
 
     function finish(save = false) {
       const held = drag
@@ -129,7 +132,7 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
       }
     }
 
-    function scrollAtEdge() {
+    function renderFrame() {
       if (!drag || !carry) return
       const bounds = rail.getBoundingClientRect()
       if (drag.x >= bounds.left && drag.x <= bounds.right && drag.y >= bounds.top && drag.y <= bounds.bottom) {
@@ -138,10 +141,16 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
         if (delta) {
           const previous = rail.scrollTop
           rail.scrollTop += Math.sign(delta) * Math.min(12, Math.ceil(Math.abs(delta) / 4))
-          if (rail.scrollTop !== previous) paint()
+          if (rail.scrollTop !== previous) invalidate()
         }
       }
-      if (carry) frame = requestAnimationFrame(scrollAtEdge)
+      // Only a rendered frame can supply a drop target. Input arriving between frames
+      // can invalidate that target on release, but cannot show a new line.
+      if (needsPaint) {
+        needsPaint = false
+        paint()
+      }
+      if (carry) frame = requestAnimationFrame(renderFrame)
     }
 
     function down(event: PointerEvent) {
@@ -154,10 +163,7 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
       const lane = section?.dataset.projectSortSection
       if (!row || !group || !section || (lane !== 'pinned' && lane !== 'projects') || row.parentElement?.dataset.menuOpen) return
       const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
-      if (touch) {
-        if (!event.target.closest('.project-folder-touch-target')) return
-        event.stopPropagation() // The label keeps the existing scroll and long-press menu.
-      }
+      if (touch && !event.target.closest('.project-folder-touch-target')) return
       drag = { section, lane, group, row, key: group.dataset.projectSortKey!, pointerId: event.pointerId, touch,
         startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY }
     }
@@ -173,10 +179,10 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
         document.documentElement.dataset.projectDragging = 'true'
         // Capture on the stable rail. React can move the source row during a cross-window update.
         rail.setPointerCapture(event.pointerId)
-        frame = requestAnimationFrame(scrollAtEdge)
+        frame = requestAnimationFrame(renderFrame)
       }
       event.preventDefault()
-      paint()
+      invalidate()
     }
     function up(event: PointerEvent) {
       if (!drag || event.pointerId !== drag.pointerId) return
@@ -198,7 +204,7 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
     rail.addEventListener('lostpointercapture', event => { if (event.target === rail && event.pointerId === drag?.pointerId) cancel() }, options)
     rail.addEventListener('touchmove', event => { if (drag?.touch && event.cancelable) event.preventDefault() }, { ...options, passive: false })
     rail.addEventListener('contextmenu', event => { if (drag?.touch) { event.preventDefault(); event.stopPropagation() } }, options)
-    rail.addEventListener('scroll', paint, options)
+    rail.addEventListener('scroll', invalidate, options)
     document.addEventListener('click', event => {
       if (suppressClick && event.detail !== 0) { suppressClick = false; event.preventDefault(); event.stopImmediatePropagation() }
     }, options)
@@ -208,7 +214,7 @@ export function useProjectFolderDrag(railRef: RefObject<HTMLDivElement | null>, 
     document.addEventListener('visibilitychange', cancel, options)
     window.addEventListener('blur', cancel, options)
     window.addEventListener('resize', cancel, options)
-    refresh.current = paint
+    refresh.current = invalidate
     return () => { refresh.current = null; cancel(); listeners.abort() }
   }, [railRef, move])
 }

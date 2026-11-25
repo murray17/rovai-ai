@@ -1103,15 +1103,18 @@ export function BusinessApp({
   const [legacySelectedProject] = useState(() => readCurrentProject())
   const [threadReadStates, setThreadReadStates] = useState<NavigationPreferencesSnapshot['threadReadStates']>({})
   const threadReadStatesRef = useRef(threadReadStates)
-  const threadReadGeneration = useRef(0)
-  const acceptThreadReadStates = useCallback((snapshot: NavigationPreferencesSnapshot): void => {
-    const next = snapshot.threadReadStates ?? {}
+  const threadReadRevisions = useRef(new Map<string, symbol>())
+  const acceptThreadReadStates = useCallback((next: NavigationPreferencesSnapshot['threadReadStates']): void => {
     const current = threadReadStatesRef.current
-    const ids = Object.keys(next)
-    if (ids.length === Object.keys(current).length && ids.every(id =>
-      current[id]?.manualUnread === next[id].manualUnread
-      && current[id]?.readThroughGlobalSequence === next[id].readThroughGlobalSequence)) return
-    ++threadReadGeneration.current
+    let changed = false
+    for (const id of new Set([...Object.keys(next), ...Object.keys(current)])) {
+      if (current[id]?.manualUnread === next[id]?.manualUnread
+        && current[id]?.readThroughGlobalSequence === next[id]?.readThroughGlobalSequence) continue
+      if (next[id]) threadReadRevisions.current.set(id, Symbol())
+      else threadReadRevisions.current.delete(id)
+      changed = true
+    }
+    if (!changed) return
     threadReadStatesRef.current = next
     setThreadReadStates(next)
   }, [])
@@ -1364,18 +1367,26 @@ export function BusinessApp({
     threadId: string,
     state: NavigationPreferencesSnapshot['threadReadStates'][string] | null
   ): Promise<void> => {
-    const generation = ++threadReadGeneration.current
+    const revision = Symbol()
+    threadReadRevisions.current.set(threadId, revision)
     const { snapshot, confirmed } = await saveNavigationThreadReadState(uiPreferences.navigationPreferences, threadId, state)
-    if (snapshot && generation === threadReadGeneration.current) acceptThreadReadStates(snapshot)
+    if (snapshot && threadReadRevisions.current.get(threadId) === revision) {
+      // A late receipt only owns the one Thread that was written.
+      const next = { ...threadReadStatesRef.current }
+      const saved = snapshot.threadReadStates[threadId]
+      if (saved) next[threadId] = saved
+      else delete next[threadId]
+      acceptThreadReadStates(next)
+    }
     if (!confirmed) throw new Error(uiAttribute('本机阅读状态的保存结果尚未确认，请重试。'))
   }, [uiPreferences, acceptThreadReadStates])
 
-  const clearThreadUnreadReminder = useCallback(async (threadId: string, generation: number): Promise<void> => {
+  const clearThreadUnreadReminder = useCallback(async (threadId: string, revision: symbol | undefined): Promise<void> => {
     const current = threadReadStatesRef.current[threadId]
     // Only an explicit navigation with a full projection clears the reminder.
     // Startup restoration and automatic observation never enter this transition.
     if (campSnapshotRef.current?.thread.id === threadId && !campSnapshotEntryPreviewRef.current
-      && generation === threadReadGeneration.current && current?.manualUnread) {
+      && revision === threadReadRevisions.current.get(threadId) && current?.manualUnread) {
       await saveThreadReadState(threadId, { ...current, manualUnread: false })
     }
   }, [saveThreadReadState])
@@ -1767,7 +1778,7 @@ export function BusinessApp({
       return current.size === next.size && [...current].every(key => next.has(key)) ? current : next
     })
     setProjectNames(snapshot.projectNames)
-    acceptThreadReadStates(snapshot)
+    acceptThreadReadStates(snapshot.threadReadStates ?? {})
     setRemovedProjectAuthorityReady(true)
   }, [acceptThreadReadStates])
 
@@ -2162,7 +2173,7 @@ export function BusinessApp({
     threadId: string,
     options: ActivateThreadOptions = {}
   ): Promise<boolean> => {
-    const readGeneration = threadReadGeneration.current
+    const readRevision = threadReadRevisions.current.get(threadId)
     const sameThread = viewRef.current === 'camp' && activeThreadIdRef.current === threadId
     const navigate = sameThread && (campSnapshotEntryPreviewRef.current || options.navigationFind)
       ? desktopNavigation.replace : desktopNavigation.push
@@ -2184,7 +2195,7 @@ export function BusinessApp({
       if (campSnapshotRef.current?.thread.missionId && options.missionPresentation) {
         setMissionPresentation(options.missionPresentation)
       }
-      await clearThreadUnreadReminder(threadId, readGeneration)
+      await clearThreadUnreadReminder(threadId, readRevision)
       return true
     }
     return activated
@@ -3330,7 +3341,7 @@ export function BusinessApp({
 
   applyNavigationRef.current = async (target, transaction, context) => {
     if (shuttingDownRef.current) return
-    const readGeneration = threadReadGeneration.current
+    const readRevision = target.kind === 'camp' ? threadReadRevisions.current.get(target.threadId) : undefined
     // Invalidate older Thread reads immediately, including reads waiting behind a leave guard.
     const selectionGeneration = ++campSelectionGeneration.current
     clearThreadOpenFeedback()
@@ -3340,12 +3351,12 @@ export function BusinessApp({
         if (viewRef.current === 'camp' && activeThreadIdRef.current === target.threadId && !campSnapshotEntryPreviewRef.current) {
           if (transaction.commit()) {
             setNavigationFind(context?.campOptions?.navigationFind ?? null)
-            if (!context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+            if (!context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readRevision)
           }
           return
         }
         const opened = await activateThreadWithoutLeaveGuard(target.threadId, context?.campOptions ?? {}, selectionGeneration, transaction)
-        if (opened && transaction.isCurrent() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readGeneration)
+        if (opened && transaction.isCurrent() && !context?.preserveUnreadReminder) await clearThreadUnreadReminder(target.threadId, readRevision)
         return
       }
       const previous = desktopNavigation.getSnapshot()

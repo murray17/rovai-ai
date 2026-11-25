@@ -1166,13 +1166,14 @@ function ThreadGroup({
       onSelect: onRemoveProject
     })
   }
-  const pressMenu = useNavigationPressMenu(!!pinTargetKey && projectMenuItems.length > 0)
+  const canMove = !!(moveActions?.up || moveActions?.down)
+  const pressMenu = useNavigationPressMenu(!!pinTargetKey && projectMenuItems.length > 0, canMove ? '.project-folder-touch-target' : undefined)
   const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const paginationControls = navigationPaginationControls(windowCount, hasMore)
   const hiddenSelection = highlighted && !mobile && !projectExpanded
     ? threads.find(thread => thread.id === activeThreadId) : undefined
   return (
-    <section className="camp-nav-group" data-group={groupKey} data-project-sort-key={moveActions?.up || moveActions?.down ? pinTargetKey : undefined}>
+    <section className="camp-nav-group" data-group={groupKey} data-project-sort-key={canMove ? pinTargetKey : undefined}>
       <div className={`project-heading-row ${currentProject ? 'current-project' : ''}`} data-menu-open={pressMenu.open || undefined}
         data-highlighted={highlighted || undefined}
         onContextMenu={(event) => { if (!event.defaultPrevented) pressMenu.rowProps.onContextMenu?.(event) }} data-expanded={projectExpanded ? 'true' : 'false'}>

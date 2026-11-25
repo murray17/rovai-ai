@@ -260,7 +260,9 @@ test('phone project folders drag by their icon, keep label gestures, and survive
     await touch('touchEnd')
     const savedOrder = `JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('rovai.presentation:') && key.endsWith(':navigation')))).projectOrder`
     await browser.wait(`${savedOrder}[0] === ${JSON.stringify(initial[1])}`)
+    const oldDocument = await browser.evaluate('performance.timeOrigin')
     await browser.send('Page.reload')
+    await browser.wait(`performance.timeOrigin !== ${oldDocument} && document.readyState === 'complete'`)
     await openDrawer()
     assert.deepEqual(await browser.evaluate(groups + '.map(group => group.dataset.group)'), [initial[1], initial[0], ...initial.slice(2)])
     const label = await point(1, '.navigation-title')
@@ -271,11 +273,24 @@ test('phone project folders drag by their icon, keep label gestures, and survive
     await browser.key('Escape')
     await browser.wait("!document.querySelector('[role=menu]')")
     const swipe = await point(2, '.navigation-title')
+    await browser.evaluate(`window.folderScrollEnded = false
+      document.querySelector('.mobile-conversation-drawer .navigation-scroll').addEventListener('scrollend',
+        () => { window.folderScrollEnded = true }, { once: true })`)
     await touch('touchStart', swipe)
     await touch('touchMove', { x: swipe.x, y: swipe.y - 24 })
     await touch('touchMove', { x: swipe.x, y: swipe.y - 100 })
     await touch('touchEnd')
+    await browser.wait('window.folderScrollEnded')
     await browser.wait("document.querySelector('.mobile-conversation-drawer .navigation-scroll').scrollTop > 20")
+    assert.equal(await browser.evaluate(savedOrder + '[0]'), initial[1])
+    const swipedRow = groups + "[2].querySelector('.project-select-row')"
+    await browser.evaluate(`${swipedRow}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
+    const expanded = await browser.evaluate(swipedRow + ".getAttribute('aria-expanded')")
+    const tappedIcon = await point(2, '.project-folder-glyph')
+    assert.equal(await browser.evaluate(`document.elementFromPoint(${tappedIcon.x}, ${tappedIcon.y})?.closest('.project-select-row') === ${swipedRow}`), true)
+    await touch('touchStart', tappedIcon)
+    await touch('touchEnd')
+    await browser.wait(`${groups}[2]?.querySelector('.project-select-row')?.getAttribute('aria-expanded') === ${JSON.stringify(expanded === 'true' ? 'false' : 'true')}`)
     assert.equal(await browser.evaluate(savedOrder + '[0]'), initial[1])
   } finally {
     await browser?.close()

@@ -47,7 +47,7 @@ export function createNavigationPressGesture(onOpen: () => void) {
   }
 }
 
-export function useNavigationPressMenu(enabled: boolean) {
+export function useNavigationPressMenu(enabled: boolean, dragTarget?: string) {
   const [open, updateOpen] = useState(false)
   const [contextPoint, setContextPoint] = useState<{ x: number; y: number } | null>(null)
   const setOpen = (next: boolean): void => {
@@ -79,6 +79,10 @@ export function useNavigationPressMenu(enabled: boolean) {
       lastPointerType.current = event.pointerType
       rememberRow(event.currentTarget)
       cancel()
+      if (dragTarget && event.target instanceof Element && event.target.closest(dragTarget)) {
+        gesture.consumeClick()
+        return
+      }
       if (!gesture.start(event)) return
       const otherPointer = (next: PointerEvent): void => { if (!next.isPrimary) cancel() }
       document.addEventListener('scroll', cancel, true)

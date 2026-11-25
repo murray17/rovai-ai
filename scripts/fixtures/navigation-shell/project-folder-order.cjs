@@ -6,14 +6,57 @@ module.exports = async function verifyFolderOrder({ run, other, mouse, key, fram
   const row = id => `[data-group="${id}"] .project-select-row`
   const domOrder = () => run("Array.from(document.querySelectorAll('.navigation-projects > [data-project-sort-key]'), group => group.dataset.group)")
   const savedOrder = () => other('window.navigationTest.preferences.get().then(snapshot => snapshot.projectOrder)')
-  await run(`window.navigationTest.preferences.registerProjects(${JSON.stringify(paths)}, true)`)
+  // X is present in Core's legacy projection, but has not been registered yet.
+  const initial = await other('window.navigationTest.preferences.get()')
+  const seed = snapshot => other(`localStorage.setItem('rovai.presentation:navigation-shell-fixture:navigation', ${JSON.stringify(JSON.stringify(snapshot))})`)
+  const legacyKeys = [b, c, a, d]
+  await seed({ ...initial, registeredProjects: ['/b', '/c', '/d'], legacyProjectsSynced: false,
+    pins: legacyKeys.map((targetKey, i) => ({ kind: 'project', targetKey, pinnedAt: new Date(i * 1000).toISOString() })),
+    pinnedProjectOrder: legacyKeys })
   await run('window.navigationTest.setFolderOrderFixture(true)')
+  await settle()
+  const pinnedOrder = () => run("Array.from(document.querySelectorAll('.pinned-navigation > .camp-nav-group'), group => group.dataset.group)")
+  assert.deepEqual(await pinnedOrder(), legacyKeys)
+  assert.equal(await run(`document.querySelector('[data-group="${a}"]').hasAttribute('data-project-sort-key')`), false)
+  const legacyTarget = await point(row(d))
+  legacyTarget.y -= 8
+  mouse('mouseDown', await point(row(b)))
+  mouse('mouseMove', legacyTarget)
+  await frame()
+  assert.equal(await run(`(() => {
+    const line = document.querySelector('.project-insertion-line')
+    const above = document.querySelector('[data-group="${a}"]').getBoundingClientRect().bottom
+    const below = document.querySelector('[data-group="${d}"]').getBoundingClientRect().top
+    return line && !line.hidden && Math.abs(parseFloat(line.style.top) - (above + below) / 2) <= 1
+  })()`), true, 'The line is between the visible legacy folder and the registered anchor')
+  mouse('mouseUp', legacyTarget)
+  await settle()
+  assert.deepEqual(await pinnedOrder(), [c, a, b, d])
+  assert.deepEqual(await other('window.navigationTest.preferences.get().then(snapshot => snapshot.pinnedProjectOrder)'), [c, a, b, d])
+  await seed(initial)
+  await settle()
+  await run(`window.navigationTest.preferences.registerProjects(${JSON.stringify(paths)}, true)`)
   await settle()
   const held = await point(row(a))
   const sourceC = await point(row(c))
   const overB = await point(row(b))
   const beforeB = { ...overB, y: overB.y - 8 }
   const beforeA = { ...held, y: held.y - 8 }
+  // Release in the native move's event turn, before Chromium can present a frame.
+  for (const previous of [{ ...sourceC, x: sourceC.x + 10 }, beforeA]) {
+    mouse('mouseDown', sourceC)
+    mouse('mouseMove', previous)
+    await frame()
+    await run(`document.addEventListener('pointermove', event => {
+      event.target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true,
+        pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: true,
+        clientX: event.clientX, clientY: event.clientY, button: 0, buttons: 0 }))
+    }, { once: true })`)
+    mouse('mouseMove', beforeB)
+    mouse('mouseUp', beforeB)
+    await settle()
+    assert.deepEqual(await savedOrder(), [a, b, c, d], 'An unpainted final move cannot become the drop target')
+  }
   // A pointerup can arrive at a new coordinate without a preceding pointermove.
   for (const [hover, hidden] of [[{ ...sourceC, x: sourceC.x + 10 }, true], [beforeB, false]]) {
     mouse('mouseDown', sourceC)

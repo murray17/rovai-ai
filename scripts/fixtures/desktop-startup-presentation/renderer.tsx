@@ -1007,14 +1007,29 @@ Object.assign(window, { startupTest: {
       const opening = deferred<unknown>()
       campRequest = id => id === 'A' ? opening.promise : campProjection(id)
       await back()
-      publishPreferences({ ...structuredClone(folders), projectOrder: [...folders.projectOrder!].reverse() })
+      const reordered = { ...structuredClone(folders), projectOrder: [...folders.projectOrder!].reverse() }
+      publishPreferences(reordered)
       await flush()
       check(manualUnread('A'), 'A pending open retains the reminder when another window moves a folder')
+      publishPreferences({ ...reordered, threadReadStates: { ...reordered.threadReadStates, B: { manualUnread: true, readThroughGlobalSequence: 0 } } })
       opening.resolve(campProjection('A'))
       await flush(); await flush()
       check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Back restores the Camp ID and title')
-      check(manualUnread('A') === false && !document.querySelector('[data-thread-id="A"] .camp-unread-dot'),
-        'A folder-only broadcast cannot prevent the open Thread clearing its reminder')
+      check(manualUnread('A') === false && !document.querySelector('[data-thread-id="A"] .camp-unread-dot') && manualUnread('B'),
+        'Opening A clears A and preserves a reminder set on B while A was loading')
+      await clickNavigation('导航会话 B', '.camp-nav-open')
+      await markUnread('A')
+      const reopening = deferred<unknown>()
+      campRequest = id => id === 'A' ? reopening.promise : campProjection(id)
+      await back()
+      const pending = responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot
+      publishPreferences({ ...pending, threadReadStates: { ...pending.threadReadStates, A: { ...pending.threadReadStates.A, manualUnread: false } } })
+      publishPreferences(pending)
+      reopening.resolve(campProjection('A'))
+      await flush(); await flush()
+      check(manualUnread('A') && document.querySelector('[data-thread-id="A"] .camp-unread-dot'),
+        'A newer reminder on A survives an older open of A, including when its value changes back')
+      await clickNavigation('导航会话 A', '.camp-nav-open')
       publishPreferences({ ...previous, threadReadStates: (responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot).threadReadStates })
     }
     cases.push('Reordering folders in another window lets an in-flight Thread open clear its manual unread reminder')

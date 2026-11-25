@@ -119,7 +119,7 @@ export function sanitizeRemovedProjects(source: unknown): RemovedNavigationProje
 
 export function isProjectTargetKey(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(PROJECT_KEY_PREFIX)
-    && value.length <= PROJECT_KEY_PREFIX.length + MAX_PROJECT_PATH_LENGTH
+    && isProjectPath(value.slice(PROJECT_KEY_PREFIX.length))
 }
 
 export function isTimestamp(value: unknown): value is string {
@@ -167,6 +167,10 @@ export function registerNavigationProjects(snapshot: NavigationPreferencesSnapsh
 export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: NavigationPreferencesSnapshot): boolean {
   if (!isRecord(source) || !isSupportedVersion(source.schemaVersion)) return false
   const version = source.schemaVersion
+  // A stray folder pin does not prevent the remaining preferences from being edited.
+  const pins = Array.isArray(source.pins) ? source.pins.filter(pin =>
+    !isRecord(pin) || pin.kind !== 'project' || isProjectTargetKey(pin.targetKey)) : source.pins
+  const comparable: Record<string, unknown> = { ...source, pins }
   const expected: Record<string, unknown> = { schemaVersion: version, pins: snapshot.pins }
   if (version >= 2) expected.removedProjects = snapshot.removedProjects
   if (version >= 3) expected.projectOrder = snapshot.projectOrder
@@ -182,7 +186,7 @@ export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: Naviga
     expected.pinnedProjectOrder = source.pinnedProjectOrder
   }
   return Object.keys(source).length === Object.keys(expected).length
-    && Object.entries(expected).every(([key, value]) => JSON.stringify(source[key]) === JSON.stringify(value))
+    && Object.entries(expected).every(([key, value]) => JSON.stringify(comparable[key]) === JSON.stringify(value))
 }
 
 export function orderedPinnedProjects(pins: readonly NavigationPin[], order: readonly string[]): string[] {
@@ -198,15 +202,18 @@ export function moveNavigationProject(snapshot: NavigationPreferencesSnapshot, m
   for (const removed of snapshot.removedProjects) registered.delete(removed.targetKey)
   const pins = new Set(orderedPinnedProjects(snapshot.pins, snapshot.pinnedProjectOrder))
   const base = section === 'pinned' ? [...pins] : [...new Set([...(snapshot.projectOrder ?? []), ...registered])]
-  const eligible = (key: string): boolean => registered.has(key) && pins.has(key) === (section === 'pinned')
-  const rows = base.filter(eligible)
-  const from = rows.indexOf(projectKey)
-  if (from < 0 || beforeProjectKey === projectKey || (rows[from + 1] ?? null) === beforeProjectKey
-    || (beforeProjectKey !== null && !rows.includes(beforeProjectKey))) return snapshot
-  rows.splice(from, 1)
-  rows.splice(beforeProjectKey === null ? rows.length : rows.indexOf(beforeProjectKey), 0, projectKey)
-  // Only replace this section's slots. Unpinning later restores the underlying project position.
+  const rows = section === 'pinned' ? base : base.filter(key => !pins.has(key))
+  const movable = rows.filter(key => registered.has(key))
+  const from = movable.indexOf(projectKey)
+  if (from < 0 || beforeProjectKey === projectKey || (movable[from + 1] ?? null) === beforeProjectKey
+    || (beforeProjectKey !== null && !movable.includes(beforeProjectKey))) return snapshot
+  // Keep visible legacy rows between their neighbours. The tail line is directly
+  // after the last movable folder, including when legacy rows follow it.
+  const order = rows.filter(key => key !== projectKey)
+  const insert = beforeProjectKey === null ? order.indexOf(movable[movable.length - 1]) + 1 : order.indexOf(beforeProjectKey)
+  order.splice(insert, 0, projectKey)
+  if (section === 'pinned') return { ...snapshot, pinnedProjectOrder: order }
+  // Pinned folders keep their underlying position for a later unpin.
   let index = 0
-  const order = base.map(key => eligible(key) ? rows[index++] : key)
-  return section === 'pinned' ? { ...snapshot, pinnedProjectOrder: order } : { ...snapshot, projectOrder: order }
+  return { ...snapshot, projectOrder: base.map(key => pins.has(key) ? key : order[index++]) }
 }
