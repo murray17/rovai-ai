@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 12
+revision: 13
 last_updated: 2026-11-25
 ---
 
@@ -57,7 +57,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 | 扫描、领取与停止 | `ready_pending_inputs` 保留旧单聊的 `JOIN camp`，独立聊天改连 `chat_topic`。FIFO 只取 `requested_mode=start`，写锁内重查归档、活动 Run、最早序号及编辑版本，`needs_repair` 挡住本话题后项。`list_dispatchable_agent_runs_scoped`、`load_claimable_run`、`load_agent_run_execution` 和 `cancel_interrupted_single_chat_runs` 增加按 Conversation 取目标的分支。停止时核对话题、Run 和执行代次，取消执行并释放 lease。迟到输出只记入原代次的诊断。 |
 | 最终答复 | 沿用现有运行端返回的 `final_output`。正文含非空白字符时，终态事务只将原文写入一条 `conversation_message` 并设置 `final_conversation_message_id`。正文为空或全为空白时只结算 Run。工具产生的文件操作留在执行记录。核对 Run、执行代次、目的地和取消状态，每轮至多发表一条最终答复。[现有终态写入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/runtime.rs#L5273-L5288) |
 
-**模型输入。** 队员身份由既有系统提示 `MEMBER_IDENTITY` 提供。各队员共用同一份聊天规则。直发、FIFO 和插话统一使用 `CURRENT_INPUT`，仅随当次用户输入带上引用、附件或显式选择的技能。运行端的工作目录由 Host 设置。[独立聊天的模型输入修订稿](model-context-change-independent-chat.md)
+**模型输入。** 首次建立原生会话时，Bootstrap 依次提供 `SESSION_CHARTER`、所选队员的 `MEMBER_IDENTITY` 和 `ROVAI_PLATFORM_SKILLS`。身份属于系统提示。各队员共用一句私聊回复指引和一句 Thread 写入指引。用户要求创建或写入 Thread 时，工具按 §5 鉴权。直发、FIFO 和插话统一使用 `CURRENT_INPUT`，随当次输入带上引用、附件或显式选择的技能。工作目录由 Host 设置。[完整 Bootstrap 示例及每轮输入](model-context-change-independent-chat.md#新建原生会话)
 
 **插话提交与定位。** `single_chat_pending_input` 增加 `requested_mode` 和原目标 Run／代次。Core 在受理事务里写入私有输入，并在目标 `agent_run_execution_evidence` 中登记一项插话。该项以 `inputId` 稳定定位，沿用执行记录分配的固定 `sequence`，即接口的 `evidenceSequence`。相同请求重放返回原项和原序号。提交后即可显示，正文、附件及引用取自原输入。进入送达未知、签收或转队时，通过原项的 `change_sequence` 刷新视图，定位用的 `sequence` 不变。
 
