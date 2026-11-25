@@ -1591,6 +1591,19 @@ struct ExecutionEvidenceListParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChatExecutionParams {
+    chat_id: String,
+    agent_run_id: String,
+    before_sequence: Option<i64>,
+    after_sequence: Option<i64>,
+    after_change_sequence: Option<i64>,
+    #[serde(default)]
+    refresh_evidence_ids: Vec<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionWindowParams {
     #[serde(rename = "threadId", alias = "campId")]
     camp_id: ThreadId,
@@ -11661,6 +11674,46 @@ impl Core {
                     )?,
                 )?)
             }
+            "chats.pendingInputs.edit" => {
+                let params: UserCommandParams<rovai_core::chat::EditPending> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_command_envelope(params.command_id, params.command);
+                let mut db = self.database.lock().await;
+                let result = rovai_core::chat::edit_pending(&mut db, &envelope)?;
+                if !result.replayed {
+                    emit(
+                        &self.output,
+                        "chats.listChanged",
+                        json!({"chatId":envelope.payload.chat_id}),
+                    );
+                }
+                let mut value = result.result.payload;
+                if let Some(object) = value.as_object_mut() {
+                    object.remove("inputDigest");
+                }
+                Ok(value)
+            }
+            "chats.send" => {
+                let params: UserCommandParams<rovai_core::chat::SendInput> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::chat::send(
+                    &mut database,
+                    user_command_envelope(params.command_id, params.command),
+                )?;
+                let mut value = execution.result.payload;
+                if !execution.replayed {
+                    emit(
+                        &self.output,
+                        "chats.listChanged",
+                        json!({"chatId":value["chatId"]}),
+                    );
+                }
+                if let Some(object) = value.as_object_mut() {
+                    object.remove("inputDigest");
+                }
+                Ok(value)
+            }
             "chats.rename" => {
                 let params: UserCommandParams<rovai_core::chat::RenameChat> =
                     serde_json::from_value(request.params.clone())?;
@@ -11668,19 +11721,29 @@ impl Core {
                 let mut database = self.database.lock().await;
                 let execution = rovai_core::chat::rename(&mut database, &envelope)?;
                 if !execution.replayed && execution.result.payload["changed"] == true {
-                    emit(&self.output, "chats.listChanged", json!({ "chatId": envelope.payload.chat_id }));
+                    emit(
+                        &self.output,
+                        "chats.listChanged",
+                        json!({ "chatId": envelope.payload.chat_id }),
+                    );
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "chats.open" => {
                 let input = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(rovai_core::chat::open(&mut database, input)?)?)
+                Ok(serde_json::to_value(rovai_core::chat::open(
+                    &mut database,
+                    input,
+                )?)?)
             }
             "chats.list" => {
                 let input = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(rovai_core::chat::list(&mut database, input)?)?)
+                Ok(serde_json::to_value(rovai_core::chat::list(
+                    &mut database,
+                    input,
+                )?)?)
             }
             "navigation.search" => {
                 let input =
@@ -12620,6 +12683,31 @@ impl Core {
                 Ok(value)
             }
             "agentRunExecution.changes" => {
+                if request.params.get("chatId").is_some() {
+                    let params: ChatExecutionParams =
+                        serde_json::from_value(request.params.clone())?;
+                    let mut db = self.database.lock().await;
+                    let result = rovai_core::execution_window::read_changes_in_scope(
+                        &mut db,
+                        &params.chat_id,
+                        &params.agent_run_id,
+                        params
+                            .after_change_sequence
+                            .context("Missing change cursor")?,
+                        &params.refresh_evidence_ids,
+                        params
+                            .limit
+                            .unwrap_or(rovai_core::execution_window::DEFAULT_WINDOW_LIMIT),
+                        true,
+                    )?;
+                    let mut data = serde_json::to_value(result)?;
+                    if let Some(object) = data.as_object_mut() {
+                        object.remove("threadId");
+                        object.insert("chatId".into(), json!(params.chat_id));
+                    }
+                    return Ok(data);
+                }
+
                 let params: ExecutionChangesParams =
                     serde_json::from_value(request.params.clone())?;
                 let lock_started_at = Instant::now();
@@ -12696,6 +12784,29 @@ impl Core {
                 Ok(value)
             }
             "agentRunExecution.page" => {
+                if request.params.get("chatId").is_some() {
+                    let params: ChatExecutionParams =
+                        serde_json::from_value(request.params.clone())?;
+                    let mut db = self.database.lock().await;
+                    let result = rovai_core::execution_window::read_range_in_scope(
+                        &mut db,
+                        &params.chat_id,
+                        &params.agent_run_id,
+                        params.before_sequence,
+                        params.after_sequence,
+                        params
+                            .limit
+                            .unwrap_or(rovai_core::execution_window::DEFAULT_WINDOW_LIMIT),
+                        true,
+                    )?;
+                    let mut data = serde_json::to_value(result)?;
+                    if let Some(object) = data.as_object_mut() {
+                        object.remove("threadId");
+                        object.insert("chatId".into(), json!(params.chat_id));
+                    }
+                    return Ok(data);
+                }
+
                 let params: ExecutionWindowParams = serde_json::from_value(request.params.clone())?;
                 let lock_started_at = Instant::now();
                 let mut database = self.database.lock().await;
@@ -28374,6 +28485,14 @@ async fn process_agent_run_exit(
 }
 
 async fn dispatch_pending_single_chat_inputs(core: &Core) -> Result<()> {
+    let chats = {
+        let mut db = core.database.lock().await;
+        rovai_core::chat::publish_ready(&mut db)?
+    };
+    for chat_id in chats {
+        emit(&core.output, "chats.listChanged", json!({"chatId":chat_id}));
+    }
+
     let candidates = {
         let database = core.database.lock().await;
         rovai_core::single_chat::ready_pending_inputs(&database)

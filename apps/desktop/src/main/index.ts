@@ -294,6 +294,8 @@ const allowedMethods = new Set<CoreMethod>([
   'navigation.findThread',
   'chats.list',
   'chats.open',
+  'chats.send',
+  'chats.pendingInputs.edit',
   'chats.rename',
   'navigation.search',
   'navigation.searchMessages',

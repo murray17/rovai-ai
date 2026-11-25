@@ -21,6 +21,10 @@ pub trait DomainCommand: sealed::Sealed + Serialize {
     const TYPE: &'static str;
     const ALLOWED_WHILE_CAMP_DELETING: bool = false;
 
+    fn matches_replay(&self, _stored_payload: &Value) -> Result<bool> {
+        Ok(true)
+    }
+
     /// Existing private draft commands belong to a Host-verified editor.
     fn draft_client(&self) -> Option<&crate::draft_client::DraftClient> {
         None
@@ -469,6 +473,7 @@ where
                 .is_some_and(|client| client.id() == client_id)
         })
         && result.camp_id == envelope.camp_id
+        && envelope.payload.matches_replay(&result.payload)?
     {
         crate::thread_compat::project_command_result(C::TYPE, &mut result.payload)?;
         return Ok(CommandExecution {

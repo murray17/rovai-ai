@@ -113,7 +113,7 @@ function isTarget(value: unknown): value is NavigationTarget {
   switch (target.kind) {
     case 'teams':
     case 'quick_chat': case 'automations': case 'missions': return true
-    case 'chat': return target.chatId === null || isChatId(target.chatId)
+    case 'chat': return (target.chatId === null && (target.draftAgentId === undefined || typeof target.draftAgentId === 'string')) || isChatId(target.chatId)
     case 'camp': return typeof target.threadId === 'string'
     case 'members': return (target.agentId === null || typeof target.agentId === 'string') && ['identity', 'runtime', 'skills', 'mcp'].includes(String(target.tab))
     case 'memory': return target.memoryId === null || typeof target.memoryId === 'string'

@@ -6,23 +6,26 @@ import { useMobileLayout } from './MobileLayout'
 import type { DesktopNavigation, NavigationState } from './desktop-navigation'
 import { navigationShortcut } from './desktop-navigation-input'
 import { useShortcutAction, useShortcutLabel, useShortcuts } from './ShortcutProvider'
-import { clampNavigationWidth, navigationDragLayout, navigationMaxWidth, parseNavigationLayout, NAVIGATION_DEFAULT_WIDTH, NAVIGATION_LAYOUT_KEY, NAVIGATION_MIN_WIDTH, type NavigationLayout } from './navigation-layout'
+import { clampNavigationWidth, navigationDragLayout, navigationMaxWidth, parseNavigationLayout, NAVIGATION_DEFAULT_WIDTH, NAVIGATION_ICON_RAIL_WIDTH, NAVIGATION_LAYOUT_KEY, NAVIGATION_MIN_WIDTH, type NavigationLayout } from './navigation-layout'
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
 import { SplitterFeedback } from './SplitterFeedback'
 
 const NavigationContext = createContext(false)
+const NavigationActionsHost = createContext<HTMLSpanElement | null>(null)
+export const useNavigationActionsHost = (): HTMLSpanElement | null => useContext(NavigationActionsHost)
 export const useNavigationCollapsed = (): boolean => useContext(NavigationContext)
 const EMPTY_HISTORY: NavigationState = { entries: [], index: -1 }
 const emptySnapshot = (): NavigationState => EMPTY_HISTORY
 const noSubscription = (): (() => void) => () => undefined
 
 // Layout state stays below App so resizing does not rebuild the Thread or Composer children.
-export function NavigationShell({ platform, disabled = false, settings = false, navigation, nativeWindowControls, browser = false, className = '', children, ...attributes }: HTMLAttributes<HTMLDivElement> & {
+export function NavigationShell({ platform, disabled = false, settings = false, navigation, nativeWindowControls, browser = false, iconRail = false, className = '', children, ...attributes }: HTMLAttributes<HTMLDivElement> & {
   platform: NodeJS.Platform
   disabled?: boolean
   settings?: boolean
   browser?: boolean
+  iconRail?: boolean
   nativeWindowControls?: Pick<import('@contracts').RovaiApi['windowControls'], 'onNavigationRequested'>
   navigation?: Pick<DesktopNavigation, 'getSnapshot' | 'subscribe' | 'back' | 'forward'>
 }): React.JSX.Element {
@@ -64,11 +67,14 @@ export function NavigationShell({ platform, disabled = false, settings = false, 
   const [menuOpen, setMenuOpen] = useState(false)
   const [chromeSlot, setChromeSlot] = useState<HTMLElement | null>(null)
   const handle = useRef<HTMLDivElement>(null)
+  const [actionsHost, setActionsHost] = useState<HTMLSpanElement | null>(null)
+  const rail = iconRail && !mobile
+  const collapsedWidth = rail ? NAVIGATION_ICON_RAIL_WIDTH : 0
   const maximum = navigationMaxWidth(viewport)
   const fixedSettings = mobile || settings && (browser || platform === 'darwin')
   // Web settings always expose their categories; ordinary-page layout stays saved.
   const collapsed = (heldFold || layout.collapsed) && !mobile && !(browser && settings)
-  const width = collapsed ? 0 : fixedSettings ? NAVIGATION_DEFAULT_WIDTH : clampNavigationWidth(layout.width, maximum)
+  const width = collapsed ? collapsedWidth : fixedSettings ? NAVIGATION_DEFAULT_WIDTH : clampNavigationWidth(layout.width, maximum)
   const paintWidth = (value: number): void => {
     handle.current?.closest<HTMLElement>('.navigation-shell')?.style.setProperty('--rail-width', `${value}px`)
   }
@@ -85,8 +91,8 @@ export function NavigationShell({ platform, disabled = false, settings = false, 
     onCommit: previewWidth,
     onCollapseFrame: paintWidth,
     onFoldPreview: edge => setHeldFold(edge === 'minimum'),
-    onCollapse: before => { paintWidth(0); setLayout({ ...before, collapsed: true }) },
-    onCancel: before => { paintWidth(before.collapsed ? 0 : clampNavigationWidth(before.width, maximum)); setLayout(before) },
+    onCollapse: before => { paintWidth(collapsedWidth); setLayout({ ...before, collapsed: true }) },
+    onCancel: before => { paintWidth(before.collapsed ? collapsedWidth : clampNavigationWidth(before.width, maximum)); setLayout(before) },
     onActiveChange: setResizing
   })
   const label = collapsed ? uiAttribute('展开导航侧栏') : uiAttribute('收起导航侧栏')
@@ -114,6 +120,7 @@ export function NavigationShell({ platform, disabled = false, settings = false, 
   const control = fixedSettings && !collapsed ? null : <div className="navigation-chrome-controls"><button className="navigation-collapse-button" type="button" disabled={disabled} title={label} aria-label={label} aria-expanded={!layout.collapsed} aria-controls="global-navigation" onClick={toggle}>
     <PanelToggleIcon side="left" visible={!layout.collapsed} />
   </button>
+    {rail && <span className="navigation-chat-actions" ref={setActionsHost} />}
     {!collapsed && !fixedSettings && navigation && <div className="navigation-history-controls" role="group" aria-label={uiAttribute("浏览历史")}>
       {(['back', 'forward'] as const).map((direction) => {
         const text = direction === 'back' ? uiAttribute('后退') : uiAttribute('前进')
@@ -128,8 +135,8 @@ export function NavigationShell({ platform, disabled = false, settings = false, 
     </div>}
   </div>
   const shellStyle = useMemo(() => ({ ...attributes.style, '--rail-width': `${width}px` }) as CSSProperties, [attributes.style, width])
-  return <NavigationContext.Provider value={collapsed}>
-    <div {...attributes} className={`app-shell navigation-shell ${className}${collapsed ? ' navigation-collapsed' : ''}${resizing ? ' navigation-resizing' : ''}`} style={shellStyle}>
+  return <NavigationActionsHost.Provider value={actionsHost}><NavigationContext.Provider value={collapsed}>
+    <div {...attributes} className={`app-shell navigation-shell ${className}${rail ? ' icon-rail-shell' : ''}${rail && collapsed ? ' icon-rail-only' : ''}${collapsed ? ' navigation-collapsed' : ''}${resizing ? ' navigation-resizing' : ''}`} style={shellStyle}>
       {children}
       {!fixedSettings && <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenu.Trigger asChild disabled={disabled}>
@@ -155,14 +162,14 @@ export function NavigationShell({ platform, disabled = false, settings = false, 
             }}><SplitterFeedback phase={splitter.phase} target={splitter.target} label={uiAttribute('继续拖动收起侧栏')} /></div>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu" side="right" sideOffset={4} collisionPadding={8}>
-          {[[200, '紧凑宽度'], [270, '默认宽度'], [360, '宽侧栏']].map(([value, text]) => <DropdownMenu.Item key={value} className="sidebar-action-menu-item" onSelect={() => resizeTo(Number(value))}>{uiAttribute(String(text))}</DropdownMenu.Item>)}
+          {[[NAVIGATION_MIN_WIDTH, '紧凑宽度'], [NAVIGATION_DEFAULT_WIDTH, '默认宽度'], [408, '宽侧栏']].map(([value, text]) => <DropdownMenu.Item key={value} className="sidebar-action-menu-item" onSelect={() => resizeTo(Number(value))}>{uiAttribute(String(text))}</DropdownMenu.Item>)}
           <DropdownMenu.Separator className="sidebar-action-menu-separator" />
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={toggle}>{label}</DropdownMenu.Item>
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root>}
-      {!fixedSettings && <span id="navigation-resize-help" className="sr-only"><UiText zh={"方向键调宽，Shift 加速，Home 最窄，End 最宽，Enter 折叠，空格选择宽度。拖到 200 像素先停住，继续向左内推 64 像素直接收起，无需松手或停留；按住反向拉回 24 像素可恢复；从左边缘拖出恢复。Escape 取消拖拽。"} /></span>}
+      {!fixedSettings && <span id="navigation-resize-help" className="sr-only"><UiText zh={"方向键调宽，Shift 加速，Home 最窄，End 最宽，Enter 折叠，空格选择宽度。拖到 248 像素先停住，继续向左内推 64 像素直接收起，无需松手或停留；按住反向拉回 24 像素可恢复；从左边缘拖出恢复。Escape 取消拖拽。"} /></span>}
       {/* Electron applies drag regions in DOM order; keep this no-drag control after the sidebar and topbar drag regions. */}
       {!browser && platform === 'win32' ? chromeSlot && createPortal(control, chromeSlot) : <div className={browser ? "navigation-browser-control" : "navigation-macos-control"}>{control}</div>}
     </div>
-  </NavigationContext.Provider>
+  </NavigationContext.Provider></NavigationActionsHost.Provider>
 }

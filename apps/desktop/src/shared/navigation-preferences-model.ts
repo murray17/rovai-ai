@@ -53,11 +53,11 @@ export function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
     const kind = candidate.kind
     const targetKey = candidate.targetKey
     if (
-      (kind !== 'camp' && kind !== 'project')
+      (kind !== 'camp' && kind !== 'project' && kind !== 'chat')
       || typeof targetKey !== 'string'
       || (kind === 'camp'
         ? !isThreadId(targetKey)
-        : !isProjectTargetKey(targetKey))
+        : kind === 'chat' ? !isChatId(targetKey) : !isProjectTargetKey(targetKey))
       || !isTimestamp(candidate.pinnedAt)
     ) continue
     const key = `${kind}:${targetKey}`

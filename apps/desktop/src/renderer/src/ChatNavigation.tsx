@@ -9,11 +9,14 @@ import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 import { chatHasUnread, chatRailHasUnread } from './navigation-unread'
 import { uiAttribute } from './interface-language'
+import { ChatMemberPicker, type ChatPickerProps } from './ChatMemberPicker'
 import type { useChatList } from './useChatList'
 import './chat-navigation.css'
 
-export interface ChatNavigationProps {
+export interface ChatNavigationProps extends ChatPickerProps {
   list: ReturnType<typeof useChatList>
+  pinnedIds: string[]
+  togglePin(chatId:string): void
   states: Record<string, ChatReadState>
   activeId: string | null
   projects(): void
@@ -37,7 +40,7 @@ export function ChatSectionRail({ chat, view, projects, missions, automations, m
   return <nav className="section-rail" aria-label={uiAttribute('主要页面')}>
     <div className="section-rail-drag" />
     {item('项目','folder-open',view === 'camp' || view === 'compose',projects)}
-    {item('聊天','chats',view === 'chat',() => chat.open(chat.activeId ?? chat.list.page?.items[0]?.chatId ?? null),unread ? '有未读回复' : undefined)}
+    {item('聊天','chats',view === 'chat',() => chat.open(chat.activeId ?? chat.list.page?.items[0]?.chatId ?? chat.list.page?.pinnedItems?.[0]?.chatId ?? null),unread ? '有未读回复' : undefined)}
     <i className="section-rail-divider"/>
     {item('使命板','briefcase-business',view === 'missions',missions,missionUnread ? '有新消息' : undefined)}
     {item('定时任务','calendar-clock',view === 'automations',automations)}
@@ -67,6 +70,7 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
       <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild><button className="sidebar-menu-trigger camp-menu-trigger" type="button" aria-label={uiAttribute('管理“{0}”', item.title)}>⋯</button></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu" align="end" sideOffset={4} loop>
+          <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => navigation.togglePin(item.chatId)}>{uiAttribute(navigation.pinnedIds.includes(item.chatId) ? '取消置顶' : '置顶')}</DropdownMenu.Item>
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => mark(item, !unread)}>{uiAttribute(unread ? '标为已读' : '标为未读')}</DropdownMenu.Item>
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => setEditing(item)}>{uiAttribute('重命名')}</DropdownMenu.Item>
         </DropdownMenu.Content></DropdownMenu.Portal>
@@ -74,10 +78,13 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
     </div>
   }
   return <section className="navigation-scroll chat-list-panel" aria-label={uiAttribute('聊天列表')}>
-    <div className="sidebar-group-title navigation-section-title"><span>{uiAttribute('聊天')}</span>{headerAction}</div>
+    {!!list.page?.pinnedItems?.length && <section className="chat-pins"><div className="sidebar-group-title navigation-section-title">{uiAttribute('置顶')}</div>
+      {list.page.pinnedItems.map(row)}
+    </section>}
+    <div className="sidebar-group-title navigation-section-title"><span>{uiAttribute('聊天')}</span>{headerAction ?? <ChatMemberPicker {...navigation} />}</div>
     {list.failed && <button type="button" className="quiet-button" onClick={() => void list.refresh()}>{uiAttribute('重新读取聊天列表')}</button>}
     {list.page?.items.map(row)}
-    {list.page && !list.page.items.length && <p className="sidebar-empty">{uiAttribute('还没有聊天')}</p>}
+    {list.page && !list.page.items.length && !list.page.pinnedItems?.length && <p className="sidebar-empty">{uiAttribute('还没有聊天')}</p>}
     {(list.hasPrevious || list.page?.nextCursor) && <div className="camp-pagination-actions">
       {list.hasPrevious && <button type="button" disabled={list.loading} onClick={list.previous}>{uiAttribute('上一页')}</button>}
       {list.page?.nextCursor && <button type="button" disabled={list.loading} onClick={list.next}>{uiAttribute('下一页')}</button>}

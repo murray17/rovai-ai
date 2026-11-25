@@ -1,3 +1,7 @@
+#[path = "chat_input.rs"]
+mod input;
+pub(crate) use input::{EditPending, SendInput, edit_pending, publish_ready, send};
+
 use std::collections::BTreeMap;
 
 use anyhow::{Result, ensure};
@@ -20,6 +24,8 @@ pub struct ListParams {
     pub limit: Option<usize>,
     pub after: Option<ListCursor>,
     pub agent_id: Option<String>,
+    #[serde(default)]
+    pub pinned_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,6 +59,8 @@ pub struct ListItem {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatList {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pinned_items: Vec<ListItem>,
     pub items: Vec<ListItem>,
     pub next_cursor: Option<ListCursor>,
     pub reply_index: Vec<ReplyPosition>,
@@ -96,6 +104,8 @@ fn list_in_snapshot(tx: &Transaction<'_>, input: ListParams) -> Result<ChatList>
         .query_map([CURRENT_USER_ID], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
+    ensure!(input.pinned_ids.len() <= 4096, "Too many pinned chats");
+    let pinned_ids = serde_json::to_string(&input.pinned_ids)?;
     let mut page_query = tx.prepare(&format!(
         "SELECT c.id, topic.title, c.agent_id, p.display_name, p.avatar_ref, topic.version,
                 topic.last_activity_global_sequence,
@@ -104,10 +114,25 @@ fn list_in_snapshot(tx: &Transaction<'_>, input: ListParams) -> Result<ChatList>
          FROM chat_topic topic JOIN conversation c ON c.id=topic.conversation_id
          JOIN agent_profile p ON p.id=c.agent_id WHERE {VISIBLE}
            AND (?2 IS NULL OR c.agent_id=?2)
+           AND (c.id IN (SELECT value FROM json_each(?6))) = ?7
            AND (?3 IS NULL OR topic.last_activity_global_sequence<?3
                 OR (topic.last_activity_global_sequence=?3 AND topic.conversation_id>?4))
          ORDER BY topic.last_activity_global_sequence DESC,topic.conversation_id LIMIT ?5"
     ))?;
+    let project = |r: &rusqlite::Row<'_>| {
+        let chat_id: String = r.get(0)?;
+        Ok(ListItem {
+            last_reply_sequence: positions[&chat_id],
+            chat_id,
+            title: r.get(1)?,
+            agent_id: r.get(2)?,
+            display_name: r.get(3)?,
+            avatar_ref: r.get(4)?,
+            version: r.get(5)?,
+            last_activity_global_sequence: r.get(6)?,
+            is_processing: r.get(7)?,
+        })
+    };
     let mut items = page_query
         .query_map(
             params![
@@ -118,24 +143,31 @@ fn list_in_snapshot(tx: &Transaction<'_>, input: ListParams) -> Result<ChatList>
                     .as_ref()
                     .map(|c| c.last_activity_global_sequence),
                 input.after.as_ref().map(|c| &c.chat_id),
-                (limit + 1) as i64
+                (limit + 1) as i64,
+                pinned_ids,
+                false
             ],
-            |r| {
-                let chat_id: String = r.get(0)?;
-                Ok(ListItem {
-                    last_reply_sequence: positions[&chat_id],
-                    chat_id,
-                    title: r.get(1)?,
-                    agent_id: r.get(2)?,
-                    display_name: r.get(3)?,
-                    avatar_ref: r.get(4)?,
-                    version: r.get(5)?,
-                    last_activity_global_sequence: r.get(6)?,
-                    is_processing: r.get(7)?,
-                })
-            },
+            project,
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let pinned_items = if input.pinned_ids.is_empty() {
+        Vec::new()
+    } else {
+        page_query
+            .query_map(
+                params![
+                    CURRENT_USER_ID,
+                    input.agent_id,
+                    None::<i64>,
+                    None::<String>,
+                    input.pinned_ids.len() as i64,
+                    pinned_ids,
+                    true
+                ],
+                project,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
     let next_cursor = if items.len() > limit {
         items.truncate(limit);
         items.last().map(|row| ListCursor {
@@ -153,6 +185,7 @@ fn list_in_snapshot(tx: &Transaction<'_>, input: ListParams) -> Result<ChatList>
         })
         .collect();
     Ok(ChatList {
+        pinned_items,
         items,
         next_cursor,
         reply_index,
@@ -250,6 +283,12 @@ pub struct ChatHeader {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunSummary {
+    pub version: i64,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub cancel_requested_at: Option<String>,
+    pub last_error_code: Option<String>,
     pub run_id: String,
     pub trigger_message_id: String,
     pub final_message_id: Option<String>,
@@ -260,7 +299,17 @@ pub struct RunSummary {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PendingInput {
+    pub input_id: String,
+    pub body: String,
+    pub revision: i64,
+    pub converted_from_steer: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OpenChat {
+    pub pending_inputs: Vec<PendingInput>,
     pub chat: ChatHeader,
     pub messages: Vec<crate::single_chat::SingleChatMessageView>,
     pub runs: Vec<RunSummary>,
@@ -323,7 +372,7 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
     let runs = {
         let mut stmt=tx.prepare(
             "SELECT id,trigger_conversation_message_id,final_conversation_message_id,status,
-                    execution_epoch,execution_evidence_change_sequence FROM agent_run
+                    execution_epoch,execution_evidence_change_sequence,version,created_at,started_at,ended_at,cancel_requested_at,last_error_code FROM agent_run
              WHERE conversation_id=?1 AND (trigger_conversation_message_id IN (SELECT value FROM json_each(?2))
                OR final_conversation_message_id IN (SELECT value FROM json_each(?2))
                OR status IN ('queued','running','waiting')) ORDER BY created_at,id",
@@ -336,12 +385,32 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
                 status: r.get(3)?,
                 execution_epoch: r.get(4)?,
                 through_change_sequence: r.get(5)?,
+                version: r.get(6)?,
+                created_at: r.get(7)?,
+                started_at: r.get(8)?,
+                ended_at: r.get(9)?,
+                cancel_requested_at: r.get(10)?,
+                last_error_code: r.get(11)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let pending_inputs = {
+        let mut stmt = tx.prepare("SELECT id,body,revision,target_run_id IS NOT NULL FROM single_chat_pending_input
+            WHERE conversation_id=?1 AND requested_mode='start' AND state IN ('queued','needs_repair') ORDER BY enqueue_sequence")?;
+        stmt.query_map([&chat.chat_id], |row| {
+            Ok(PendingInput {
+                input_id: row.get(0)?,
+                body: row.get(1)?,
+                revision: row.get(2)?,
+                converted_from_steer: row.get(3)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     tx.commit()?;
     Ok(OpenChat {
+        pending_inputs,
         chat,
         messages,
         runs,
@@ -386,6 +455,10 @@ mod tests {
             json!([{"chatId":"new","lastReplySequence":0},{"chatId":"old","lastReplySequence":3}]);
         assert_eq!(first["items"][0]["chatId"], "new");
         assert_eq!(first["items"][0]["isProcessing"], false);
+        let pinned = read(json!({"limit":1,"pinnedIds":["old"]}));
+        assert_eq!(pinned["pinnedItems"][0]["chatId"], "old");
+        assert_eq!(pinned["items"][0]["chatId"], "new");
+        assert_eq!(pinned["replyIndex"], expected);
         assert_eq!(first["replyIndex"], expected);
         let second = read(json!({"limit":1,"after":first["nextCursor"]}));
         assert_eq!(second["items"][0]["chatId"], "old");

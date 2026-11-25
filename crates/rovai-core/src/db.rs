@@ -4,6 +4,10 @@ mod attachment_paths;
 mod automation_naming;
 #[path = "db_channel_native.rs"]
 mod channel_native;
+#[path = "db_chat_inputs.rs"]
+mod chat_inputs;
+#[path = "db_chat_topics.rs"]
+mod chat_topics;
 #[path = "db_claim_context.rs"]
 mod claim_context;
 #[path = "db_compact_execution.rs"]
@@ -66,8 +70,6 @@ mod subagent;
 mod task_capability;
 #[path = "db_teams.rs"]
 mod teams;
-#[path = "db_chat_topics.rs"]
-mod chat_topics;
 #[path = "db_thread_archive.rs"]
 mod thread_archive;
 #[path = "db_web_pasted_text.rs"]
@@ -532,7 +534,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 183;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 184;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1041,6 +1043,7 @@ struct CurrentMigrationState {
     v231: bool,
     v232: bool,
     v233: bool,
+    v234: bool,
 }
 
 impl CurrentMigrationState {
@@ -1062,6 +1065,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v234 {
+            let mut previous = *self;
+            previous.v234 = false;
+            return schema == 184 && previous.admits(contract, 183, classifier);
+        }
         if self.v233 {
             let mut previous = *self;
             previous.v233 = false;
@@ -3892,6 +3900,7 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 184 || chat_inputs::schema_matches(connection)?)
             && (marker.projection_schema_version < 183 || chat_topics::schema_matches(connection)?)
             && (marker.projection_schema_version < 181
                 || run_continuation::retired_schema_matches(connection)?)
@@ -6332,7 +6341,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=230),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=231),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=232),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=233)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=233),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=234)
         "#,
         [],
         |row| {
@@ -6501,6 +6511,7 @@ fn load_current_migration_state(
                 v231: row.get(161)?,
                 v232: row.get(162)?,
                 v233: row.get(163)?,
+                v234: row.get(164)?,
             })
         },
     )
@@ -8921,6 +8932,9 @@ impl Database {
         }
         if !self.schema_migration_applied(233)? {
             observe_migration_step(progress, "migration_233", || chat_topics::migrate(self))?;
+        }
+        if !self.schema_migration_applied(234)? {
+            observe_migration_step(progress, "migration_234", || chat_inputs::migrate(self))?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40682,7 +40696,8 @@ mod tests {
             "migration_230".into(),
             "migration_231".into(),
             "migration_232".into(),
-            "migration_233".into()
+            "migration_233".into(),
+            "migration_234".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40763,7 +40778,8 @@ mod tests {
                 "migration_230",
                 "migration_231",
                 "migration_232",
-                "migration_233"
+                "migration_233",
+                "migration_234"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
@@ -42857,6 +42873,7 @@ mod tests {
             v231: version >= 231,
             v232: version >= 232,
             v233: version >= 233,
+            v234: version >= 234,
         }
     }
 

@@ -136,6 +136,8 @@ import { MissionHeader } from './MissionHeader'
 import { FilePreviewProvider } from './FilePreviewContext'
 import { useChatList } from './useChatList'
 import { ChatWorkspace } from './ChatWorkspace'
+import { ChatContact } from './ChatContact'
+import { attachSourceThreadToDraft } from './chat-draft'
 import { NavigationShell } from './NavigationShell'
 import { StartupLoadingCanvas } from './StartupLoadingCanvas'
 import { createDesktopNavigation, type NavigationTarget, type NavigationTransaction, type NavigationIntent, type MemoryNavigationTarget, type ArchiveNavigationSelection } from './desktop-navigation'
@@ -1154,8 +1156,11 @@ export function BusinessApp({
   )
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(initialTarget)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>(desktop ? 'loading' : 'resolved')
+  const [chatHeadingHost,setChatHeadingHost] = useState<HTMLDivElement | null>(null)
+  const [chatDraftAgentId, setChatDraftAgentId] = useState<string | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
-  const chatList = useChatList(client, startupStatus === 'resolved' && !shuttingDown)
+  const chatPinnedIds = useMemo(() => navigationPins.filter(pin => pin.kind === 'chat').map(pin => pin.targetKey), [navigationPins])
+  const chatList = useChatList(client, startupStatus === 'resolved' && !shuttingDown, chatPinnedIds)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
@@ -1639,6 +1644,10 @@ export function BusinessApp({
     setMemberReadIssue(reportOperationFailure('members.read', error).message)
     throw error
   }), [memberRosterReader])
+
+  useEffect(() => {
+    if (view === 'chat' && startupStatus === 'resolved') void loadAgents().catch(() => undefined)
+  }, [view,startupStatus,loadAgents])
 
   useEffect(() => {
     if (startupStatus !== 'resolved' || view !== 'members') return
@@ -3387,7 +3396,7 @@ export function BusinessApp({
         case 'teams': setView('teams'); break
         case 'automations': setView('automations'); break
         case 'missions': setView('missions'); break
-        case 'chat': setActiveChatId(target.chatId); setView('chat'); break
+        case 'chat': setChatDraftAgentId(target.draftAgentId ?? null); setActiveChatId(target.chatId); setView('chat'); break
         case 'quick_chat': setView('compose'); break
       }
     }
@@ -4772,7 +4781,8 @@ export function BusinessApp({
     }).catch(error => notifyError(errorMessage(error)))
   }
   const renderNavigation = (drawer = false): React.JSX.Element => <ThreadNavigation
-    chatNavigation={{list: chatList, states: navigationPreferences?.chatReadStates ?? {}, activeId: activeChatId,
+    chatNavigation={{list: chatList, pinnedIds:chatPinnedIds, togglePin:id => {void toggleNavigationPin('chat',id)}, profiles: agents, loadProfiles: loadAgents,
+      chooseMember: agentId => { setMobileConversationDrawerOpen(false); void desktopNavigation.push({kind:'chat', chatId:null, draftAgentId:agentId}) }, states: navigationPreferences?.chatReadStates ?? {}, activeId: activeChatId,
       projects: () => { setMobileConversationDrawerOpen(false); void desktopNavigation.push(selectedThreadId ? {kind:'camp',threadId:selectedThreadId} : {kind:'quick_chat'}) },
       open: chatId => { setMobileConversationDrawerOpen(false); void desktopNavigation.push({kind: 'chat',chatId}) },
       mark: (item, unread) => markChat(item.chatId, item.lastReplySequence, unread),
@@ -4893,7 +4903,17 @@ export function BusinessApp({
       }
     }}>
     <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onArchive={async mission => { await changeArchive(mission.threadId, true, 'mission') }} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
-    <NavigationShell platform={client.platform} settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
+    <ChatContact.Provider value={async (agentId,source) => {
+      const visit=desktopNavigation.captureVisit()
+      try {
+        const page=await client.request<import('@contracts').ChatListPage>('chats.list',{agentId,limit:1})
+        if (!visit.isCurrent()) return
+        const id=page.items[0]?.chatId ?? null
+        if (source) attachSourceThreadToDraft(agentId,id,source)
+        await desktopNavigation.push(id ? {kind:'chat',chatId:id} : {kind:'chat',chatId:null,draftAgentId:agentId})
+      } catch (failure) { notifyError(failure instanceof Error ? failure.message : String(failure)); throw failure }
+    }}>
+    <NavigationShell platform={client.platform} iconRail settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={(view === 'camp' && !missionDrawer) || view === 'chat' ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!startupGateVisible && !shuttingDown && forkToast && <AppToast toast={forkToast}
         onClose={() => {
           if (forkToast.loading) dismissForkLoading()
@@ -4903,6 +4923,10 @@ export function BusinessApp({
       {!startupGateVisible && mobile && ['compose', 'members', 'teams', 'automations'].includes(view) && <MobilePageHeader
         title={({ compose:uiAttribute("新对话"), members:uiAttribute("队员"), teams:uiAttribute("团队"), automations:uiAttribute("定时任务") } as Record<string, string>)[view]}
         onOpenMenu={openMobileMenu} menuOpen={mobileConversationDrawerOpen} triggerRef={mobileConversationListButtonRef} />}
+      {!startupGateVisible && view === 'chat' && <header className="topbar camp-topbar"><div className="topbar-conversation-context">
+        {mobile && <button type="button" className="mobile-icon-button" onClick={event => openMobileMenu(event.currentTarget)} aria-label={uiAttribute('打开导航')}>☰</button>}
+        <div ref={setChatHeadingHost}/>
+      </div></header>}
       {!startupGateVisible && view === 'camp' && !missionThread && <AppHeader
         threadTitle={activeThreadTitle ||uiAttribute("对话")}
         contextLabel={activeThreadContextLabel}
@@ -5051,9 +5075,10 @@ export function BusinessApp({
           </MissionSurface>
         )}
 
-        {!startupGateVisible && view === 'chat' && (activeChatId
-          ? <ChatWorkspace key={activeChatId} client={client} chatId={activeChatId} theme={appearance.resolvedTheme} onRead={(id, sequence) => markChat(id, sequence, false)}/>
-          : <div className="chat-workspace-messages"><h1>{uiAttribute('聊天')}</h1></div>)}
+        {!startupGateVisible && view === 'chat' && <ChatWorkspace key={activeChatId ?? chatDraftAgentId ?? 'index'}
+          client={client} chatId={activeChatId} draftAgentId={chatDraftAgentId} profiles={agents} header={chatHeadingHost} theme={appearance.resolvedTheme}
+          onRead={(id, sequence) => markChat(id, sequence, false)}
+          onFirst={id => { desktopNavigation.captureCurrentEntry().update({kind:'chat',chatId:id}); setChatDraftAgentId(null); setActiveChatId(id); void chatList.refresh() }}/>}
         {!startupGateVisible && view === 'compose' && (
           <QuickChatWorkspace
             agents={agents}
@@ -5275,6 +5300,7 @@ export function BusinessApp({
         onDownload={appUpdates.download}
       />}
     </NavigationShell>
+    </ChatContact.Provider>
     {startupStatus !== 'waiting' && <StartupLoadingCanvas visible={startupLoadingVisible} route={startupLoadingRoute} />}
     </MissionInteractionProvider>
     </ThreadReferencePreviewProvider>
@@ -5686,7 +5712,7 @@ async function resolveNavigationPins(
   const validPins = pins.filter((pin) =>
     pin.kind === 'camp'
       ? campById.has(pin.targetKey)
-      : validProjectKeys.has(pin.targetKey)
+      : pin.kind === 'chat' || validProjectKeys.has(pin.targetKey)
   )
   return {
     pins: validPins,

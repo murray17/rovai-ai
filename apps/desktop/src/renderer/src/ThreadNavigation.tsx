@@ -9,6 +9,7 @@ import { useMobileLayout } from './MobileLayout'
 import { useNavigationPressMenu } from './useNavigationPressMenu'
 import { useProjectFolderDrag } from './use-project-folder-drag'
 import { orderedPinnedProjects } from '../../shared/navigation-preferences-model'
+import { ChatMemberPicker } from './ChatMemberPicker'
 import { ChatListPanel, ChatSectionRail, type ChatNavigationProps } from './ChatNavigation'
 import { navigationThreadHasUnread } from './navigation-unread'
 import { useInterruptionAttention } from './thread-interruption-attention'
@@ -57,7 +58,8 @@ import { NavigationTitle } from './NavigationTitle'
 import { formatThreadTitle, normalizeThreadTitle, THREAD_TITLE_MAX_SCALARS } from './camp-title'
 import { ProjectRenameDialog } from './ProjectRenameDialog'
 import { normalizeFailure, reportOperationFailure } from './operation-failure'
-import { useNavigationCollapsed } from './NavigationShell'
+import { createPortal } from 'react-dom'
+import { useNavigationActionsHost, useNavigationCollapsed } from './NavigationShell'
 import {
   NAVIGATION_INITIAL_VISIBLE_CAMPS,
   NAVIGATION_MORE_CAMPS_STEP,
@@ -297,6 +299,7 @@ export function ThreadNavigation({
 }): JSX.Element {
   const client = useThreadClient()
   const mobile = useMobileLayout()
+  const actionsHost = useNavigationActionsHost()
   const collapsed = useNavigationCollapsed()
   const navigationCollapsed = !mobile && collapsed
   const settingsSidebar = view === 'settings' && !mobile
@@ -557,7 +560,17 @@ export function ThreadNavigation({
 
   return (
     <>
-      <aside id={navigationId} className={`unified-sidebar ${chatNavigation ? 'has-chat-rail' : ''} ${settingsSidebar ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={settingsSidebar ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
+      {chatNavigation && actionsHost && !mobile && !settingsSidebar && createPortal(<>
+        <button className="navigation-collapse-button" type="button" aria-label={searchLabel}
+          title={jumpLabel ? `${searchLabel}（${jumpLabel}）` : searchLabel} onClick={() => setPaletteOpen(true)}>
+          <NavigationIcon name="search" />
+        </button>
+        {collapsed && view === 'chat' && <ChatMemberPicker {...chatNavigation} toolbar />}
+        {collapsed && (view === 'camp' || view === 'compose') && <button className="navigation-collapse-button" type="button"
+          aria-label={uiAttribute('新对话')} title={uiAttribute('新对话')} disabled={state !== 'ready' || creatingConversation}
+          onClick={onNewConversation}><NavigationIcon name="square-pen" /></button>}
+      </>, actionsHost)}
+      <aside id={navigationId} className={`unified-sidebar ${chatNavigation ? 'has-chat-rail' : ''} ${settingsSidebar ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || (navigationCollapsed && !chatNavigation)} aria-label={settingsSidebar ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
         {chatNavigation && <ChatSectionRail chat={chatNavigation} view={view} projects={chatNavigation.projects} missions={onMissions} automations={onAutomations} members={onMembers} teams={onTeams}
           settings={updateBadge ? onOpenUpdates : onSettings} missionUnread={unreadMissionCount > 0} update={updateBadge}/>}
         <div className="unified-sidebar-drag" aria-hidden="true" />

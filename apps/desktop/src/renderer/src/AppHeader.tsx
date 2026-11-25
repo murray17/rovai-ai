@@ -85,9 +85,11 @@ export function AppHeader({
           ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
           : <PanelToggleIcon side="left" visible={false} />}</button>}
         {onBack && <MobileBack label={previewVisible ? uiAttribute("返回对话") : uiAttribute("返回对话列表")} onClick={previewVisible ? filePreview!.hidePane : onBack} />}
-        <div className="context-breadcrumb" hidden={hideTitle}>
-          {contextLabel && (browser?.store ? <button type="button" className="context-project project-files-project" title={uiAttribute('显示／隐藏文件目录')} aria-expanded={browser.visible} aria-controls="project-files-pane" onClick={event => browser.toggle(event.currentTarget)}><ProjectFolderIcon /><span>{contextLabel}</span></button> : <span className="context-project">{contextLabel}</span>)}
-          {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
+        <div className="context-breadcrumb workspace-title" hidden={hideTitle}>
+          {contextLabel && browser?.store ? <button type="button" className="workspace-title-icon is-button" title={contextLabel}
+            aria-label={uiAttribute('{0}，显示／隐藏文件目录', contextLabel)} aria-expanded={browser.visible}
+            aria-controls="project-files-pane" onClick={event => browser.toggle(event.currentTarget)}><ProjectFolderIcon /></button>
+            : <span className="workspace-title-icon" title={contextLabel ?? undefined}><ProjectFolderIcon /></span>}
           <h1 title={title}>{title}</h1>
         </div>
         <div className="topbar-context-status" aria-live="polite">

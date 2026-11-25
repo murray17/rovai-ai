@@ -32,6 +32,8 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 **首发。** 选人只读队员资料。本机按用户与队员保存未发送草稿，同一份草稿跨窗口共用 `draftId`。首发校验队员、引用和附件，在事务内建立 `conversation`，沿用 `resolve_frozen_runtime` 核对运行端配置、授权和就绪状态。运行端未就绪就回滚并返回具体原因，草稿保留在本机。校验通过才一并提交 Conversation、`chat_topic`、首条 `conversation_message`、首个 `agent_run` 和成功回执。[现有发送准入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L715-L744)
 
+输入框里的 `/` 使用队员档案中的运行端。选人后的草稿和已有话题都按需读取现有工具箱与该运行端的用户级技能，省去项目级扫描。工具箱里可以临时点选队员尚未配置的一项。候选不依赖 `chatId`，只把用户实际点选的技能随本条输入保存。模型侧按 [R8](model-context-change-independent-chat.md) 投递。
+
 标题取首句，最多 20 个用户可见字符。用户首条消息只有附件时取首个文件名，只有引用时取引用标题。此后由用户按话题版本手动改名。续聊沿用原 ID，另起话题用新草稿，成功首发时才分配新 ID。
 
 **首发去重。** Host 按认证用户和请求中的 `draftId` 稳定派生首发 `commandId`。回执以 `commandId` 查找，保存发送内容摘要和结果，省去明文 `draftId` 副本。Core 用 `canonical_json_digest` 计算队员、正文、引用、有序附件标识及本条有序技能选择的摘要。事务前快速查询和取得写锁后的再次查询共用身份、作用域及摘要校验。摘要相同返回原三个 ID，摘要不同返回冲突并保留后提交窗口的输入。已有成功回执优先于运行端就绪检查重放。可修正的拒绝回滚并直接返回，去重键留给该草稿下次首发。成功时客户端只清除已发送的草稿版本。[网关的两次查重](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L249-L305) · [现有重放比较](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L482)

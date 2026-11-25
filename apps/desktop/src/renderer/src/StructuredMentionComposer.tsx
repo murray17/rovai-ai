@@ -140,7 +140,7 @@ export interface StructuredMentionComposerHandle {
 
 export interface StructuredMentionComposerProps {
   referenceScope?: ReferenceScope
-  purpose?: 'message' | 'mission'
+  purpose?: 'message' | 'mission' | 'chat'
   onDocumentChange?(document: ComposerDocument): void
   onEffectiveDocumentChange?(document: ComposerDocument): void
   inputHistory?: () => ComposerDocument[]
@@ -578,7 +578,7 @@ function ComposerBridge({
   const skillOpen = triggerMatch?.kind === 'skill'
   useEffect(() => { if (skillOpen && skillCatalogStatus === 'loading') onNeedSkills?.() }, [skillOpen, skillCatalogStatus, onNeedSkills])
   const mentionOptions = useMemo(
-    () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery, inviteLayer, purpose !== 'mission'),
+    () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery, inviteLayer, purpose === 'message'),
     [inviteLayer, members, mentionQuery, purpose]
   )
   const referencePicker = useReferencePicker(referenceScope, triggerMatch, inviteLayer, mentionOptions, filesSupported)
@@ -872,7 +872,7 @@ function ComposerBridge({
   }, [editor])
 
   const mentionMenuOptions = referenceScope ? referencePicker.options : mentionOptions
-  const getMentionOptions = (query: string) => callbacks.current.referenceScope ? pickerRef.current.query === query ? pickerRef.current.options : [] : structuredMentionOptions(callbacks.current.members, query, inviteLayerRef.current, callbacks.current.purpose !== 'mission')
+  const getMentionOptions = (query: string) => callbacks.current.referenceScope ? pickerRef.current.query === query ? pickerRef.current.options : [] : structuredMentionOptions(callbacks.current.members, query, inviteLayerRef.current, (callbacks.current.purpose ?? 'message') === 'message')
   const skillMenuOptions = useMemo(() => skillOptions.slice(0, 50), [skillOptions])
   const mentionMenuId = `${id || generatedId}-mention-options`
   const skillMenuId = `${id || generatedId}-skill-options`

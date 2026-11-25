@@ -115,7 +115,7 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
           })
         },
         removeProject: (key, threadIds) => commitNavigation(current => ({
-          pins: current.pins.filter(pin => !(pin.kind === 'project' ? pin.targetKey === key : threadIds.includes(pin.targetKey))),
+          pins: current.pins.filter(pin => !(pin.kind === 'project' ? pin.targetKey === key : pin.kind === 'camp' && threadIds.includes(pin.targetKey))),
           registeredProjects: current.registeredProjects.filter(path => `directory:${path}` !== key),
           projectOrder: current.projectOrder?.filter(item => item !== key) ?? null,
           removedProjects: [...current.removedProjects.filter(p => p.targetKey !== key), { targetKey: key, removedAt: new Date().toISOString() }]

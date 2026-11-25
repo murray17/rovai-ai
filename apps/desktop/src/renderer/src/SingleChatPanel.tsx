@@ -336,16 +336,18 @@ export function SingleChatRunHistory({
   finalMessage,
   now,
   cancelling = false,
-  onNotify = () => undefined
+  onNotify = () => undefined,
+  onExpand
 }: {
   threadId: string
   conversationId: string
-  run: SingleChatRunView
+  run: Omit<SingleChatRunView, 'threadTurnId'> & { threadTurnId?: string }
   evidence: AgentRunExecutionEvidenceView[]
   finalMessage: SingleChatMessageView | null
   now: string
   cancelling?: boolean
   onNotify?(message: string): void
+  onExpand?(expanded: boolean): void
 }): React.JSX.Element {
   const runtime = useRuntimePhase(threadId, run)
   const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
@@ -454,7 +456,7 @@ export function SingleChatRunHistory({
         <details
           className={`single-chat-run-history${terminal ? ' is-terminal' : ' is-live'}`}
           open={!terminal || open}
-          onToggle={(event) => { if (terminal) setOpen(event.currentTarget.open) }}
+          onToggle={(event) => { if (terminal) { setOpen(event.currentTarget.open); onExpand?.(event.currentTarget.open) } }}
         >
           <summary hidden={!terminal}>
             <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>

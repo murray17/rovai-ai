@@ -42,6 +42,11 @@ fn agent_run_belongs_to_camp(
     )?)
 }
 
+fn agent_run_belongs_to_chat(connection: &Connection, chat_id: &str, run_id: &str) -> Result<bool> {
+    Ok(connection.query_row("SELECT EXISTS(SELECT 1 FROM agent_run r JOIN chat_topic t ON t.conversation_id=r.conversation_id
+        WHERE r.id=?1 AND r.invocation_kind='chat' AND t.conversation_id=?2 AND t.owner_user_id=?3 AND t.deletion_operation_id IS NULL)",
+        params![run_id,chat_id,crate::current_user::CURRENT_USER_ID],|row|row.get(0))?)
+}
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionWindowPage {
@@ -85,6 +90,26 @@ pub fn read_range(
     after_position: Option<i64>,
     limit: i64,
 ) -> Result<ExecutionWindowPage> {
+    read_range_in_scope(
+        database,
+        camp_id,
+        agent_run_id,
+        before_sequence,
+        after_position,
+        limit,
+        false,
+    )
+}
+
+pub(crate) fn read_range_in_scope(
+    database: &mut Database,
+    camp_id: &str,
+    agent_run_id: &str,
+    before_sequence: Option<i64>,
+    after_position: Option<i64>,
+    limit: i64,
+    chat: bool,
+) -> Result<ExecutionWindowPage> {
     ensure!(
         after_position.is_none_or(|position| position > 0)
             && !(before_sequence.is_some() && after_position.is_some()),
@@ -95,7 +120,11 @@ pub fn read_range(
         "Execution window cursor must be positive"
     );
     let transaction = database.connection_mut().transaction()?;
-    let belongs = agent_run_belongs_to_camp(&transaction, camp_id, agent_run_id)?;
+    let belongs = if chat {
+        agent_run_belongs_to_chat(&transaction, camp_id, agent_run_id)?
+    } else {
+        agent_run_belongs_to_camp(&transaction, camp_id, agent_run_id)?
+    };
     ensure!(belongs, "AgentRun does not exist in this Thread");
     let through_sequence: i64 = transaction.query_row(
         "SELECT COALESCE(MAX(sequence), 0) FROM agent_run_execution_evidence WHERE agent_run_id = ?1",
@@ -277,12 +306,36 @@ pub fn read_changes(
     refresh_evidence_ids: &[String],
     limit: i64,
 ) -> Result<ExecutionWindowChanges> {
+    read_changes_in_scope(
+        database,
+        camp_id,
+        agent_run_id,
+        after_change_sequence,
+        refresh_evidence_ids,
+        limit,
+        false,
+    )
+}
+
+pub(crate) fn read_changes_in_scope(
+    database: &mut Database,
+    camp_id: &str,
+    agent_run_id: &str,
+    after_change_sequence: i64,
+    refresh_evidence_ids: &[String],
+    limit: i64,
+    chat: bool,
+) -> Result<ExecutionWindowChanges> {
     ensure!(
         after_change_sequence >= 0 && refresh_evidence_ids.len() <= 256,
         "Invalid execution change cursor or refresh set"
     );
     let transaction = database.connection_mut().transaction()?;
-    let belongs = agent_run_belongs_to_camp(&transaction, camp_id, agent_run_id)?;
+    let belongs = if chat {
+        agent_run_belongs_to_chat(&transaction, camp_id, agent_run_id)?
+    } else {
+        agent_run_belongs_to_camp(&transaction, camp_id, agent_run_id)?
+    };
     ensure!(belongs, "AgentRun does not exist in this Thread");
     let through_change_sequence: i64 = transaction.query_row(
         "SELECT execution_evidence_change_sequence FROM agent_run WHERE id = ?1",

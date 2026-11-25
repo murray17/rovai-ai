@@ -4981,15 +4981,16 @@ pub(crate) fn build_effective_config(
         r#"
         SELECT agent_profile.default_capabilities_json,
                agent_profile.version,
-               camp_member.capability_overrides_json,
-               camp_member.version,
+               COALESCE(camp_member.capability_overrides_json, '{}'),
+               COALESCE(camp_member.version, 0),
                conversation.version
         FROM conversation
         JOIN agent_profile ON agent_profile.id = conversation.agent_id
-        JOIN camp_member
+        LEFT JOIN camp_member
           ON camp_member.camp_id = conversation.camp_id
          AND camp_member.agent_id = conversation.agent_id
         WHERE conversation.id = ?1 AND conversation.agent_id = ?2
+          AND (conversation.kind='chat' OR camp_member.agent_id IS NOT NULL)
         "#,
         params![conversation_id, agent_id],
         |row| {

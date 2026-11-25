@@ -198,6 +198,10 @@ pub enum Operation {
 
     #[serde(rename = "navigation.findThread", alias = "navigation.findCamp")]
     NavigationFindCamp,
+    #[serde(rename = "chats.send")]
+    ChatsSend,
+    #[serde(rename = "chats.pendingInputs.edit")]
+    ChatsEditPending,
     #[serde(rename = "chats.rename")]
     ChatsRename,
     #[serde(rename = "chats.open")]
@@ -573,6 +577,8 @@ impl Operation {
             Self::RuntimeStartupCheck => "runtime.startup.check",
 
             Self::NavigationFindCamp => "navigation.findCamp",
+            Self::ChatsSend => "chats.send",
+            Self::ChatsEditPending => "chats.pendingInputs.edit",
             Self::ChatsRename => "chats.rename",
             Self::ChatsOpen => "chats.open",
             Self::ChatsList => "chats.list",

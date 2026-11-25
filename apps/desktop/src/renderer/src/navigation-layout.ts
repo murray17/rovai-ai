@@ -1,6 +1,7 @@
-export const NAVIGATION_DEFAULT_WIDTH = 270
-export const NAVIGATION_MIN_WIDTH = 200
-export const NAVIGATION_MAX_WIDTH = 420
+export const NAVIGATION_DEFAULT_WIDTH = 300
+export const NAVIGATION_MIN_WIDTH = 248
+export const NAVIGATION_MAX_WIDTH = 468
+export const NAVIGATION_ICON_RAIL_WIDTH = 48
 export const NAVIGATION_LAYOUT_KEY = 'rovai.navigation-layout.v1'
 export type NavigationLayout = { width: number; collapsed: boolean }
 

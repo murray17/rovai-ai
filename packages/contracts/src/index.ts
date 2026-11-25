@@ -3820,7 +3820,7 @@ export interface WindowsApplicationMenuPopupRequest {
 }
 
 export interface NavigationPin {
-  kind: 'camp' | 'project'
+  kind: 'camp' | 'project' | 'chat'
   targetKey: string
   pinnedAt: string
 }
@@ -3858,14 +3858,21 @@ export interface ChatListItem extends ChatReplyPosition, ChatListCursor {
   isProcessing: boolean
 }
 
+export type ChatSendResult =
+  | { kind: 'started'; chatId: string; messageId: string; runId: string; title?: string }
+  | { kind: 'queued'; chatId: string; inputId: string }
+  | { kind: 'steer_submitted'; chatId: string; inputId: string; runId: string; executionEpoch: number; evidenceSequence: number }
+
 export interface ChatOpenResult {
+  pendingInputs: { inputId: string; body: string; revision: number; convertedFromSteer: boolean }[]
   chat: Pick<ChatListItem, 'chatId' | 'agentId' | 'displayName' | 'avatarRef' | 'title' | 'version'> & { archivedAt: string | null }
   messages: SingleChatMessageView[]
-  runs: { runId: string; triggerMessageId: string; finalMessageId: string | null; status: string; executionEpoch: number; throughChangeSequence: number }[]
+  runs: { runId: string; triggerMessageId: string; finalMessageId: string | null; status: SingleChatRunView['status']; executionEpoch: number; throughChangeSequence: number; version: number; createdAt: string; startedAt: string | null; endedAt: string | null; cancelRequestedAt: string | null; lastErrorCode: string | null }[]
   nextBeforeSequence: number | null
 }
 
 export interface ChatListPage {
+  pinnedItems?: ChatListItem[]
   items: ChatListItem[]
   nextCursor: ChatListCursor | null
   replyIndex: ChatReplyPosition[]
@@ -4797,6 +4804,8 @@ export type CoreMethod =
   | 'navigation.groupThreads'
   | 'navigation.findThread'
   | 'chats.open'
+  | 'chats.send'
+  | 'chats.pendingInputs.edit'
   | 'chats.rename'
   | 'chats.list'
   | 'navigation.search'

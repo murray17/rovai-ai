@@ -125,6 +125,8 @@ export const WEB_OPERATIONS = [
   'navigation.findThread',
   'chats.list',
   'chats.open',
+  'chats.send',
+  'chats.pendingInputs.edit',
   'chats.rename',
   'navigation.search',
   'navigation.searchMessages',
@@ -253,6 +255,8 @@ export const WEB_OPERATIONS = [
 export type WebOperation = typeof WEB_OPERATIONS[number]
 
 const RECONCILABLE_COMMANDS = new Set<WebOperation>([
+  'chats.send',
+  'chats.pendingInputs.edit',
   'chats.rename',
   'teams.save',
   'teams.delete',

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChatListCursor, ChatListPage } from '@contracts'
 import type { ThreadClient } from './camp-client'
 
-export function useChatList(client: ThreadClient, enabled: boolean) {
+export function useChatList(client: ThreadClient, enabled: boolean, pinnedIds: string[]) {
   const [cursors, setCursors] = useState<Array<ChatListCursor | null>>([null])
   const after = cursors[cursors.length - 1]
   const [page, setPage] = useState<ChatListPage | null>(null)
@@ -14,7 +14,7 @@ export function useChatList(client: ThreadClient, enabled: boolean) {
     const request = ++generation.current
     setLoading(true)
     try {
-      const result = await client.request<ChatListPage>('chats.list', { after, limit: 50 })
+      const result = await client.request<ChatListPage>('chats.list', { after, limit: 50, pinnedIds })
       if (request !== generation.current) return
       setPage(result)
       setFailed(false)
@@ -24,7 +24,7 @@ export function useChatList(client: ThreadClient, enabled: boolean) {
     } finally {
       if (request === generation.current) setLoading(false)
     }
-  }, [client, after, enabled])
+  }, [client, after, enabled, pinnedIds])
   useEffect(() => {
     if (!enabled) return
     const stopEvents = client.onEvent?.(event => { if (event.method === 'chats.listChanged') void refresh() })
