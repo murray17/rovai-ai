@@ -2,14 +2,14 @@
 document_type: model-context-change
 version: v1.72
 change_id: independent-chat
-revision: 5
+revision: 6
 confirmation_status: pending
 authority: proposed-model-input-change-statement
 implementation_baseline: 3000b971f22bae67f45ded8e2d051bc85cc61803
 last_updated: 2026-11-25
 ---
 
-# 独立聊天的模型输入 R5
+# 独立聊天的模型输入 R6
 
 本稿规定队员实际读到的文字。聊天页面、侧栏、已读位置、排队展示和公开操作的回执归[聊天后端提案](chat-backend-proposal.md)。
 
@@ -21,13 +21,13 @@ last_updated: 2026-11-25
 
 ### 新建原生会话
 
-「帮我润色这条发版通知」只需在聊天里给出文案。「把这条通知发到发布组」才请队员发布。即使队员已是发布组成员，两种请求也要产生不同的结果。因此 Charter 保留一句关于创建或写入 Thread 的指引。它涵盖发消息、建改任务和修改使命。为回答问题而读取 Thread 沿用读取权限，明确交办的写操作沿用 §5 的目标与成员校验。[工具授权](chat-backend-proposal.md#5-31-项-agent-cli-与授权)
+Charter 用一句话介绍 Rovai AI，再说明队员在当前私聊答复用户。产品介绍只放在 Bootstrap。[产品定位](../../../PRODUCT.md#product-purpose)
 
 下面是**首次开聊的完整 Bootstrap 示例**。假设用户选择了只填姓名的阿澈，且已开启 Rovai Memory。`/example/rovai/skills` 是示例路径，实际值取自执行 Host。两个技能的说明取自基线中的受管文件。
 
 ```text
 [SESSION_CHARTER]
-Reply in this private chat. Create or write to a Thread only when the user asks.
+Rovai AI is a workspace for long-lived coding-agent teams. Reply in this private chat.
 [/SESSION_CHARTER]
 
 [MEMBER_IDENTITY]
@@ -96,10 +96,10 @@ Host 将本话题自有目录设为 Runtime 的实际工作目录，续聊和插
 
 ## 验证
 
-1. 用同一句话分别直发、排队和插话，核对三者的 `CURRENT_INPUT`。仅含附件或引用时核对可选字段。同一名发布组成员收到「帮我润色通知」时只给出私聊答复，收到「把通知发到发布组」时才向该组写入消息。引用里的指令本身不会触发公开写入。
+1. 用同一句话分别直发、排队和插话，核对三者的 `CURRENT_INPUT` 均只含当次输入。仅含附件或引用时核对可选字段。同一名发布组成员收到「帮我润色通知」时只给出私聊答复，收到「把通知发到发布组」时才向该组写入消息。引用里的指令本身不会触发公开写入。
 2. 分别选阿澈、洛可，以相同提问开聊。核对两个系统提示各自的队员资料，两个 Charter 和 `CURRENT_INPUT` 则逐字相同。检查运行端实际收到的 system 和 user 内容，身份资料只出现在系统指令侧。再为阿澈开两个话题，在 A 写入相对路径的文件，预览定位到 A。模拟 A 中一个结果未知的操作，只有 A 获得核对提示，B 的上下文和历史均不含 A 的数据。
 3. 按示例配置首次开聊，核对 Bootstrap 的区段顺序、身份六字段和平台技能索引。关闭记忆后另开话题，核对索引只含 `cli-operations`。给队员配置一个工具箱技能，开新轮、插话并重启，核对动态索引及显式引用，只恢复一次已接收输入。对照旧 Thread 和会话内单聊的冻结样本。
 
 ## 二次确认
 
-R5 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
+R6 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
