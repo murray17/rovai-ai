@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 5
+revision: 6
 last_updated: 2026-11-25
 ---
 
@@ -32,7 +32,7 @@ last_updated: 2026-11-25
 
 **临时离线也受理。** 已选定且获准的 Runtime 暂时离线时，首发仍返回同一条消息和已建立的 Run，界面显示「等待运行端」。Run 保持 `queued`，`chats.open` 将暂不可派发的原因投影为 `waiting_runtime`。保存已获准的 Runtime 选择、权限和配置版本，此时尚未开始投递。恢复时重新核对归档、权限、安装身份及绑定，相符才领取这个 Run，补齐可执行快照并派发一次。未配置、已禁用或授权撤销时返回具体原因并保留草稿。等待期间撤权则停止派发。`resolve_frozen_runtime` 的配置校验与实时可达性判断需在聊天准入处分开。[队员运行配置](../../../crates/rovai-core/src/agent_profile.rs)
 
-**首发去重。** Host 按认证用户和 `draftId` 派生首发 `commandId`，使用 `canonical_json_digest` 对队员、正文、引用及有序附件标识求摘要。`event_log` 的 `command.result` 保存草稿标识、摘要和结果。快速重放与写事务内查重都校验两者。相同快照返回原三个 ID，异内容返回冲突，后提交窗口保留输入。可修正的拒绝回滚，草稿仍可首发。成功时客户端只清除已发送的草稿版本。[现有重放逻辑](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L495)
+**首发去重。** Host 按认证用户和请求中的 `draftId` 稳定派生首发 `commandId`。回执以 `commandId` 查找，保存发送内容摘要和结果，省去明文 `draftId` 副本。Core 用 `canonical_json_digest` 计算队员、正文、引用及有序附件标识的摘要。事务前快速查询和取得写锁后的再次查询共用身份、作用域及摘要校验。摘要相同返回原三个 ID，摘要不同返回冲突并保留后提交窗口的输入。可修正的拒绝回滚，草稿仍可首发。成功时客户端只清除已发送的草稿版本。[网关的两次查重](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L249-L305) · [现有重放比较](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L482)
 
 `chats.send` 首发传 `draftId, agentId`，续聊传 `chatId`。`mode=start` 在空闲且无更早排队项时开一轮，忙时对应「排队发送」。`mode=steer` 对应「补充当前执行」，须带用户当前看到的 `runId, executionEpoch`。Core 在写事务核对该 Run 正在此用户的这个话题中执行。同一命令号的重放须匹配最初提交的模式、目标及内容摘要。已变化的 Run 或不支持 Steer 的目标返回具体原因，保留输入供用户选择排队。
 
@@ -57,19 +57,23 @@ last_updated: 2026-11-25
 
 公开 Steer 的 `context_manifest.source_delivery_id` 引用公开 Delivery。给同表增加互斥的私有 `source_chat_input_id`，外键指向上述输入。两种来源都为空才是初始 Manifest，每个私有来源只能建立一个补充 Manifest。同步修改部分唯一索引、来源不可变守卫、输入构造器和 `input_kind` 判定。复用 `runtime_input_delivery(input_kind='steer', input_sequence)` 的准备、发出及接收回执。登记 Steer 后冻结这份输入，只有尚待 FIFO 发表的输入沿用队列编辑入口。私有补充从原输入取正文及附件，绕开 `agent_run_input` 对公开消息和 Delivery 的外键。执行窗口通过私有来源读写现有 `agent_run_execution_evidence`，按 `inputId` 合并步骤。模型输入与 Manifest 的版本调整按现有流程记录。[Steer 资格与结算](../../../crates/rovai-core/src/steer.rs) · [来源约束](../../../crates/rovai-core/src/db_steer.rs) · [模型上下文变更](../../development/model-context-change-governance.md)
 
-获得 `accepted` 时在同一事务将输入关联到**原 Run**，追加一条私有用户消息并标记已发表，原 Run 的触发消息保持原值。仅在现有规则确认未提交或 `not_accepted` 且允许回队时，才把同一输入一次性改为 `start` 并保留 FIFO 序号。`accepted`、`delivery_unknown` 及已经开始发送但没有确定结果的输入均不得再次入队或重发。符合 `canReconcile` 的未知项只核对原生回执，确证后只结算原 `inputId`，重复或迟到的 ACK 不再追加消息。切换聊天、归档、重启或后继 Run 均不改变输入归属。[现有 Steer 核对合同](../../contracts/message-delivery-v20.md) · [已接收输入恢复](../../contracts/accepted-input-recovery-v9.md)
+**Steer 按原 `inputId` 发表一次。** 正常签收与符合 `canReconcile` 的事后确证共用签收事务。Core 核对证据与原输入的话题、Run、执行代次和原生绑定。持写锁按 `inputId` 查发表结果，已有 `published_conversation_message_id` 就返回原消息 ID。首次确证时，将 `runtime_input_delivery` 记为 `accepted`，写一条私有用户消息，在同一事务把输入标为已发表并关联原 Run 和消息 ID。原轮已经结束也可补记首次确证。两种签收都不新开轮次、不再次推进最近聊天排序，原 Run 的触发消息保持原值。[现有签收事务](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/context.rs#L2950-L2978)
+
+补充已被接收或发送后结果未知时均不得重发或入队。`delivery_unknown` 只核对原投递，缺少接收证据时保持未确认。仅在现有规则确认未提交或 `not_accepted` 且允许回队时，才把同一输入一次性改为 `start` 并保留 FIFO 序号。切换聊天、归档、重启或后继 Run 均不改变原输入归属。[现有 Steer 核对合同](../../contracts/message-delivery-v20.md) · [已接收输入恢复](../../contracts/accepted-input-recovery-v9.md)
 
 共享执行证据继续按 `runId + executionEpoch` 保存和展开。普通答复、仅附件答复及忙时补充都只对话题所有者可见。[排队表与类型触发器](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/db.rs#L26574-L26679) · [私有准入与队列恢复](../../../crates/rovai-core/src/single_chat.rs) · [运行与终态](../../../crates/rovai-core/src/runtime.rs)
 
 ## 4. 历史、导航、归档与删除
 
-**历史。** `rovai chat history` 只接受分页参数。Core 从有效 Run 和原生绑定反查目的 Conversation，以触发用户消息序号为排他上界，返回此前已发表的用户消息、最终答复和附件摘要。当前轮的补充从该轮 Steer 输入送达。下一轮能够读到此前已确认的补充和最终答复。游标绑定话题及上界，传入另一个 `chatId` 或跨话题游标均拒绝。详情页按 Run 展示消息与执行步骤。重开聊天时，按 `inputId` 及其关联的已发表消息还原待处理项和轮内消息，同一输入只显示一次。
+**历史。** `rovai chat history` 只接受分页参数，从认证 Run、执行代次及原生绑定确定当前聊天。`rovai single-chat history` 沿用会话内单聊的 Camp、Turn 和 Run 归属校验。两入口各自确定可读的 `conversation_id` 和触发消息序号，再共用已有的 `conversation_message` 分页、附件摘要及引用投影，只读触发序号之前的用户消息和最终答复。独立聊天的游标绑定话题和上界，传入 `chatId` 或跨话题游标均拒绝。当前轮通过 Steer 接收补充，发表后新开的轮次可以从历史读到它。详情页按 `inputId` 及关联消息还原待处理项与轮内补充，同一输入只显示一次。[消息查询与投影](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L394-L469) · [旧单聊归属校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L2693-L2727)
 
 **导航。** `navigation.search` 先按认证用户和 `chat_topic.archived_at IS NULL` 筛选，再连接 `conversation`、`agent_profile` 匹配标题和队员名。结果为 `kind:'chat', chatId`。左栏按活动序号降序、ID 稳定分页，可按队员过滤。直接发送、FIFO 入队或 Steer 提交成功时，以及队员发表最终回复时，各在同一事务将该事件的 `event_log.global_sequence` 写入 `chat_topic.last_activity_sequence`。同一输入只计一次，命令重放、FIFO 正式发表和 Steer 签收不重复计入。打开聊天、展开步骤和改名均不参与排序。`navigation.searchMessages` 继续只搜 `camp_message`。[导航搜索合同](../../contracts/navigation-search-v1.md)
 
 **归档。** 在同一事务设置 `archived_at`、取消活动 Run、关闭新输入和派发。设置页按所有者显示 `kind:'chat'` 的归档项。已取消的原轮显示「已停止」。补充沿用原 Run／代次的回执，`accepted` 显示「已收到」，`delivery_unknown` 显示「送达未确认」。有尚未派发的 FIFO 时提示「恢复后将继续发送排队中的消息」。手动恢复沿用原 ID、历史与草稿，只按原顺序唤醒这些 FIFO，已取消的轮次保持终态。[现有归档行为](../../contracts/thread-archive-v1.md)
 
-**删除与文件清理同事务交接。** Core 记录删除操作 ID，封住聊天读写并隔离活动 Run。业务删除事务先向现有 `camp_attachment_view_operation` 和 `camp_attachment_view_operation_entry` 登记待清理的受管根、文件相对路径和所有权标识，再清理私有消息、Run、证据、输入、话题属性和 Conversation，两者一起提交或回滚。为现有 journal 增加 `chat_delete_cleanup` 和独立的 `chatId` 归属，允许此类记录的 `camp_id` 为空。清单在话题删除后仍可读取。启动恢复先接续尚未交接的删除标记，再按操作 ID 扫描未完成清单，核对根身份后逐项清理，已删项视为完成。清单只覆盖该聊天自有的受管目录。目录内的文件即使已发到其他 Thread，也随目录清理。用户指定的外部文件保留在原处。提交后按 `chatId` 清掉本机草稿。话题内的创建回执随话题清理，已创建的全局队员档案保留。首发回执仅保留去重标识与已删除状态。[文件归属与生命周期](../../architecture/camp-published-attachment-view.md#归属与生命周期) · [现有删除交接合同](../../contracts/camp-permanent-deletion-v4.md) · [恢复扫描](../../../crates/rovai-core/src/camp_deletion.rs)
+**永久删除按目录交接。** Core 记录删除操作 ID，封住聊天读写并隔离活动 Run。删除私有消息、Run、证据、输入、话题属性与 Conversation 的同一事务，将清理责任交给现有 `camp_attachment_view_operation`。为日志增加 `chat_delete_cleanup` 类型，归属使用 `chatId`，允许 `camp_id` 为空。每个聊天自有的受管根只登记相对路径和必要的目录身份，根内文件数量不影响登记量。话题删库后日志仍可独立恢复。[目录登记](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/camp_attachment_view.rs#L1700-L1733) · [删除交接合同](../../contracts/camp-permanent-deletion-v4.md)
+
+重启时先接续尚未交接的删除标记，再按操作 ID 恢复未完成的目录清理。目录身份匹配就清理整棵目录，已不存在视为完成。身份不符时保留现场，按既有机制记录可恢复错误。目录内文件即使已发到其他 Thread，也随目录清理。用户指定的外部文件保留在原处。提交后按 `chatId` 清掉本机草稿。话题内的队员创建回执随话题清理，已创建的全局队员档案保留。首发回执仅留去重键与已删除状态。[按目录恢复](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/camp_attachment_view.rs#L1971-L2004) · [文件归属与生命周期](../../architecture/camp-published-attachment-view.md#归属与生命周期)
 
 ## 5. 31 项 Agent CLI 与授权
 
@@ -113,9 +117,13 @@ last_updated: 2026-11-25
 | 用例 | 业务读写及可观察的结果 | 接口 |
 | --- | --- | --- |
 | ① 选人退出、同草稿双击首发 | 只选人读 `agent_profile`、存本机草稿，Core 新增零条。双击时从 `event_log` 去重，只创建一组 `conversation`、`chat_topic`、首条 `conversation_message`、首个 `agent_run`。两次同快照得到相同 ID，异内容保留输入并报冲突。已配置获准的 Runtime 暂离时仍返回 `started` 并显示等待，恢复后只派发这一个 Run。 | `chats.list`、`chats.send`、`chats.rename` |
-| ② 同一队员的 A、B 两段聊天历史隔离 | A 的 Run 经 `conversation`、`chat_topic`、触发消息定位历史，传 B 的 ID 或游标被拒。若 A 的最终答复只有一个附件，`conversation_message` 只新增一条含附件的 Agent 消息，关联 A 的 `final_conversation_message_id`，迟到或重复终态不再追加。 | `chat history`、`chats.open`、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
-| ③ 先排队、再补充，然后重启 | 同一轮先排队 Q，再补充 S，两次受理各推进一次话题排序。Q 在 `single_chat_pending_input` 等待，S 的私有 `context_manifest` 和 `runtime_input_delivery` 绑定原 Run／代次。S 已签收、Q 尚未发表时重启。重开后原轮只显示一条 S，Q 仍排在原来的位置。原轮结算后，Q 只开启一轮，该轮历史可读 S。S 签收和 Q 发表均不重复推进排序。若 S 送达未确认，重启也不重发或入队。只有 §3 允许回队时才用原 `inputId` 入队一次。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message` 和公开 Delivery 零写入。 | `chats.send` 三种回执、`chats.open`，合资格时 `runtimeInputs.reconcile` |
-| ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描读取 `single_chat_pending_input` 及在途补充回执，归档中不派发，普通列表与搜索均找不到。手动恢复原 ID，只发布尚未派发的 FIFO 输入。删除前向同一 Thread 发送聊天自有目录中的报告和用户指定的外部清单。在删库提交后、清文件前重启，由 `camp_attachment_view_operation` 及明细完成清理。目标 `camp_message` 仍保留两个原附件引用。报告随自有目录删除，外部清单在原路径仍可读时可以打开。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
+| ② 同一队员的 A、B 两段聊天历史隔离 | A 的 Run 经 `conversation`、`chat_topic` 和触发消息定位历史，传 B 的 ID 或游标被拒。打开有 50 个已折叠历史轮次的 A，只取本页消息与轮次摘要。展开一轮只读该轮的证据，给 A 的详情请求传 B 的 Run 或证据 ID 被拒。若 A 的最终答复只有附件，`conversation_message` 只新增一条含附件的 Agent 消息，关联 A 的 `final_conversation_message_id`，迟到或重复终态不再追加。 | `chat history`、`chats.open`、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
+| ③ 先排队、再补充，然后重启 | 同一轮先排队 Q，再补充 S，两次受理各推进一次话题排序。Q 在 `single_chat_pending_input` 等待，S 的私有 `context_manifest` 和 `runtime_input_delivery` 绑定原 Run／代次。S 签收后重启，原轮只有一条 S，Q 按原队序只开启一轮，历史可读 S。若重启时 S 仍未确认，只核对原投递。首次取得接收证据才补写原轮的一条 S，再次核对返回同一消息 ID。两种签收及 Q 正式发表均不再次推进排序。仅 §3 确认可以回队时沿用原 `inputId` 入队一次。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message` 和公开 Delivery 零写入。 | `chats.send` 三种回执、`chats.open`，合资格时 `runtimeInputs.reconcile` |
+| ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描读取 `single_chat_pending_input` 及在途补充回执，归档中不派发，普通列表与搜索均找不到。手动恢复原 ID，只发布尚未派发的 FIFO 输入。删除前向同一 Thread 发送聊天自有目录中的报告和用户指定的外部清单。删库后重启，按 `camp_attachment_view_operation` 登记的目录身份清理。若目录已删、日志尚未记完成，再次恢复直接结清该目录。目标 `camp_message` 仍保留两个原附件引用。报告随自有目录删除，外部清单在原路径仍可读时可以打开。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
 | ⑤ 任务已建，补通知不重复建任务 | `task` 中只有一条阿澈创建的任务。查建任务和通知各自的 `event_log` 回执，再按 `camp_message`、`camp_message_delivery` 区分 §6 三种结果。确认未发出只补通知，已提交只取原消息，未知即停。即使重启，任务始终一条、公开通知至多一条，目标只能看到阿澈及公开结果。 | 既有 `task create / get`、`send` 及命令结果对账 |
 
-上述入口共用于 Desktop 和认证 Web。`chats.open` 返回队列状态、当前 Run 的 Steer 能力与进度、最终附件和逐轮执行窗口。§5 的四项 `member` 命令还需分别覆盖无 Camp 的名册读取、越权档案读取、确认创建，以及缺少直接用户要求或版本不符的修改。旧 Thread 调用沿用原接口。[现有共享接口](../../../packages/contracts/src/index.ts)
+**打开聊天与展开步骤。** Desktop 和认证 Web 共用 `chats.open`，返回本页聊天消息（含最终附件）、待处理输入、当前 Run 的 Steer 能力与进度，以及本页各轮摘要。摘要从 `agent_run` 读取 `runId`、状态、执行代次和已有的 `execution_evidence_change_sequence`，折叠历史无需逐轮读取或统计执行证据。[旧单聊快照的读取路径](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L1639-L1685)
+
+只有正在展示的执行和用户展开的历史轮次才调用 `agentRunExecution.page` 取步骤。若首屏已附当前轮第一页，沿该页的 `nextBeforeSequence` 翻到更早步骤，从该页的 `throughChangeSequence` 调用 `agentRunExecution.changes` 接续变化。展开单项输出才用 `agentRunEvidence.getContent`。每次读取在 Core 核对认证用户拥有该 Chat、Run 属于该 Chat，读单项时还核对证据属于该 Run，然后复用既有窗口查询。[当前窗口归属校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/execution_window.rs#L63-L103) · [按需展开规则](../../contracts/run-process-detail-surface-v34.md#按窗口阅读与-dom)
+
+§5 的四项 `member` 命令还需分别覆盖无 Camp 的名册读取、越权档案读取、确认创建，以及缺少直接用户要求或版本不符的修改。旧 Thread 调用沿用原接口。[现有共享接口](../../../packages/contracts/src/index.ts)
