@@ -114,16 +114,27 @@ describe('navigation preferences', () => {
     expect((await NavigationPreferencesStore.load(file)).get()).toEqual(atEnd)
   })
 
-  it('upgrades valid schema 4 without a degradation or rewriting the old file', async () => {
+  it.each([false, true])('preserves a legacy POSIX pin when changing another alias (pin in projectOrder: %s)', async (pinInOrder) => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-read-'))
     cleanup.push(directory)
-    const path = join(directory, 'navigation.json')
-    const original = JSON.stringify({ schemaVersion: 4, pins: [], removedProjects: [], projectOrder: [], projectNames: {} })
-    await writeFile(path, original)
-    const store = await NavigationPreferencesStore.load(path)
+    const file = join(directory, 'navigation.json')
+    const folderName = 'release\\..\\archive'
+    const folder = process.platform === 'win32' ? '/work/' + folderName : join(directory, folderName)
+    if (process.platform !== 'win32') await mkdir(folder)
+    const pin = { kind: 'project', targetKey: 'directory:' + folder, pinnedAt: '2026-10-01T00:00:00Z' }
+    const other = 'directory:/other'
+    const projectOrder = pinInOrder ? [pin.targetKey, other] : [other]
+    const original = JSON.stringify({ schemaVersion: 4, pins: [pin], removedProjects: [], projectOrder, projectNames: {} })
+    await writeFile(file, original)
+    const store = await NavigationPreferencesStore.load(file)
     expect(store.loadDegradation).toBeNull()
     expect(store.get().threadReadStates).toEqual({})
-    expect(await readFile(path, 'utf8')).toBe(original)
+    expect(await readFile(file, 'utf8')).toBe(original)
+
+    await store.setProjectName(other, 'Other project')
+    const saved = JSON.parse(await readFile(file, 'utf8'))
+    expect(saved).toMatchObject({ pins: [pin], projectOrder, projectNames: { [other]: 'Other project' } })
+    expect((await NavigationPreferencesStore.load(file)).get()).toEqual(saved)
   })
 
   it('persists manual reminders, merges concurrent pin writes and keeps read boundaries monotonic', async () => {
@@ -456,11 +467,13 @@ describe('navigation preferences', () => {
     cleanup.push(directory)
     const filePath = join(directory, 'navigation.json')
     const store = await NavigationPreferencesStore.load(filePath)
-    await store.registerProjects(['/work/a', '/work/a'])
-    await expect(store.registerProjects(['quick-chat'])).rejects.toThrow('Invalid project directories')
-    await expect(store.registerProjects(['/work/../a'])).rejects.toThrow('Invalid project directories')
-    expect(store.get().registeredProjects).toEqual(['/work/a'])
-    expect(store.get().projectOrder).toEqual(['directory:/work/a'])
+    const valid = ['/work/a', 'C:\\work\\a', '\\\\server\\share\\a']
+    await store.registerProjects([...valid, '/work/a'])
+    for (const invalid of ['quick-chat', '/work/../a', 'C:/work\\..\\a', '\\\\server\\share\\.\\a']) {
+      await expect(store.registerProjects([invalid])).rejects.toThrow('Invalid project directories')
+    }
+    expect(store.get().registeredProjects).toEqual(valid)
+    expect(store.get().projectOrder).toEqual(valid.map(path => 'directory:' + path))
   })
 })
 

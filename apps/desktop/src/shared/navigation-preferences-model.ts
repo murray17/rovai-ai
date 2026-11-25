@@ -146,9 +146,10 @@ export function sanitizeThreadReadStates(source: unknown): Record<string, Naviga
 }
 
 export function isProjectPath(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= MAX_PROJECT_PATH_LENGTH
-    && !value.includes('\0') && (/^\//.test(value) || /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value))
-    && !value.split(/[\\/]/).some(part => part === '.' || part === '..')
+  if (typeof value !== 'string' || value.length > MAX_PROJECT_PATH_LENGTH || value.includes('\0')) return false
+  const isPosixPath = value.startsWith('/')
+  if (!isPosixPath && !/^[A-Za-z]:[\\/]/.test(value) && !value.startsWith('\\\\')) return false
+  return !value.split(isPosixPath ? '/' : /[\\/]/).some(part => part === '.' || part === '..')
 }
 
 export function registerNavigationProjects(snapshot: NavigationPreferencesSnapshot, paths: string[], completeLegacy = false): NavigationPreferencesSnapshot {
