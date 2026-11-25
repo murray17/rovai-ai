@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 11
+revision: 16
 last_updated: 2026-11-25
 ---
 
@@ -19,9 +19,9 @@ last_updated: 2026-11-25
 | --- | --- |
 | 聊天身份 | `conversation.kind='chat'` 要求 `camp_id IS NULL`，`agent_id` 固定为所选队员。每个话题用自己的 `native_binding_id` 和绑定代次。同一用户与同一队员可以开多个话题。 |
 | 左栏话题 | `chat_topic.conversation_id` 同时是主键和指向 `conversation.id` 的外键，只接收 `chat`。其余字段为 `owner_user_id`、`title`、`archived_at`、`last_activity_global_sequence`、`version`，永久删除受理时记录 `deletion_operation_id`。队员和头像经 Conversation 查 `agent_profile`。 |
-| 用户消息和最终答复 | `conversation_message` 按 `(conversation_id, sequence)` 排序。用户消息可带引用和附件。Core 把队员最终答复的正文写回 Run 的目的 Conversation。`rovai send` 用于显式发布到公开 Thread。 |
+| 用户消息和最终答复 | `conversation_message` 按 `(conversation_id, sequence)` 排序。用户消息可带引用、附件及沿用 Thread 格式的技能选择（`skill_mention` 的 `skillId` 和 `nameAtSend`）。Core 把队员最终答复的正文写回 Run 的目的 Conversation。`rovai send` 用于显式发布到公开 Thread。 |
 | 执行过程 | `agent_run` 直接引用 `conversation_id` 和 `trigger_conversation_message_id`。聊天 Run 的 `camp_id`、`camp_turn_id` 均为空。`agent_run_execution_evidence` 保存工具调用、进度、输出和插话的位置，按 Run 与 `execution_epoch` 读取。 |
-| 忙时输入 | `single_chat_pending_input` 保存 FIFO 输入和指向原 Run 的插话。只有 FIFO 可以开启下一轮。运行端的接收凭据保存在 `runtime_input_delivery`。 |
+| 忙时输入 | `single_chat_pending_input` 保存 FIFO 输入和指向原 Run 的插话，随输入保留本条技能选择的顺序，发表时写回对应的用户消息。只有 FIFO 可以开启下一轮。运行端的接收凭据保存在 `runtime_input_delivery`。 |
 | 公开业务结果 | `event_log` 的 `command.result` 关联已有工具请求与结果。任务读 `task`，消息和逐收件人投递读 `camp_message`、`camp_message_delivery`。 |
 
 私下问答的整个过程，包括首发、排队、插话和最终回复，对 `camp`、`camp_member`、`camp_turn` 均为零写入。工作目录按 `chatId` 管理，引用 Thread 只定位业务对象。置顶与已读沿用本机偏好，以聊天类型保存 ID。
@@ -34,7 +34,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 标题取首句，最多 20 个用户可见字符。用户首条消息只有附件时取首个文件名，只有引用时取引用标题。此后由用户按话题版本手动改名。续聊沿用原 ID，另起话题用新草稿，成功首发时才分配新 ID。
 
-**首发去重。** Host 按认证用户和请求中的 `draftId` 稳定派生首发 `commandId`。回执以 `commandId` 查找，保存发送内容摘要和结果，省去明文 `draftId` 副本。Core 用 `canonical_json_digest` 计算队员、正文、引用及有序附件标识的摘要。事务前快速查询和取得写锁后的再次查询共用身份、作用域及摘要校验。摘要相同返回原三个 ID，摘要不同返回冲突并保留后提交窗口的输入。已有成功回执优先于运行端就绪检查重放。可修正的拒绝回滚并直接返回，去重键留给该草稿下次首发。成功时客户端只清除已发送的草稿版本。[网关的两次查重](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L249-L305) · [现有重放比较](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L482)
+**首发去重。** Host 按认证用户和请求中的 `draftId` 稳定派生首发 `commandId`。回执以 `commandId` 查找，保存发送内容摘要和结果，省去明文 `draftId` 副本。Core 用 `canonical_json_digest` 计算队员、正文、引用、有序附件标识及本条有序技能选择的摘要。事务前快速查询和取得写锁后的再次查询共用身份、作用域及摘要校验。摘要相同返回原三个 ID，摘要不同返回冲突并保留后提交窗口的输入。已有成功回执优先于运行端就绪检查重放。可修正的拒绝回滚并直接返回，去重键留给该草稿下次首发。成功时客户端只清除已发送的草稿版本。[网关的两次查重](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L249-L305) · [现有重放比较](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/command.rs#L452-L482)
 
 `chats.send` 首发传 `draftId, agentId`，续聊传 `chatId`。`mode=start` 在空闲且无更早排队项时开一轮，忙时对应「排队发送」。`mode=steer` 对应「插话」，须带用户当前看到的 `runId, executionEpoch`。Core 在写事务核对这是该话题的活动 Run，且代次一致。命令重放须匹配最初的模式、目标及内容摘要。受理前若目标已变化或不支持插话，返回具体原因，输入留在输入框，供用户选择排队。
 
@@ -44,7 +44,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 | `queued {chatId, inputId}` | 输入出现在输入框上方的排队列表，标「排队中」。轮到它时才发表为下一轮的首条用户消息，并创建 Run。 |
 | `steer_submitted {chatId, inputId, runId, executionEpoch, evidenceSequence}` | 提交成功即在原轮的 `evidenceSequence` 位置显示一条普通用户消息。正常提交和签收都不带状态文字。仅 `delivery_unknown` 在消息下显示一行「未确认送达」。 |
 
-排队列表按提交顺序排列。直接入队标「排队中」，由插话转入标「已转为排队」，两种都可编辑、可删除。`chats.pendingInputs.edit` 按 `chatId, inputId` 复用现有队列操作，在事务内核对版本和未派发状态。编辑将正文、附件和引用移回输入框，释放原队位，用户重新发送时按当时的队列顺序处理。删除只撤掉所选输入。若队首已发表，刷新到对应轮次。[现有排队编辑合同](../../contracts/single-chat-v5.md)
+排队列表按提交顺序排列。直接入队标「排队中」，由插话转入标「已转为排队」，两种都可编辑、可删除。`chats.pendingInputs.edit` 按 `chatId, inputId` 复用现有队列操作，在事务内核对版本和未派发状态。编辑将正文、附件、引用和所选技能移回输入框，释放原队位，用户重新发送时按当时的队列顺序处理。删除只撤掉所选输入。若队首已发表，刷新到对应轮次。[现有排队编辑合同](../../contracts/single-chat-v5.md)
 
 ## 3. 没有 Camp 和 Turn 的运行链路
 
@@ -57,11 +57,13 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 | 扫描、领取与停止 | `ready_pending_inputs` 保留旧单聊的 `JOIN camp`，独立聊天改连 `chat_topic`。FIFO 只取 `requested_mode=start`，写锁内重查归档、活动 Run、最早序号及编辑版本，`needs_repair` 挡住本话题后项。`list_dispatchable_agent_runs_scoped`、`load_claimable_run`、`load_agent_run_execution` 和 `cancel_interrupted_single_chat_runs` 增加按 Conversation 取目标的分支。停止时核对话题、Run 和执行代次，取消执行并释放 lease。迟到输出只记入原代次的诊断。 |
 | 最终答复 | 沿用现有运行端返回的 `final_output`。正文含非空白字符时，终态事务只将原文写入一条 `conversation_message` 并设置 `final_conversation_message_id`。正文为空或全为空白时只结算 Run。工具产生的文件操作留在执行记录。核对 Run、执行代次、目的地和取消状态，每轮至多发表一条最终答复。[现有终态写入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/runtime.rs#L5273-L5288) |
 
+**模型输入。** 首次建立原生会话时，Bootstrap 的 `SESSION_CHARTER` 写明队员身处 Rovai，答复发在当前私聊。随后是所选队员的 `MEMBER_IDENTITY` 和平台技能索引 `ROVAI_PLATFORM_SKILLS`。同一运行端下，独立聊天与 Thread 使用相同的身份投递通道。Hermes 首条 `user` 输入在动态正文前携带完整 Bootstrap。`CURRENT_INPUT` 只含当次用户输入。直发、FIFO 出队和插话都按队员当时配置与本条显式选用的工具箱技能生成完整 `ROVAI_ADDITIONAL_SKILLS`，空时也发 `skills: []`。工作目录由 Host 设置。[完整 Bootstrap 示例及每轮输入](model-context-change-independent-chat.md#新建原生会话)
+
 **插话提交与定位。** `single_chat_pending_input` 增加 `requested_mode` 和原目标 Run／代次。Core 在受理事务里写入私有输入，并在目标 `agent_run_execution_evidence` 中登记一项插话。该项以 `inputId` 稳定定位，沿用执行记录分配的固定 `sequence`，即接口的 `evidenceSequence`。相同请求重放返回原项和原序号。提交后即可显示，正文、附件及引用取自原输入。进入送达未知、签收或转队时，通过原项的 `change_sequence` 刷新视图，定位用的 `sequence` 不变。
 
 `active_input_availability` 为 `chat` 复用冻结的适配器、协议、版本和绑定检查。`canSteer` 允许登记输入，`ready` 还须同一绑定及代次的初始输入已接收。启动中的绑定按既有预计代次等待，实际投递前再验原目标，每条插话按提交顺序单独投递。私有路径对 `camp_message` 和 `camp_message_delivery` 均为零写入。
 
-公开插话的 `context_manifest.source_delivery_id` 引用公开 Delivery。同表增加互斥的私有 `source_chat_input_id`，外键指向上述输入。两种来源都为空才是初始 Manifest，每个私有来源只能建立一个插话 Manifest。同步修改部分唯一索引、来源不可变守卫、输入构造器和 `input_kind` 判定。投递复用 `runtime_input_delivery(input_kind='steer', input_sequence)` 的准备、发出及接收回执。受理后冻结输入，只有尚待 FIFO 发表的输入可以编辑。私有输入直接提供正文及附件，绕开 `agent_run_input` 对公开消息和 Delivery 的外键。模型输入与 Manifest 的版本调整按现有流程记录。[插话资格与结算](../../../crates/rovai-core/src/steer.rs) · [来源约束](../../../crates/rovai-core/src/db_steer.rs) · [模型上下文变更](../../development/model-context-change-governance.md)
+公开插话的 `context_manifest.source_delivery_id` 引用公开 Delivery。同表增加互斥的私有 `source_chat_input_id`，外键指向上述输入。两种来源都为空才是初始 Manifest，每个私有来源只能建立一个插话 Manifest。同步修改部分唯一索引、来源不可变守卫、输入构造器和 `input_kind` 判定。投递复用 `runtime_input_delivery(input_kind='steer', input_sequence)` 的准备、发出及接收回执。受理后冻结输入，只有尚待 FIFO 发表的输入可以编辑。私有输入直接提供本条正文、引用、附件及技能选择，绕开 `agent_run_input` 对公开消息和 Delivery 的外键。模型输入与 Manifest 的版本调整按现有流程记录。[插话资格与结算](../../../crates/rovai-core/src/steer.rs) · [来源约束](../../../crates/rovai-core/src/db_steer.rs) · [模型上下文变更](../../development/model-context-change-governance.md)
 
 **签收按 `inputId` 发表一次。** 正常签收与符合 `canReconcile` 的事后确证共用同一事务。Core 核对原话题、Run、代次及绑定，持写锁查询 `published_conversation_message_id`，已有结果就返回原 ID。首次确证时将 `runtime_input_delivery` 记为 `accepted`，写一条 `conversation_message` 用户消息并把原输入关联到该消息和原 Run。原轮结束后也可补记首次确证。界面沿用同一 `inputId` 和执行序号，只更新原位置的内容来源并清除可能存在的「未确认送达」。原轮的触发消息、轮次和话题排序均保持原值。[现有签收事务](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/context.rs#L2950-L2978)
 
@@ -145,9 +147,9 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 | 用例 | 业务读写及可观察的结果 | 接口 |
 | --- | --- | --- |
-| ① 选人退出、同草稿双击首发 | 退出只读 `agent_profile`、存本机草稿，聊天记录为零条。双击经 `event_log` 去重，只建一组 `conversation`、`chat_topic`、首条 `conversation_message` 和首个 `agent_run`。相同内容得到同一组 ID，异内容保留输入并报冲突。列表只新增一行，显示活动轮，最后答复序号为 0。只加载列表第一页时，第二页聊天的新答复仍由 `replyIndex` 点亮图标栏。在本机将它标为已读，或归档这段聊天后刷新索引，若其余聊天均已读，总蓝点熄灭。 | `chats.list`、`chats.listChanged`、`chats.send`、`chats.rename` |
+| ① 选人退出、同草稿双击首发 | 退出只读 `agent_profile`、存本机草稿，聊天记录为零条。双击经 `event_log` 去重，只建一组 `conversation`、`chat_topic`、首条 `conversation_message` 和首个 `agent_run`。相同内容得到同一组 ID。内容不同（包括仅所选技能不同）时，后提交者收到冲突并保留输入。列表只新增一行，显示活动轮，最后答复序号为 0。对照同一运行端的 Thread，首发 Bootstrap 的队员身份走相同通道。Hermes 首条 `user` 输入携带身份，聊天的 `CURRENT_INPUT` 只含当次输入。只加载列表第一页时，第二页聊天的新答复仍由 `replyIndex` 点亮图标栏。在本机将它标为已读，或归档这段聊天后刷新索引，若其余聊天均已读，总蓝点熄灭。 | `chats.list`、`chats.listChanged`、`chats.send`、`chats.rename` |
 | ② 同一队员的 A、B 两段聊天历史隔离 | A、B 同属本机用户。A 的 Run 经 `conversation`、`chat_topic` 和触发消息定位历史，传 B 的 ID 或游标被拒。打开有 50 个折叠轮次的 A，只取本页消息、插话位置与摘要，展开一轮只读该轮的步骤，传 B 的 Run 或证据 ID 被拒。A 的答复含报告链接和本地图片时，`conversation_message` 只存一份原文。重开可预览 A 目录内的文件，指向 B 或外部目录的链接和图片只显示路径。若工具写了文件而最终正文为空，步骤保存在 `agent_run_execution_evidence`，本轮最终消息为零条。 | `chat history`、`chats.open`、聊天消息文件预览、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
-| ③ 先排队 Q、再插话 S，然后重启 | `single_chat_pending_input` 保存 Q、S，`agent_run_execution_evidence` 记录 S 的位置，私有 `context_manifest` 绑定原 Run／代次。Q 在输入框上方标「排队中」。签收前重启并打开原轮，仍在原位置看到一条 S，之前启动的命令结束后仍在上段，后续步骤和答复在下段。正常签收或对原 `runtime_input_delivery` 事后确证均只发表一条原轮的 `conversation_message`。若送达仍未知，S 在原位标「未确认送达」且不重发。若确证未接收且可回队，S 从原轮移除，排在 Q 之后标「已转为排队」，两项均可编辑、删除。保留 Q 时，它只开启一次下一轮。Q、S 提交各推进一次排序，自己的输入不点亮蓝点，只有新发表的队员答复推进答复序号。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message`、`camp_message_delivery` 零写入。 | `chats.send`、`chats.open`、`chats.pendingInputs.edit`、`chats.list`、`chats.listChanged`，合资格时 `runtimeInputs.reconcile` |
+| ③ 先排队 Q、再插话 S，然后重启 | `single_chat_pending_input` 保存 Q、S，`agent_run_execution_evidence` 记录 S 的位置，私有 `context_manifest` 绑定原 Run／代次。Q 在输入框上方标「排队中」。签收前重启并打开原轮，仍在原位置看到一条 S，之前启动的命令结束后仍在上段，后续步骤和答复在下段。正常签收或对原 `runtime_input_delivery` 事后确证均只发表一条原轮的 `conversation_message`。若送达仍未知，S 在原位标「未确认送达」且不重发。若确证未接收且可回队，S 从原轮移除，排在 Q 之后标「已转为排队」，两项均可编辑、删除。保留 Q 时，它只开启一次下一轮。S 和 Q 各自携带完整工具箱索引，空时也发。已准备的 S 按原字节恢复，Q 出队时按当时的队员配置和 Q 的选择取值。Q、S 提交各推进一次排序，自己的输入不点亮蓝点，只有新发表的队员答复推进答复序号。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message`、`camp_message_delivery` 零写入。[技能用例](model-context-change-independent-chat.md#验证) | `chats.send`、`chats.open`、`chats.pendingInputs.edit`、`chats.list`、`chats.listChanged`，合资格时 `runtimeInputs.reconcile` |
 | ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描 `single_chat_pending_input` 和原 `runtime_input_delivery`，归档中不派发，普通列表与搜索找不到该聊天。已签收的插话作为普通用户消息留在原位，未知的保留「未确认送达」。手动恢复原 ID，只唤醒未派发的 FIFO。删除前，队员向已加入的 Thread 发送自有目录的报告和用户指定的外部清单。删库后重启，按 `camp_attachment_view_operation` 登记的目录身份清理。目录已删就结清该项。目标 `camp_message` 保留两个原引用，报告随目录删除，外部清单在原路径仍可读时可以打开。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
 | ⑤ 建任务后离队，只补未发出的通知 | 阿澈是发布组有效成员时，`task create` 在事务内复核 `camp_member`、检查配额并提交一条 `task`。随后他离队，下一笔 `send` 在自己的写事务内复核失败，成员、`camp_message` 和 `camp_message_delivery` 均无新增。若起初就不是成员，建任务、改任务和改使命也会被拒。重新具备资格且确认通知未发出时，只提交通知。已提交则按原请求的 `event_log`、消息与投递 ID 查回结果，未知即停。重启后任务仍只有一条、通知至多一条。聊天将结果留在实际答复与展开的步骤中。 | `task create / get`、`send` 及既有命令结果对账 |
 
