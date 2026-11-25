@@ -3,7 +3,7 @@ document_type: implementation-proposal
 version: v1.72
 authority: proposed-chat-backend
 status: proposed
-revision: 8
+revision: 9
 last_updated: 2026-11-25
 ---
 
@@ -30,7 +30,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 ## 2. 首发、排队与补充当前执行
 
-**首发。** 选人只读队员资料。本机按用户与队员保存未发送草稿，同一份草稿跨窗口共用 `draftId`。首发校验队员、引用和附件，在事务内建立 `conversation`，沿用 `resolve_frozen_runtime` 核对运行端配置、授权和就绪状态。运行端未就绪（包括暂时离线）时整笔回滚，返回具体原因，输入留在本机草稿。恢复后由用户重新发送。校验通过才一并提交 Conversation、`chat_topic`、首条 `conversation_message`、首个 `agent_run` 和成功回执。[现有发送准入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L715-L744)
+**首发。** 选人只读队员资料。本机按用户与队员保存未发送草稿，同一份草稿跨窗口共用 `draftId`。首发校验队员、引用和附件，在事务内建立 `conversation`，沿用 `resolve_frozen_runtime` 核对运行端配置、授权和就绪状态。运行端未就绪就回滚并返回具体原因，草稿保留在本机。校验通过才一并提交 Conversation、`chat_topic`、首条 `conversation_message`、首个 `agent_run` 和成功回执。[现有发送准入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L715-L744)
 
 标题取首句，最多 20 个用户可见字符。用户首条消息只有附件时取首个文件名，只有引用时取引用标题。此后由用户按话题版本手动改名。续聊沿用原 ID，另起话题用新草稿，成功首发时才分配新 ID。
 
@@ -51,9 +51,9 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 | 环节 | 需要调整的现有依赖 |
 | --- | --- |
 | Conversation 与 Run | `conversation.camp_id` 仅在 `kind='chat'` 时为空。聊天 `agent_run` 固定 `invocation_kind='chat'`、`operation_policy='chat_v1'`、`response_delivery='conversation_message'`、`destination_conversation_id=conversation_id`。触发消息属于该话题，两个 Camp 引用均为空。每个聊天 Conversation 至多一个 `queued/running/waiting` Run。保留旧类型的唯一索引、原生绑定和路由不可变约束。 |
-| 首发、直接发表与 FIFO | 从 `admit_single_chat_message` 拆出共同的消息序号和 Run 写入。`load_active_target`、`single_chat_has_active_run` 识别聊天，`build_effective_config` 从 `agent_profile` 取获准配置。`single_chat_pending_input_scope_insert` 校验队列项关联未归档话题。扩展 `source_attachments_json` 的插入与更新约束，允许 `chat` 的用户消息携带不可变附件引用。`published` 须有同话题的消息和 Run，旧单聊另须有匹配的 `published_camp_turn_id`，聊天要求为空。插入与更新均校验，未发表时三个发布引用全空。普通排队发布在同一事务建消息、新 Run 并结算队首。 |
+| 首发、直接发表与 FIFO | 从 `admit_single_chat_message` 拆出共同的消息序号和 Run 写入。`load_active_target`、`single_chat_has_active_run` 识别聊天，`build_effective_config` 从 `agent_profile` 取获准配置。`single_chat_pending_input_scope_insert` 校验队列项关联未归档话题。`chat` 接入现有 `source_attachments_json` 用户附件校验，携带附件的消息作者须为用户，附件引用写入后不可变。`published` 须有同话题的消息和 Run，旧单聊另须有匹配的 `published_camp_turn_id`，聊天要求为空。插入与更新均校验，未发表时三个发布引用全空。普通排队发布在同一事务建消息、新 Run 并结算队首。 |
 | 扫描、领取与停止 | `ready_pending_inputs` 保留旧单聊的 `JOIN camp`，独立聊天改连 `chat_topic`。FIFO 只取 `requested_mode=start`，写锁内重查归档、活动 Run、最早序号及编辑版本，`needs_repair` 挡住本话题后项。`list_dispatchable_agent_runs_scoped`、`load_claimable_run`、`load_agent_run_execution` 和 `cancel_interrupted_single_chat_runs` 增加按 Conversation 取目标的分支。停止时核对话题、Run 和执行代次，取消执行并释放 lease。迟到输出只记入原代次的诊断。 |
-| 最终答复 | 沿用现有运行端返回的 `final_output`。正文非空时在终态事务按原文写一条 `conversation_message`，设置 `final_conversation_message_id`。即使正文只有一个 Markdown 文件链接，也按同一条答复展示。正文为空时只结算 Run，工具写文件等步骤留在执行记录。核对 Run、执行代次、目的地和取消状态，每轮至多发表一条最终答复。[现有终态写入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/runtime.rs#L5273-L5288) |
+| 最终答复 | 沿用现有运行端返回的 `final_output`。正文含非空白字符时，终态事务只将原文写入一条 `conversation_message` 并设置 `final_conversation_message_id`。正文为空或全为空白时只结算 Run。工具产生的文件操作留在执行记录。核对 Run、执行代次、目的地和取消状态，每轮至多发表一条最终答复。[现有终态写入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/runtime.rs#L5273-L5288) |
 
 **Steer 的私有输入来源。** 在 `single_chat_pending_input` 增加 `requested_mode` 和目标 Run／代次，`inputId` 也是补充输入的稳定标识。`active_input_availability` 目前限定 `batch`，为 `chat` 接入同一套冻结的适配器、协议、版本和绑定检查。`canSteer` 允许登记意图，`ready` 还须同一绑定、代次的初始输入已接收。启动中的绑定按既有预计代次等待。发送前再验原目标，每条按提交顺序单独投递。私有路径对 `camp_message` 和 `camp_message_delivery` 均为零写入。
 
@@ -67,7 +67,11 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 ## 4. 历史、导航、归档与删除
 
-**历史。** `rovai chat history` 只接受分页参数，从认证 Run、执行代次及原生绑定确定当前聊天。`rovai single-chat history` 沿用会话内单聊的 Camp、Turn 和 Run 归属校验。两入口各自确定可读的 `conversation_id` 和触发消息序号，再共用已有的 `conversation_message` 分页、附件摘要及引用投影，只读触发序号之前的用户消息和最终答复。独立聊天的游标绑定话题和上界，传入 `chatId` 或跨话题游标均拒绝。当前轮通过 Steer 接收补充，发表后新开的轮次可以从历史读到它。详情页按 `inputId` 及关联消息还原待处理项与轮内补充，同一输入只显示一次。[消息查询与投影](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L394-L469) · [旧单聊归属校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L2693-L2727)
+**历史。** `rovai chat history` 只接受分页参数，从认证 Run、执行代次及原生绑定确定当前聊天。`rovai single-chat history` 沿用会话内单聊的 Camp、Turn 和 Run 归属校验。两入口各自确定可读的 `conversation_id` 和触发消息序号，再共用已有的 `conversation_message` 分页及用户消息的附件、引用投影，只读触发序号之前的用户消息和最终答复。`rovai chat history` 和 `chats.open` 对队员最终答复都只返回正文。独立聊天的游标绑定话题和上界，传入 `chatId` 或跨话题游标均拒绝。当前轮通过 Steer 接收补充，发表后新开的轮次可以从历史读到它。详情页按 `inputId` 及关联消息还原待处理项与轮内补充，同一输入只显示一次。[消息查询与投影](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L394-L469) · [旧单聊归属校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L2693-L2727)
+
+**答复里的本地文件和图片。** 独立聊天给 `MessageMarkdown` 接入 `onFileReference` 打开文件预览，`localImageContent` 读取内联图片。点击已显示的图片也走同一个预览入口。直接渲染最终消息、复用已显示的执行正文以及重开历史时，均绑定同一条最终消息。[单聊最终正文的两个渲染分支](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/apps/desktop/src/renderer/src/SingleChatPanel.tsx#L477-L485) · [现有图片读取](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/apps/desktop/src/renderer/src/SafeMarkdown.tsx#L374-L403)
+
+现有文件预览接口增加聊天消息来源（`chatId, messageId, rawReference`）。Core 在 §1 的话题范围内核对该 `conversation_message` 是本聊天的最终答复，且原文的显式 Markdown 文件链接或图片确实指向该路径。Core 以话题自有受管目录为基准解析相对路径，按需核对当前展示的引用。路径和解析符号链接后的真实文件都在该目录内时，文件可点击预览，图片可内联显示。宿主在打开或读取时复核同一边界，对该来源关闭 `allowExternalFile`。目录外的目标（含经符号链接跳出目录的文件）只显示原路径文字，既不可点击也不读取图片内容。普通正文及代码块中的路径照原文显示。[现有公屏预览来源](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/file_preview_authority.rs#L424-L471) · [文件预览的职责划分](../../architecture/file-preview.md#组件与权威)
 
 **导航。** `navigation.search` 在 §1 的话题范围内按 `chat_topic.archived_at IS NULL` 筛选，再连接 `conversation`、`agent_profile` 匹配标题和队员名。结果为 `kind:'chat', chatId`。左栏按活动序号降序、ID 稳定分页，可按队员过滤。直接发送、FIFO 入队或 Steer 提交成功时，以及队员发表最终回复时，各在同一事务将该事件的 `event_log.global_sequence` 写入 `chat_topic.last_activity_sequence`。同一输入只计一次，命令重放、FIFO 正式发表和 Steer 签收不重复计入。打开聊天、展开步骤和改名均不参与排序。`navigation.searchMessages` 继续只搜 `camp_message`。[导航搜索合同](../../contracts/navigation-search-v1.md)
 
@@ -119,13 +123,13 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 | 用例 | 业务读写及可观察的结果 | 接口 |
 | --- | --- | --- |
-| ① 选人退出、同草稿双击首发 | 选人后退出只读 `agent_profile`、存本机草稿，聊天记录为零条。首发遇到运行端未就绪，草稿保留，聊天、消息和 Run 均为零条。上线后由用户用该草稿重发。双击通过 `event_log` 去重，只创建一组 `conversation`、`chat_topic`、首条 `conversation_message` 和首个 `agent_run`。两次同快照得到相同 ID，异内容保留输入并报冲突。 | `chats.list`、`chats.send`、`chats.rename` |
-| ② 同一队员的 A、B 两段聊天历史隔离 | A、B 同属本机用户。A 的 Run 经 `conversation`、`chat_topic` 和触发消息定位历史，传 B 的 ID 或游标被拒。打开有 50 个已折叠历史轮次的 A，只取本页消息与轮次摘要。展开一轮只读该轮证据，传 B 的 Run 或证据 ID 被拒。A 最终只回一个报告链接时，`conversation_message` 保存一次原文。若工具写了文件而最终正文为空，写文件留在 `agent_run_execution_evidence`，本轮最终消息为零条。 | `chat history`、`chats.open`、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
+| ① 选人退出、同草稿双击首发 | 选人后退出只读 `agent_profile`、存本机草稿，聊天记录为零条。双击通过 `event_log` 去重，只创建一组 `conversation`、`chat_topic`、首条 `conversation_message` 和首个 `agent_run`。两次同快照得到相同 ID，异内容保留输入并报冲突。 | `chats.list`、`chats.send`、`chats.rename` |
+| ② 同一队员的 A、B 两段聊天历史隔离 | A、B 同属本机用户。A 的 Run 经 `conversation`、`chat_topic` 和触发消息定位历史，传 B 的 ID 或游标被拒。打开有 50 个已折叠历史轮次的 A，只取本页消息与轮次摘要。展开一轮只读该轮证据，传 B 的 Run 或证据 ID 被拒。A 的答复含报告链接和本地图片时，`conversation_message` 只存一份原文。重开后可预览 A 目录内的文件，指向 B 或外部目录的链接和图片只显示路径。若工具写了文件而最终正文为空，步骤保存在 `agent_run_execution_evidence`，本轮最终消息为零条。 | `chat history`、`chats.open`、聊天消息文件预览、`agentRunExecution.page / changes`、`agentRunEvidence.getContent` |
 | ③ 先排队、再补充，然后重启 | 同一轮先排队 Q，再补充 S，两次受理各推进一次话题排序。Q 在 `single_chat_pending_input` 等待，S 的私有 `context_manifest` 和 `runtime_input_delivery` 绑定原 Run／代次。S 签收后重启，原轮只有一条 S，Q 按原队序只开启一轮，历史可读 S。若重启时 S 仍未确认，只核对原投递。首次取得接收证据才补写原轮的一条 S，再次核对返回同一消息 ID。两种签收及 Q 正式发表均不再次推进排序。仅 §3 确认可以回队时沿用原 `inputId` 入队一次。全程对 `camp`、`camp_member`、`camp_turn`、`camp_message` 和公开 Delivery 零写入。 | `chats.send` 三种回执、`chats.open`，合资格时 `runtimeInputs.reconcile` |
 | ④ 归档、重启、手动恢复 | 归档更新 `chat_topic`、取消 `agent_run`。重启扫描读取 `single_chat_pending_input` 及在途补充回执，归档中不派发，普通列表与搜索均找不到。手动恢复原 ID，只发布尚未派发的 FIFO 输入。删除前由队员向自己已加入的同一 Thread 发送聊天自有目录中的报告和用户指定的外部清单。删库后重启，按 `camp_attachment_view_operation` 登记的目录身份清理。若目录已删、日志尚未记完成，再次恢复直接结清该目录。目标 `camp_message` 仍保留两个原附件引用。报告随自有目录删除，外部清单在原路径仍可读时可以打开。 | `chats.setArchived`、`chats.delete`、`threads.archive.list`、`navigation.search`、`agentRuns.cancel` |
 | ⑤ 任务已建，补通知不重复建任务 | `task` 中只有一条阿澈创建的任务。若阿澈发通知前已离开发布组，`send` 被拒，`camp_member`、`camp_message` 和 `camp_message_delivery` 均无新增。具备发送资格后，如需补发，只提交通知。若此前已提交或结果未知，则按原请求的 `event_log` 回执及公开消息、投递记录核对。已提交只取原消息，未知即停。即使重启，任务始终一条、公开通知至多一条，目标只能看到阿澈及公开结果。 | 既有 `task create / get`、`send` 及命令结果对账 |
 
-**打开聊天与展开步骤。** Desktop 和认证 Web 共用 `chats.open`，返回本页聊天消息、待处理输入、当前 Run 的 Steer 能力与进度，以及本页各轮摘要。摘要从 `agent_run` 读取 `runId`、状态、执行代次和已有的 `execution_evidence_change_sequence`，折叠历史无需逐轮读取或统计执行证据。[旧单聊快照的读取路径](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L1639-L1685)
+**打开聊天与展开步骤。** Desktop 和认证 Web 共用 `chats.open`，按 §4 返回本页聊天消息，同时返回待处理输入、当前 Run 的 Steer 能力与进度，以及本页各轮摘要。摘要从 `agent_run` 读取 `runId`、状态、执行代次和已有的 `execution_evidence_change_sequence`，折叠历史无需逐轮读取或统计执行证据。[旧单聊快照的读取路径](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L1639-L1685)
 
 只有正在展示的执行和用户展开的历史轮次才调用 `agentRunExecution.page` 取步骤。若首屏已附当前轮第一页，沿该页的 `nextBeforeSequence` 翻到更早步骤，从该页的 `throughChangeSequence` 调用 `agentRunExecution.changes` 接续变化。展开单项输出才用 `agentRunEvidence.getContent`。分页、增量和单项读取共用 §1 的话题查询，只取该话题下的 Run。读单项时再核对证据属于该 Run，然后复用既有窗口查询。[当前窗口归属校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/execution_window.rs#L63-L103) · [按需展开规则](../../contracts/run-process-detail-surface-v34.md#按窗口阅读与-dom)
 
