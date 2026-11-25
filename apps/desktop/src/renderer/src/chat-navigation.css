@@ -1,0 +1,22 @@
+.unified-sidebar.has-chat-rail { padding-left: 58px; }
+.section-rail { position: absolute; inset: 0 auto 0 0; z-index: 2; display: flex; flex-direction: column; align-items: center; width: 48px; padding-bottom: 10px; gap: 4px; background: var(--rail); }
+.section-rail::after { content: ''; position: absolute; top: 38px; right: 0; bottom: 0; width: 1px; background: var(--rail-line); pointer-events: none; }
+.section-rail-drag { flex: 0 0 40px; align-self: stretch; -webkit-app-region: drag; }
+html[data-rovai-platform="win32"] .section-rail::after { top: 8px; }
+html[data-rovai-platform="win32"] .section-rail-drag { flex-basis: 10px; }
+.section-rail-item { position: relative; display: grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 0; border-radius: 8px; color: var(--rail-ink); background: transparent; cursor: pointer; -webkit-app-region: no-drag; }
+.section-rail-item:hover { color: var(--ink); background: var(--surface-muted); }
+.section-rail-item.active { color: var(--ink); background: var(--surface-selected); }
+.section-rail-item .navigation-icon { width: 18px; height: 18px; }
+.section-rail-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--conversation-unread); box-shadow: 0 0 0 2px var(--rail); }
+.section-rail-dot.is-update { background: var(--ember); }
+.section-rail-dot.is-ready { background: var(--success); }
+.section-rail-dot.is-failed { background: var(--danger); }
+.section-rail-divider { width: 20px; height: 1px; margin: 6px 0; background: var(--rail-line); }
+.section-rail-bottom { margin-top: auto; }
+.has-chat-rail .unified-primary-nav > .rail-button:not(.new-conversation-button), .has-chat-rail:not(.settings-navigation-mode) .unified-sidebar-footer { display: none; }
+.chat-list-panel { flex: 1; }
+.chat-list-row .camp-nav-open { gap: 6px; }
+.chat-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-workspace-header { display: flex; align-items: center; gap: 8px; }
+.chat-workspace-messages { width: min(100%, var(--conversation-composer-width, 790px)); margin-inline: auto; padding: 12px 16px; }

@@ -2889,6 +2889,7 @@ export interface ThreadMessageChange {
   throughGlobalSequence: number
 }
 export interface ThreadReadInvalidation {
+  chatsChanged?: boolean
   referencesChanged?: boolean
   notificationsChanged?: boolean
   nativeInteractionsChanged?: boolean
@@ -3829,6 +3830,47 @@ export interface RemovedNavigationProject {
   removedAt: string
 }
 
+export function isChatId(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)
+}
+
+export interface ChatReadState {
+  manualUnread: boolean
+  readThroughReplySequence: number
+}
+
+export interface ChatReplyPosition {
+  chatId: string
+  lastReplySequence: number
+}
+
+export interface ChatListCursor {
+  chatId: string
+  lastActivityGlobalSequence: number
+}
+
+export interface ChatListItem extends ChatReplyPosition, ChatListCursor {
+  title: string
+  agentId: string
+  displayName: string
+  avatarRef: string | null
+  version: number
+  isProcessing: boolean
+}
+
+export interface ChatOpenResult {
+  chat: Pick<ChatListItem, 'chatId' | 'agentId' | 'displayName' | 'avatarRef' | 'title' | 'version'> & { archivedAt: string | null }
+  messages: SingleChatMessageView[]
+  runs: { runId: string; triggerMessageId: string; finalMessageId: string | null; status: string; executionEpoch: number; throughChangeSequence: number }[]
+  nextBeforeSequence: number | null
+}
+
+export interface ChatListPage {
+  items: ChatListItem[]
+  nextCursor: ChatListCursor | null
+  replyIndex: ChatReplyPosition[]
+}
+
 export interface NavigationThreadReadState {
   /** Explicit local reminder; viewing new replies does not clear this intent. */
   manualUnread: boolean
@@ -3844,7 +3886,7 @@ export interface NavigationProjectMove {
 }
 
 export interface NavigationPreferencesSnapshot {
-  schemaVersion: 7
+  schemaVersion: 8
   registeredProjects: string[]
   legacyProjectsSynced: boolean
   /** Read degradation only; never persisted. */
@@ -3855,12 +3897,14 @@ export interface NavigationPreferencesSnapshot {
   pinnedProjectOrder: string[]
   projectNames: Record<string, string>
   threadReadStates: Record<string, NavigationThreadReadState>
+  chatReadStates: Record<string, ChatReadState>
 }
 
 export interface NavigationPreferencesApi {
   moveProject(move: NavigationProjectMove): Promise<NavigationPreferencesSnapshot>
   registerProjects(projectPaths: string[], completeLegacy?: boolean): Promise<NavigationPreferencesSnapshot>
   get(): Promise<NavigationPreferencesSnapshot>
+  setChatReadState(chatId: string, state: ChatReadState | null): Promise<NavigationPreferencesSnapshot>
   setThreadReadState(threadId: string, state: NavigationThreadReadState | null): Promise<NavigationPreferencesSnapshot>
   onChanged(listener: (snapshot: NavigationPreferencesSnapshot) => void): () => void
   replacePins(pins: NavigationPin[]): Promise<NavigationPreferencesSnapshot>
@@ -4752,6 +4796,9 @@ export type CoreMethod =
   | 'navigation.threads'
   | 'navigation.groupThreads'
   | 'navigation.findThread'
+  | 'chats.open'
+  | 'chats.rename'
+  | 'chats.list'
   | 'navigation.search'
   | 'navigation.searchMessages'
   | 'navigation.campViewed'

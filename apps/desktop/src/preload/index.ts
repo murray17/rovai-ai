@@ -381,6 +381,9 @@ const api: RovaiApi = {
     registerProjects(paths, completeLegacy = false) {
       return ipcRenderer.invoke('rovai:navigation-preferences-register-projects', paths, completeLegacy)
     },
+    setChatReadState(chatId, state) {
+      return ipcRenderer.invoke('rovai:navigation-preferences-set-chat-read-state', chatId, state)
+    },
     setThreadReadState(threadId, state) {
       return ipcRenderer.invoke('rovai:navigation-preferences-set-thread-read-state', threadId, state)
     },

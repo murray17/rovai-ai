@@ -5062,10 +5062,10 @@ fn validate_project_path(path: &str) -> Result<()> {
     Ok(())
 }
 
-const CAMP_NAME_MAX_SCALARS: usize = 80;
+pub(crate) const CAMP_NAME_MAX_SCALARS: usize = 80;
 pub(crate) const DEFAULT_CAMP_TITLE: &str = "未命名对话";
 
-fn normalize_camp_name(value: &str) -> String {
+pub(crate) fn normalize_camp_name(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

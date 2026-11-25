@@ -6,10 +6,14 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-23
+last_updated: 2026-11-25
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 独立聊天的列表和已读位置
+
+Migration 233 将 projection schema 升至 183，允许独立 `conversation` 使用空的 `camp_id`，并以 `chat_topic` 保存话题标题与排序。`chats.list` 在同一快照读取当前页和全部未归档话题的答复序号。Desktop 和 Web 将其与本机已读位置比较，驱动左栏总蓝点。标题修改按版本提交，成功改动后通知客户端刷新。[聊天后端提案](chat-backend-proposal.md#4-历史导航归档与删除)
 
 ## macOS 应用内 ZIP 增量更新（2026-11-23）
 

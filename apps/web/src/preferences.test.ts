@@ -78,10 +78,15 @@ it('persists local unread intent, preserves it across other tab writes, and publ
   expect((await browserPreferences('host-a', transport).preferences.navigationPreferences.get()).threadReadStates[id].manualUnread).toBe(true)
   expect((await browserPreferences('host-b', transport).preferences.navigationPreferences.get()).threadReadStates).toEqual({})
   await other.setThreadReadState(id, { manualUnread: false, readThroughGlobalSequence: 8 })
+  const chatId = 'c69b4ddb-7774-4512-8d79-8a5d2035faae'
+  await first.setChatReadState(chatId, { manualUnread: true, readThroughReplySequence: 9 })
+  await other.setChatReadState(chatId, { manualUnread: false, readThroughReplySequence: 4 })
   const event = new Event('storage')
   Object.assign(event, { storageArea: storage, key: 'rovai.presentation:host-a:navigation' })
   events.dispatchEvent(event)
   expect(seen.at(-1)?.threadReadStates[id]).toEqual({ manualUnread: false, readThroughGlobalSequence: 12 })
+  expect(seen.at(-1)?.chatReadStates[chatId]).toEqual({ manualUnread: false, readThroughReplySequence: 9 })
+  expect((await browserPreferences('host-b', transport).preferences.navigationPreferences.get()).chatReadStates).toEqual({})
   const count = seen.length
   failWrite = true
   await expect(first.setThreadReadState(id, { manualUnread: true, readThroughGlobalSequence: 12 })).rejects.toThrow('Storage unavailable')

@@ -1,5 +1,5 @@
 import { isThreadId } from '@contracts'
-import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isTimestamp, isNavigationThreadReadState, moveNavigationProject, registerNavigationProjects, sourceMatchesSupportedSnapshot } from '../shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, sanitizeSnapshot, isProjectTargetKey, isTimestamp, isNavigationThreadReadState, withChatReadState, moveNavigationProject, registerNavigationProjects, sourceMatchesSupportedSnapshot } from '../shared/navigation-preferences-model'
 import { readFile } from 'node:fs/promises'
 import type {
   NavigationPin,
@@ -121,6 +121,13 @@ export class NavigationPreferencesStore {
       const snapshot = this.get()
       if (changed) onChanged?.(snapshot)
       return snapshot
+    })
+  }
+
+  setChatReadState(chatId: unknown, state: unknown): Promise<NavigationPreferencesSnapshot> {
+    return this.#enqueue(async () => {
+      await this.#commit(withChatReadState(this.#snapshot, chatId, state))
+      return this.get()
     })
   }
 

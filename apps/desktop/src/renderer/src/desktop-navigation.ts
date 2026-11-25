@@ -13,6 +13,7 @@ export type ArchiveNavigationSelection = { kind: ArchiveKind; threadId: string }
 
 export type NavigationTarget = Exclude<RestorableLocation, { kind: 'memory' }>
   | MemoryNavigationTarget
+  | { kind: 'chat'; chatId: string | null }
   | { kind: 'settings'; section: SettingsSection; overview?: true; archive?: ArchiveNavigationSelection }
   | { kind: 'automations' }
   | { kind: 'missions' }

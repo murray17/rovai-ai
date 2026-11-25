@@ -281,6 +281,7 @@ pub(super) fn migrate_edited_messages(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_edited_messages_for_test(c: &Connection) {
+    super::chat_topics::downgrade_for_test(c);
     if !c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=232)",

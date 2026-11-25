@@ -9,6 +9,7 @@ import { useMobileLayout } from './MobileLayout'
 import { useNavigationPressMenu } from './useNavigationPressMenu'
 import { useProjectFolderDrag } from './use-project-folder-drag'
 import { orderedPinnedProjects } from '../../shared/navigation-preferences-model'
+import { ChatListPanel, ChatSectionRail, type ChatNavigationProps } from './ChatNavigation'
 import { navigationThreadHasUnread } from './navigation-unread'
 import { useInterruptionAttention } from './thread-interruption-attention'
 import {
@@ -171,6 +172,7 @@ function projectMoveActions(projects: ProjectNavigationGroup[], registered: Set<
 
 export function ThreadNavigation({
   navigationId = 'global-navigation',
+  chatNavigation,
   settingsNavigation,
   footer,
   view,
@@ -232,9 +234,10 @@ export function ThreadNavigation({
   onError
 }: {
   navigationId?: string
+  chatNavigation?: ChatNavigationProps
   settingsNavigation?: React.ReactNode
   footer?: React.ReactNode
-  view: 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'missions' | 'memory' | 'settings'
+  view: 'compose' | 'camp' | 'chat' | 'members' | 'teams' | 'automations' | 'missions' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   disabled?: boolean
   navigation: NavigationSnapshot | null
@@ -554,7 +557,9 @@ export function ThreadNavigation({
 
   return (
     <>
-      <aside id={navigationId} className={`unified-sidebar ${settingsSidebar ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={settingsSidebar ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
+      <aside id={navigationId} className={`unified-sidebar ${chatNavigation ? 'has-chat-rail' : ''} ${settingsSidebar ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || navigationCollapsed} aria-label={settingsSidebar ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
+        {chatNavigation && <ChatSectionRail chat={chatNavigation} view={view} projects={chatNavigation.projects} missions={onMissions} automations={onAutomations} members={onMembers} teams={onTeams}
+          settings={updateBadge ? onOpenUpdates : onSettings} missionUnread={unreadMissionCount > 0} update={updateBadge}/>}
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
@@ -573,7 +578,7 @@ export function ThreadNavigation({
             </button>
           )}
         </div>
-        {settingsSidebar
+        {view === 'chat' && chatNavigation ? <ChatListPanel navigation={chatNavigation}/> : settingsSidebar
           ? (
               settingsNavigation ?? <SettingsSidebarNavigation
                 groups={SETTINGS_SIDEBAR_GROUPS.map(group => ({ ...group, items: group.items.filter(item => (item.key !== 'channels' || client.channels) && (item.key !== 'shortcuts' || managed)) }))}

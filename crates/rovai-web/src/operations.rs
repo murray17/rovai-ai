@@ -198,6 +198,12 @@ pub enum Operation {
 
     #[serde(rename = "navigation.findThread", alias = "navigation.findCamp")]
     NavigationFindCamp,
+    #[serde(rename = "chats.rename")]
+    ChatsRename,
+    #[serde(rename = "chats.open")]
+    ChatsOpen,
+    #[serde(rename = "chats.list")]
+    ChatsList,
     #[serde(rename = "navigation.search")]
     NavigationSearch,
     #[serde(rename = "navigation.searchMessages")]
@@ -567,6 +573,9 @@ impl Operation {
             Self::RuntimeStartupCheck => "runtime.startup.check",
 
             Self::NavigationFindCamp => "navigation.findCamp",
+            Self::ChatsRename => "chats.rename",
+            Self::ChatsOpen => "chats.open",
+            Self::ChatsList => "chats.list",
             Self::NavigationSearch => "navigation.search",
             Self::NavigationSearchMessages => "navigation.searchMessages",
             Self::RunExecutionPage => "agentRunExecution.page",

@@ -123,6 +123,9 @@ export const WEB_OPERATIONS = [
   'runtime.startup.inspect',
   'runtime.startup.check',
   'navigation.findThread',
+  'chats.list',
+  'chats.open',
+  'chats.rename',
   'navigation.search',
   'navigation.searchMessages',
   'agentRunExecution.page',
@@ -250,6 +253,7 @@ export const WEB_OPERATIONS = [
 export type WebOperation = typeof WEB_OPERATIONS[number]
 
 const RECONCILABLE_COMMANDS = new Set<WebOperation>([
+  'chats.rename',
   'teams.save',
   'teams.delete',
   'threads.rename',
@@ -1176,7 +1180,7 @@ export class ConsoleClient {
             if (done) break
             if (frames.push(decoder.decode(value, { stream: true }))) {
               const changes = frames.takeChanges()
-              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.referencesChanged) ? { referencesChanged: true } : {}), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.nativeInteractionsChanged) ? { nativeInteractionsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), ...(changes.some(change => change.memoryChanged) ? { memoryChanged: true } : {}), ...(changes.some(change => change.memoryContentChanged) ? { memoryContentChanged: true } : {}), ...(changes.some(change => change.teamsChanged) ? { teamsChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
+              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.referencesChanged) ? { referencesChanged: true } : {}), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.nativeInteractionsChanged) ? { nativeInteractionsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), ...(changes.some(change => change.memoryChanged) ? { memoryChanged: true } : {}), ...(changes.some(change => change.memoryContentChanged) ? { memoryContentChanged: true } : {}), ...(changes.some(change => change.teamsChanged) ? { teamsChanged: true } : {}), ...(changes.some(change => change.chatsChanged) ? { chatsChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
               void this.reconcilePending()
             }
           }

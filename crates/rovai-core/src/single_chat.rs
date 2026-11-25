@@ -1762,7 +1762,7 @@ struct EndTarget {
     ended_at: Option<String>,
 }
 
-fn source_attachment_views(value: &str) -> Result<Vec<LocalAttachmentSourceView>> {
+pub(crate) fn source_attachment_views(value: &str) -> Result<Vec<LocalAttachmentSourceView>> {
     Ok(parse_source_attachments(value)?
         .iter()
         .map(|source_ref| source_ref.view(LocalAttachmentAvailability::Unknown))

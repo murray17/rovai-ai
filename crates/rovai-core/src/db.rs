@@ -66,6 +66,8 @@ mod subagent;
 mod task_capability;
 #[path = "db_teams.rs"]
 mod teams;
+#[path = "db_chat_topics.rs"]
+mod chat_topics;
 #[path = "db_thread_archive.rs"]
 mod thread_archive;
 #[path = "db_web_pasted_text.rs"]
@@ -530,7 +532,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 182;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 183;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1038,6 +1040,7 @@ struct CurrentMigrationState {
     v230: bool,
     v231: bool,
     v232: bool,
+    v233: bool,
 }
 
 impl CurrentMigrationState {
@@ -1059,6 +1062,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v233 {
+            let mut previous = *self;
+            previous.v233 = false;
+            return schema == 183 && previous.admits(contract, 182, classifier);
+        }
         if self.v232 {
             let mut previous = *self;
             previous.v232 = false;
@@ -3884,6 +3892,7 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 183 || chat_topics::schema_matches(connection)?)
             && (marker.projection_schema_version < 181
                 || run_continuation::retired_schema_matches(connection)?)
             && (!(177..=180).contains(&marker.projection_schema_version)
@@ -6024,7 +6033,8 @@ fn single_chat_v140_schema_matches(connection: &Connection) -> rusqlite::Result<
     )?;
     Ok(required_objects == 11
         && retired_objects == 0
-        && conversation_sql.contains("kind IN ('camp_member', 'single_chat')")
+        && (conversation_sql.contains("kind IN ('camp_member', 'single_chat')")
+            || conversation_sql.contains("kind IN ('camp_member', 'single_chat', 'chat')"))
         && camp_turn_sql.contains("kind IN ('camp', 'single_chat')")
         && camp_turn_sql.contains("'conversation_message'")
         && agent_run_sql.contains("'single_chat'")
@@ -6321,7 +6331,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=229),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=230),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=231),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=232)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=232),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=233)
         "#,
         [],
         |row| {
@@ -6489,6 +6500,7 @@ fn load_current_migration_state(
                 v230: row.get(160)?,
                 v231: row.get(161)?,
                 v232: row.get(162)?,
+                v233: row.get(163)?,
             })
         },
     )
@@ -8906,6 +8918,9 @@ impl Database {
             observe_migration_step(progress, "migration_232", || {
                 quote_text::migrate_edited_messages(self)
             })?;
+        }
+        if !self.schema_migration_applied(233)? {
+            observe_migration_step(progress, "migration_233", || chat_topics::migrate(self))?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40666,7 +40681,8 @@ mod tests {
             "migration_229".into(),
             "migration_230".into(),
             "migration_231".into(),
-            "migration_232".into()
+            "migration_232".into(),
+            "migration_233".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40746,7 +40762,8 @@ mod tests {
                 "migration_229",
                 "migration_230",
                 "migration_231",
-                "migration_232"
+                "migration_232",
+                "migration_233"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
@@ -42839,6 +42856,7 @@ mod tests {
             v230: version >= 230,
             v231: version >= 231,
             v232: version >= 232,
+            v233: version >= 233,
         }
     }
 

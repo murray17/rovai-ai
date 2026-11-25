@@ -134,6 +134,8 @@ import { createRuntimeRefresh, openRuntimeModelCatalog } from './runtime-check'
 import { MissionSurface } from './MissionSurface'
 import { MissionHeader } from './MissionHeader'
 import { FilePreviewProvider } from './FilePreviewContext'
+import { useChatList } from './useChatList'
+import { ChatWorkspace } from './ChatWorkspace'
 import { NavigationShell } from './NavigationShell'
 import { StartupLoadingCanvas } from './StartupLoadingCanvas'
 import { createDesktopNavigation, type NavigationTarget, type NavigationTransaction, type NavigationIntent, type MemoryNavigationTarget, type ArchiveNavigationSelection } from './desktop-navigation'
@@ -318,7 +320,7 @@ export function requestAuthoritativeThreadOpenProjection(
 type LoadState = 'loading' | 'ready' | 'error'
 export type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
-export type View = 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'missions' | 'memory' | 'settings'
+export type View = 'chat' | 'compose' | 'camp' | 'members' | 'teams' | 'automations' | 'missions' | 'memory' | 'settings'
 type ActivateThreadOptions = {
   title?: string
   memberPrepared?: boolean
@@ -1152,6 +1154,8 @@ export function BusinessApp({
   )
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(initialTarget)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>(desktop ? 'loading' : 'resolved')
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const chatList = useChatList(client, startupStatus === 'resolved' && !shuttingDown)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
@@ -3383,6 +3387,7 @@ export function BusinessApp({
         case 'teams': setView('teams'); break
         case 'automations': setView('automations'); break
         case 'missions': setView('missions'); break
+        case 'chat': setActiveChatId(target.chatId); setView('chat'); break
         case 'quick_chat': setView('compose'); break
       }
     }
@@ -4613,6 +4618,7 @@ export function BusinessApp({
       }
     : null
   const pageContentClassName: Record<View, string> = {
+    chat: 'task-content independent-chat-content',
     compose: 'task-content compose-content',
     'camp': 'task-content camp-content',
     members: 'members-content',
@@ -4758,7 +4764,30 @@ export function BusinessApp({
   }
 
   const cachedNavigationRow = selectedThreadId ? campSnapshotCache.current.get(selectedThreadId)?.navigationRow : null
+  const markChat = (chatId: string, sequence: number, manualUnread: boolean): void => {
+    const previous = navigationPreferencesRef.current?.chatReadStates[chatId]
+    if (!manualUnread && !previous?.manualUnread && (previous?.readThroughReplySequence ?? 0) >= sequence) return
+    void uiPreferences.navigationPreferences.setChatReadState(chatId, {
+      manualUnread, readThroughReplySequence: manualUnread ? previous?.readThroughReplySequence ?? 0 : sequence
+    }).catch(error => notifyError(errorMessage(error)))
+  }
   const renderNavigation = (drawer = false): React.JSX.Element => <ThreadNavigation
+    chatNavigation={{list: chatList, states: navigationPreferences?.chatReadStates ?? {}, activeId: activeChatId,
+      projects: () => { setMobileConversationDrawerOpen(false); void desktopNavigation.push(selectedThreadId ? {kind:'camp',threadId:selectedThreadId} : {kind:'quick_chat'}) },
+      open: chatId => { setMobileConversationDrawerOpen(false); void desktopNavigation.push({kind: 'chat',chatId}) },
+      mark: (item, unread) => markChat(item.chatId, item.lastReplySequence, unread),
+      rename: async (item, title) => {
+        const result = await client.request<StoredCommandResult>('chats.rename', {
+          commandId: newCommandId(),
+          command: { chatId: item.chatId, title, expectedVersion: item.version }
+        })
+        if (result.status === 'rejected') {
+          if (result.code === 'chat.version_conflict') {
+            throw new Error(uiAttribute('名称已在另一窗口修改。关闭后重新打开即可查看。'))
+          }
+          throw new OperationFailure(normalizeFailure(result))
+        }
+      }}}
     navigationId={drawer ? 'mobile-conversation-navigation' : 'global-navigation'}
     platform={client.platform}
     footer={sidebarFooter}
@@ -5022,6 +5051,9 @@ export function BusinessApp({
           </MissionSurface>
         )}
 
+        {!startupGateVisible && view === 'chat' && (activeChatId
+          ? <ChatWorkspace key={activeChatId} client={client} chatId={activeChatId} theme={appearance.resolvedTheme} onRead={(id, sequence) => markChat(id, sequence, false)}/>
+          : <div className="chat-workspace-messages"><h1>{uiAttribute('聊天')}</h1></div>)}
         {!startupGateVisible && view === 'compose' && (
           <QuickChatWorkspace
             agents={agents}

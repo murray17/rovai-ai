@@ -6,7 +6,7 @@ import type { AppearanceSnapshot, CurrentUserProfileApi, NavigationPreferencesSn
 import { DEFAULT_CURRENT_USER_PROFILE, currentUserNameError, isThreadId } from '@contracts'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
 import { DEFAULT_APPEARANCE, parseAppearancePatch, resolveThemeMode } from '../../desktop/src/shared/appearance'
-import { EMPTY_SNAPSHOT, sanitizeSnapshot, sourceMatchesSupportedSnapshot, registerNavigationProjects, moveNavigationProject, isNavigationThreadReadState } from '../../desktop/src/shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, sanitizeSnapshot, sourceMatchesSupportedSnapshot, registerNavigationProjects, moveNavigationProject, withChatReadState, isNavigationThreadReadState } from '../../desktop/src/shared/navigation-preferences-model'
 import { normalizeProjectDisplayName, projectDisplayNameError } from '../../desktop/src/shared/project-display-name'
 
 /** Browser presentation preferences only. No drafts, domain facts or credentials enter storage. */
@@ -94,6 +94,7 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
         },
         registerProjects: (paths, completeLegacy = false) => commitNavigation(current => registerNavigationProjects(current, paths, completeLegacy)),
         moveProject: move => commitNavigation(current => moveNavigationProject(current, move)),
+        setChatReadState: (chatId, state) => commitNavigation(current => withChatReadState(current, chatId, state)),
         setThreadReadState: (threadId, state) => {
           if (!isThreadId(threadId) || (state !== null && !isNavigationThreadReadState(state))) return Promise.reject(new Error('Invalid Thread read state'))
           return commitNavigation(current => {

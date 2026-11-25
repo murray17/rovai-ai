@@ -292,6 +292,9 @@ const allowedMethods = new Set<CoreMethod>([
   'navigation.threads',
   'navigation.groupThreads',
   'navigation.findThread',
+  'chats.list',
+  'chats.open',
+  'chats.rename',
   'navigation.search',
   'navigation.searchMessages',
   'navigation.campViewed',
@@ -1767,6 +1770,10 @@ ipcMain.handle('rovai:navigation-preferences-register-projects', (_event, paths:
     await requireNavigationPreferences().registerProjects(paths, completeLegacy)
   ))
 })
+
+ipcMain.handle('rovai:navigation-preferences-set-chat-read-state', (_event, chatId: unknown, state: unknown) =>
+  projectAccessTransactions.run(() => requireNavigationPreferences().setChatReadState(chatId, state).then(publishNavigationPreferences))
+)
 
 ipcMain.handle('rovai:navigation-preferences-set-thread-read-state', (_event, threadId: unknown, state: unknown) => {
   if (typeof threadId !== 'string' || (state !== null && !isNavigationThreadReadState(state))) {

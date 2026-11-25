@@ -1,4 +1,4 @@
-import { isThreadId } from '@contracts'
+import { isChatId, isThreadId, type ChatReadState } from '@contracts'
 import type { NavigationPin, NavigationPreferencesSnapshot, NavigationProjectMove, NavigationThreadReadState, RemovedNavigationProject } from '@contracts'
 import { normalizeProjectDisplayName, projectDisplayNameError } from './project-display-name'
 
@@ -6,7 +6,7 @@ const MAX_PROJECT_PATH_LENGTH = 8_192
 const PROJECT_KEY_PREFIX = 'directory:'
 
 export const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
-  schemaVersion: 7,
+  schemaVersion: 8,
   registeredProjects: [],
   legacyProjectsSynced: false,
   pins: [],
@@ -14,7 +14,8 @@ export const EMPTY_SNAPSHOT: NavigationPreferencesSnapshot = {
   projectOrder: null,
   pinnedProjectOrder: [],
   projectNames: {},
-  threadReadStates: {}
+  threadReadStates: {},
+  chatReadStates: {}
 }
 
 function isSupportedVersion(value: unknown): value is number {
@@ -34,7 +35,10 @@ export function sanitizeSnapshot(source: unknown): NavigationPreferencesSnapshot
   const legacyProjectsSynced = version >= 6 && source.legacyProjectsSynced === true
   const pinned = new Set(pins.filter(pin => pin.kind === 'project').map(pin => pin.targetKey))
   const pinnedProjectOrder = version >= 7 ? (sanitizeProjectOrder(source.pinnedProjectOrder) ?? []).filter(key => pinned.has(key)) : []
-  return { schemaVersion: 7, registeredProjects, legacyProjectsSynced, pins, removedProjects, projectOrder, pinnedProjectOrder, projectNames, threadReadStates }
+  const chatReadStates = version >= 8 && isRecord(source.chatReadStates)
+    ? Object.fromEntries(Object.entries(source.chatReadStates).filter(([id, state]) => isChatId(id) && isChatReadState(state))) as Record<string, ChatReadState>
+    : {}
+  return { schemaVersion: 8, registeredProjects, legacyProjectsSynced, pins, removedProjects, projectOrder, pinnedProjectOrder, projectNames, threadReadStates, chatReadStates }
 }
 
 export function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
@@ -136,6 +140,22 @@ export function isNavigationThreadReadState(value: unknown): value is Navigation
     && (value.readThroughGlobalSequence as number) >= 0
 }
 
+function isChatReadState(value: unknown): value is ChatReadState {
+  return isRecord(value) && typeof value.manualUnread === 'boolean'
+    && Number.isSafeInteger(value.readThroughReplySequence) && (value.readThroughReplySequence as number) >= 0
+}
+
+export function withChatReadState(snapshot: NavigationPreferencesSnapshot, chatId: unknown, state: unknown): NavigationPreferencesSnapshot {
+  if (!isChatId(chatId) || (state !== null && !isChatReadState(state))) throw new Error('Invalid chat read state')
+  const chatReadStates = { ...snapshot.chatReadStates }
+  if (state === null) delete chatReadStates[chatId]
+  else chatReadStates[chatId] = {
+    manualUnread: state.manualUnread,
+    readThroughReplySequence: Math.max(state.readThroughReplySequence, chatReadStates[chatId]?.readThroughReplySequence ?? 0)
+  }
+  return { ...snapshot, chatReadStates }
+}
+
 export function sanitizeThreadReadStates(source: unknown): Record<string, NavigationThreadReadState> {
   if (!isRecord(source)) return {}
   return Object.fromEntries(Object.entries(source).flatMap(([id, state]) =>
@@ -181,6 +201,7 @@ export function sourceMatchesSupportedSnapshot(source: unknown, snapshot: Naviga
     expected.registeredProjects = snapshot.registeredProjects
     expected.legacyProjectsSynced = snapshot.legacyProjectsSynced
   }
+  if (version >= 8) expected.chatReadStates = snapshot.chatReadStates
   if (version >= 7) {
     // Pins own membership. Stale or repeated display-order entries can be skipped on read.
     if (!Array.isArray(source.pinnedProjectOrder)) return false

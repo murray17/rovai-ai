@@ -115,6 +115,7 @@ pub mod planned_shutdown;
 pub mod platform;
 pub mod project_file_reference;
 pub mod project_files;
+pub mod chat;
 pub mod read_model;
 pub mod run_continuation;
 pub mod runtime;

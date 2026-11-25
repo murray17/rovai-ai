@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NavigationPreferencesSnapshot, NavigationThreadItem } from '@contracts'
-import { navigationThreadHasUnread, navigationThreadReadState, saveNavigationThreadReadState } from './navigation-unread'
+import { chatHasUnread, chatRailHasUnread, navigationThreadHasUnread, navigationThreadReadState, saveNavigationThreadReadState } from './navigation-unread'
 
 const thread: NavigationThreadItem = {
   id: 'rvcamp_01h47kvsy5fk1shh6w1g60eec0', title: 'Concurrent replies', activationState: 'active',
@@ -10,6 +10,17 @@ const thread: NavigationThreadItem = {
 }
 
 describe('navigation read intent', () => {
+  it('takes the rail dot from the complete reply index even with a read first page', () => {
+    const first = {chatId: 'a', lastReplySequence: 0}
+    const offPage = {chatId: 'b', lastReplySequence: 3}
+    const index = [first, offPage]
+    expect(chatHasUnread(first)).toBe(false)
+    expect(chatRailHasUnread(index, {})).toBe(true)
+    const states = {b:{manualUnread:false,readThroughReplySequence:3}}
+    expect(chatRailHasUnread(index, states)).toBe(false)
+    expect(chatRailHasUnread(index, {...states, a: {manualUnread:true,readThroughReplySequence:0}})).toBe(true)
+    expect(chatRailHasUnread([first], {b:{manualUnread:true,readThroughReplySequence:0}})).toBe(false)
+  })
   it('shows an unread reply while another member is running and retains it after running ends', () => {
     expect(navigationThreadHasUnread(thread)).toBe(true)
     expect(navigationThreadHasUnread({ ...thread, marker: 'none' })).toBe(true)
@@ -41,7 +52,7 @@ describe('navigation read intent', () => {
   it('reads back an uncertain local write before allowing the Core acknowledgement step', async () => {
     const desired = navigationThreadReadState(thread, false)
     const snapshot: NavigationPreferencesSnapshot = {
-      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: true, pins: [],
+      schemaVersion: 8, chatReadStates: {}, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: true, pins: [],
       removedProjects: [], projectOrder: null, projectNames: {},
       threadReadStates: { [thread.id]: { ...desired, readThroughGlobalSequence: 30 } }
     }

@@ -11661,6 +11661,27 @@ impl Core {
                     )?,
                 )?)
             }
+            "chats.rename" => {
+                let params: UserCommandParams<rovai_core::chat::RenameChat> =
+                    serde_json::from_value(request.params.clone())?;
+                let envelope = user_command_envelope(params.command_id, params.command);
+                let mut database = self.database.lock().await;
+                let execution = rovai_core::chat::rename(&mut database, &envelope)?;
+                if !execution.replayed && execution.result.payload["changed"] == true {
+                    emit(&self.output, "chats.listChanged", json!({ "chatId": envelope.payload.chat_id }));
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "chats.open" => {
+                let input = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(rovai_core::chat::open(&mut database, input)?)?)
+            }
+            "chats.list" => {
+                let input = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(rovai_core::chat::list(&mut database, input)?)?)
+            }
             "navigation.search" => {
                 let input =
                     serde_json::from_value::<NavigationSearchParams>(request.params.clone())
