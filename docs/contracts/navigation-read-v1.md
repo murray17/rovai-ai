@@ -3,7 +3,7 @@ document_type: contract
 contract: navigation-read
 version: v1
 status: accepted
-last_updated: 2026-11-22
+last_updated: 2026-11-24
 ---
 
 # Navigation Read v1
@@ -45,6 +45,14 @@ Desktop 的 `navigation.json` 与 Web 既有 origin/Owner 偏好 JSON 是各自�
 projectNames、threadReadStates 上增补 `registeredProjects: string[]` 与 `legacyProjectsSynced: boolean`。
 路径沿用 Workspace 规范绝对路径；名称只读取既有别名映射。旧 schema 在内存补空数组和 false，不在读取时重写。
 
+schema 7 增加 `pinnedProjectOrder: string[]`。合法 v1–v6 在内存补空数组，直到下次实际写入才升级。
+置顶项目先按手动顺序显示仍在置顶区的目录，其余按原置顶时间追加。读取置顶记录时逐项跳过无效路径，其余记录仍可编辑。读取顺序时跳过无效、重复或已离开置顶区的项。取消置顶或移除目录会清理对应顺序项。
+
+`moveProject({ section, projectKey, beforeProjectKey })` 把已登记的源目录移到同区目标之前，`null` 表示区尾。
+两个键都用 `directory:<规范绝对路径>`。长度上限与目录登记一致，8192 个 UTF-16 码元只计算路径本身。`projects` 只重排 `projectOrder` 中普通目录的槽位，置顶目录保留其基础位置。
+`pinned` 只写 `pinnedProjectOrder`，保留置顶时间。保存端按最新快照应用移动。源或目标离开本区、位置相同均直接返回当前快照。只有顺序实际改变才写入并通知订阅者。
+旧目录尚未登记、仍显示在同区时，按可见顺序插入到目标之前。区尾对应最后一个可移动目录之后的边界。
+
 `registerProjects(paths, completeLegacy=false)` 由同一个偏好写入口增量追加缺失目录，过滤最新移除记录；
 `completeLegacy=true` 在同一次原子保存中写清单和完成标记，已经完成则不改变清单。
 正常目录操作不重置完成标记。明确移除同时去掉登记和顺序并保留移除记录；明确恢复重新加入同一路径。
@@ -78,7 +86,7 @@ Desktop 复用 Main 队列及私有原子文件写入；Web 在现有浏览器�
 
 ## Explicit local read intent
 
-`navigationPreferences` schema 6 另存本机 `threadReadStates`，每个稳定 Thread ID 的值为
+`navigationPreferences` 另存本机 `threadReadStates`，每个稳定 Thread ID 的值为
 `{ manualUnread: boolean, readThroughGlobalSequence: number }`；水位必须是非负安全整数。
 `setThreadReadState(threadId, state | null)` 原子保存并返回完整偏好快照；`null` 移除本机意图，非空值的 read-through
 与旧值取最大。`onChanged` 发布成功保存后的快照。schema 2/3/4 默认补空映射，不修改 Core schema 或已读存储。

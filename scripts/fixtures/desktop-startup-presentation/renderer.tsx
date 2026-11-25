@@ -105,6 +105,10 @@ function api(path = ''): unknown {
         return Promise.resolve(next)
       }
       if (path === 'navigationPreferences.get' && requestHandlers.has(path)) { calls.push(path); return Promise.resolve().then(() => requestHandlers.get(path)!(args)) }
+      if (path === 'navigationPreferences.moveProject' && requestHandlers.has(path)) {
+        calls.push(path)
+        return Promise.resolve().then(() => requestHandlers.get(path)!(args))
+      }
       if (path === 'navigationPreferences.get' && responses.has(path)) {
         calls.push(path)
         return Promise.resolve(sanitizeSnapshot(responses.get(path)))
@@ -343,6 +347,43 @@ Object.assign(window, { startupTest: {
     await add('/unsaved-after-completion')
     check(saved().legacyProjectsSynced && !visible('/unsaved-after-completion') && !document.querySelector('.error-banner'), 'A later save failure keeps the completed marker without a temporary row or persistent banner')
     cases.push('First preference read failure preserves ordinary navigation')
+    const paths = ['/a', '/b', '/c']
+    const [a, b, c] = paths.map(path => 'directory:' + path)
+    const initial = registerNavigationProjects(EMPTY_SNAPSHOT, paths, true)
+    let save = deferred<NavigationPreferencesSnapshot>()
+    await boot(initial, emptyNavigation, () => requestHandlers.set('navigationPreferences.moveProject', () => save.promise))
+    const order = () => Array.from(document.querySelectorAll<HTMLElement>('.navigation-projects > [data-project-sort-key]'), row => row.dataset.group).join()
+    const moveUp = async (id: string) => {
+      const row = document.querySelector<HTMLButtonElement>(`[data-project-sort-key="${id}"] .project-select-row`)!
+      row.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowUp', altKey: true }))
+      await flush()
+    }
+    await moveUp(c)
+    check(order() === [a, c, b].join(), 'The released folder moves while the save is pending')
+    const broadcast = { ...initial, projectOrder: [b, a, c] }
+    navigationPreferenceListeners.forEach(listener => listener(broadcast))
+    save.reject(new Error('fixture save failed'))
+    await flush()
+    check(order() === [b, a, c].join() && !document.querySelector('.app-toast'), 'Failure immediately restores the latest confirmed order')
+    save = deferred<NavigationPreferencesSnapshot>()
+    await moveUp(c)
+    const newer = { ...initial, projectOrder: [c, a, b] }
+    navigationPreferenceListeners.forEach(listener => listener(newer))
+    save.resolve({ ...initial, projectOrder: [b, c, a] })
+    await flush()
+    check(order() === [c, a, b].join(), 'A late move reply never overwrites a newer broadcast')
+    cases.push('Optimistic folder move, immediate rollback and late-reply handling in the production sidebar')
+    const longPath = 'C:/' + 'a/'.repeat(4_094) + 'x'
+    const longKey = 'directory:' + longPath
+    const withLongPath = registerNavigationProjects(EMPTY_SNAPSHOT, ['/a', longPath], true)
+    save = deferred<NavigationPreferencesSnapshot>()
+    await boot(withLongPath, emptyNavigation, () => requestHandlers.set('navigationPreferences.moveProject', () => save.promise))
+    await moveUp(longKey)
+    check(order() === [longKey, a].join(), 'A maximum-length folder stays visible during an optimistic move')
+    save.resolve({ ...withLongPath, projectOrder: [longKey, a] })
+    await flush()
+    check(order() === [longKey, a].join(), 'The saved long folder remains in its new position')
+    cases.push('Maximum-length project paths remain usable during sidebar reorder')
     return { ok: true, cases }
   },
 
@@ -669,7 +710,7 @@ Object.assign(window, { startupTest: {
     responses.set('members.list', [])
     responses.set('runtime.installations.list', [])
     responses.set('navigation.snapshot', { schemaVersion: 3, projects: [], quickChat: { recentThreads: [], totalCount: 0 } })
-    const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
+    const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
     responses.set('navigationPreferences.get', navPreferences)
     responses.set('memory.hearthReviewItems.list', [])
     responses.set('preferences.memory.get', { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 })
@@ -955,8 +996,43 @@ Object.assign(window, { startupTest: {
     await flush()
     cases.push('The Skill picker loads its catalog on demand')
     check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 B', 'Camp switches share the same history')
-    await back(); check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Back restores the Camp ID and title')
-    check(manualUnread('A') === false, 'Explicit history navigation clears the reminder after the full projection opens')
+    {
+      const previous = responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot
+      const folders = registerNavigationProjects(previous, ['/alpha', '/beta'])
+      const publishPreferences = (next: NavigationPreferencesSnapshot) => {
+        responses.set('navigationPreferences.get', next)
+        navigationPreferenceListeners.forEach(listener => listener(next))
+      }
+      publishPreferences(folders)
+      const opening = deferred<unknown>()
+      campRequest = id => id === 'A' ? opening.promise : campProjection(id)
+      await back()
+      const reordered = { ...structuredClone(folders), projectOrder: [...folders.projectOrder!].reverse() }
+      publishPreferences(reordered)
+      await flush()
+      check(manualUnread('A'), 'A pending open retains the reminder when another window moves a folder')
+      publishPreferences({ ...reordered, threadReadStates: { ...reordered.threadReadStates, B: { manualUnread: true, readThroughGlobalSequence: 0 } } })
+      opening.resolve(campProjection('A'))
+      await flush(); await flush()
+      check(document.querySelector('.camp-topbar h1')?.textContent === '导航会话 A', 'Back restores the Camp ID and title')
+      check(manualUnread('A') === false && !document.querySelector('[data-thread-id="A"] .camp-unread-dot') && manualUnread('B'),
+        'Opening A clears A and preserves a reminder set on B while A was loading')
+      await clickNavigation('导航会话 B', '.camp-nav-open')
+      await markUnread('A')
+      const reopening = deferred<unknown>()
+      campRequest = id => id === 'A' ? reopening.promise : campProjection(id)
+      await back()
+      const pending = responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot
+      publishPreferences({ ...pending, threadReadStates: { ...pending.threadReadStates, A: { ...pending.threadReadStates.A, manualUnread: false } } })
+      publishPreferences(pending)
+      reopening.resolve(campProjection('A'))
+      await flush(); await flush()
+      check(manualUnread('A') && document.querySelector('[data-thread-id="A"] .camp-unread-dot'),
+        'A newer reminder on A survives an older open of A, including when its value changes back')
+      await clickNavigation('导航会话 A', '.camp-nav-open')
+      publishPreferences({ ...previous, threadReadStates: (responses.get('navigationPreferences.get') as NavigationPreferencesSnapshot).threadReadStates })
+    }
+    cases.push('Reordering folders in another window lets an in-flight Thread open clear its manual unread reminder')
     const delayedCamp = deferred<unknown>()
     campRequest = id => id === 'C' ? delayedCamp.promise : campProjection(id)
     await clickNavigation('导航会话 C', '.camp-nav-open')

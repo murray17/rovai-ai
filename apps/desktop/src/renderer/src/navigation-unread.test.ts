@@ -41,7 +41,7 @@ describe('navigation read intent', () => {
   it('reads back an uncertain local write before allowing the Core acknowledgement step', async () => {
     const desired = navigationThreadReadState(thread, false)
     const snapshot: NavigationPreferencesSnapshot = {
-      schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: true, pins: [],
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: true, pins: [],
       removedProjects: [], projectOrder: null, projectNames: {},
       threadReadStates: { [thread.id]: { ...desired, readThroughGlobalSequence: 30 } }
     }

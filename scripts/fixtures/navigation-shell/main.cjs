@@ -167,6 +167,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(projects.registeredProjects, ['/b'])
     assert.equal(projects.legacyProjectsSynced, true)
     assert.deepEqual(projects.projectNames, { 'directory:/a': 'A', 'directory:/b': 'B' })
+    await require('./project-folder-order.cjs')({ run, other, mouse, key, frame, settle, point, context, selectItem })
     second.destroy()
     const opensBefore=await run('window.navigationTest.actions.length')
     const p=await context(runningSelector)

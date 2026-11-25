@@ -6,7 +6,7 @@ import type { AppearanceSnapshot, CurrentUserProfileApi, NavigationPreferencesSn
 import { DEFAULT_CURRENT_USER_PROFILE, currentUserNameError, isThreadId } from '@contracts'
 import type { BusinessEnvironment } from '../../desktop/src/renderer/src/business-environment'
 import { DEFAULT_APPEARANCE, parseAppearancePatch, resolveThemeMode } from '../../desktop/src/shared/appearance'
-import { EMPTY_SNAPSHOT, sanitizeSnapshot, sourceMatchesSupportedSnapshot, registerNavigationProjects, isNavigationThreadReadState } from '../../desktop/src/shared/navigation-preferences-model'
+import { EMPTY_SNAPSHOT, sanitizeSnapshot, sourceMatchesSupportedSnapshot, registerNavigationProjects, moveNavigationProject, isNavigationThreadReadState } from '../../desktop/src/shared/navigation-preferences-model'
 import { normalizeProjectDisplayName, projectDisplayNameError } from '../../desktop/src/shared/project-display-name'
 
 /** Browser presentation preferences only. No drafts, domain facts or credentials enter storage. */
@@ -36,15 +36,18 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
     refreshNavigation(); publishNavigation()
   }
   const commitNavigation = async (update: (current: NavigationPreferencesSnapshot) => Partial<NavigationPreferencesSnapshot>): Promise<NavigationPreferencesSnapshot> => {
-    const next = await withBrowserPreferenceWrite(key, () => {
+    const changed = await withBrowserPreferenceWrite(key, () => {
       refreshNavigation()
       if (navigation.readError) throw new Error(navigation.readError)
       const next = sanitizeSnapshot({ ...navigation, ...update(navigation) })
-      if (JSON.stringify(next) !== JSON.stringify(navigation)) write('navigation', next)
-      return next
+      if (JSON.stringify(next) === JSON.stringify(navigation)) return false
+      write('navigation', next)
+      navigation = next
+      return true
     })
-    navigation = next; publishNavigation()
-    return structuredClone(next)
+    // A storage event may already have supplied a newer snapshot while the lock was released.
+    if (changed) publishNavigation()
+    return structuredClone(navigation)
   }
   const media = matchMedia('(prefers-color-scheme: dark)')
   let appearance = { ...DEFAULT_APPEARANCE }
@@ -90,6 +93,7 @@ export function browserPreferences(scope: string, transport: ConsoleClient): {
           }
         },
         registerProjects: (paths, completeLegacy = false) => commitNavigation(current => registerNavigationProjects(current, paths, completeLegacy)),
+        moveProject: move => commitNavigation(current => moveNavigationProject(current, move)),
         setThreadReadState: (threadId, state) => {
           if (!isThreadId(threadId) || (state !== null && !isNavigationThreadReadState(state))) return Promise.reject(new Error('Invalid Thread read state'))
           return commitNavigation(current => {

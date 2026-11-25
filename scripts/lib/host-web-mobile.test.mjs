@@ -194,6 +194,112 @@ test('phone navigation search automatically scans and opens mission hits in mobi
 })
 
 // Real Host + production Web entry. No Electron profile, Runtime, or daily data.
+test('phone project folders drag by their icon, keep label gestures, and survive reload', { timeout: 60_000 }, async t => {
+  if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) { t.skip('Requires macOS Chrome'); return }
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mobile-folder-order-')))
+  const data = join(fixture, 'core')
+  const host = launchHost(process.env.ROVAI_HOST_BIN ?? join(repository, 'target/debug/rovai-host'), [
+    ...coreDataDirectoryArguments(data), '--skill-library-root', join(data, 'skills'), '--mcp-config-path', join(data, 'mcp.json')
+  ], { cwd: repository })
+  let browser
+  try {
+    await within(host.ready)
+    const [member] = await host.request('members.list')
+    for (let index = 0; index < 12; index++) {
+      const name = 'folder-' + index, projectPath = join(fixture, name)
+      await mkdir(projectPath)
+      const result = await host.request('camps.create', { commandId: crypto.randomUUID(), name, workspace: { projectPath, name },
+        memberAgentIds: [member.agentId], defaultLeadAgentId: member.agentId, collaborationMode: 'peer' })
+      assert.equal(result.status, 'applied')
+    }
+    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: process.env.ROVAI_WEB_UI ?? join(repository, 'out/web') })
+    browser = await launchAcceptanceBrowser({ executable, args: ['--headless=new', '--user-data-dir=' + join(fixture, 'chrome'),
+      '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', 'about:blank'] })
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+    await browser.send('Page.navigate', { url: service.origin })
+    await browser.wait('!!document.querySelector("#administrator-token")')
+    await browser.click('document.querySelector("#administrator-token")')
+    await browser.send('Input.insertText', { text: service.administratorToken })
+    await browser.click('document.querySelector(".web-login button[type=submit]")')
+    const open = '[...document.querySelectorAll(\'button[aria-label="打开主菜单"]\')].find(button => button.getClientRects().length)'
+    const selector = '.mobile-conversation-drawer .navigation-projects > [data-project-sort-key]'
+    const groups = `Array.from(document.querySelectorAll('${selector}'))`
+    const openDrawer = async () => {
+      await browser.wait('!!' + open)
+      await browser.click(open)
+      await browser.wait(`${groups}.length === 12 && Math.abs(document.querySelector('.mobile-conversation-drawer').getBoundingClientRect().left) < 1`)
+    }
+    const point = (index, child) => browser.evaluate(`(() => {
+      const rect = ${groups}[${index}].querySelector('${child}').getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    })()`)
+    const touch = (type, point) => browser.send('Input.dispatchTouchEvent', { type, touchPoints: point ? [point] : [] })
+    await openDrawer()
+    const initial = await browser.evaluate(groups + '.map(group => group.dataset.group)')
+    await browser.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
+    await browser.wait("document.documentElement.dataset.theme === 'night'")
+    const hit = await browser.evaluate(`(() => {
+      const row = ${groups}[1]
+      const handle = row.querySelector('.project-folder-touch-target')
+      const rect = handle.getBoundingClientRect()
+      const start = { x: rect.left + 2, y: rect.top + rect.height / 2 }
+      return { width: rect.width, height: rect.height, start,
+        inside: handle.contains(document.elementFromPoint(start.x, start.y)),
+        leftOfIcon: start.x < row.querySelector('.project-folder-glyph').getBoundingClientRect().left,
+        clearOfLabel: rect.right <= row.querySelector('.navigation-title').getBoundingClientRect().left }
+    })()`)
+    assert.deepEqual([hit.width, hit.height, hit.inside, hit.leftOfIcon, hit.clearOfLabel], [44, 48, true, true, true])
+    const target = await point(0, '.project-folder-glyph')
+    await touch('touchStart', hit.start)
+    await touch('touchMove', { x: hit.start.x, y: hit.start.y - 9 })
+    await touch('touchMove', target)
+    await browser.wait("!!document.querySelector('.project-insertion-line:not([hidden])')")
+    assert.equal(await browser.evaluate("getComputedStyle(document.querySelector('.project-insertion-line')).backgroundColor"), 'rgb(255, 255, 255)')
+    assert.equal(await browser.evaluate("document.querySelector('.project-drag-preview .camp-nav-row') === null"), true)
+    await touch('touchEnd')
+    const savedOrder = `JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('rovai.presentation:') && key.endsWith(':navigation')))).projectOrder`
+    await browser.wait(`${savedOrder}[0] === ${JSON.stringify(initial[1])}`)
+    const oldDocument = await browser.evaluate('performance.timeOrigin')
+    await browser.send('Page.reload')
+    await browser.wait(`performance.timeOrigin !== ${oldDocument} && document.readyState === 'complete'`)
+    await openDrawer()
+    assert.deepEqual(await browser.evaluate(groups + '.map(group => group.dataset.group)'), [initial[1], initial[0], ...initial.slice(2)])
+    const label = await point(1, '.navigation-title')
+    await touch('touchStart', label)
+    await browser.wait("Array.from(document.querySelectorAll('[role=menuitem]')).some(item => item.textContent.includes('上移项目'))")
+    assert.equal(await browser.evaluate("document.querySelector('.project-drag-preview')"), null)
+    await touch('touchEnd')
+    await browser.key('Escape')
+    await browser.wait("!document.querySelector('[role=menu]')")
+    const swipe = await point(2, '.navigation-title')
+    await browser.evaluate(`window.folderScrollEnded = false
+      document.querySelector('.mobile-conversation-drawer .navigation-scroll').addEventListener('scrollend',
+        () => { window.folderScrollEnded = true }, { once: true })`)
+    await touch('touchStart', swipe)
+    await touch('touchMove', { x: swipe.x, y: swipe.y - 24 })
+    await touch('touchMove', { x: swipe.x, y: swipe.y - 100 })
+    await touch('touchEnd')
+    await browser.wait('window.folderScrollEnded')
+    await browser.wait("document.querySelector('.mobile-conversation-drawer .navigation-scroll').scrollTop > 20")
+    assert.equal(await browser.evaluate(savedOrder + '[0]'), initial[1])
+    const swipedRow = groups + "[2].querySelector('.project-select-row')"
+    await browser.evaluate(`${swipedRow}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
+    const expanded = await browser.evaluate(swipedRow + ".getAttribute('aria-expanded')")
+    const tappedIcon = await point(2, '.project-folder-glyph')
+    assert.equal(await browser.evaluate(`document.elementFromPoint(${tappedIcon.x}, ${tappedIcon.y})?.closest('.project-select-row') === ${swipedRow}`), true)
+    await touch('touchStart', tappedIcon)
+    await touch('touchEnd')
+    await browser.wait(`${groups}[2]?.querySelector('.project-select-row')?.getAttribute('aria-expanded') === ${JSON.stringify(expanded === 'true' ? 'false' : 'true')}`)
+    assert.equal(await browser.evaluate(savedOrder + '[0]'), initial[1])
+  } finally {
+    await browser?.close()
+    await host.close()
+    await removeEphemeralRuntimeCampFilesRoot(data, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test('phone workbench uses shared navigation, schedules and per-tab drafts', { timeout: 180_000 }, async t => {
   if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) { t.skip('Requires macOS Chrome; does not qualify real phones or other OSes'); return }
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mobile-web-')))

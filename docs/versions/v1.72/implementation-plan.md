@@ -3,10 +3,17 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-23
+last_updated: 2026-11-24
 ---
 
 # v1.72 实施与验收
+
+## 侧栏项目目录排序
+
+普通区和置顶区分别支持拖动、项目菜单和键盘排序。路径键、偏好升级与保存语义见[导航偏好合同](../../contracts/navigation-read-v1.md#client-directory-preferences)，交互见[侧栏规范](../../ui/components/app-shell-navigation.md)。
+验收覆盖同名与最长可登记路径、置顶目录的基础位置、旧版目录混排、重启恢复和保存失败回退。桌面验证同帧松手只接受已显示的落点，并验证另一窗口重排目录或标记其他会话时，打开会话仍按本条提醒的最新状态清除未读点。
+桌面输入与失败回退分别由 `pnpm test:navigation-shell`、`pnpm test:startup-presentation` 覆盖。手机回归在
+`pnpm test:host-web-mobile` 中通过真实 Host 和独立 Chrome 触摸视口验证图标拖动、名称滑动与长按、刷新恢复。
 
 ## 侧栏补显当前会话
 

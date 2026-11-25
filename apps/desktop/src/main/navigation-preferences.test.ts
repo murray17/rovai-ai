@@ -1,7 +1,7 @@
 import { stat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   NavigationPreferencesStore,
   readNavigationPreferences
@@ -16,16 +16,125 @@ afterEach(async () => {
 })
 
 describe('navigation preferences', () => {
-  it('upgrades valid schema 4 without a degradation or rewriting the old file', async () => {
+  it('keeps v6 read-only until a real move, preserves pinned slots, and restores order after restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-order-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const paths = ['/one/app', '/pinned', '/two/app', '/c']
+    const [a, p, b, c] = paths.map(path => `directory:${path}`)
+    const legacy = { schemaVersion: 6, registeredProjects: paths, legacyProjectsSynced: true,
+      projectOrder: [a, p, b, c], pins: [{ kind: 'project', targetKey: p, pinnedAt: '2026-10-01T00:00:00Z' }],
+      projectNames: { [a]: 'app', [b]: 'app' }, removedProjects: [], threadReadStates: {} }
+    const original = JSON.stringify(legacy)
+    await writeFile(file, original)
+    const store = await NavigationPreferencesStore.load(file)
+    expect(store.loadDegradation).toBeNull()
+    const changed = vi.fn()
+    await store.moveProject({ section: 'projects', projectKey: a, beforeProjectKey: b }, changed)
+    expect(changed).not.toHaveBeenCalled()
+    expect(await readFile(file, 'utf8')).toBe(original)
+    const move = { section: 'projects' as const, projectKey: c, beforeProjectKey: a }
+    await Promise.all([store.registerProjects(['/added']), store.moveProject(move, changed)])
+    const saved = { ...legacy, schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [...paths, '/added'],
+      projectOrder: [c, p, a, b, 'directory:/added'] }
+    expect((await NavigationPreferencesStore.load(file)).get()).toEqual(saved)
+    const inode = (await stat(file)).ino
+    expect(await store.moveProject(move, changed)).toEqual(saved)
+    await store.moveProject({ ...move, beforeProjectKey: p }, changed)
+    await store.moveProject({ ...move, projectKey: 'directory:/gone' }, changed)
+    expect(changed.mock.calls).toEqual([[saved]])
+    expect((await stat(file)).ino).toBe(inode)
+  })
+
+  it('moves and reloads a maximum-length path as both the folder and the insertion point', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-long-project-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const store = await NavigationPreferencesStore.load(file)
+    const path = 'C:/' + 'a/'.repeat(4_094) + 'x'
+    const long = 'directory:' + path
+    const short = 'directory:/short'
+    await store.registerProjects(['/short', path])
+    expect((await store.moveProject({ section: 'projects', projectKey: long, beforeProjectKey: short })).projectOrder).toEqual([long, short])
+    const saved = await store.moveProject({ section: 'projects', projectKey: short, beforeProjectKey: long })
+    expect(saved.projectOrder).toEqual([short, long])
+    await expect(store.registerProjects([path + 'x'])).rejects.toThrow('Invalid project directories')
+    expect(await store.moveProject({ section: 'projects', projectKey: long + 'x', beforeProjectKey: short })).toEqual(saved)
+    const reopened = await NavigationPreferencesStore.load(file)
+    expect(reopened.loadDegradation).toBeNull()
+    expect(reopened.get()).toEqual(saved)
+  })
+
+  it('moves pinned folders independently and appends a re-pinned folder in pin-time order', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-project-pins-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const store = NavigationPreferencesStore.defaults(file)
+    const paths = ['/a', '/b', '/c']
+    const keys = paths.map(path => `directory:${path}`)
+    const [a, b, c] = keys
+    const pins = keys.map((targetKey, i) => ({ kind: 'project' as const, targetKey, pinnedAt: `2026-10-01T00:00:0${i}Z` }))
+    await store.registerProjects(paths)
+    await store.replacePins(pins)
+    const malformed = ['directory:relative', 'directory:' + 'r'.repeat(8_192)]
+    const partial = JSON.stringify({ ...store.get(), pins: [...pins, ...malformed.map(targetKey => ({ ...pins[0], targetKey }))],
+      pinnedProjectOrder: [null, a, {}, ...malformed, 'directory:/gone', a] })
+    await writeFile(file, partial)
+    const reloaded = await NavigationPreferencesStore.load(file)
+    expect(reloaded.loadDegradation).toBeNull()
+    expect(reloaded.get().pins).toEqual(pins)
+    expect(reloaded.get().pinnedProjectOrder).toEqual([a])
+    expect(await readFile(file, 'utf8')).toBe(partial)
+    await store.moveProject({ section: 'pinned', projectKey: c, beforeProjectKey: a })
+    expect((await NavigationPreferencesStore.load(file)).get()).toMatchObject({ projectOrder: keys, pinnedProjectOrder: [c, a, b], pins })
+    await store.replacePins(pins.slice(0, 2))
+    await store.replacePins([...pins.slice(0, 2), { ...pins[2], pinnedAt: '2026-11-01T00:00:00Z' }])
+    expect(store.get().pinnedProjectOrder).toEqual([a, b])
+    await store.moveProject({ section: 'pinned', projectKey: c, beforeProjectKey: b })
+    await store.removeProject(a, [])
+    expect(store.get().pinnedProjectOrder).toEqual([c, b])
+  })
+
+  it('honors visible insertion points among legacy folders while preserving the underlying slots of pinned folders', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rovai-partial-directory-order-'))
+    cleanup.push(directory)
+    const file = join(directory, 'navigation.json')
+    const store = await NavigationPreferencesStore.load(file)
+    const registered = await store.registerProjects(['/a', '/b', '/c', '/pinned'])
+    const [a, b, c, pinned] = registered.projectOrder!
+    const x = 'directory:/legacy', trailing = 'directory:/last-legacy'
+    const base = [a, pinned, b, x, c, trailing]
+    await writeFile(file, JSON.stringify({ ...registered, projectOrder: base,
+      pins: [{ kind: 'project', targetKey: pinned, pinnedAt: '2026-10-01T00:00:00Z' }] }))
+    const moved = await store.moveProject({ section: 'projects', projectKey: a, beforeProjectKey: c })
+    expect(moved.projectOrder).toEqual([b, pinned, x, a, c, trailing])
+    const atEnd = await store.moveProject({ section: 'projects', projectKey: b, beforeProjectKey: null })
+    expect(atEnd.projectOrder).toEqual([x, pinned, a, c, b, trailing])
+    expect(atEnd.registeredProjects).toEqual(registered.registeredProjects)
+    expect((await NavigationPreferencesStore.load(file)).get()).toEqual(atEnd)
+  })
+
+  it.each([false, true])('preserves a legacy POSIX pin when changing another alias (pin in projectOrder: %s)', async (pinInOrder) => {
     const directory = await mkdtemp(join(tmpdir(), 'rovai-navigation-read-'))
     cleanup.push(directory)
-    const path = join(directory, 'navigation.json')
-    const original = JSON.stringify({ schemaVersion: 4, pins: [], removedProjects: [], projectOrder: [], projectNames: {} })
-    await writeFile(path, original)
-    const store = await NavigationPreferencesStore.load(path)
+    const file = join(directory, 'navigation.json')
+    const folderName = 'release\\..\\archive'
+    const folder = process.platform === 'win32' ? '/work/' + folderName : join(directory, folderName)
+    if (process.platform !== 'win32') await mkdir(folder)
+    const pin = { kind: 'project', targetKey: 'directory:' + folder, pinnedAt: '2026-10-01T00:00:00Z' }
+    const other = 'directory:/other'
+    const projectOrder = pinInOrder ? [pin.targetKey, other] : [other]
+    const original = JSON.stringify({ schemaVersion: 4, pins: [pin], removedProjects: [], projectOrder, projectNames: {} })
+    await writeFile(file, original)
+    const store = await NavigationPreferencesStore.load(file)
     expect(store.loadDegradation).toBeNull()
     expect(store.get().threadReadStates).toEqual({})
-    expect(await readFile(path, 'utf8')).toBe(original)
+    expect(await readFile(file, 'utf8')).toBe(original)
+
+    await store.setProjectName(other, 'Other project')
+    const saved = JSON.parse(await readFile(file, 'utf8'))
+    expect(saved).toMatchObject({ pins: [pin], projectOrder, projectNames: { [other]: 'Other project' } })
+    expect((await NavigationPreferencesStore.load(file)).get()).toEqual(saved)
   })
 
   it('persists manual reminders, merges concurrent pin writes and keeps read boundaries monotonic', async () => {
@@ -73,7 +182,7 @@ describe('navigation preferences', () => {
     await writeFile(filePath, source)
     const store = await NavigationPreferencesStore.load(filePath)
     expect(store.loadDegradation).toBeNull()
-    expect(store.get()).toEqual({ schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {}, threadReadStates: {} })
+    expect(store.get()).toEqual({ schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: ['directory:/a/frontend'], projectNames: {}, threadReadStates: {} })
     expect(await readFile(filePath, 'utf8')).toBe(source)
   })
 
@@ -158,7 +267,7 @@ describe('navigation preferences', () => {
     const snapshot = await readNavigationPreferences(filePath)
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [
@@ -194,7 +303,7 @@ describe('navigation preferences', () => {
     const snapshot = await store.removeProject('directory:/work/a', [CAMP_A])
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: ['/work/b'], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: ['/work/b'], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [
@@ -228,7 +337,7 @@ describe('navigation preferences', () => {
     const snapshot = await store.restoreProject('directory:/work/a')
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: ['/work/a'], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: ['/work/a'], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
@@ -261,7 +370,7 @@ describe('navigation preferences', () => {
     const snapshot = await store.reinstateRemovedProject(removedProject)
 
     expect(snapshot).toEqual({
-      schemaVersion: 6, registeredProjects: [], legacyProjectsSynced: false,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false,
       projectNames: {},
       threadReadStates: {},
       pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
@@ -343,7 +452,7 @@ describe('navigation preferences', () => {
 
     const synchronized = await store.removeProject('directory:/work/b', [])
     expect(synchronized).toEqual({
-      schemaVersion: 6, registeredProjects: ['/work/a', '/work/c'], legacyProjectsSynced: true,
+      schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: ['/work/a', '/work/c'], legacyProjectsSynced: true,
       projectNames: {},
       threadReadStates: {},
       pins: [],
@@ -358,11 +467,13 @@ describe('navigation preferences', () => {
     cleanup.push(directory)
     const filePath = join(directory, 'navigation.json')
     const store = await NavigationPreferencesStore.load(filePath)
-    await store.registerProjects(['/work/a', '/work/a'])
-    await expect(store.registerProjects(['quick-chat'])).rejects.toThrow('Invalid project directories')
-    await expect(store.registerProjects(['/work/../a'])).rejects.toThrow('Invalid project directories')
-    expect(store.get().registeredProjects).toEqual(['/work/a'])
-    expect(store.get().projectOrder).toEqual(['directory:/work/a'])
+    const valid = ['/work/a', 'C:\\work\\a', '\\\\server\\share\\a']
+    await store.registerProjects([...valid, '/work/a'])
+    for (const invalid of ['quick-chat', '/work/../a', 'C:/work\\..\\a', '\\\\server\\share\\.\\a']) {
+      await expect(store.registerProjects([invalid])).rejects.toThrow('Invalid project directories')
+    }
+    expect(store.get().registeredProjects).toEqual(valid)
+    expect(store.get().projectOrder).toEqual(valid.map(path => 'directory:' + path))
   })
 })
 

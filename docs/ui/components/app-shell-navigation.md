@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-11-23
+last_updated: 2026-11-24
 ---
 
 # App Shell 与统一侧栏
@@ -43,6 +43,11 @@ Desktop 与宽屏 Web 以中性文字、字重和文件夹标识当前新建对�
 未读提示点使用 `--conversation-unread`，表达未查看回复或用户显式保留的未读提醒。
 Hover 不能是发现行操作的唯一方式。
 
+普通项目与置顶项目分别在本区内排序。鼠标从文件夹行移动 6px 开始拖动，跟手预览只显示文件夹图标和名称。
+源目录展开的会话留在原位并淡出、轻微虚化。2px 插入线和左端空心圆使用 `CanvasText`，浅色为黑、深色为白。
+滚动或其他窗口更新列表时，线随当前行位置更新。松手时指针仍对应屏幕上已画出的插入线才移动目录。快速越过一行、在新落点的线出现前松手时取消移动。松手时没有线、移出本区或按 Esc 也会取消移动。
+落位即完成反馈。菜单提供「上移项目」「下移项目」，点击后沿用菜单的焦点行为。焦点在文件夹行时可用 Alt+↑/↓，移动后焦点随目录走。置顶会话和快速对话保持原位。
+
 Sidecar Project 行在升级后保持稳定位置。合法旧偏好第一次进入时按用户当时看到的 Project 顺序冻结；
 之后现有 Project 保持原相对顺序，新发现或重新恢复的 Project 追加到末尾，只有用户主动从本机移除的
 Project 才清理。老 Project 收到新消息、开始或结束 Run、更新活动时间或未读状态时都不能移动行。
@@ -71,7 +76,7 @@ Thread 行显示稳定标题和必要状态。右键、三点按钮、Shift+F10 
 右键不打开 Thread 或折叠 Project。鼠标菜单靠点击位置，三点和键盘菜单靠行末入口，均限制在窗口内；
 Escape、点击外部、滚动或窗口失焦关闭。Escape 关闭时，在菜单释放焦点约束后恢复原 Project/Thread 行的 DOM focus，
 以便继续键盘操作；点击外部、选择命令、滚动或失焦关闭不执行该恢复。Thread 顶栏不得重复这些操作。
-Project 菜单提供 New Chat、置顶、重命名、Reveal in Finder（Windows 使用文件管理器文案）、复制项目路径、移除项目。
+Project 菜单提供 New Chat、置顶、重命名、上移和下移、Reveal in Finder（Windows 使用文件管理器文案）、复制项目路径、移除项目。
 Finder 定位真实目录，由 Desktop Main 校验存在后调用原生系统；目录失效提示重新选择。远程 Web 不提供原生定位项。
 Desktop 与宽屏 WebUI 的置顶 Thread 在标题左侧显示 17px 对话图标；置顶项目标题、置顶项目内 Thread、
 普通项目内 Thread 与独立置顶 Thread 共用文字轴。Project 子 Thread 只用层级缩进，不渲染空图标或左侧状态占位。
@@ -118,7 +123,7 @@ tombstone 必须过滤受理前已经发出的迟到 Navigation snapshot，导�
 重试继续原 operation，Thread 不重新进入列表。同一 `operationId + attentionRevision` 在一个窗口会话只提醒一次，重启后
 未解决事项仍可再次提醒。不使用全局大红条，不向 Renderer 暴露 Runtime stop、数据库删除或资源 cleanup 阶段。
 
-Project 三点菜单依次提供“置顶项目 / 取消置顶项目”“重命名”“移除项目”；刚选择且尚无 Thread 的目录也可重命名。
+刚选择且尚无 Thread 的目录也可在 Project 菜单中重命名。
 “重命名项目”沿用通用单字段 Dialog：项目名称、只读工作目录、“取消 / 保存名称”。打开时聚焦并全选原名称；
 名称规范化后非空且最多 80 个 Unicode scalar，同名允许。已有自定义名称时提供“使用目录名”，填回目录名后仍需保存。
 恢复操作清除本机别名，保留原目录名的连续空格和长度，不受自定义名称的 80 字符限制；继续编辑输入则重新按自定义名称校验。

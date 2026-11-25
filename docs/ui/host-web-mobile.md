@@ -1,7 +1,7 @@
 ---
 document_type: ui-platform-guidance
 authority: renderer-mobile-layout
-last_updated: 2026-11-22
+last_updated: 2026-11-24
 ---
 
 # Mobile WebUI
@@ -46,6 +46,7 @@ Web / Mobile 浏览器页签统一为 `Rovai AI`。远程连接中的“退出�
 Desktop 保留初始 5 个、每次增加 10 个。
 
 手机会话和项目行移除常驻「···」，长按约 480ms 打开既有操作菜单；移动超过 10px、开始滚动或取消触摸时取消等待。
+可排序项目从文件夹图标起拖。图标周围的留白提供 44 × 48px 的触摸区，名称仍可滑动滚屏或长按打开菜单。滚动结束后，轻点一次同一行的图标即可选择和开合目录。
 松开长按不打开会话、不选择菜单项；轻点仍打开会话或开合项目，右键、Shift+F10 与屏幕阅读器操作入口也可打开菜单。
 会话菜单在“复制会话 ID”下方提供“导出会话”，复用[消息导出](components/conversation-workspace.md#消息导出)的完整历史与内容边界。
 导出 HTML 的预览阅读面随手机可用宽度重排，不要求横向平移整个阅读面；PNG 继续使用固定 720px 阅读面。
