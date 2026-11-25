@@ -3,8 +3,11 @@ document_type: model-context-change
 version: v1.72
 change_id: independent-chat
 revision: 8
-confirmation_status: pending
-authority: proposed-model-input-change-statement
+confirmation_status: confirmed
+confirmed_revision: 8
+confirmed_by: User
+confirmed_at: 2026-11-25
+authority: confirmed-model-input-change-statement
 implementation_baseline: 3000b971f22bae67f45ded8e2d051bc85cc61803
 last_updated: 2026-11-25
 ---
@@ -114,4 +117,4 @@ Host 将本话题自有目录设为 Runtime 的实际工作目录，续聊和插
 
 ## 二次确认
 
-R8 待用户确认。此状态只适用于本稿涉及的模型输入和恢复合同。
+用户在收到 R8 修订稿后要求「开启wt开始，注意还原交互稿」，确认按本版实施。
