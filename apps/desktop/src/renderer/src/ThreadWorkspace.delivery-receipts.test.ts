@@ -96,6 +96,12 @@ function receipts(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryV
 }
 
 describe('user message receipts follow the current execution attempt', () => {
+  it('shows the reason a waiting recipient was dropped after leaving the group', () => {
+    const cancelled = delivery({ status: 'cancelled', targetAgentRunId: null,
+      failureCode: 'channel.target_bot_not_in_roster' })
+    expect(workspaceMarkup([], [cancelled])).toContain('未派发，机器人已离群')
+  })
+
   it('shows only recipients with retained Run or Delivery facts', () => {
     expect(receipts([], [])).toEqual([])
     const waiting = originalDeliveries.map(item => ({

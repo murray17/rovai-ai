@@ -273,3 +273,5 @@ Run 卡头、状态图形、工具组、命令结果与 Markdown 正文沿用桌
 - [Lark 渠道架构](../../architecture/lark-channel.md)
 - [DingTalk Channel v14](../../contracts/dingtalk-channel-v14.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)
+
+账号摘要显示上次成功验证网页身份的本地时间。打开设置读取已存账号与连接状态。

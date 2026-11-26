@@ -8789,7 +8789,7 @@ function ThreadMessageDeliveryFooter({
   )
 }
 
-const receiptWords = ['已收到', '发送中', '待发送', '排队中', '未确认送达', '已停止', '执行失败'] as const
+const receiptWords = ['已收到', '发送中', '待发送', '排队中', '未确认送达', '未派发，机器人已离群', '已停止', '执行失败'] as const
 
 function UserMessageDeliveryReceipt({
   deliveries, allRuns, resultRowByRunId, onReconcile,
@@ -8831,14 +8831,16 @@ function UserMessageDeliveryReceipt({
     // its target Run later finishes; ordinary targets describe execution.
     const steer = delivery?.requestedMode === 'steer'
     let word: string
-    if (run && !steer) word = readStatus(run).word
+    const leftGroup = delivery?.status === 'cancelled' && delivery.failureCode === 'channel.target_bot_not_in_roster'
+    if (leftGroup) word = '未派发，机器人已离群'
+    else if (run && !steer) word = readStatus(run).word
     else if (steer && delivery.inputDeliveryStatus === 'accepted') word = '已收到'
     else if (delivery?.inputDeliveryStatus === 'delivery_unknown') word = '未确认送达'
     else if (delivery?.status === 'failed' || run?.status === 'failed') word = '执行失败'
     else if (delivery?.status === 'cancelled' || run?.status === 'cancelled') word = '已停止'
     else if (steer) word = delivery.dispatchPhase === 'attempting' ? '发送中' : '待发送'
     else word = delivery?.status === 'settled' ? '已完成' : '排队中'
-    const counted = steer || (!run ? word !== '已完成'
+    const counted = leftGroup || steer || (!run ? word !== '已完成'
       : (word === '执行失败' || word === '已停止') && !resultRowByRunId.has(run.id))
     return { agentId, delivery, run, word, counted }
   }).filter(item => item.run !== null || item.delivery !== undefined)
@@ -8860,7 +8862,7 @@ function UserMessageDeliveryReceipt({
   const prefix = ordered.some(item => item.delivery?.requestedMode === 'steer') ? uiAttribute('插话') : ''
   const presentation = {
     className: counts.has('未确认送达') ? 'is-unknown' : failureLabel ? 'is-failed' : counts.has('发送中') ? 'is-sending'
-      : counts.has('待发送') || counts.has('排队中') ? 'is-queued' : counts.has('已停止') ? 'is-stopped' : 'is-confirmed',
+      : counts.has('待发送') || counts.has('排队中') ? 'is-queued' : counts.has('已停止') || counts.has('未派发，机器人已离群') ? 'is-stopped' : 'is-confirmed',
     label: [prefix, ...ordinaryLabels, failureLabel].filter(Boolean).join(' · ')
   }
   return (

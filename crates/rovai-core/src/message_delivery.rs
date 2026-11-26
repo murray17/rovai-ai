@@ -143,7 +143,7 @@ struct DispatchDelivery {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TopicRosterRefreshRequest {
+pub struct GroupRosterRefreshRequest {
     pub provider: String,
     pub tenant_key: String,
     pub chat_id: String,
@@ -1976,10 +1976,10 @@ pub(crate) fn topic_channel_recipient_is_present(
 }
 
 pub(crate) fn pending_topic_roster_refreshes(
-    transaction: &Transaction<'_>,
+    connection: &rusqlite::Connection,
     provider: &str,
-) -> Result<Vec<TopicRosterRefreshRequest>> {
-    let mut statement = transaction.prepare(
+) -> Result<Vec<GroupRosterRefreshRequest>> {
+    let mut statement = connection.prepare(
         r#"
         SELECT conversation.provider, conversation.tenant_key, conversation.chat_id,
                MAX(CAST(json_extract(
@@ -1997,6 +1997,11 @@ pub(crate) fn pending_topic_roster_refreshes(
           AND json_extract(delivery.failure_detail_json, '$.blockerCode') = ?2
           AND conversation.provider = ?3
           AND conversation.conversation_kind = 'topic'
+          AND NOT EXISTS (
+              SELECT 1 FROM conversation c JOIN agent_run r ON r.conversation_id=c.id
+              WHERE c.camp_id=delivery.camp_id AND c.agent_id=delivery.recipient_agent_id
+                AND c.kind='camp_member' AND r.status IN ('running','waiting','queued')
+          )
         GROUP BY conversation.provider, conversation.tenant_key, conversation.chat_id
         ORDER BY conversation.provider, conversation.tenant_key, conversation.chat_id
         "#,
@@ -2009,7 +2014,7 @@ pub(crate) fn pending_topic_roster_refreshes(
                 provider
             ],
             |row| {
-                Ok(TopicRosterRefreshRequest {
+                Ok(GroupRosterRefreshRequest {
                     provider: row.get(0)?,
                     tenant_key: row.get(1)?,
                     chat_id: row.get(2)?,
@@ -2528,8 +2533,10 @@ mod tests {
             CREATE TABLE external_group_bot_roster_state(provider, tenant_key, chat_id, generation);
             CREATE TABLE external_group_bot_roster(provider, tenant_key, chat_id, app_id, agent_id, status);
             CREATE TABLE channel_member_bot_directory(provider, app_id, agent_id, status);
+            CREATE TABLE conversation(id, camp_id, agent_id, kind);
+            CREATE TABLE agent_run(conversation_id, status);
             CREATE TABLE message_delivery(id, camp_id, status, dispatch_phase, active_dispatch_attempt_id,
-                wait_condition, failure_detail_json, version, updated_at);
+                wait_condition, failure_detail_json, version, updated_at, recipient_agent_id);
             CREATE TABLE message_delivery_attempt(id, delivery_id, status, wait_condition, failure_detail_json, ended_at);
             CREATE TABLE event_log(event_id, task_id, turn_id, sequence, event_type, native_method,
                 payload_json, camp_id, entity_type, entity_id, actor_type, actor_id, source_agent_run_id,
@@ -2592,7 +2599,7 @@ mod tests {
                 ],
             )
             .unwrap();
-            tx.execute("INSERT INTO message_delivery VALUES(?1,?1,'pending','attempting',?1,NULL,NULL,1,?2)", params![provider, now]).unwrap();
+            tx.execute("INSERT INTO message_delivery VALUES(?1,?1,'pending','attempting',?1,NULL,NULL,1,?2,'agent_1')", params![provider, now]).unwrap();
             tx.execute(
                 "INSERT INTO message_delivery_attempt VALUES(?1,?1,'attempting',NULL,NULL,NULL)",
                 [provider],
@@ -2607,7 +2614,7 @@ mod tests {
         for provider in ["feishu", "lark"] {
             assert_eq!(
                 pending_topic_roster_refreshes(&tx, provider).unwrap(),
-                vec![TopicRosterRefreshRequest {
+                vec![GroupRosterRefreshRequest {
                     provider: provider.into(),
                     tenant_key: "tenant".into(),
                     chat_id: "chat".into(),
@@ -2619,6 +2626,24 @@ mod tests {
             pending_topic_roster_refreshes(&tx, "dingtalk")
                 .unwrap()
                 .is_empty()
+        );
+        tx.execute(
+            "INSERT INTO conversation VALUES('busy','feishu','agent_1','camp_member')",
+            [],
+        )
+        .unwrap();
+        tx.execute("INSERT INTO agent_run VALUES('busy','running')", [])
+            .unwrap();
+        assert!(
+            pending_topic_roster_refreshes(&tx, "feishu")
+                .unwrap()
+                .is_empty()
+        );
+        tx.execute("UPDATE agent_run SET status='succeeded'", [])
+            .unwrap();
+        assert_eq!(
+            pending_topic_roster_refreshes(&tx, "feishu").unwrap().len(),
+            1
         );
         let resume = |provider: &str| {
             let mut value = delivery(provider);

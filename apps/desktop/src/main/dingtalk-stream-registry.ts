@@ -127,6 +127,7 @@ export class DingTalkStreamRegistry {
   }
 
   stop(appKey: string): void {
+    this.#starting.delete(appKey)
     const client = this.#clients.get(appKey)
     if (!client) return
     this.#clients.delete(appKey)

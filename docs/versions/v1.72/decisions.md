@@ -3,10 +3,19 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-23
+last_updated: 2026-11-26
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d96"></a>
+## V1.72-D96：三个渠道按任务需要读取父群机器人名单
+
+- 状态：accepted
+- 日期：2026-11-26
+- 当前权威：[Channel Host Maintenance v6](../../contracts/channel-host-maintenance-v6.md)、[飞书](../../architecture/feishu-channel.md)、[Lark](../../architecture/lark-channel.md)、[钉钉](../../architecture/dingtalk-channel.md)。
+
+历史群在空闲期反复消耗开放平台配额。由 Core 按任务实际开工顺序要求完整名单，能同时保留退群保护与 FIFO。Host 合并同群读取，查询失败保留原待办，回复发送独立进行。
 
 <a id="v1-72-d95"></a>
 ## V1.72-D95：当前会话移出队员可在影响详情不可用时确认

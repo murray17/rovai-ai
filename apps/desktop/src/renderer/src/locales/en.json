@@ -1,4 +1,7 @@
 {
+  "上次验证时间": "Last verified",
+  "未派发，机器人已离群": "Not dispatched · bot left the group",
+  "未派发，机器人已离群 {0}": "Not dispatched · {0} bots left the group",
   "已收到": "Received",
   "待发送": "Pending dispatch",
   "{0}已收到": "{0} received it",

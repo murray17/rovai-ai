@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createLarkChannel,
+  Client,
+  DefaultCache,
   Domain,
   LarkChannelError,
   LoggerLevel,
@@ -40,6 +42,7 @@ function channelCore(
   const intents = new Map<string, Record<string, unknown>>()
   return {
     request: async (method: string, params: unknown) => {
+      if (method.endsWith('roster.begin')) return { startedAt: new Date().toISOString() }
       const result = await handler(method, params)
       const command = (params as { command?: Record<string, unknown> } | undefined)?.command
       if (command && (result as { status?: string })?.status === 'applied') {
@@ -273,7 +276,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       updateCard,
       recallMessage,
       getChatMode,
-      getChatInfo: vi.fn(async () => ({ name: '测试群' })),
+      getChatInfo: vi.fn(async (chatId: string) => ({ name: '测试群', chatType: await getChatMode(chatId) })),
       rawClient: {
         im: { v1: {
           message: { create: createMessage, reply: replyMessage, get: getMessage },
@@ -890,7 +893,7 @@ describe('channel settings service', () => {
     } finally { await service.stop() }
   })
 
-  it('does not expire a connected account when startup inspection throws a transient error', async () => {
+  it('opens settings and starts without inspecting the developer web session', async () => {
     const session = developerSession()
     session.inspect.mockRejectedValue(new Error('ERR_INTERNET_DISCONNECTED'))
     const commands: string[] = []
@@ -906,7 +909,8 @@ describe('channel settings service', () => {
     })
     try {
       await service.start()
-      await vi.waitFor(() => expect(session.inspect).toHaveBeenCalled())
+      await service.get()
+      expect(session.inspect).not.toHaveBeenCalled()
       expect(commands).not.toContain('channels.feishu.account.expire')
       expect(session.disconnect).not.toHaveBeenCalled()
     } finally {
@@ -1066,7 +1070,7 @@ describe('channel settings service', () => {
   })
 
   it.each(['expired', 'identity_changed'] as const)(
-    'expires the account only after a conclusive background inspection: %s',
+    'leaves saved identity alone at startup even if the next operation would report %s',
     async (reason) => {
       const session = developerSession()
       session.inspect.mockResolvedValue({ status: 'invalid', reason })
@@ -1081,7 +1085,9 @@ describe('channel settings service', () => {
       })
       try {
         await service.start()
-        await vi.waitFor(() => expect(commands).toContain('channels.feishu.account.expire'))
+        await service.get()
+        expect(session.inspect).not.toHaveBeenCalled()
+        expect(commands).not.toContain('channels.feishu.account.expire')
       } finally {
         await service.stop()
       }
@@ -1175,6 +1181,56 @@ describe('channel settings service', () => {
     }, { needCheck: false })).resolves.toEqual({
       toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
     })
+  })
+
+  it('shares a token exchange across SDK clients and obtains a fresh token after credential rotation', async () => {
+    const transport = vi.fn(async (_url: string, credentials: { app_secret: string }) => ({
+      tenant_access_token: credentials.app_secret === 'first' ? 'first-token' : 'rotated-token', expire: 7200
+    }))
+    const manager = (secret: string, cache: DefaultCache) => {
+      const client = new Client({ appId: 'cli_shared_token', appSecret: secret, cache, loggerLevel: LoggerLevel.error })
+      const token = (client as unknown as { tokenManager: {
+        requestToken: typeof transport; getCustomTenantAccessToken(): Promise<string>
+      } }).tokenManager
+      token.requestToken = transport
+      return token
+    }
+    const cache = new DefaultCache()
+    const a = manager('first', cache)
+    const b = manager('first', cache)
+    expect(await Promise.all([a.getCustomTenantAccessToken(), b.getCustomTenantAccessToken()]))
+      .toEqual(['first-token', 'first-token'])
+    expect(transport).toHaveBeenCalledTimes(1)
+    expect(await manager('rotated', new DefaultCache()).getCustomTenantAccessToken()).toBe('rotated-token')
+    expect(transport).toHaveBeenCalledTimes(2)
+  })
+
+  it('deduplicates raw merge forwards in the installed SDK before any expansion', async () => {
+    const channel = createLarkChannel({
+      appId: 'cli_merge_dedup', appSecret: 'fixture', transport: 'websocket', includeRawEvent: true,
+      deferMergeForward: true, safety: { chatQueue: { enabled: false } }, loggerLevel: LoggerLevel.error
+    })
+    const internals = channel as unknown as {
+      botIdentity: { openId: string; name: string }
+      registerDispatcherHandlers(): void
+      dispatcher: { invoke(event: unknown, opts: { needCheck: false }): Promise<unknown> }
+    }
+    internals.botIdentity = { openId: 'ou_bot', name: 'Bot' }
+    internals.registerDispatcherHandlers()
+    const fetch = vi.spyOn(channel.rawClient.im.v1.message, 'get').mockResolvedValue({ code: 0, data: { items: [] } })
+    const received = vi.fn()
+    channel.on('message', received)
+    const event = { schema: '2.0', header: { event_type: 'im.message.receive_v1' }, event: {
+      sender: { sender_id: { open_id: 'ou_user' }, tenant_key: 'tenant' },
+      message: { message_id: 'om_merge_dedup', chat_id: 'chat', chat_type: 'p2p', message_type: 'merge_forward',
+        content: '{}', create_time: String(Date.now()) }
+    } }
+    try {
+      await internals.dispatcher.invoke(event, { needCheck: false })
+      await internals.dispatcher.invoke(event, { needCheck: false })
+      expect(received).toHaveBeenCalledOnce()
+      expect(fetch).not.toHaveBeenCalled()
+    } finally { await channel.disconnect() }
   })
 
   it('surfaces Feishu Bot removal events through the installed Lark SDK', async () => {
@@ -2861,6 +2917,7 @@ describe('channel settings service', () => {
               payload: {}
             }
           }
+          if (command.checkRoster) return { status: 'applied', code: 'channel.binding.roster_required', payload: {tenantKey:'tenant-1',chatId:'oc_group'} }
           return {
             status: 'accepted',
             code: 'channel.binding.resolved',
@@ -2978,7 +3035,7 @@ describe('channel settings service', () => {
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(callback)).not.toContain('ou_spoofed')
-    const firstResolveIndex = commands.findIndex(({ method }) => (
+    const firstResolveIndex = commands.findLastIndex(({ method }) => (
       method === 'channels.feishu.pendingBinding.resolve'
     ))
     expect(commands[firstResolveIndex - 1]?.method).toBe('channels.roster.reconcile')
@@ -3009,12 +3066,13 @@ describe('channel settings service', () => {
         }
       }
     })
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(1)
     expect(nonOwnerResult).toEqual({
       toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
     })
     expect(commands.filter(({ method }) => (
       method === 'channels.feishu.pendingBinding.resolve'
-    ))).toHaveLength(2)
+    ))).toHaveLength(3)
     expect(harness.updateCard).not.toHaveBeenCalled()
 
     for (const owner of [true, false]) {
@@ -3041,7 +3099,8 @@ describe('channel settings service', () => {
       const resolveIndex = commands.findLastIndex(({ method }) => (
         method === 'channels.feishu.pendingBinding.resolve'
       ))
-      expect(commands[resolveIndex - 1]?.method).toBe('channels.roster.reconcile')
+      if (owner) expect(commands[resolveIndex - 1]?.method).toBe('channels.roster.reconcile')
+      else expect(commands[resolveIndex]?.command.checkRoster).toBe(true)
       expect(commands[resolveIndex]?.command).toMatchObject({
         action: 'quick_chat',
         projectId: null,
@@ -3310,7 +3369,7 @@ describe('channel settings service', () => {
           return {
             status: 'accepted',
             code: 'channel.inbound.collecting',
-            payload: { aggregateId: `rvcia_${observations.length}`, readyToFinalize: false }
+            payload: { aggregateId: `rvcia_${observations.length}`, readyToFinalize: true }
           }
         }
         if (method === 'channels.host.tick') {
@@ -3388,7 +3447,7 @@ describe('channel settings service', () => {
       operator: { openId: 'ou_owner' },
       botName: '审阅员'
     })
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 3)
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 2)
     await service.stop()
   })
 
@@ -3516,6 +3575,69 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
+  it('filters discarded forwards locally and retains only successful group-name reads for 24 hours', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    let now = Date.now()
+    let owner = false
+    const observations: Array<Record<string, unknown>> = []
+    const changes: Array<Record<string, unknown>> = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(), now: () => now, createChannel: harness.createChannel,
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore((method, raw) => {
+        if (method.endsWith('.snapshot')) return coreSnapshot({ transportConversations: [{
+          tenantKey: 'tenant-1', chatId: 'known-group', conversationKind: 'group', bindingId: 'binding'
+        }], memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a', botDisplayName: '审阅员',
+          brand: 'feishu', status: 'published', credentialRef: 'credential-a', ownerIdentityStatus: 'verified', failureCode: null
+        }] })
+        if (method.endsWith('inbound.observed')) return { observed: true }
+        if (method.endsWith('owner.verify')) return { code: 'verified', payload: { classification: owner ? 'owner' : 'non_owner' } }
+        if (method.endsWith('inbound.observe')) {
+          observations.push((raw as { command: Record<string, unknown> }).command)
+          return { code: 'channel.inbound.collecting', payload: { aggregateId: 'agg', readyToFinalize: false } }
+        }
+        if (method.endsWith('roster.reconcile')) changes.push((raw as { command: Record<string, unknown> }).command)
+        if (method.endsWith('host.tick')) return { deliveries: [] }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    const forward = harness.handlers.get('cli_a:message')!
+    const groupMessage = (messageId: string, content: string, mentioned: boolean, rawContentType = 'text') =>
+      normalizedMessage({ messageId, content, rawContentType, chatId: 'oc_cached', chatType: 'group', senderUserId: 'owner',
+        mentions: mentioned ? [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }] : [] })
+    try {
+      for (const chatId of ['unused-group', 'known-group']) {
+        await harness.handlers.get('cli_a:botAdded')!({ chatId })
+        await harness.handlers.get('cli_a:botRemoved')!({ chatId })
+      }
+      expect(changes.map(c => [c.chatId, c.membershipEvent])).toEqual([
+        ['known-group', { appId: 'cli_a', present: true }], ['known-group', { appId: 'cli_a', present: false }]
+      ])
+      await forward(groupMessage('missing-mention', '合并转发', false, 'merge_forward'))
+      await forward(groupMessage('wrong-owner', '合并转发', true, 'merge_forward'))
+      owner = true
+      await forward(groupMessage('replayed-after-restart', '合并转发', true, 'merge_forward'))
+      await forward(groupMessage('group-new', '/new', true))
+      expect(harness.getMessage).not.toHaveBeenCalled()
+      expect(harness.getChatMode).not.toHaveBeenCalled()
+      expect(harness.isInChat.get('cli_a')).not.toHaveBeenCalled()
+
+      harness.getChatMode.mockRejectedValueOnce(new Error('offline'))
+      await forward(groupMessage('cold', '消息', true))
+      await forward(groupMessage('success', '消息', true))
+      await forward(groupMessage('cached', '消息', true))
+      now += 24 * 60 * 60 * 1000 + 1
+      await service.get()
+      expect(harness.getChatMode).toHaveBeenCalledTimes(2)
+      harness.getChatMode.mockRejectedValueOnce(new Error('offline'))
+      await forward(groupMessage('stale', '消息', true))
+      expect(harness.getChatMode).toHaveBeenCalledTimes(3)
+      expect(observations.map(c => c.conversationDisplayName)).toEqual(['', '测试群', '测试群', '测试群'])
+    } finally { await service.stop() }
+  })
+
   it('refreshes a Topic parent roster requested by Core before delivery materialization', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const calls: Array<{ method: string; command: Record<string, unknown> }> = []
@@ -3572,10 +3694,7 @@ describe('channel settings service', () => {
     })
 
     expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(1)
-    expect(calls.map((call) => call.method).slice(0, 2)).toEqual([
-      'channels.host.tick',
-      'channels.roster.reconcile'
-    ])
+    expect(calls[0].method).toBe('channels.host.tick')
     expect(calls.find((call) => call.method === 'channels.roster.reconcile')?.command)
       .toMatchObject({
         provider: 'feishu',
@@ -3583,8 +3702,7 @@ describe('channel settings service', () => {
         chatId: 'oc_topic_group',
         presentAppIds: ['cli_a']
       })
-    // A forced generation refresh must still run inside the cache lifetime. The next
-    // background sweep, fifteen seconds later, must reuse that observation without a receipt.
+    // Only the group named in the durable refresh set consumes another round.
     const wake = async () => {
       const ticks = calls.filter((call) => call.method === 'channels.host.tick').length
       service.handleCoreEvent({ method: 'agent_run.started', params: {} })
@@ -3600,14 +3718,14 @@ describe('channel settings service', () => {
     expect(calls.filter((call) => call.method === 'channels.roster.reconcile')).toHaveLength(2)
     now = 260_000
     await wake()
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(3)
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(2)
     await service.stop()
   })
 
   it.each([
     ['feishu', FEISHU_PROVIDER_PROFILE],
     ['lark', LARK_PROVIDER_PROFILE]
-  ] as const)('delivers %s replies while a historical group roster request is pending', async (provider, profile) => {
+  ] as const)('delivers %s replies while only the requested group roster is pending', async (provider, profile) => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const settlements: Array<Record<string, unknown>> = []
     let now = 100_000
@@ -3645,7 +3763,7 @@ describe('channel settings service', () => {
             updateMessageId: null, recipientOpenId: null,
             payload: { kind: 'agent_output', presentationVersion: 1, body: '回复已生成。',
               mentionPrincipal: false, memberRecipients: [] }
-          }], rosterRefreshes: [], hasOutstandingWork: true }
+          }], rosterRefreshes: [{ provider,tenantKey:'tenant-1',chatId:'oc_demand' }], hasOutstandingWork: true }
         }
         if (method === `${hostPrefix}deliveries.settle`) {
           settlements.push((rawParams as { command: Record<string, unknown> }).command)
@@ -3662,12 +3780,12 @@ describe('channel settings service', () => {
     })
     harness.isInChat.get('cli_a')!.mockImplementation(() => delayedRoster)
     now = 140_000
-    service.handleCoreEvent({ method: 'agent_run.started', params: { agentRunId: 'run-1' } })
+    service.handleCoreEvent({ method: 'channel.roster_refresh.requested', params: {} })
     await vi.waitFor(() => expect(settlements).toHaveLength(1))
 
     expect(harness.createMessage).toHaveBeenCalledOnce()
     expect(settlements[0]).toMatchObject({ outcome: 'sent', deliveryId: 'delivery-output' })
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledOnce()
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledExactlyOnceWith({path:{chat_id:'oc_demand'}})
     await service.stop()
     releaseRoster()
   })
