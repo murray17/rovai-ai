@@ -3,8 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, 
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ThreadMessageView } from '@contracts'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
-import { useThreadClient } from './camp-client'
-import { getOrLoadImagePayload } from './ImageGallery'
+import { useImagePreviewSession, useThreadClient } from './camp-client'
+import { acquireExportImage, type GalleryImage } from './ImageGallery'
 import { CurrentUserAvatar } from './CurrentUserProfile'
 import { MemberAvatar } from './MemberAvatar'
 import { UiText, uiAttribute } from './interface-language'
@@ -84,18 +84,26 @@ export function MessageSelectionDock({ selection, onExport }: { selection: Retur
     </div>
   </div>
 }
-function ExportAttachment({ threadId, messageId, attachment, runtime = false }: { runtime?: boolean; threadId: string; messageId: string; attachment: ThreadMessageView['attachments'][number] }): React.JSX.Element {
+function ExportAttachment({ threadId, message, attachment, runtime = false }: {
+  runtime?: boolean; threadId: string; message: ThreadMessageView; attachment: ThreadMessageView['attachments'][number]
+}): React.JSX.Element {
   const client = useThreadClient(), [image, setImage] = useState<string | null>(null), [pending, setPending] = useState(attachment.previewKind === 'image')
+  const reuseUserPreview = !runtime && (message.authorType === 'user' || message.authorType === 'external_principal')
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
-    let active = true, url: string | null = null
-    void getOrLoadImagePayload(runtime ? { kind: 'runtime', threadId, image: { id: attachment.id, displayName: attachment.displayName, mediaType: attachment.mediaType ?? 'image/png', byteSize: attachment.byteSize ?? 0 } }
-      : { kind: 'attachment', threadId, locator: { owner: 'message', threadId, messageId, attachmentRefId: attachment.id }, image: attachment }, client).then(result => {
-      if (!active || !result) return
-      url = URL.createObjectURL(result.blob); setImage(url)
+    let active = true
+    let release: (() => void) | undefined
+    const source: GalleryImage = runtime
+      ? { kind: 'runtime', threadId, image: { id: attachment.id, displayName: attachment.displayName, mediaType: attachment.mediaType ?? 'image/png', byteSize: attachment.byteSize ?? 0 } }
+      : { kind: 'attachment', threadId, locator: { owner: 'message', threadId, messageId: message.id, attachmentRefId: attachment.id }, image: attachment }
+    void acquireExportImage(source, client, reuseUserPreview).then(preview => {
+      if (!preview) return
+      if (!active) { preview.release(); return }
+      release = preview.release
+      setImage(preview.url)
     }).catch(() => undefined).finally(() => { if (active) setPending(false) })
-    return () => { active = false; if (url) URL.revokeObjectURL(url) }
-  }, [client, threadId, messageId, attachment.id, attachment.previewKind, runtime])
+    return () => { active = false; release?.() }
+  }, [client, threadId, message.id, attachment.id, attachment.previewKind, runtime, reuseUserPreview])
   return <div className="message-export-attachment" data-export-pending={pending}>
     {image ? <img className="message-export-image" src={image} alt={attachment.displayName} onError={() => setImage(null)} />
       : <AgentArtifactIcon type={classifyAttachmentDisplay(attachment).agentDisplayType} />}
@@ -108,6 +116,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
   renderBody(message: ThreadMessageView): ReactNode; onClose(): void
   conversation?: { status: 'loading' | 'ready' | 'error'; onRetry(): void }
 }): React.JSX.Element {
+  const imageSession = useImagePreviewSession()
   const [format, setFormat] = useState<MessageExportFormat>('html')
   const [settings, setSettings] = useState<Record<MessageExportFormat, MessageExportOptions>>(() => ({ html: defaultMessageExportOptions('html'), png: defaultMessageExportOptions('png'), markdown: defaultMessageExportOptions('markdown') }))
   const [customTitle, setCustomTitle] = useState<string | null>(null)
@@ -127,16 +136,16 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
     const timer = setTimeout(() => setShowSpinner(true), 350)
     return () => clearTimeout(timer)
   }, [loading])
-  const shortMessages = useExportMessageLayout(reader, !!conversation, entries, format, options)
+  const shortMessages = useExportMessageLayout(reader, conversation ? imageSession : null, entries, format, options)
   useLayoutEffect(() => () => { revision.current++; controller.current?.abort() }, [])
   useLayoutEffect(() => {
     revision.current++
     controller.current?.abort(); setBusy(false); setError(null); setManualCopy(null); setZoom(null)
-  }, [entries, conversation?.status])
+  }, [entries, conversation?.status, imageSession])
   useEffect(() => { setCopied(false) }, [entries, format])
   useEffect(() => {
     reader.current?.querySelectorAll<HTMLElement>('button:not(.markdown-code-copy), a:not([href^="https://"]):not([href^="http://"])').forEach(node => { node.tabIndex = -1 })
-  }, [entries, format, options])
+  }, [entries, format, options, imageSession])
   const name = title.trim() || defaultTitle
   const markdown = entries ? messageExportMarkdown(name, entries, options) : ''
   const close = () => { if (!busy) onClose() }
@@ -156,7 +165,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
     } catch (e) { if (!control.signal.aborted) setError(e instanceof Error ? e.message : uiAttribute('导出失败，请重试。')) }
     finally { if (!control.signal.aborted) setBusy(false) }
   }
-  return <Dialog.Root open={!!conversation || entries !== null} onOpenChange={open => { if (!open) close() }}><Dialog.Portal>
+  return <Dialog.Root key={imageSession} open={imageSession !== null && (!!conversation || entries !== null)} onOpenChange={open => { if (!open) close() }}><Dialog.Portal>
     <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
     <AppDialogContent className="message-export-dialog" width="wide"
       onOpenAutoFocus={() => {
@@ -194,8 +203,8 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
                   }}>
                     {e.reply && <blockquote>{e.reply}</blockquote>}{renderBody(e.message)}
                   </div>
-                  {e.message.attachments.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment threadId={threadId} messageId={e.message.id} attachment={a} /></div>)}
-                  {e.runtimeImages?.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment runtime threadId={threadId} messageId={e.message.id} attachment={{ ...a, kind: 'file', fileCount: null, availability: 'available', previewKind: 'image' }} /></div>)}
+                  {e.message.attachments.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment threadId={threadId} message={e.message} attachment={a} /></div>)}
+                  {e.runtimeImages?.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment runtime threadId={threadId} message={e.message} attachment={{ ...a, kind: 'file', fileCount: null, availability: 'available', previewKind: 'image' }} /></div>)}
                   {options.recipients && e.recipients.length > 0 && <div className="message-export-recipients"><UiText zh="发送给" /> {e.recipients.map(n => '@' + n).join('、')}</div>}
                 </div>
               </section>)}
@@ -223,12 +232,12 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
 }
 
 /** Complete exports have no browsing DOM. Measure their content using the shared grouping height rule. */
-function useExportMessageLayout(reader: RefObject<HTMLElement | null>, enabled: boolean, entries: MessageExportEntry[] | null,
+function useExportMessageLayout(reader: RefObject<HTMLElement | null>, imageSession: number | null, entries: MessageExportEntry[] | null,
   format: MessageExportFormat, options: MessageExportOptions): ReadonlySet<string> {
   const [short, setShort] = useState<Set<string>>(() => new Set())
   useLayoutEffect(() => {
     const root = reader.current
-    if (!enabled || !root) return
+    if (imageSession === null || !root) return
     let active = true
     const measure = () => {
       if (!active) return
@@ -246,6 +255,6 @@ function useExportMessageLayout(reader: RefObject<HTMLElement | null>, enabled: 
     void document.fonts.ready.then(measure)
     measure()
     return () => { active = false; resize.disconnect(); root.removeEventListener('load', measure, true); root.removeEventListener('error', measure, true) }
-  }, [reader, enabled, entries, format, options])
+  }, [reader, imageSession, entries, format, options])
   return short
 }

@@ -13,7 +13,7 @@ import type { ReplyReaderState, ThreadReplyReader } from './thread-reply-reader'
 import './reply-details.css'
 
 export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onClose, onReveal,
-  snapshot, profiles, eventsByRunId, windowedEvidence, onOpenExecution, author, renderBody, onCopy, onError }: {
+  snapshot, profiles, eventsByRunId, windowedEvidence, onOpenExecution, imagePublicationReady, author, renderBody, onCopy, onError }: {
   state: ReplyReaderState
   reader: ThreadReplyReader
   width: number
@@ -27,6 +27,7 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
   eventsByRunId: ReadonlyMap<string, LiveRuntimeEvent[]>
   windowedEvidence: boolean
   onOpenExecution(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
+  imagePublicationReady(message: ThreadMessageView): boolean
   author(message: ThreadMessageView): string
   renderBody(message: ThreadMessageView): ReactNode
   onCopy(message: ThreadMessageView): Promise<void>
@@ -66,7 +67,7 @@ export function ReplyDetails({ state, reader, width, full, onWidth, onFull, onCl
   const runs = snapshot.agentRuns.filter(run => !state.page?.hasLater && (run.status === 'running' || run.status === 'waiting')
     && run.invocationKind !== 'single_chat' && run.anchorMessageId
     && state.page?.runAnchorMessageIds.includes(run.anchorMessageId))
-  const timeline = conversationRunPresenceTimeline((state.page?.messages ?? []).map(message => ({
+  const timeline = conversationRunPresenceTimeline((state.page?.messages ?? []).filter(imagePublicationReady).map(message => ({
     kind: 'camp_message' as const, id: message.id, createdAt: message.createdAt, message, runtimeImageGroups: []
   })), runs).items
   const copy = async (message: ThreadMessageView): Promise<void> => {

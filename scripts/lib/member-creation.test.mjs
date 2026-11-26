@@ -11,10 +11,11 @@ import { build } from 'vite'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/member-creation')
-for (const [name, entry] of [
+for (const [name, entry, flow] of [
   ['AI teammate creation uses the ordinary draft, send, navigation and member surfaces', 'main.cjs'],
   ['One-click conversation drafts survive switching, refresh and window recreation', 'pending-draft-main.cjs'],
-  ['Team creation preserves save receipts and late initial selection', 'team-creation-main.cjs'],
+  ['Team creation preserves save receipts and late initial selection', 'renderer-regression-main.cjs', 'teams'],
+  ['Published user images keep their first frame and read the source only on a cache miss', 'renderer-regression-main.cjs', 'user-images'],
   ['Runtime environment settings guard app navigation and preserve hidden drafts', 'environment-main.cjs']
 ]) test(name, { timeout: 180_000 }, async t => {
   if (!admitElectronIntegrationTest(t)) return
@@ -22,12 +23,12 @@ for (const [name, entry] of [
   let child, closed, passed = false
   try {
     await build({ configFile: false, root: source, base: './', logLevel: 'error', plugins: [react()],
-      define: entry === 'team-creation-main.cjs' ? { 'process.env.NODE_ENV': '"development"' } : undefined,
+      define: flow === 'teams' ? { 'process.env.NODE_ENV': '"development"' } : undefined,
       resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } }, build: { outDir: join(fixture, 'renderer'), minify: false } })
     const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
     delete env.ELECTRON_RUN_AS_NODE
     console.log(`Automatic acceptance userData: ${join(fixture, 'user-data')}; memory adapter only, no Core, Skill Library or Runtime`)
-    child = spawn(electron, [join(source, entry), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'), ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    child = spawn(electron, [join(source, entry), join(fixture, 'renderer/index.html'), join(fixture, 'user-data'), ...(flow ? [flow] : []), ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     closed = once(child, 'close')
     let output = ''
     child.stdout.on('data', chunk => { output += chunk })
