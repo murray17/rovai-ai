@@ -13,7 +13,7 @@ last_updated: 2026-11-26
 
 ## 渠道名单按需验证
 
-三个渠道仅为有效入站、项目绑定与待开工任务读取父群名单。范围和验收依据见[本版决定](decisions.md#v1-72-d96)和[渠道维护契约](../../contracts/channel-host-maintenance-v6.md)。
+三个渠道的普通群仅在有效 @ 入站和确认绑定时查名单。进出通知即时更新对应成员，派发沿用本地名单。整轮失败时入站最多等一次重试。范围和验收依据见[本版决定](decisions.md#v1-72-d96)和[渠道维护契约](../../contracts/channel-host-maintenance-v6.md)。
 
 ## macOS 应用内 ZIP 增量更新（2026-11-23）
 

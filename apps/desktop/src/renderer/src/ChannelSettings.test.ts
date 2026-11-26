@@ -75,6 +75,11 @@ describe('Channel settings', () => {
     expect(render()).not.toContain('channel-live-status')
     expect(render()).not.toContain('role="tooltip"')
     expect(render()).toContain('已发布')
+    snapshot.channels[0].memberBots[0].rosterIssue = 'permission'
+    expect(render()).toContain('缺少群名单读取权限')
+    snapshot.channels[0].memberBots[0].rosterIssue = 'credentials'
+    expect(render()).toContain('群名单读取凭据无效')
+    delete snapshot.channels[0].memberBots[0].rosterIssue
     snapshot.channels[0].memberBots[0].connectionNeedsAttention = false
     expect(render()).toContain('aria-label="Bot · 连接不畅，正在重连"')
     expect(render()).not.toContain('检查网络或代理')

@@ -1,7 +1,12 @@
-/** One platform request per parent group. Core keeps the durable waiting work. */
+import type { ChannelMemberBotView, ChannelKind } from '@contracts'
+
+type RosterIssue = NonNullable<ChannelMemberBotView['rosterIssue']>
+
+/** Share platform reads for the same group. Core owns pending inbound messages. */
 export class ChannelRosterQueries {
   readonly #running = new Map<string, Promise<boolean>>()
   readonly #failures = new Map<string, { attempts: number; retryAt: number }>()
+  readonly issues = new Map<string, RosterIssue>()
   #generation = 0
 
   constructor(private readonly now: () => number, private readonly wakeAfter: (ms: number) => void) {}
@@ -30,7 +35,24 @@ export class ChannelRosterQueries {
     return result
   }
 
+  waitForInboundRetry(tenant: string, chat: string): boolean {
+    const failure = this.#failures.get(JSON.stringify([tenant, chat]))
+    if (failure?.attempts !== 1) return false
+    // An earlier idle tick may have cancelled a retry scheduled by a picker click.
+    this.wakeAfter(Math.max(0, failure.retryAt - this.now()))
+    return true
+  }
+
+  setIssue(provider: ChannelKind, agentId: string, issue?: RosterIssue): boolean {
+    if (!issue) return this.issues.delete(agentId)
+    if (this.issues.get(agentId) === issue) return false
+    this.issues.set(agentId, issue)
+    console.warn('[rovai] Group roster access failed', { provider, agentId, issue })
+    return true
+  }
+
   clear(): void {
+    this.issues.clear()
     this.#generation++
     this.#running.clear()
     this.#failures.clear()

@@ -3511,6 +3511,7 @@ export interface ChannelConnectionView {
 }
 
 export interface ChannelMemberBotView {
+  rosterIssue?: 'permission' | 'credentials'
   /** Durable Bot publication fact, even if a later connection/retry failed. */
   published?: boolean
   /** Live transport observation, independent of durable publication status. */
@@ -4692,11 +4693,9 @@ export type CoreMethod =
   | 'channels.lark.owner.verify'
   | 'channels.lark.dm.startNew'
   | 'channels.lark.pendingBinding.resolve'
-  | 'channels.lark.inbound.observed'
   | 'channels.lark.inbound.observe'
   | 'channels.lark.inbound.attachments.complete'
   | 'channels.lark.inbound.finalize'
-  | 'channels.lark.roster.begin'
   | 'channels.lark.roster.reconcile'
   | 'channels.lark.deliveries.settle'
   | 'channels.lark.host.tick'
@@ -4720,7 +4719,6 @@ export type CoreMethod =
   | 'channels.dingtalk.cardActionContext'
   | 'channels.dingtalk.inbound.observe'
   | 'channels.dingtalk.inbound.attachments.complete'
-  | 'channels.dingtalk.roster.begin'
   | 'channels.dingtalk.roster.reconcile'
   | 'channels.dingtalk.inbound.finalize'
   | 'channels.dingtalk.host.tick'
@@ -4732,9 +4730,7 @@ export type CoreMethod =
   | 'channels.dingtalk.deliveries.settle'
   | 'channels.membership.add'
   | 'channels.membership.remove'
-  | 'channels.inbound.observed'
   | 'channels.inbound.observe'
-  | 'channels.roster.begin'
   | 'channels.roster.reconcile'
   | 'channels.inbound.finalize'
   | 'channels.inbound.attachments.complete'

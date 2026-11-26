@@ -87,7 +87,6 @@ const LARK_PROVIDER: &str = "lark";
 const FEISHU_PROVIDER: &str = FEISHU_SPEC.provider;
 pub mod inbound_attachments;
 pub mod native_interactions;
-pub mod roster;
 const DINGTALK_PROVIDER: &str = "dingtalk";
 #[cfg(all(test, feature = "extended-tests"))]
 const FEISHU_CHANNEL_HOST_COMPONENT: &str = FEISHU_SPEC.host_component;
@@ -687,9 +686,7 @@ pub struct ReconcileFeishuGroupRosterCommand {
     pub chat_id: String,
     pub present_app_ids: Vec<String>,
     #[serde(default)]
-    pub started_at: Option<chrono::DateTime<Utc>>,
-    #[serde(default)]
-    pub observed_app_ids: Option<BTreeSet<String>>,
+    pub absent_app_ids: Option<BTreeSet<String>>,
     #[serde(default)]
     pub membership_event: Option<GroupBotMembershipEvent>,
 }
@@ -726,7 +723,7 @@ fn default_delivery_claim_limit() -> usize {
 #[serde(rename_all = "camelCase")]
 pub struct ChannelHostTickResult {
     pub deliveries: Vec<ClaimedChannelDelivery>,
-    pub(crate) roster_refreshes: Vec<crate::message_delivery::GroupRosterRefreshRequest>,
+    pub(crate) roster_refreshes: Vec<crate::message_delivery::TopicRosterRefreshRequest>,
     pub has_outstanding_work: bool,
     pub inbound_attachments: Vec<inbound_attachments::PendingAttachments>,
 }
@@ -4895,40 +4892,28 @@ impl ChannelService {
                 .filter(|(_, _, status)| status == "published")
                 .map(|(app_id, _, _)| app_id.clone())
                 .collect::<BTreeSet<_>>();
-            if envelope.payload.observed_app_ids.as_ref().is_some_and(|apps| apps != &published_app_ids) {
-                return Ok(rejected("channel.roster_changed", "Published Bot set changed during the query"));
-            }
-            let scope = params![envelope.payload.provider, envelope.payload.tenant_key, envelope.payload.chat_id];
-            let now = Utc::now();
             if let Some(event) = &envelope.payload.membership_event {
-                let at = now.to_rfc3339();
-                transaction.execute(
-                    "INSERT INTO external_group_bot_roster(provider,tenant_key,chat_id,app_id,agent_id,
-                        status,version,observed_at,updated_at)
-                     SELECT provider,?2,?3,app_id,agent_id,?5,1,?6,?6 FROM channel_member_bot_directory
-                     WHERE provider=?1 AND app_id=?4 AND status='published'
-                     ON CONFLICT(provider,tenant_key,chat_id,app_id) DO UPDATE SET
-                        status=excluded.status, observed_at=excluded.observed_at, updated_at=excluded.updated_at,
-                        version=external_group_bot_roster.version+(external_group_bot_roster.status!=excluded.status)",
-                    params![envelope.payload.provider,envelope.payload.tenant_key,envelope.payload.chat_id,event.app_id,
-                        if event.present { "present" } else { "absent" },at],
+                record_group_bot_presence(
+                    transaction,
+                    &envelope.payload.provider,
+                    &envelope.payload.tenant_key,
+                    &envelope.payload.chat_id,
+                    &event.app_id,
+                    event.present,
+                    &Utc::now().to_rfc3339(),
                 )?;
-                // A membership event fences earlier reads without certifying a full list.
-                transaction.execute("UPDATE external_group_bot_roster_state SET updated_at=?4
-                    WHERE provider=?1 AND tenant_key=?2 AND chat_id=?3",
-                    params![envelope.payload.provider,envelope.payload.tenant_key,envelope.payload.chat_id,at])?;
-                return Ok(CommandHandlerResult::applied("channel.group_roster.member_changed",
-                    json!({"appId": event.app_id, "present": event.present}), None));
+                return Ok(CommandHandlerResult::applied(
+                    "channel.group_roster.member_changed",
+                    json!({"appId": event.app_id, "present": event.present}),
+                    None,
+                ));
             }
-            let observed = envelope.payload.started_at.unwrap_or(now);
-            let last: Option<String> = transaction.query_row(
-                "SELECT updated_at FROM external_group_bot_roster_state
-                 WHERE provider=?1 AND tenant_key=?2 AND chat_id=?3",
-                scope, |row| row.get(0),
-            ).optional()?;
-            let last = last.as_deref().and_then(roster::timestamp);
-            if observed > now || last.is_some_and(|last| last > observed) {
-                return Ok(rejected("channel.roster_changed", "Roster changed during the query"));
+            let absent = envelope.payload.absent_app_ids.as_ref();
+            if absent.is_some_and(|apps| apps.is_empty() && present_app_ids.is_empty()) {
+                return Ok(rejected(
+                    "channel.roster_incomplete",
+                    "No Bot returned a membership result",
+                ));
             }
             let unknown_present = present_app_ids
                 .difference(&published_app_ids)
@@ -4959,12 +4944,12 @@ impl ChannelService {
                 .optional()?
                 .unwrap_or(0);
             let generation = current_generation + 1;
-            let now = now.to_rfc3339();
+            let now = Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
                 INSERT INTO external_group_bot_roster_state(
                     provider, tenant_key, chat_id, generation, observed_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
                 ON CONFLICT(provider, tenant_key, chat_id) DO UPDATE SET
                     generation = excluded.generation,
                     observed_at = excluded.observed_at,
@@ -4975,15 +4960,17 @@ impl ChannelService {
                     envelope.payload.tenant_key,
                     envelope.payload.chat_id,
                     generation,
-                    observed.to_rfc3339(),
                     now,
                 ],
             )?;
-            let mut present_agent_ids = Vec::new();
             for (app_id, agent_id, bot_status) in known_bots {
+                if absent.is_some_and(|apps| {
+                    !apps.contains(&app_id) && !present_app_ids.contains(&app_id)
+                }) {
+                    continue;
+                }
                 let roster_status =
                     if bot_status == "published" && present_app_ids.contains(&app_id) {
-                        present_agent_ids.push(agent_id.clone());
                         "present"
                     } else {
                         "absent"
@@ -4993,7 +4980,7 @@ impl ChannelService {
                     INSERT INTO external_group_bot_roster(
                         provider, tenant_key, chat_id, app_id, agent_id,
                         status, version, observed_at, updated_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)
                     ON CONFLICT(provider, tenant_key, chat_id, app_id) DO UPDATE SET
                         agent_id = excluded.agent_id,
                         status = excluded.status,
@@ -5013,11 +5000,16 @@ impl ChannelService {
                         app_id,
                         agent_id,
                         roster_status,
-                        observed.to_rfc3339(),
                         now,
                     ],
                 )?;
             }
+            let present_agent_ids = present_group_agents(
+                transaction,
+                &envelope.payload.provider,
+                &envelope.payload.tenant_key,
+                &envelope.payload.chat_id,
+            )?;
             Ok(CommandHandlerResult::applied(
                 "channel.group_roster.reconciled",
                 json!({
@@ -5046,40 +5038,6 @@ impl ChannelService {
                 &envelope.payload.chat_id,
                 &envelope.command_id,
             )?;
-            let output = database.message_changes.clone();
-            let tx = database
-                .connection_mut()
-                .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let changes = crate::message_changes::MessageChanges::begin(&tx, output);
-            if envelope.payload.membership_event.is_none() {
-                // The scheduler rechecks each cutoff before claiming. Drop the serviced
-                // demand here so an intervening Host tick cannot start a duplicate read.
-                tx.execute(
-                    "UPDATE camp_message_delivery SET failure_code=NULL
-                     WHERE status='waiting' AND failure_code=?1 AND camp_id IN (
-                        SELECT b.camp_id FROM channel_conversation_binding b
-                        JOIN channel_conversation c ON c.id=b.channel_conversation_id
-                        WHERE b.status='active' AND c.provider=?2 AND c.tenant_key=?3 AND c.chat_id=?4)",
-                    params![roster::WAIT, envelope.payload.provider, envelope.payload.tenant_key, envelope.payload.chat_id],
-                )?;
-            }
-            let pending = query_rows(&tx,"SELECT r.id FROM channel_turn_request r
-                JOIN channel_conversation_binding b ON b.id=r.binding_id JOIN channel_conversation c ON c.id=b.channel_conversation_id
-                WHERE r.status='queued' AND r.failure_code=?1 AND c.provider=?2 AND c.tenant_key=?3 AND c.chat_id=?4 ORDER BY r.rowid",
-                params![roster::WAIT,envelope.payload.provider,envelope.payload.tenant_key,envelope.payload.chat_id],|r|r.get::<_,String>(0))?;
-            let mut settled = Vec::new();
-            for request in pending {
-                try_admit_request(
-                    &tx,
-                    &request,
-                    &Utc::now().to_rfc3339(),
-                    &envelope.command_id,
-                    &mut settled,
-                )?;
-            }
-            changes.commit(tx)?;
-            crate::runtime::pump_targets_after_runs_terminal(database, &settled)?;
-            database.execution_wake.execution_changed();
             crate::message_delivery::dispatch_topic_deliveries_waiting_for_roster(
                 database,
                 &envelope.payload.provider,
@@ -5090,26 +5048,6 @@ impl ChannelService {
         Ok(execution)
     }
 
-    /// A replay from a previous Host session must not fetch merge-forward children again.
-    pub fn inbound_was_observed(
-        &self,
-        database: &Database,
-        provider: &str,
-        tenant: &str,
-        message: &str,
-        app: &str,
-    ) -> Result<bool> {
-        let digest = inbound_message_digest(provider, tenant, message)?;
-        Ok(database.connection().query_row(
-            "SELECT EXISTS(SELECT 1 FROM channel_inbound_aggregate a
-             WHERE a.provider=?1 AND a.tenant_key=?2 AND a.external_message_digest=?3
-               AND (a.status!='collecting' OR EXISTS (
-                 SELECT 1 FROM json_each(a.observed_app_ids_json) seen WHERE seen.value=?4)))",
-            params![provider, tenant, digest, app],
-            |row| row.get(0),
-        )?)
-    }
-
     pub fn observe_inbound(
         &self,
         database: &mut Database,
@@ -5117,11 +5055,14 @@ impl ChannelService {
     ) -> Result<CommandExecution> {
         validate_observation_input(&envelope.payload)?;
         let aggregate_id = format!("rvcia_{}", Uuid::new_v4().simple());
-        let external_message_digest = inbound_message_digest(
-            &envelope.payload.provider,
-            &envelope.payload.tenant_key,
-            &envelope.payload.external_message_id,
-        )?;
+        let external_message_digest = format!(
+            "sha256:{}",
+            canonical_json_digest(&json!({
+                "provider": envelope.payload.provider,
+                "tenantKey": envelope.payload.tenant_key,
+                "externalMessageId": envelope.payload.external_message_id,
+            }))?
+        );
         let conversation_id = stable_channel_conversation_id(
             &envelope.payload.provider,
             &envelope.payload.tenant_key,
@@ -5575,7 +5516,7 @@ impl ChannelService {
             }
             let now = Utc::now();
             let now_text = now.to_rfc3339();
-            let frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
+            let mut frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
                 .context("channel inbound frozen payload is invalid")?;
             if let Some(ignored) = discard_archived_inbound(
                 transaction, &envelope.actor, &aggregate.provider, &frozen.conversation_id,
@@ -5650,47 +5591,60 @@ impl ChannelService {
                 transaction,
                 &frozen.conversation_id,
             )?.context("channel inbound conversation is missing")?;
-            if envelope.payload.require_fresh_roster && matches!(conversation.conversation_kind.as_str(),"group"|"topic") {
-                let fresh: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM external_group_bot_roster_state s
-                    JOIN channel_inbound_aggregate a ON a.provider=s.provider AND a.tenant_key=s.tenant_key AND a.chat_id=s.chat_id
-                    WHERE a.id=?1 AND s.observed_at>a.created_at)",[&aggregate.id],|r|r.get(0))?;
-                if !fresh {
-                    return Ok(rejected("channel.roster_sync_required", "A fresh group roster is required for this message"));
+            let mut roster_agent_ids = Vec::new();
+            if matches!(conversation.conversation_kind.as_str(), "group" | "topic") {
+                // A receiving Bot is present even when its platform credentials cannot read the roster.
+                for app_id in &observed {
+                    record_group_bot_presence(
+                        transaction, &conversation.provider, &conversation.tenant_key,
+                        &conversation.chat_id, app_id, true, &now_text,
+                    )?;
+                }
+                if envelope.payload.require_fresh_roster {
+                    let fresh: bool = transaction.query_row(
+                        r#"
+                        SELECT EXISTS(
+                            SELECT 1 FROM external_group_bot_roster_state AS roster
+                            JOIN channel_inbound_aggregate AS inbound USING (provider, tenant_key, chat_id)
+                            WHERE inbound.id = ?1 AND roster.observed_at > inbound.created_at
+                        )
+                        "#,
+                        [&aggregate.id],
+                        |row| row.get(0),
+                    )?;
+                    if !fresh {
+                        return Ok(rejected(
+                            "channel.roster_sync_required",
+                            "A fresh group roster was requested",
+                        ));
+                    }
+                }
+                roster_agent_ids = present_group_agents(
+                    transaction, &conversation.provider, &conversation.tenant_key, &conversation.chat_id,
+                )?;
+                frozen.target_agent_ids.retain(|id| roster_agent_ids.contains(id));
+                frozen.structured_content.retain(|segment| match segment {
+                    StructuredThreadMessageSegment::MemberMention { agent_id } => frozen.target_agent_ids.contains(agent_id),
+                    _ => true,
+                });
+                if frozen.target_agent_ids.is_empty() {
+                    mark_aggregate_failed(transaction, &aggregate.id, "channel.target_bot_not_in_roster", &now_text)?;
+                    return Ok(CommandHandlerResult::applied(
+                        "channel.inbound.failed",
+                        json!({ "aggregateId": aggregate.id, "status": "failed", "failureCode": "channel.target_bot_not_in_roster" }),
+                        None,
+                    ));
+                }
+                if !observed.contains(&frozen.acknowledgement_app_id) {
+                    let targets = frozen.target_agent_ids.iter().cloned().collect();
+                    let apps = app_ids_for_agents(transaction, &conversation.provider, &targets)?;
+                    if !apps.contains(&frozen.acknowledgement_app_id)
+                        && let Some(receiver) = observed.intersection(&apps).next()
+                    {
+                        frozen.acknowledgement_app_id = receiver.clone();
+                    }
                 }
             }
-            let roster_agent_ids = match group_roster_readiness(
-                transaction,
-                &conversation,
-                &expected,
-            )? {
-                GroupRosterReadiness::NotRequired => Vec::new(),
-                GroupRosterReadiness::MissingState => {
-                    return Ok(CommandHandlerResult::rejected(
-                        "channel.roster_sync_required",
-                        json!({
-                            "message": "The channel group Bot roster must be reconciled before admission",
-                            "tenantKey": conversation.tenant_key,
-                            "chatId": conversation.chat_id,
-                        }),
-                    ));
-                }
-                GroupRosterReadiness::MissingApps(app_ids) => {
-                    if envelope.payload.require_fresh_roster {
-                        mark_aggregate_failed(transaction,&aggregate.id,"channel.target_bot_not_in_roster",&now_text)?;
-                        return Ok(CommandHandlerResult::applied("channel.inbound.failed",json!({"aggregateId":aggregate.id,"failureCode":"channel.target_bot_not_in_roster"}),None));
-                    }
-                    return Ok(CommandHandlerResult::rejected(
-                        "channel.bot_not_in_roster",
-                        json!({
-                            "message": "A mentioned member Bot is no longer in this channel group",
-                            "tenantKey": conversation.tenant_key,
-                            "chatId": conversation.chat_id,
-                            "appIds": app_ids,
-                        }),
-                    ));
-                }
-                GroupRosterReadiness::Ready(agent_ids) => agent_ids,
-            };
 
             let mut camp_created = false;
             let mut binding = if let Some(observed_binding_id) =
@@ -6270,7 +6224,7 @@ impl ChannelService {
                             "The channel group Bot roster must be reconciled before binding",
                         ));
                     }
-                    GroupRosterReadiness::MissingApps(_) => {
+                    GroupRosterReadiness::MissingApps => {
                         return Ok(rejected(
                             "channel.bot_not_in_roster",
                             "A selected message target Bot is no longer in the channel group",
@@ -6885,7 +6839,11 @@ impl ChannelService {
                 remaining,
                 &now,
             )?);
-            let roster_refreshes = roster::pending(&transaction, Some(provider))?;
+            let roster_refreshes = if ChannelProviderSpec::for_provider(provider).is_some() {
+                crate::message_delivery::pending_topic_roster_refreshes(&transaction, provider)?
+            } else {
+                Vec::new()
+            };
             let retention_boundary =
                 (now - Duration::days(CHANNEL_TRANSPORT_RETENTION_DAYS)).to_rfc3339();
             transaction.execute(
@@ -7290,24 +7248,7 @@ impl ChannelService {
 struct BoundGroupThread {
     binding_id: String,
     camp_id: String,
-}
-
-pub(crate) fn finish_deferred_roster_removal(
-    database: &mut Database,
-    camp: &str,
-    agent: &str,
-    run: &str,
-) -> Result<()> {
-    let group = database.connection().query_row("SELECT chat.provider,chat.tenant_key,chat.chat_id FROM channel_conversation_binding b
-        JOIN channel_conversation chat ON chat.id=b.channel_conversation_id
-        JOIN external_group_bot_roster r ON r.provider=chat.provider AND r.chat_id=chat.chat_id AND r.tenant_key=chat.tenant_key
-        JOIN camp_member m ON m.camp_id=b.camp_id AND m.agent_id=r.agent_id
-        WHERE b.camp_id=?1 AND b.status='active' AND r.agent_id=?2 AND r.status='absent' AND m.status='active'
-        AND chat.conversation_kind IN ('group','topic')",params![camp,agent],|row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?))).optional()?;
-    if let Some((provider, tenant, chat)) = group {
-        reconcile_bound_group_memberships(database, &provider, &tenant, &chat, run)?;
-    }
-    Ok(())
+    conversation_kind: String,
 }
 
 fn reconcile_bound_group_memberships(
@@ -7320,7 +7261,7 @@ fn reconcile_bound_group_memberships(
     let camps = query_rows(
         database.connection(),
         r#"
-        SELECT binding.id, binding.camp_id
+        SELECT binding.id, binding.camp_id, conversation.conversation_kind
         FROM channel_conversation AS conversation
         JOIN channel_conversation_binding AS binding
           ON binding.channel_conversation_id = conversation.id
@@ -7337,6 +7278,7 @@ fn reconcile_bound_group_memberships(
             Ok(BoundGroupThread {
                 binding_id: row.get(0)?,
                 camp_id: row.get(1)?,
+                conversation_kind: row.get(2)?,
             })
         },
     )?;
@@ -7421,43 +7363,6 @@ fn reconcile_bound_group_memberships(
         }
 
         for agent_id in active_managed_agents.difference(&desired_agents) {
-            let latest_run: (bool, Option<String>) = database.connection().query_row(
-                "SELECT COALESCE(MAX(r.status IN ('running','waiting','queued')),0), MAX(r.ended_at)
-                 FROM conversation c JOIN agent_run r ON r.conversation_id=c.id
-                 WHERE c.kind='camp_member' AND c.camp_id=?1 AND c.agent_id=?2",
-                params![camp.camp_id, agent_id], |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            if latest_run.0 {
-                continue;
-            }
-            let now = Utc::now().to_rfc3339();
-            let output = database.message_changes.clone();
-            let tx = database.connection_mut().transaction()?;
-            let changes = crate::message_changes::MessageChanges::begin(&tx, output);
-            let cancelled = tx.execute(
-                "UPDATE camp_message_delivery SET status='cancelled', failure_code='channel.target_bot_not_in_roster',
-                   ended_at=?3, updated_at=?3, version=version+1
-                 WHERE camp_id=?1 AND recipient_agent_id=?2 AND status='waiting'
-                   AND EXISTS (SELECT 1 FROM external_group_bot_roster m WHERE m.provider=?4
-                     AND m.tenant_key=?5 AND m.chat_id=?6 AND m.agent_id=?2 AND m.status='absent'
-                     AND m.observed_at>camp_message_delivery.created_at AND (?7 IS NULL OR m.observed_at>?7))",
-                params![camp.camp_id, agent_id, now, provider, tenant_key, chat_id, latest_run.1],
-            )?;
-            if cancelled > 0 {
-                crate::message_changes::record(&tx, &camp.camp_id, false, &[]);
-            }
-            changes.commit(tx)?;
-            // A later delivery or Run end still needs its own read. Preserve the lane
-            // so the claim scheduler can request it before ending local membership.
-            let waiting: bool = database.connection().query_row(
-                "SELECT EXISTS(SELECT 1 FROM camp_message_delivery
-                 WHERE camp_id=?1 AND recipient_agent_id=?2 AND status='waiting')",
-                params![camp.camp_id, agent_id],
-                |row| row.get(0),
-            )?;
-            if waiting {
-                continue;
-            }
             let Some(preview) = CollaborationService::default().camp_member_removal_preview(
                 database,
                 &camp.camp_id,
@@ -7471,7 +7376,7 @@ fn reconcile_bound_group_memberships(
             {
                 continue;
             }
-            if preview.non_terminal_agent_run_count > 0 {
+            if camp.conversation_kind == "topic" && preview.non_terminal_agent_run_count > 0 {
                 // A remote roster change controls future admission. It must
                 // never cancel an AgentRun whose execution context was already
                 // frozen. A later reconciliation finalizes the membership once
@@ -7604,7 +7509,7 @@ struct ChannelConversationAdmission {
 enum GroupRosterReadiness {
     NotRequired,
     MissingState,
-    MissingApps(Vec<String>),
+    MissingApps,
     Ready(Vec<String>),
 }
 
@@ -8551,6 +8456,37 @@ fn load_channel_conversation(
         .map_err(Into::into)
 }
 
+fn record_group_bot_presence(
+    tx: &Transaction<'_>,
+    provider: &str,
+    tenant: &str,
+    chat: &str,
+    app: &str,
+    present: bool,
+    now: &str,
+) -> Result<()> {
+    // Only a platform lookup sets the parent snapshot time. An empty value sorts before every inbound timestamp.
+    tx.execute(
+        "INSERT OR IGNORE INTO external_group_bot_roster_state
+            (provider, tenant_key, chat_id, generation, observed_at, updated_at)
+         VALUES (?1, ?2, ?3, 1, '', ?4)",
+        params![provider, tenant, chat, now],
+    )?;
+    tx.execute(
+        r#"
+        INSERT INTO external_group_bot_roster
+            (provider, tenant_key, chat_id, app_id, agent_id, status, version, observed_at, updated_at)
+        SELECT provider, ?2, ?3, app_id, agent_id, ?5, 1, ?6, ?6 FROM channel_member_bot_directory
+        WHERE provider = ?1 AND app_id = ?4 AND status = 'published'
+        ON CONFLICT(provider, tenant_key, chat_id, app_id) DO UPDATE SET
+            status = excluded.status, observed_at = excluded.observed_at, updated_at = excluded.updated_at,
+            version = external_group_bot_roster.version + (external_group_bot_roster.status != excluded.status)
+        "#,
+        params![provider, tenant, chat, app, if present { "present" } else { "absent" }, now],
+    )?;
+    Ok(())
+}
+
 fn group_roster_readiness(
     transaction: &Transaction<'_>,
     conversation: &ChannelConversationAdmission,
@@ -8593,14 +8529,24 @@ fn group_roster_readiness(
     )?
     .into_iter()
     .collect::<BTreeSet<_>>();
-    let missing_apps = expected_app_ids
-        .difference(&present_app_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_apps.is_empty() {
-        return Ok(GroupRosterReadiness::MissingApps(missing_apps));
+    if !expected_app_ids.is_subset(&present_app_ids) {
+        return Ok(GroupRosterReadiness::MissingApps);
     }
-    let present_agents = query_rows(
+    Ok(GroupRosterReadiness::Ready(present_group_agents(
+        transaction,
+        &conversation.provider,
+        &conversation.tenant_key,
+        &conversation.chat_id,
+    )?))
+}
+
+fn present_group_agents(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    tenant: &str,
+    chat: &str,
+) -> Result<Vec<String>> {
+    query_rows(
         transaction,
         r#"
         SELECT roster.agent_id
@@ -8613,14 +8559,9 @@ fn group_roster_readiness(
           AND roster.status = 'present' AND bot.status = 'published'
         ORDER BY roster.agent_id
         "#,
-        params![
-            conversation.provider,
-            conversation.tenant_key,
-            conversation.chat_id
-        ],
+        params![provider, tenant, chat],
         |row| row.get::<_, String>(0),
-    )?;
-    Ok(GroupRosterReadiness::Ready(present_agents))
+    )
 }
 
 fn discard_archived_inbound(
@@ -9765,7 +9706,7 @@ fn try_admit_request(
               AND NOT EXISTS (
                   SELECT 1 FROM channel_turn_request AS active
                   WHERE active.binding_id = channel_turn_request.binding_id
-                    AND (active.status = 'admitted' OR (active.status='queued' AND active.rowid<channel_turn_request.rowid))
+                    AND active.status = 'admitted'
               )
             "#,
             [request_id],
@@ -9800,11 +9741,6 @@ fn try_admit_request(
     };
     let attachments = inbound_attachments::for_request(transaction, request_id)?;
     if !attachments.ready() {
-        return Ok(AdmissionAttempt::Deferred);
-    }
-    if matches!(conversation_kind.as_str(), "group" | "topic")
-        && !roster::request_ready(transaction, request_id, &provider, &tenant_key, &chat_id)?
-    {
         return Ok(AdmissionAttempt::Deferred);
     }
     let content: StructuredThreadMessageContent = serde_json::from_str(&content_json)?;
@@ -9883,7 +9819,7 @@ fn try_admit_request(
     transaction.execute(
         r#"
         UPDATE channel_turn_request
-        SET status = 'completed', failure_code=NULL, camp_message_id = ?2,
+        SET status = 'completed', camp_message_id = ?2,
             delivery_ids_json = ?3, trigger_camp_sequence = ?4,
             admitted_at = ?5, completed_at = ?5,
             version = version + 1, updated_at = ?5
@@ -11744,7 +11680,7 @@ fn promote_ready_requests(
           AND queued.id = (
               SELECT next.id FROM channel_turn_request AS next
               WHERE next.binding_id = queued.binding_id AND next.status = 'queued'
-              ORDER BY next.rowid
+              ORDER BY next.queue_position, next.created_at, next.id
               LIMIT 1
           )
         ORDER BY queued.created_at, queued.id
@@ -12349,13 +12285,6 @@ fn assemble_external_content(
     });
     let content = normalize_content(content);
     Ok(content)
-}
-
-fn inbound_message_digest(provider: &str, tenant: &str, message: &str) -> Result<String> {
-    let digest = canonical_json_digest(&json!({
-        "provider": provider, "tenantKey": tenant, "externalMessageId": message,
-    }))?;
-    Ok(format!("sha256:{digest}"))
 }
 
 fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<()> {
@@ -14210,8 +14139,7 @@ mod tests {
                                 &actor,
                                 wrong("roster"),
                                 ReconcileFeishuGroupRosterCommand {
-                                    started_at: None,
-                                    observed_app_ids: None,
+                                    absent_app_ids: None,
                                     membership_event: None,
                                     provider: provider.to_string(),
                                     tenant_key: "tenant_1".to_string(),
@@ -15313,8 +15241,8 @@ mod tests {
                             spec,
                             &format!("finalize-{id}"),
                             FinalizeChannelInboundCommand {
-                                aggregate_id,
                                 require_fresh_roster: false,
+                                aggregate_id,
                             },
                         ),
                     )
@@ -15382,8 +15310,7 @@ mod tests {
                         spec,
                         "roster",
                         ReconcileFeishuGroupRosterCommand {
-                            started_at: None,
-                            observed_app_ids: None,
+                            absent_app_ids: None,
                             membership_event: None,
                             provider: provider.to_string(),
                             tenant_key: "tenant_1".to_string(),
@@ -16266,8 +16193,8 @@ mod tests {
                         provider,
                         "images-finalize",
                         FinalizeChannelInboundCommand {
-                            aggregate_id,
                             require_fresh_roster: false,
+                            aggregate_id,
                         },
                     ),
                 )
@@ -18568,45 +18495,6 @@ mod tests {
         path
     }
 
-    // Exercise the same targeted feedback loop as a Host. The fixture platform
-    // keeps the membership from its last response until a test changes it.
-    fn answer_roster_demand(
-        service: &ChannelService,
-        db: &mut Database,
-        provider: &str,
-        command: &str,
-    ) {
-        let groups = roster::pending(db.connection(), Some(provider)).unwrap();
-        assert_eq!(
-            groups.len(),
-            1,
-            "only the waiting parent group needs a fresh observation"
-        );
-        let group = &groups[0];
-        let apps = query_rows(db.connection(),"SELECT app_id FROM external_group_bot_roster
-            WHERE provider=?1 AND tenant_key=?2 AND chat_id=?3 AND status='present' ORDER BY app_id",
-            params![provider,group.tenant_key,group.chat_id],|r|r.get(0)).unwrap();
-        let reply = service
-            .reconcile_feishu_group_roster(
-                db,
-                &provider_host_envelope(
-                    provider,
-                    command,
-                    ReconcileFeishuGroupRosterCommand {
-                        provider: provider.to_string(),
-                        tenant_key: group.tenant_key.clone(),
-                        chat_id: group.chat_id.clone(),
-                        present_app_ids: apps,
-                        started_at: Some(Utc::now()),
-                        observed_app_ids: None,
-                        membership_event: None,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(reply.result.code, "channel.group_roster.reconciled");
-    }
-
     fn claim_waiting_runs(database: &mut Database) -> Vec<String> {
         crate::delivery_queue::claim_waiting_delivery_batches(database, 100).unwrap()
     }
@@ -19054,8 +18942,7 @@ mod tests {
                 &host_envelope(
                     &format!("{chat_id}-roster"),
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -19191,8 +19078,7 @@ mod tests {
                         &host_envelope(
                             &format!("quick-roster-{index}"),
                             ReconcileFeishuGroupRosterCommand {
-                                started_at: None,
-                                observed_app_ids: None,
+                                absent_app_ids: None,
                                 membership_event: None,
                                 provider: FEISHU_PROVIDER.to_string(),
                                 tenant_key: "tenant_1".to_string(),
@@ -19308,12 +19194,6 @@ mod tests {
                     )
                     .unwrap(),
                 2
-            );
-            answer_roster_demand(
-                &service,
-                &mut database,
-                FEISHU_PROVIDER,
-                "quick-queued-start",
             );
             for (table, count) in [
                 ("camp_message", 2),
@@ -20610,8 +20490,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-multi-roster",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         tenant_key: "ding-corp-1".to_string(),
@@ -20795,13 +20674,6 @@ mod tests {
                 .unwrap()
                 .deliveries;
         }
-        assert!(claim_waiting_runs(&mut database).is_empty());
-        answer_roster_demand(
-            &service,
-            &mut database,
-            DINGTALK_PROVIDER,
-            "multi-first-query-after-input",
-        );
         assert_eq!(claim_waiting_runs(&mut database).len(), 2);
         let mut dispatched = service
             .host_tick(
@@ -20940,8 +20812,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-group-roster-initial",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         tenant_key: "ding-corp-1".to_string(),
@@ -21175,8 +21046,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-group-roster-updated",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         tenant_key: "ding-corp-1".to_string(),
@@ -22002,8 +21872,8 @@ mod tests {
                 &host_envelope(
                     "finalize-1",
                     FinalizeChannelInboundCommand {
-                        aggregate_id,
                         require_fresh_roster: false,
+                        aggregate_id,
                     },
                 ),
             )
@@ -23032,8 +22902,8 @@ mod tests {
                 &host_envelope(
                     "finalize-terminal-console",
                     FinalizeChannelInboundCommand {
-                        aggregate_id,
                         require_fresh_roster: false,
+                        aggregate_id,
                     },
                 ),
             )
@@ -23896,8 +23766,7 @@ mod tests {
         let project_path = seed_project(&database, "binding");
         let quick_chat_path = quick_chat_path(&database);
         let roster = ReconcileFeishuGroupRosterCommand {
-            started_at: None,
-            observed_app_ids: None,
+            absent_app_ids: None,
             membership_event: None,
             provider: FEISHU_PROVIDER.to_string(),
             tenant_key: "tenant_1".to_string(),
@@ -24044,8 +23913,7 @@ mod tests {
                 &host_envelope(
                     "binding-roster-missing",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -24209,8 +24077,7 @@ mod tests {
                 &host_envelope(
                     "binding-roster-restored",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -24239,13 +24106,6 @@ mod tests {
         assert_eq!(change["params"]["unavailableMessageIds"], json!([]));
         assert!(message_changes.try_recv().is_err());
 
-        assert_eq!(database.connection().query_row("SELECT COUNT(*) FROM channel_turn_request WHERE status='queued' AND failure_code=?1",[roster::WAIT],|r|r.get::<_,i64>(0)).unwrap(),1);
-        answer_roster_demand(
-            &service,
-            &mut database,
-            FEISHU_PROVIDER,
-            "binding-queued-start",
-        );
         assert_channel_camp_name(
             &mut database,
             camp_id,
@@ -24551,8 +24411,7 @@ mod tests {
                 &host_envelope(
                     "legacy-picker-roster",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -24725,8 +24584,7 @@ mod tests {
                 &host_envelope(
                     "picker-card-revision-roster",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -24933,8 +24791,7 @@ mod tests {
                 &host_envelope(
                     "sent-picker-card-revision-roster",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -25100,8 +24957,7 @@ mod tests {
                 &host_envelope(
                     "aggregate-roster",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -25295,8 +25151,7 @@ mod tests {
                 &host_envelope(
                     "roster-both",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -25324,46 +25179,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert!(
-            service
-                .inbound_was_observed(
-                    &database,
-                    FEISHU_PROVIDER,
-                    "tenant_1",
-                    "om_group_pending",
-                    "cli_app_1"
-                )
-                .unwrap()
-        );
-        assert!(
-            !service
-                .inbound_was_observed(
-                    &database,
-                    FEISHU_PROVIDER,
-                    "tenant_1",
-                    "om_group_pending",
-                    "cli_app_2"
-                )
-                .unwrap()
-        );
-        let fresh = service
-            .reconcile_feishu_group_roster(
-                &mut database,
-                &host_envelope(
-                    "direct-observation",
-                    ReconcileFeishuGroupRosterCommand {
-                        provider: FEISHU_PROVIDER.into(),
-                        tenant_key: "tenant_1".into(),
-                        chat_id: "oc_group".into(),
-                        present_app_ids: vec!["cli_app_1".into(), "cli_app_2".into()],
-                        started_at: Some(Utc::now()),
-                        observed_app_ids: None,
-                        membership_event: None,
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(fresh.result.code, "channel.group_roster.reconciled");
         let pending = service
             .finalize_inbound(
                 &mut database,
@@ -25397,81 +25212,27 @@ mod tests {
             2,
             "normal group Camp starts from the full present Bot roster"
         );
-        let running = claim_waiting_runs(&mut database);
-        assert_eq!(
-            running.len(),
-            1,
-            "the original inbound target reuses its read"
-        );
-        assert!(
-            roster::pending(database.connection(), None)
-                .unwrap()
-                .is_empty()
-        );
-
-        // A desktop message behind this Run must wait for the Run's end before its read.
-        use crate::camp_content::{
-            StructuredThreadMessageSegment as Segment, composer_document_from_content,
-        };
-        let content = composer_document_from_content(&vec![
-            Segment::MemberMention {
-                agent_id: "agent_1".into(),
-            },
-            Segment::Text {
-                text: "下一项任务".into(),
-            },
-        ])
-        .unwrap();
-        let mut desktop = host_envelope(
-            "ordinary-group-next",
-            crate::collaboration::SendUserThreadMessageCommand {
-                delivery_mode: Default::default(),
-                steer_targets: None,
-                camp_id: camp_id.to_owned(),
-                content,
-                source_attachments: Vec::new(),
-                quotes: Vec::new(),
-                reply_to_camp_message_id: None,
-                execution: Some(crate::collaboration::ExecutionRequest {
-                    task_id: None,
-                    purpose: "下一项任务".into(),
-                    completion_role: "required".into(),
-                    budget: None,
-                }),
-            },
-        );
-        desktop.actor = ActorRef::User {
-            user_id: "local_user".into(),
-        };
-        desktop.camp_id = Some(camp_id.to_owned());
-        let sent = CollaborationService::default()
-            .send_user_camp_message(&mut database, &desktop)
-            .unwrap();
-        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
-        assert!(claim_waiting_runs(&mut database).is_empty());
-        assert!(
-            roster::pending(database.connection(), None)
-                .unwrap()
-                .is_empty()
-        );
-
-        service
+        let partial = service
             .reconcile_feishu_group_roster(
                 &mut database,
                 &host_envelope(
                     "roster-agent-two-left",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: Some(BTreeSet::from(["cli_app_2".to_string()])),
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_group".to_string(),
-                        present_app_ids: vec!["cli_app_1".to_string()],
+                        present_app_ids: vec![],
                     },
                 ),
             )
             .unwrap();
+        // Only Bot 2 answered. Its absence is authoritative and Bot 1 keeps its prior status.
+        assert_eq!(
+            partial.result.payload["presentAgentIds"],
+            json!(["agent_1"])
+        );
         let (status, source_generation): (String, i64) = database
             .connection()
             .query_row(
@@ -25487,62 +25248,63 @@ mod tests {
             .unwrap();
         assert_eq!(status, "left");
         assert_eq!(source_generation, 1);
-        let mut snapshot = ReconcileFeishuGroupRosterCommand {
-            provider: FEISHU_PROVIDER.into(),
-            tenant_key: "tenant_1".into(),
-            chat_id: "oc_group".into(),
-            present_app_ids: vec!["cli_app_1".into()],
-            started_at: Some(Utc::now()),
-            observed_app_ids: None,
-            membership_event: None,
+
+        // Simulate a bound group whose last platform snapshot lacks the receiving Bot.
+        database.connection().execute(
+            "DELETE FROM external_group_bot_roster WHERE chat_id='oc_group' AND app_id='cli_app_1'",
+            [],
+        ).unwrap();
+        let inbound = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "receive-during-outage",
+                    observation_command(
+                        "cli_app_1",
+                        "om_while_offline",
+                        "oc_group",
+                        "",
+                        "group",
+                        "继续派发",
+                        &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let aggregate_id = inbound.result.payload["aggregateId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let submit = |fresh| FinalizeChannelInboundCommand {
+            aggregate_id: aggregate_id.clone(),
+            require_fresh_roster: fresh,
         };
-        let mut leave = snapshot.clone();
-        leave.membership_event = Some(GroupBotMembershipEvent {
-            app_id: "cli_app_1".into(),
-            present: false,
-        });
-        leave.present_app_ids.clear();
-        service
-            .reconcile_feishu_group_roster(&mut database, &host_envelope("ordinary-left", leave))
-            .unwrap();
-        let stale = service
-            .reconcile_feishu_group_roster(
+        let first = service
+            .finalize_inbound(
                 &mut database,
-                &host_envelope("old-in-flight", snapshot.clone()),
+                &quick_chat_path,
+                &host_envelope("try-fresh", submit(true)),
             )
             .unwrap();
-        assert_eq!(stale.result.code, "channel.roster_changed");
-        assert!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT cancel_requested_at IS NULL FROM agent_run WHERE id=?1",
-                    [&running[0]],
-                    |row| row.get::<_, bool>(0)
-                )
-                .unwrap()
+        assert_eq!(first.result.code, "channel.roster_sync_required");
+        let fallback = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("submit-local", submit(false)),
+            )
+            .unwrap();
+        assert_eq!(fallback.result.code, "channel.turn.admitted");
+        let (ack, targets): (String, String) = database.connection().query_row(
+            "SELECT ack_app_id, addressed_agent_ids_json FROM channel_turn_request WHERE aggregate_id=?1",
+            [&aggregate_id], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(ack, "cli_app_1");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&targets).unwrap(),
+            ["agent_1"]
         );
-        assert_eq!(database.connection().query_row("SELECT COUNT(*) FROM camp_message_delivery WHERE camp_id=?1 AND status='waiting'",
-            [camp_id],|row|row.get::<_,i64>(0)).unwrap(),1);
-        let end = Utc::now().to_rfc3339();
-        database.connection().execute("UPDATE agent_run SET status='succeeded',started_at=?2,ended_at=?2,updated_at=?2 WHERE id=?1",
-            params![running[0],end]).unwrap();
-        assert!(claim_waiting_runs(&mut database).is_empty());
-        let demand = roster::pending(database.connection(), None).unwrap();
-        assert_eq!(demand.len(), 1);
-        assert_eq!(demand[0].chat_id, "oc_group");
-        snapshot.started_at = Some(Utc::now());
-        snapshot.present_app_ids.clear();
-        service
-            .reconcile_feishu_group_roster(
-                &mut database,
-                &host_envelope("current-absence", snapshot),
-            )
-            .unwrap();
-        assert!(claim_waiting_runs(&mut database).is_empty());
-        assert_eq!(database.connection().query_row("SELECT COUNT(*) FROM camp_message_delivery
-            WHERE camp_id=?1 AND status='cancelled' AND failure_code='channel.target_bot_not_in_roster'",
-            [camp_id],|row|row.get::<_,i64>(0)).unwrap(),1);
     }
 
     #[test]
@@ -25560,8 +25322,7 @@ mod tests {
                 &host_envelope(
                     "topic-roster",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -25645,11 +25406,6 @@ mod tests {
             1,
             "only the explicitly mentioned Bot receives the initial Delivery"
         );
-        assert!(
-            claim_waiting_runs(&mut database).is_empty(),
-            "a snapshot from before inbound cannot start the Run"
-        );
-        answer_roster_demand(&service, &mut database, FEISHU_PROVIDER, "topic-start-due");
         assert_eq!(claim_waiting_runs(&mut database).len(), 1);
         assert_eq!(
             database
@@ -25675,8 +25431,7 @@ mod tests {
                 &host_envelope(
                     "topic-roster-added-agent-three",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -25757,8 +25512,7 @@ mod tests {
                 &host_envelope(
                     "topic-roster-removed-agent-two",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
@@ -25827,8 +25581,7 @@ mod tests {
                 &host_envelope(
                     "topic-roster-running-agent-left",
                     ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
+                        absent_app_ids: None,
                         membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),

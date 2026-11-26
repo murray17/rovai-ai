@@ -250,9 +250,7 @@ Main 正常存活时在 3 秒后提交完整集合；Main 重启错过定时器�
 不向存储地址传递 App token。多 Bot 的 grant 不进入共同内容摘要，原接收 Bot 与资源授权保持绑定。
 同一消息全部附件就绪前不发布 ThreadMessage 或 Agent Delivery；终止失败由正常 attention 路径提示用户重新发送。
 
-群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
-generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
-App 或目标已移出时 fail closed。
+读取成功时，群名单使用远端机器人列表与本机已发布钉钉 Bot 的交集，通过既有 membership generation 和 source binding 同步。读取失败时保留本地名单，实际收到群消息的 Bot 视为在群。
 
 <a id="当前-feature-gate"></a>
 ## 当前管理入口与能力 Gate
@@ -281,7 +279,9 @@ provider-scoped outstanding 判定和按需调度；钉钉不再永久每 800ms 
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 Cookie jar。启动恢复所有
-published Bot Stream。纯重连使用已有 Bot 凭据，网页身份在管理操作需要时核验。恢复入站和多 Bot 聚合均先向 Core 提交原记录。只有缺少合格名单时才读取父群并重提一次。有效空数组代表全员缺席。网络故障、限流、服务端错误、无法解析或原因不明的拒绝均按未知退避。平台明确返回当前机器人未安装（`chatbotNotInstall`）或当前应用缺少接口权限（`Forbidden.AccessDenied.AccessTokenPermissionDenied`）时，同一轮改用下一个机器人查询。项目选择读取名单失败时更新原卡提示，原按钮可再次点击。待开工名单查询与回复发送独立执行。
+published Bot Stream。纯重连使用已有凭据。普通群仅在有效 @ 入站和确认绑定时查目标群。恢复入站和多 Bot 聚合先提交 Core，收到刷新要求后用一个 Bot 读全群。有效空数组表示未发现群机器人，缺少名单字段表示读取失败。当前 Bot 未安装（`chatbotNotInstall`）或缺少接口权限（`Forbidden.AccessDenied.AccessTokenPermissionDenied`）时，同轮换下一个。限流、网络和服务端错误直接退避。全部失败时入站最多等一次重试，然后用本地名单继续。实际收件 Bot 直接记为在群。确认绑定读取失败时保留原卡，提示稍后再点。
+
+桌面输入、转派、排队开工与重试按本地成员派发。绑定群如有明确的进出群通知便即时更新对应成员。钉钉无法可靠提供这类通知，名单可能过期，以下一条 @ 消息或可用通知校正。若退群后、下一条 @ 前发生转派，机器人可能在本地执行一次，群回复按普通发送失败处理。
 
 DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card create/update/recall/failed 计数，用于判断链路阶段；
 不暴露正文、附件内容、tenant/chat/App/Agent/Owner identity、credential、URL、token 或远端响应。计数不参与 admission。

@@ -23,11 +23,9 @@ export type ProviderChannelRequest =
   | 'publicationIntent.storeCredential'
   | 'dm.startNew'
 export type HostBoundChannelRequest =
-  | 'inbound.observed'
   | 'inbound.observe'
   | 'inbound.attachments.complete'
   | 'inbound.finalize'
-  | 'roster.begin'
   | 'roster.reconcile'
   | 'deliveries.settle'
   | 'host.tick'

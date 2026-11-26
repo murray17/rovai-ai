@@ -794,10 +794,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.feishu.owner.verify"
         | "channels.feishu.dm.startNew"
         | "channels.feishu.pendingBinding.resolve"
-        | "channels.inbound.observed"
         | "channels.inbound.observe"
         | "channels.inbound.attachments.complete"
-        | "channels.roster.begin"
         | "channels.roster.reconcile"
         | "channels.inbound.finalize"
         | "channels.host.tick"
@@ -819,7 +817,6 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.dingtalk.pendingBinding.resolve"
         | "channels.dingtalk.inbound.observe"
         | "channels.dingtalk.inbound.attachments.complete"
-        | "channels.dingtalk.roster.begin"
         | "channels.dingtalk.roster.reconcile"
         | "channels.dingtalk.inbound.finalize"
         | "channels.dingtalk.host.tick"
@@ -840,10 +837,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.lark.owner.verify"
         | "channels.lark.dm.startNew"
         | "channels.lark.pendingBinding.resolve"
-        | "channels.lark.inbound.observed"
         | "channels.lark.inbound.observe"
         | "channels.lark.inbound.attachments.complete"
-        | "channels.lark.roster.begin"
         | "channels.lark.roster.reconcile"
         | "channels.lark.inbound.finalize"
         | "channels.lark.host.tick"
@@ -2733,7 +2728,6 @@ struct Core {
     automation_scheduler_control: RwLock<Option<AutomationSchedulerControl>>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Arc<Notify>,
-    roster_demand: Arc<Mutex<Vec<rovai_core::message_delivery::GroupRosterRefreshRequest>>>,
     delivery_batch_scheduler_notify: Arc<Notify>,
     agent_run_cleanup_inflight:
         std::sync::Mutex<HashMap<ActiveExecutionKey, Option<tokio::time::Instant>>>,
@@ -9824,31 +9818,6 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "channels.inbound.observed" | "channels.lark.inbound.observed" => {
-                #[derive(Deserialize)]
-                #[serde(rename_all = "camelCase")]
-                struct ObservationKey {
-                    tenant_key: String,
-                    external_message_id: String,
-                    app_id: String,
-                }
-                let key: ObservationKey = serde_json::from_value(request.params.clone())?;
-                let database = self.database.lock().await;
-                let seen = ChannelService::default().inbound_was_observed(
-                    &database,
-                    native_channel_provider(&request.method)?,
-                    &key.tenant_key,
-                    &key.external_message_id,
-                    &key.app_id,
-                )?;
-                Ok(json!({ "observed": seen }))
-            }
-            "channels.roster.begin"
-            | "channels.lark.roster.begin"
-            | "channels.dingtalk.roster.begin" => {
-                channel_request_host_component(&request.method)?;
-                Ok(json!({"startedAt":chrono::Utc::now().to_rfc3339()}))
-            }
             "channels.dingtalk.roster.reconcile" => {
                 let params: UserCommandParams<ReconcileFeishuGroupRosterCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -9862,7 +9831,6 @@ impl Core {
                         params.command,
                     ),
                 )?;
-                self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.inbound.finalize" => {
@@ -9949,7 +9917,6 @@ impl Core {
                         params.command,
                     ),
                 )?;
-                self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.lark.roster.reconcile" => {
@@ -9966,7 +9933,6 @@ impl Core {
                             params.command,
                         ),
                     )?;
-                self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.inbound.attachments.complete"
@@ -14994,19 +14960,6 @@ impl Core {
                 break;
             }
             tokio::task::yield_now().await;
-        }
-        {
-            let database = self.database.lock().await;
-            let groups = rovai_core::channel::roster::pending(database.connection(), None)?;
-            let mut previous = self.roster_demand.lock().await;
-            if *previous != groups {
-                emit(
-                    &self.output,
-                    "channel.roster_refresh.requested",
-                    json!({"groups":groups}),
-                );
-                *previous = groups;
-            }
         }
         for camp_id in changed_camps {
             emit_navigation_invalidated(&self.output, "delivery_batch.claimed", Some(&camp_id));
@@ -21970,7 +21923,6 @@ async fn run_core(
     let core = Arc::new(Core {
         project_files: Arc::new(crate::project_files::ProjectFiles::default()),
         execution_wake: database.execution_wake.clone(),
-        roster_demand: Default::default(),
         delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
         agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
         non_batch_retry_at: Mutex::new(None),
@@ -30843,7 +30795,6 @@ mod tests {
         Ok(Core {
             project_files: Arc::new(crate::project_files::ProjectFiles::default()),
             execution_wake: database.execution_wake.clone(),
-            roster_demand: Default::default(),
             delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
             agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
             non_batch_retry_at: Mutex::new(None),
