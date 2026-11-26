@@ -6311,13 +6311,17 @@ impl ChannelService {
                 queued.push((request_id, queue_position, message.ack_app_id.clone()));
             }
             for (request_id, queue_position, ack_app_id) in &queued {
-                let admission = try_admit_request(
-                    transaction,
-                    request_id,
-                    &now_text,
-                    &envelope.command_id,
-                    &mut settled_run_ids,
-                )?;
+                let admission = if *queue_position == 1 {
+                    try_admit_request(
+                        transaction,
+                        request_id,
+                        &now_text,
+                        &envelope.command_id,
+                        &mut settled_run_ids,
+                    )?
+                } else {
+                    AdmissionAttempt::Deferred
+                };
                 if matches!(admission, AdmissionAttempt::Deferred) {
                     insert_queue_ack_delivery(
                         transaction,
@@ -11680,7 +11684,8 @@ fn promote_ready_requests(
           AND queued.id = (
               SELECT next.id FROM channel_turn_request AS next
               WHERE next.binding_id = queued.binding_id AND next.status = 'queued'
-              ORDER BY next.queue_position, next.created_at, next.id
+              -- Positions are assigned from queue depth and can be reused as requests finish.
+              ORDER BY next.rowid
               LIMIT 1
           )
         ORDER BY queued.created_at, queued.id
@@ -17192,9 +17197,7 @@ mod tests {
             publish_dingtalk_bot(&service, &mut database, "agent_2");
         }
         let quick = quick_chat_path(&database);
-        // Bot B's second message lets us finish its download first and prove
-        // that filtering download candidates does not reorder Camp admission.
-        for index in 0..22 {
+        let enqueue = |database: &mut Database, index: usize, with_file: bool| {
             let (agent_id, app_id, chat_id) = if index < 20 {
                 ("agent_1", app_one, "offline-chat")
             } else {
@@ -17214,15 +17217,17 @@ mod tests {
             if provider == DINGTALK_PROVIDER {
                 use_dingtalk_observation_identity(&mut observation);
             }
-            observation.resources = vec![InboundResource {
-                file_key: format!("file-{index}"),
-                download_code: None,
-                name: "note.txt".into(),
-                kind: "file".into(),
-            }];
+            if with_file {
+                observation.resources.push(InboundResource {
+                    file_key: format!("file-{index}"),
+                    download_code: None,
+                    name: "note.txt".into(),
+                    kind: "file".into(),
+                });
+            }
             let observed = service
                 .observe_inbound(
-                    &mut database,
+                    database,
                     &provider_host_envelope(provider, &format!("observe-{index}"), observation),
                 )
                 .unwrap();
@@ -17232,7 +17237,7 @@ mod tests {
                 .to_string();
             let finalized = service
                 .finalize_inbound(
-                    &mut database,
+                    database,
                     &quick,
                     &provider_host_envelope(
                         provider,
@@ -17252,6 +17257,10 @@ mod tests {
                     params![aggregate_id, format!("2026-09-23T00:00:{index:02}Z")],
                 )
                 .unwrap();
+            finalized
+        };
+        for index in 0..23 {
+            enqueue(&mut database, index, true);
         }
         let actor = ActorRef::System {
             component_id: if provider == FEISHU_PROVIDER {
@@ -17281,7 +17290,7 @@ mod tests {
                 .iter()
                 .map(|item| item.message_id.as_str())
                 .collect::<Vec<_>>(),
-            ["attachment-20", "attachment-21"]
+            ["attachment-20", "attachment-21", "attachment-22"]
         );
         assert!(pending.iter().all(|item| item.app_id == app_two));
         let source = quick.join("download.txt");
@@ -17340,6 +17349,16 @@ mod tests {
         let published = messages(&database);
         assert_eq!(published.len(), 2);
         assert!(published[1].ends_with("attachment-21"));
+        let later = enqueue(&mut database, 23, false);
+        assert_eq!(later.result.payload["queuePosition"], 2);
+        service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap();
+        assert_eq!(
+            messages(&database),
+            published,
+            "a new text at position 2 must wait for the older file originally queued at position 3",
+        );
     }
 
     #[test]
@@ -19154,6 +19173,27 @@ mod tests {
             assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
             let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
             let binding_id = resolved.result.payload["bindingId"].as_str().unwrap();
+            assert_eq!(
+                database.connection().query_row(
+                    "SELECT COUNT(*) FROM channel_turn_request WHERE binding_id = ?1 AND status = 'queued'",
+                    [binding_id], |row| row.get::<_, i64>(0),
+                ).unwrap(),
+                1,
+                "even when both messages are ready, binding only admits the queue head",
+            );
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "quick-binding-worker".into(),
+                        inbound_attachment_app_ids: Vec::new(),
+                        limit: 20,
+                    },
+                )
+                .unwrap();
             let persisted: (String, String, String, Option<String>, Option<String>) = database.connection().query_row(
                 "SELECT camp.project_binding_kind, camp.project_path, binding.execution_scope_kind,
                         binding.project_id, pending.project_id
@@ -23780,22 +23820,28 @@ mod tests {
             )
             .unwrap();
 
+        let mut file_message = observation_command(
+            "cli_app_2",
+            "om_pending_first",
+            "oc_group_binding",
+            "",
+            "group",
+            "先由二号确认项目",
+            &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
+            true,
+        );
+        file_message
+            .resources
+            .push(inbound_attachments::InboundResource {
+                file_key: "group-file".into(),
+                download_code: None,
+                name: "notes.txt".into(),
+                kind: "file".into(),
+            });
         let first_observation = service
             .observe_inbound(
                 &mut database,
-                &host_envelope(
-                    "observe-pending-first",
-                    observation_command(
-                        "cli_app_2",
-                        "om_pending_first",
-                        "oc_group_binding",
-                        "",
-                        "group",
-                        "先由二号确认项目",
-                        &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
-                        true,
-                    ),
-                ),
+                &host_envelope("observe-pending-first", file_message),
             )
             .unwrap();
         let finalize = FinalizeChannelInboundCommand {
@@ -23856,7 +23902,7 @@ mod tests {
                         "oc_group_binding",
                         "",
                         "group",
-                        "第二条一起排队",
+                        "请总结上面的文件",
                         &[("agent_1", "cli_app_1")],
                         true,
                     ),
@@ -24098,13 +24144,63 @@ mod tests {
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
         let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
-        // Binding resolution publishes external user messages internally; hints follow
-        // actual writes, independently of this non-send command's name, and coalesce.
+        assert_eq!(
+            database.connection().query_row(
+                "SELECT COUNT(*) FROM channel_turn_request WHERE camp_id = ?1 AND status = 'queued'",
+                [camp_id], |row| row.get::<_, i64>(0),
+            ).unwrap(),
+            2,
+            "binding must keep the summary request behind the pending file",
+        );
+        let actor = ActorRef::System {
+            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+        };
+        let poll = ChannelHostTickRequest {
+            worker_id: "binding-worker".into(),
+            inbound_attachment_app_ids: vec!["cli_app_2".into()],
+            limit: 20,
+        };
+        let initial_tick = service.host_tick(&mut database, &actor, &poll).unwrap();
+        let [download] = initial_tick.inbound_attachments.as_slice() else {
+            panic!("the first message's attachment should be available to download");
+        };
+        assert_eq!(download.message_id, "om_pending_first");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1",
+                    [camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "the summary must wait even if the host polls before the file is ready",
+        );
+        let source = quick_chat_path.join("notes.txt");
+        std::fs::write(&source, "file contents").unwrap();
+        let completed = inbound_attachments::complete(
+            &mut database,
+            &host_envelope(
+                "group-file-complete",
+                inbound_attachments::CompleteAttachmentsCommand {
+                    request_id: download.request_id.clone(),
+                    app_id: download.app_id.clone(),
+                    attempt: download.attempt,
+                    files: vec![source.to_string_lossy().into_owned()],
+                    failure_code: None,
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(completed.result.payload["ready"], true);
+        service.host_tick(&mut database, &actor, &poll).unwrap();
         let change: Value = serde_json::from_str(&message_changes.try_recv().unwrap()).unwrap();
         assert_eq!(change["params"]["threadId"], camp_id);
         assert_eq!(change["params"]["indexChanged"], true);
         assert_eq!(change["params"]["unavailableMessageIds"], json!([]));
         assert!(message_changes.try_recv().is_err());
+        service.host_tick(&mut database, &actor, &poll).unwrap();
 
         assert_channel_camp_name(
             &mut database,
@@ -24132,6 +24228,23 @@ mod tests {
             );
         }
         assert_eq!(claim_waiting_runs(&mut database).len(), 2);
+        let inputs = query_rows(
+            database.connection(),
+            "SELECT m.body, json_array_length(m.source_attachments_json)
+             FROM agent_run_input i JOIN camp_message m ON m.id = i.message_id
+             JOIN camp_message_delivery d ON d.id = i.delivery_id
+             WHERE d.camp_id = ?1 AND d.recipient_agent_id = 'agent_1' ORDER BY i.ordinal",
+            [camp_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .unwrap();
+        let [(file, 1), (summary, 0)] = inputs.as_slice() else {
+            panic!(
+                "expected the file before the summary request in the agent's inputs: {inputs:?}"
+            );
+        };
+        assert!(file.ends_with("先由二号确认项目"));
+        assert!(summary.ends_with("请总结上面的文件"));
         assert_eq!(
             database
                 .connection()
@@ -24160,33 +24273,16 @@ mod tests {
         assert_eq!(author_type, "external_principal");
         assert_eq!(reply_to, None);
         assert_eq!(camp_path, project_path.to_string_lossy());
-        let outbox = serde_json::to_value(
-            service
-                .host_tick(
-                    &mut database,
-                    &ActorRef::System {
-                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
-                    },
-                    &ChannelHostTickRequest {
-                        worker_id: "binding-worker".to_string(),
-                        inbound_attachment_app_ids: Vec::new(),
-                        limit: 20,
-                    },
-                )
-                .unwrap(),
-        )
-        .unwrap();
+        let outbox = serde_json::to_value(initial_tick).unwrap();
         let queue_acknowledgements = outbox["deliveries"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|delivery| delivery["deliveryKind"] == "queue_ack")
             .collect::<Vec<_>>();
-        assert_eq!(
-            queue_acknowledgements.len(),
-            0,
-            "Channel receipt has no separate request queue acknowledgement"
-        );
+        assert_eq!(queue_acknowledgements.len(), 1);
+        assert_eq!(queue_acknowledgements[0]["targetAppId"], "cli_app_1");
+        assert_eq!(queue_acknowledgements[0]["payload"]["queuePosition"], 2);
         let picker_recalls = outbox["deliveries"]
             .as_array()
             .unwrap()
@@ -24229,9 +24325,6 @@ mod tests {
         // The same FIFO fixture owns poll-response loss: claims remain leased,
         // expiry is recoverable, and a later failure rolls the whole tick back.
         let recovered_delivery_id = picker_recalls[0]["deliveryId"].as_str().unwrap();
-        let actor = ActorRef::System {
-            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
-        };
         let poll = ChannelHostTickRequest {
             worker_id: "replacement-worker".to_string(),
             inbound_attachment_app_ids: Vec::new(),
