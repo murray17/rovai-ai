@@ -1,7 +1,6 @@
 import { useThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import type {
   AgentProfile,
   AutomationListPage,
@@ -10,14 +9,17 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import { readErrorMessage } from './error-message'
-import { MemberAvatar } from './MemberAvatar'
+import { useAutomationAction } from './useAutomationAction'
+import { AutomationListRow } from './AutomationListRow'
+import { AutomationEndedPlan } from './AutomationEndedPlan'
+import { changeAutomationList, emptyAutomationList, type AutomationListChange } from './automation-list'
 import { AutomationEditor } from './AutomationEditor'
 import { automationScheduleError } from './automation-schedule-validation'
-import { AutomationGlyph, AutomationTemplates } from './AutomationControls'
+import { AutomationGlyph, AutomationRunOnce, AutomationRunSwitch, AutomationTemplates } from './AutomationControls'
 import {
   AUTOMATION_DEFAULT_LIST_WIDTH, AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
-  draftFingerprint, draftFromAutomation, filterAutomations, scheduleLabel, localizedAutomationTemplate,
-  type AutomationDraft, type AutomationFilter, type AutomationIssue, type SaveState, type TemplateId
+  describeAutomationPlan, draftFingerprint, draftFromAutomation, localizedAutomationTemplate,
+  type AutomationDetailMode, type AutomationDraft, type AutomationIssue, type OnceSchedule, type SaveState, type TemplateId
 } from './automation-workspace-model'
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
@@ -42,10 +44,17 @@ export function AutomationWorkspace({
   onLeaveGuardChange?(guard: AutomationLeaveGuard | null): void
 }): React.JSX.Element {
   const client = useThreadClient()
-  const [automations, setAutomations] = useState<AutomationView[]>([])
+  const [list, setList] = useState(emptyAutomationList)
+  const listRef = useRef(list)
+  const changeList = useCallback((change: AutomationListChange) => {
+    const next = changeAutomationList(listRef.current, change)
+    listRef.current = next
+    setList(next)
+    return next
+  }, [])
+  const { filter, query } = list
   const refreshGeneration = useRef(0)
   useEffect(() => () => { refreshGeneration.current++ }, [client])
-  const automationsRef = useRef<AutomationView[]>([])
   const [selectedId, setSelectedId] = useState<string | 'new' | null>(null)
   const selectedIdRef = useRef(selectedId)
   const [draft, setDraft] = useState<AutomationDraft>(() => defaultDraft(defaultMemberId))
@@ -56,10 +65,11 @@ export function AutomationWorkspace({
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [issue, setIssue] = useState<AutomationIssue | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [deleteArmed, setDeleteArmed] = useState<string | null>(null)
-  const [filter, setFilter] = useState<AutomationFilter>('all')
-  const [query, setQuery] = useState('')
+  const { action, runAction } = useAutomationAction(nextError => {
+    setIssue({ kind: 'action', message: readErrorMessage(nextError) })
+  })
+  const busy = action?.kind ?? null
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null)
   const [listWidth, setListWidth] = useState(AUTOMATION_DEFAULT_LIST_WIDTH)
   const [editorClosed, setEditorClosed] = useState(false)
   const [heldFold, setHeldFold] = useState(false)
@@ -107,11 +117,22 @@ export function AutomationWorkspace({
 
   selectedIdRef.current = selectedId
   draftRef.current = draft
-  automationsRef.current = automations
 
   const selected = selectedId && selectedId !== 'new'
-    ? automations.find((automation) => automation.automationId === selectedId) ?? null
+    ? list.records.get(selectedId) ?? null
     : null
+
+  const syncSavedDraft = useCallback((task: AutomationView, submittedFingerprint?: string): void => {
+    const next = draftFromAutomation(task)
+    savedVersions.current.set(task.automationId, task.version)
+    savedFingerprints.current.set(task.automationId, draftFingerprint(next))
+    // An autosave can finish after the user switches tasks or continues typing.
+    if (submittedFingerprint !== undefined && (selectedIdRef.current !== task.automationId ||
+        draftFingerprint(draftRef.current) !== submittedFingerprint)) return
+    draftRef.current = next
+    setDraft(next)
+    setSaveState('saved')
+  }, [])
 
   const refresh = useCallback(async (quiet = false): Promise<boolean> => {
     const request = ++refreshGeneration.current
@@ -133,12 +154,11 @@ export function AutomationWorkspace({
         cursor = page.nextCursor
       }
       if (request !== refreshGeneration.current) return false
-      setAutomations(loaded)
-      automationsRef.current = loaded
+      const latestList = changeList({ type: 'loaded', tasks: loaded })
 
       const activeId = selectedIdRef.current
       if (activeId && activeId !== 'new') {
-        const latest = loaded.find((automation) => automation.automationId === activeId)
+        const latest = latestList.records.get(activeId)
         if (latest) {
           const savedFingerprint = savedFingerprints.current.get(activeId)
           const localFingerprint = draftFingerprint(draftRef.current)
@@ -151,17 +171,13 @@ export function AutomationWorkspace({
               message:uiAttribute("任务已在其他位置更新。请重新载入，或确认用当前草稿覆盖最新内容。")
             })
           } else if (!localDirty) {
-            const latestDraft = draftFromAutomation(latest)
-            savedFingerprints.current.set(activeId, draftFingerprint(latestDraft))
-            savedVersions.current.set(activeId, latest.version)
-            setDraft(latestDraft)
-            setSaveState('saved')
+            syncSavedDraft(latest)
           }
         }
       }
       setSelectedId((current) => {
         if (current === 'new') return current
-        if (current && loaded.some((automation) => automation.automationId === current)) return current
+        if (current && latestList.records.has(current)) return current
         return null
       })
       setLoadState('ready')
@@ -174,7 +190,7 @@ export function AutomationWorkspace({
       }
       return false
     }
-  }, [client])
+  }, [client, changeList, syncSavedDraft])
 
   useEffect(() => {
     void refresh()
@@ -191,32 +207,34 @@ export function AutomationWorkspace({
   }, [client, refresh])
 
   useEffect(() => {
-    setDeleteArmed(null)
     if (selectedId === 'new') {
       setSaveState('idle')
       setIssue((current) => current?.kind === 'save' || current?.kind === 'conflict' ? null : current)
       return
     }
-    const automation = automationsRef.current.find((item) => item.automationId === selectedId)
+    const automation = selectedId ? listRef.current.records.get(selectedId) : null
     if (!automation) return
-    const next = draftFromAutomation(automation)
-    savedFingerprints.current.set(automation.automationId, draftFingerprint(next))
-    savedVersions.current.set(automation.automationId, automation.version)
-    setDraft(next)
-    setSaveState('saved')
+    syncSavedDraft(automation)
     setIssue((current) => current?.kind === 'save' || current?.kind === 'conflict' ? null : current)
-  }, [selectedId])
+  }, [selectedId, syncSavedDraft])
 
-  const replaceAutomation = useCallback((next: AutomationView): void => {
-    savedVersions.current.set(next.automationId, next.version)
-    setAutomations((current) => {
-      const updated = current.some((item) => item.automationId === next.automationId)
-        ? current.map((item) => item.automationId === next.automationId ? next : item)
-        : [next, ...current]
-      automationsRef.current = updated
-      return updated
-    })
-  }, [])
+  const applyReceipt = useCallback((change: AutomationListChange) => {
+    // A list read started before this command can still contain its old definition or a deleted row.
+    refreshGeneration.current++
+    const next = changeList(change)
+    if (!next.initialized) void refresh(true)
+    return next
+  }, [changeList, refresh])
+
+  const recordTaskReceipt = useCallback((type: 'created' | 'saved', next: AutomationView): AutomationView => {
+    const current = applyReceipt({ type, task: next }).records.get(next.automationId)
+    if (!current) throw new AutomationCommandError('automation.not_found', uiAttribute('「{0}」已不存在。', next.name))
+    if (type === 'saved' && current.version > next.version) {
+      throw new AutomationCommandError('command.version_conflict', uiAttribute('任务已在其他位置更新。请选择重新载入，或确认保留当前草稿后重试。'))
+    }
+    savedVersions.current.set(current.automationId, current.version)
+    return current
+  }, [applyReceipt])
 
   const queueSave = useCallback((automationId: string, snapshot: AutomationDraft): Promise<void> => {
     const validation = automationScheduleError(snapshot.schedule)
@@ -224,7 +242,7 @@ export function AutomationWorkspace({
     const fingerprint = draftFingerprint(snapshot)
     if (savedFingerprints.current.get(automationId) === fingerprint) return Promise.resolve()
     saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
-      const current = automationsRef.current.find((item) => item.automationId === automationId)
+      const current = listRef.current.records.get(automationId)
       if (!current || savedFingerprints.current.get(automationId) === fingerprint) return
       if (selectedIdRef.current === automationId) {
         setSaveState('saving')
@@ -245,16 +263,7 @@ export function AutomationWorkspace({
             notifyChannels: snapshot.notifyChannels
           }
         })
-        const updated = automationFromResult(result)
-        const normalizedDraft = draftFromAutomation(updated)
-        savedFingerprints.current.set(automationId, draftFingerprint(normalizedDraft))
-        savedVersions.current.set(automationId, updated.version)
-        replaceAutomation(updated)
-        if (selectedIdRef.current === automationId && draftFingerprint(draftRef.current) === fingerprint) {
-          draftRef.current = normalizedDraft
-          setDraft(normalizedDraft)
-          setSaveState('saved')
-        }
+        syncSavedDraft(recordTaskReceipt('saved', automationFromResult(result)), fingerprint)
       } catch (nextError) {
         if (selectedIdRef.current === automationId) {
           const conflict = nextError instanceof AutomationCommandError
@@ -269,7 +278,7 @@ export function AutomationWorkspace({
       }
     })
     return saveQueue.current
-  }, [replaceAutomation])
+  }, [client, recordTaskReceipt, syncSavedDraft])
 
   const flushBeforeLeave = useCallback(async (): Promise<boolean> => {
     const automationId = selectedIdRef.current
@@ -306,14 +315,16 @@ export function AutomationWorkspace({
     return () => window.clearTimeout(timer)
   }, [draft, queueSave, saveState, selected])
 
-  const choose = async (automationId: string): Promise<void> => {
+  const openTask = async (automationId: string, mode: AutomationDetailMode): Promise<void> => {
     if (!(await flushBeforeLeave())) return
+    setReschedulingId(mode === 'reschedule' ? automationId : null)
     setSelectedId(automationId)
     setEditorClosed(false)
   }
 
   const showOverview = async (): Promise<void> => {
     if (!(await flushBeforeLeave())) return
+    setReschedulingId(null)
     setSelectedId(null)
     setEditorClosed(false)
   }
@@ -321,6 +332,7 @@ export function AutomationWorkspace({
   const beginNew = async (templateId?: TemplateId): Promise<void> => {
     if (!(await flushBeforeLeave())) return
     setCreateChooserOpen(false)
+    setReschedulingId(null)
     const context = selectedIdRef.current === 'new' ? draftRef.current : defaultDraft(defaultMemberId)
     const template = templateId ? localizedAutomationTemplate(templateId) : null
     const next = { ...context, name: template?.name ?? '', prompt: template?.prompt ?? '', schedule: template?.schedule ?? context.schedule }
@@ -334,7 +346,7 @@ export function AutomationWorkspace({
 
   const prepareAction = async (automationId: string): Promise<AutomationView | null> => {
     if (!(await flushBeforeLeave())) return null
-    return automationsRef.current.find((item) => item.automationId === automationId) ?? null
+    return listRef.current.records.get(automationId) ?? null
   }
 
   const retrySave = async (): Promise<void> => {
@@ -342,8 +354,8 @@ export function AutomationWorkspace({
     if (saveState === 'conflict') {
       const loaded = await refresh()
       if (!loaded) return
-      const latest = automationsRef.current.find((item) => item.automationId === selected.automationId)
-      if (!latest) return
+      const latest = listRef.current.records.get(selected.automationId)
+      if (!latest || selectedIdRef.current !== selected.automationId) return
       savedVersions.current.set(selected.automationId, latest.version)
     }
     try {
@@ -358,101 +370,67 @@ export function AutomationWorkspace({
     const automationId = selected.automationId
     const loaded = await refresh()
     if (!loaded) return
-    const latest = automationsRef.current.find((item) => item.automationId === automationId)
-    if (!latest) return
-    const latestDraft = draftFromAutomation(latest)
-    savedFingerprints.current.set(automationId, draftFingerprint(latestDraft))
-    savedVersions.current.set(automationId, latest.version)
-    setDraft(latestDraft)
-    setSaveState('saved')
+    const latest = listRef.current.records.get(automationId)
+    if (!latest || selectedIdRef.current !== automationId) return
+    syncSavedDraft(latest)
     setIssue(null)
   }
 
   const create = async (): Promise<void> => {
     if (!draft.prompt.trim() || !draft.memberId || automationScheduleError(draft.schedule)) return
-    setBusy('create')
-    setIssue(null)
-    try {
+    await runAction({ kind: 'create' }, async () => {
+      setIssue(null)
       const result = await client.request<StoredCommandResult>('automations.create', {
         commandId: newCommandId(), command: draft
       })
-      const created = automationFromResult(result)
-      replaceAutomation(created)
-      const normalizedDraft = draftFromAutomation(created)
-      savedFingerprints.current.set(created.automationId, draftFingerprint(normalizedDraft))
+      const created = recordTaskReceipt('created', automationFromResult(result))
       setSelectedId(created.automationId)
-      setDraft(normalizedDraft)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      setBusy(null)
-    }
+      syncSavedDraft(created)
+    })
   }
 
-  const runNow = async (automationId: string): Promise<void> => {
+  const runNow = (automationId: string) => runAction({ kind: 'run', id: automationId }, async () => {
     const current = await prepareAction(automationId)
     if (!current) return
-    setBusy('run')
     setIssue(null)
-    try {
-      const result = await client.request<StoredCommandResult>('automations.run', {
-        commandId: newCommandId(), command: { automationId: current.automationId }
-      })
-      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务未能开始。')))
-      await refresh(true)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      setBusy(null)
-    }
-  }
+    const result = await client.request<StoredCommandResult>('automations.run', {
+      commandId: newCommandId(), command: { automationId: current.automationId }
+    })
+    if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务未能开始。')))
+    await refresh(true)
+  })
 
-  const setEnabled = async (automationId: string, enabled: boolean): Promise<void> => {
+  const setEnabled = (automationId: string, enabled: boolean, schedule?: OnceSchedule) => runAction({ kind: 'enabled', id: automationId }, async () => {
     const current = await prepareAction(automationId)
     if (!current) return
-    setBusy('enabled')
     setIssue(null)
-    try {
-      const method = enabled ? 'automations.update' : 'automations.close'
-      const command = enabled
-        ? { automationId: current.automationId, expectedVersion: current.version, enabled: true }
-        : { automationId: current.automationId, expectedVersion: current.version }
-      const result = await client.request<StoredCommandResult>(method, {
-        commandId: newCommandId(), command
-      })
-      const updated = automationFromResult(result)
-      replaceAutomation(updated)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      setBusy(null)
+    const method = enabled ? 'automations.update' : 'automations.close'
+    const command = enabled
+      ? { automationId, expectedVersion: current.version, enabled: true, ...(schedule ? { schedule } : {}) }
+      : { automationId, expectedVersion: current.version }
+    const result = await client.request<StoredCommandResult>(method, {
+      commandId: newCommandId(), command
+    })
+    const updated = recordTaskReceipt('saved', automationFromResult(result))
+    if (schedule && selectedIdRef.current === automationId) {
+      syncSavedDraft(updated)
+      setReschedulingId(null)
     }
-  }
+  })
 
-  const remove = async (automationId: string): Promise<void> => {
+  const remove = (automationId: string) => runAction({ kind: 'delete', id: automationId }, async () => {
     const current = await prepareAction(automationId)
     if (!current) return
-    setBusy('delete')
     setIssue(null)
-    try {
-      const result = await client.request<StoredCommandResult>('automations.delete', {
-        commandId: newCommandId(),
-        command: { automationId: current.automationId, expectedVersion: current.version }
-      })
-      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务删除失败。')))
-      savedFingerprints.current.delete(automationId)
-      savedVersions.current.delete(automationId)
-      const next = automationsRef.current.filter((item) => item.automationId !== automationId)
-      setAutomations(next)
-      automationsRef.current = next
-      if (selectedIdRef.current === automationId) setSelectedId(null)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      setBusy(null)
-      setDeleteArmed(null)
-    }
-  }
+    const result = await client.request<StoredCommandResult>('automations.delete', {
+      commandId: newCommandId(), command: { automationId, expectedVersion: current.version }
+    })
+    if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务删除失败。')))
+    savedFingerprints.current.delete(automationId)
+    savedVersions.current.delete(automationId)
+    applyReceipt({ type: 'deleted', id: automationId })
+    if (selectedIdRef.current === automationId) setSelectedId(null)
+  })
 
   const selectedDirty = selected
     ? savedFingerprints.current.get(selected.automationId) !== draftFingerprint(draft)
@@ -469,7 +447,9 @@ export function AutomationWorkspace({
 
   const overview = selectedId === null
   const width = automationListWidth(listWidth, availableWidth)
-  const visibleAutomations = useMemo(() => filterAutomations(automations, filter, query), [automations, filter, query])
+  const selectedPlan = selected && describeAutomationPlan(selected)
+  const selectedRunning = action?.kind === 'run' && action.id === selectedId
+  const selectedSwitching = action?.kind === 'enabled' && action.id === selectedId
   const closeEditor = async (): Promise<void> => {
     if (await flushBeforeLeave()) setEditorClosed(true)
   }
@@ -511,7 +491,7 @@ export function AutomationWorkspace({
 
   const filters = (
     <div className="automation-filter-tabs" role="group" aria-label={uiAttribute("筛选定时任务")}>
-      {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{uiAttribute(['全部', '开启', '关闭'][index])}</button>)}
+      {(['all', 'enabled', 'closed'] as const).map((value, index) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => changeList({ type: 'criteria', filter: value, query })}>{uiAttribute(['全部', '开启', '关闭'][index])}</button>)}
     </div>
   )
 
@@ -538,15 +518,15 @@ export function AutomationWorkspace({
             <div><h1><UiText zh={"定时任务"} /></h1><p><UiText zh={"安排一次，按时执行。"} /></p></div>
             <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void beginNew()}><AutomationGlyph name="plus" /><UiText zh={"新建"} /></button>
           </header>}
-          {(!overview || automations.length > 0) && <div className="automation-list-controls">
+          {(!overview || list.records.size > 0) && <div className="automation-list-controls">
             {overview && filters}
-            {!overview && <h2 className="automation-list-title"><UiText zh={"定时任务"} /><span>{automations.length}</span></h2>}
+            {!overview && <h2 className="automation-list-title"><UiText zh={"定时任务"} /><span>{list.records.size}</span></h2>}
             {!overview && <div className="automation-list-navigation">
               <button ref={createTriggerRef} className="primary-button" type="button" disabled={busy !== null}
                 aria-expanded={createChooserOpen} aria-controls={createChooserId}
                 onClick={() => setCreateChooserOpen((open) => !open)}><AutomationGlyph name="plus" /><UiText zh={"新建"} /></button>
             </div>}
-            <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label={uiAttribute("搜索定时任务")} placeholder={uiAttribute("搜索定时任务")} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+            <label className="automation-search"><AutomationGlyph name="search" /><input type="search" aria-label={uiAttribute("搜索定时任务")} placeholder={uiAttribute("搜索定时任务")} value={query} onChange={event => changeList({ type: 'criteria', filter, query: event.target.value })} /></label>
             {!overview && filters}
           </div>}
           {!overview && <section ref={createChooserRef} id={createChooserId} className="automation-create-choices" aria-label={uiAttribute("选择创建方式")} hidden={!createChooserOpen}>
@@ -554,32 +534,16 @@ export function AutomationWorkspace({
             <AutomationTemplates compact onChoose={(id) => void beginNew(id)} />
           </section>}
           <div className="automation-list-scroll" aria-busy={loadState === 'loading'}>
-            {loadState === 'loading' && automations.length === 0 && <p className="automation-list-message" role="status"><UiText zh={"正在读取任务…"} /></p>}
-            {loadState === 'error' && automations.length === 0 && <p className="automation-list-message"><UiText zh={"任务列表暂时不可用。"} /></p>}
-            {loadState === 'ready' && automations.length === 0 && <p className="automation-list-message automation-empty-message">{overview ? uiAttribute("还没有定时任务，从空白或下面的模板开始。") : uiAttribute("还没有定时任务，创建后会显示在这里。")}</p>}
-            {automations.length > 0 && visibleAutomations.length === 0 && <p className="automation-list-message"><UiText zh={"没有匹配的定时任务"} /></p>}
-            {visibleAutomations.map((automation) => {
-              const member = agents.find((agent) => agent.agentId === automation.memberId)
-              return <div key={automation.automationId} className={`automation-list-item ${selectedId === automation.automationId ? 'active' : ''}`}>
-                <button type="button" className="automation-task-open" onClick={() => void choose(automation.automationId)} aria-current={selectedId === automation.automationId ? 'true' : undefined}>
-                  <span className={`automation-state-icon ${automation.enabled ? 'enabled' : 'closed'}`} role="img" aria-label={automation.enabled ? uiAttribute("已开启") : uiAttribute("已关闭")} title={automation.enabled ? uiAttribute("已开启") : uiAttribute("已关闭")}><AutomationGlyph name={automation.enabled ? 'clock' : 'pause'} /></span>
-                  <span className="automation-list-copy"><strong>{automation.name}</strong><small>{scheduleLabel(automation.schedule)}</small></span>
-                  <span title={member?.displayName ?? uiAttribute('队员不可用')}><MemberAvatar agentId={automation.memberId} avatarRef={member?.avatarRef ?? null} displayName={member?.displayName ?? uiAttribute('未知队员')} size="mention" /></span>
-                </button>
-                <DropdownMenu.Root onOpenChange={(open) => { if (!open) setDeleteArmed(null) }}>
-                  <DropdownMenu.Trigger asChild><button className="automation-icon-button automation-task-more" type="button" aria-label={uiAttribute("{0}的操作", String(automation.name))} disabled={busy !== null}><AutomationGlyph name="more" /></button></DropdownMenu.Trigger>
-                  <DropdownMenu.Portal><DropdownMenu.Content onCloseAutoFocus={(event) => event.preventDefault()} className="automation-menu" align="end" sideOffset={4} collisionPadding={12} loop>
-                    <DropdownMenu.Item className="automation-menu-item" onSelect={() => void runNow(automation.automationId)}><AutomationGlyph name="play" /><UiText zh={"运行一次"} /></DropdownMenu.Item>
-                    <DropdownMenu.Item className="automation-menu-item" onSelect={() => void setEnabled(automation.automationId, !automation.enabled)}><AutomationGlyph name={automation.enabled ? 'pause' : 'clock'} />{automation.enabled ? uiAttribute("关闭") : uiAttribute("开启")}</DropdownMenu.Item>
-                    <DropdownMenu.Separator className="automation-menu-separator" />
-                    <DropdownMenu.Item className="automation-menu-item danger" onSelect={(event) => {
-                      if (deleteArmed === automation.automationId) void remove(automation.automationId)
-                      else { event.preventDefault(); setDeleteArmed(automation.automationId) }
-                    }}><AutomationGlyph name="trash" />{deleteArmed === automation.automationId ? uiAttribute("确认删除任务") : uiAttribute("删除")}</DropdownMenu.Item>
-                    {deleteArmed === automation.automationId && <p className="automation-menu-note"><UiText zh={"删除定义，保留已有运行与对话。"} /></p>}
-                  </DropdownMenu.Content></DropdownMenu.Portal>
-                </DropdownMenu.Root>
-              </div>
+            {loadState === 'loading' && list.records.size === 0 && <p className="automation-list-message" role="status"><UiText zh={"正在读取任务…"} /></p>}
+            {loadState === 'error' && list.records.size === 0 && <p className="automation-list-message"><UiText zh={"任务列表暂时不可用。"} /></p>}
+            {loadState === 'ready' && list.records.size === 0 && <p className="automation-list-message automation-empty-message">{overview ? uiAttribute("还没有定时任务，从空白或下面的模板开始。") : uiAttribute("还没有定时任务，创建后会显示在这里。")}</p>}
+            {list.records.size > 0 && list.visibleIds.length === 0 && <p className="automation-list-message"><UiText zh={"没有匹配的定时任务"} /></p>}
+            {list.visibleIds.map(id => {
+              const task = list.records.get(id)!
+              return <AutomationListRow key={id} task={task} member={agents.find(agent => agent.agentId === task.memberId)}
+                selected={selectedId === id} overview={overview} disabled={busy !== null} switching={action?.kind === 'enabled' && action.id === id}
+                onOpen={mode => void openTask(id, mode)} onToggle={() => void setEnabled(id, !task.enabled)}
+                onRun={() => void runNow(id)} onDelete={() => void remove(id)} />
             })}
           </div>
           {overview && <section className="automation-template-library" aria-labelledby="automation-templates-heading">
@@ -599,8 +563,21 @@ export function AutomationWorkspace({
               else if (event.key === 'Enter') { event.preventDefault(); setEditorClosed(false); setListWidth(AUTOMATION_DEFAULT_LIST_WIDTH) }
             }}><span /><SplitterFeedback phase={splitter.phase} target={splitter.target} label={uiAttribute('继续拖动收起任务详情')} /></div>
           <section className="automation-editor" aria-label={selectedId === 'new' ? uiAttribute("新建定时任务") : uiAttribute("定时任务详情")} hidden={editorHidden}>
-            <header className="automation-editor-toolbar"><span>{selectedId === 'new' ? uiAttribute("新建") : uiAttribute("详情")}</span><small role="status">{selected ? saveLabel : ''}</small><button type="button" className="automation-icon-button" aria-label={uiAttribute("返回定时任务总览")} onClick={() => void showOverview()}><AutomationGlyph name="close" /></button></header>
-            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenThread={onOpenThread} onCreate={() => void create()} />
+            <header className="automation-editor-toolbar">
+              <span>{selectedId === 'new' ? uiAttribute('新建') : uiAttribute('详情')}</span>
+              <small role="status" data-state={saveState}>{selected ? saveLabel : ''}</small>
+              {selected && selectedPlan?.toolbar === 'switch' && <AutomationRunSwitch enabled={selected.enabled} disabled={busy !== null} switching={selectedSwitching}
+                onChange={() => void setEnabled(selected.automationId, !selected.enabled)} />}
+              {selected && selectedPlan?.toolbar === 'run-once' && <AutomationRunOnce disabled={busy !== null} running={selectedRunning} onRun={() => void runNow(selected.automationId)} />}
+              {selectedPlan?.toolbar && <span className="automation-toolbar-divider" aria-hidden="true" />}
+              <button type="button" className="automation-icon-button" aria-label={uiAttribute('返回定时任务总览')} onClick={() => void showOverview()}><AutomationGlyph name="close" /></button>
+            </header>
+            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenThread={onOpenThread} onCreate={() => void create()}>
+              {selected && selectedPlan?.endedSchedule && <AutomationEndedPlan
+                schedule={selectedPlan.endedSchedule} disabled={busy !== null} running={selectedRunning} saving={selectedSwitching} editing={reschedulingId === selected.automationId}
+                onEdit={editing => setReschedulingId(editing ? selected.automationId : null)}
+                onRun={() => void runNow(selected.automationId)} onConfirm={next => void setEnabled(selected.automationId, true, next)} />}
+            </AutomationEditor>
           </section>
         </>}
       </div>
