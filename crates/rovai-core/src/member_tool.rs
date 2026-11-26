@@ -138,14 +138,27 @@ pub fn authorize_member_target(
     agent_id: &str,
     update: bool,
 ) -> Result<()> {
-    let allowed: bool = connection.query_row(
+    let private =
+        crate::chat::run_conversation(connection, &run.agent_run_id, run.execution_epoch)?;
+    let allowed: bool = if let Some(chat) = private {
+        if run.camp_id.is_empty() {
+            connection.query_row("SELECT EXISTS(SELECT 1 FROM agent_profile p WHERE p.id=?1 AND p.profile_status<>'removed' AND
+                (p.id=?2 OR EXISTS(SELECT 1 FROM member_creation c WHERE c.conversation_id=?3 AND json_extract(c.snapshot_json,'$.creatorAgentId')=?2 AND json_extract(c.snapshot_json,'$.agentId')=p.id)))",
+                params![agent_id,run.agent_id,chat],|r|r.get(0))?
+        } else {
+            crate::chat::authorize_destination(connection,&run.agent_run_id,run.execution_epoch,&run.agent_id,&run.camp_id,false)?
+            && connection.query_row("SELECT EXISTS(SELECT 1 FROM camp_member m JOIN agent_profile p ON p.id=m.agent_id AND p.profile_status<>'removed' WHERE m.camp_id=?1 AND m.agent_id=?2 AND m.status='active' AND m.leave_requested_at IS NULL)",params![run.camp_id,agent_id],|r|r.get(0))?
+        }
+    } else {
+        connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM agent_profile p WHERE p.id=?1 AND p.profile_status != 'removed'
          AND (EXISTS(SELECT 1 FROM camp_member m WHERE m.camp_id=?2 AND m.agent_id=p.id AND m.status='active' AND m.leave_requested_at IS NULL)
           OR EXISTS(SELECT 1 FROM member_creation c WHERE c.camp_id=?2
             AND json_extract(c.snapshot_json,'$.agentId')=p.id
             AND json_extract(c.snapshot_json,'$.creatorAgentId')=?3
             AND json_extract(c.snapshot_json,'$.sourceAgentRunId') IS NOT NULL)))",
-        params![agent_id, run.camp_id, run.agent_id], |row| row.get(0))?;
+        params![agent_id, run.camp_id, run.agent_id], |row| row.get(0))?
+    };
     if !allowed {
         return Err(denied().into());
     }
@@ -156,6 +169,15 @@ pub fn authorize_member_target(
 }
 
 pub fn list_members(connection: &Connection, run: &AuthenticatedTeamToolRun) -> Result<Value> {
+    if run.camp_id.is_empty() {
+        anyhow::ensure!(
+            crate::chat::run_conversation(connection, &run.agent_run_id, run.execution_epoch)?
+                .is_some(),
+            "member.access_denied"
+        );
+        let items=connection.prepare_cached("SELECT id,display_name,team_role FROM agent_profile WHERE profile_status<>'removed' ORDER BY member_order,id")?.query_map([],|r|Ok(json!({"agentId":r.get::<_,String>(0)?,"displayName":r.get::<_,String>(1)?,"teamRole":r.get::<_,String>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        return Ok(json!({"items":items}));
+    }
     let mut statement = connection.prepare(
         "SELECT p.id,p.display_name,p.team_role,COALESCE(p.id=c.default_lead_agent_id,0)
          FROM camp_member m JOIN agent_profile p ON p.id=m.agent_id JOIN camp c ON c.id=m.camp_id
@@ -249,7 +271,7 @@ pub fn update_member(
         actor: ActorRef::User {
             user_id: CURRENT_USER_ID.to_string(),
         },
-        camp_id: Some(run.camp_id.clone()),
+        camp_id: crate::runtime::run_thread_id(&run.camp_id).map(str::to_owned),
         expected_versions: vec![],
         execution_epoch: None,
         payload: PatchMemberCommand {
@@ -393,10 +415,10 @@ pub fn update_member(
 }
 
 pub fn member_list_input_schema() -> Value {
-    json!({"type":"object","additionalProperties":false,"properties":{}})
+    json!({"type":"object","additionalProperties":false,"properties":{"threadId":{"type":"string","minLength":1}}})
 }
 pub fn member_get_input_schema() -> Value {
-    json!({"type":"object","additionalProperties":false,"required":["agentId"],"properties":{"agentId":{"type":"string","minLength":1}}})
+    json!({"type":"object","additionalProperties":false,"required":["agentId"],"properties":{"threadId":{"type":"string","minLength":1},"agentId":{"type":"string","minLength":1}}})
 }
 pub fn member_update_input_schema() -> Value {
     let mut schema = crate::member_studio::member_create_input_schema();
@@ -405,6 +427,7 @@ pub fn member_update_input_schema() -> Value {
         .as_object_mut()
         .expect("identity schema properties");
     fields.remove("creationKey");
+    fields.insert("threadId".into(), json!({"type":"string","minLength":1}));
     for field in fields.values_mut() {
         field
             .as_object_mut()
@@ -432,10 +455,10 @@ pub fn member_update_input_schema() -> Value {
 }
 
 pub fn member_list_output_schema() -> Value {
-    json!({"type":"object","additionalProperties":false,"required":["threadId","items"],"properties":{
+    json!({"type":"object","additionalProperties":false,"required":["items"],"properties":{
         "threadId":{"type":"string"},"items":{"type":"array","items":{
             "type":"object","additionalProperties":false,
-            "required":["agentId","displayName","teamRole","isDefaultLead"],
+            "required":["agentId","displayName","teamRole"],
             "properties":{"agentId":{"type":"string"},"displayName":{"type":"string"},"teamRole":{"type":"string"},"isDefaultLead":{"type":"boolean"}}
         }}
     }})

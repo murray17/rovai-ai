@@ -5472,7 +5472,7 @@ fn normalize_existing_or_lexical(path: &Path) -> Result<PathBuf> {
     Ok(canonical_parent.join(path.file_name().context("path has no file name")?))
 }
 
-fn directory_identity_digest(path: &Path) -> Result<String> {
+pub(crate) fn directory_identity_digest(path: &Path) -> Result<String> {
     let canonical = fs::canonicalize(path)?;
     let metadata = fs::metadata(&canonical)?;
     if !metadata.is_dir() {

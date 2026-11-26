@@ -144,7 +144,7 @@ export function MemoryReviewDialog({
                   <summary><UiText zh="提交详情" /><DialogControlIcon name="chevron" /></summary>
                   <dl className="memory-detail-facts">
                     <div><dt><UiText zh="提交时间" /></dt><dd>{formatTime(selected.createdAt)}</dd></div>
-                    <div><dt><UiText zh="来源会话" /></dt><dd>{shortId(selected.sourceThreadId)}</dd></div>
+                    <div><dt><UiText zh="来源会话" /></dt><dd>{selected.sourceThreadId ? shortId(selected.sourceThreadId) : uiAttribute('聊天')}</dd></div>
                     {selected.requestedAction === 'revise' && <>
                       <div><dt><UiText zh="目标记忆" /></dt><dd>{shortId(selected.targetMemoryId)}</dd></div>
                       <div><dt><UiText zh="基准版本" /></dt><dd>{shortId(selected.baseRevisionId)}</dd></div>

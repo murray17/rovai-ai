@@ -12,7 +12,7 @@ export function isArchiveChangeEvent(event: CoreEvent): boolean {
 }
 
 export function invalidatesArchiveRecords(event: CoreEvent): boolean {
-  return isArchiveChangeEvent(event) || isReferenceDirectoryEvent(event)
+  return event.method === 'chats.listChanged' || isArchiveChangeEvent(event) || isReferenceDirectoryEvent(event)
 }
 
 export function normalizeArchiveText(value: string): string {
@@ -77,8 +77,8 @@ export function archiveTargetIsRemoved(error: unknown): boolean {
 
 export async function requestArchiveCommand(
   client: Pick<ThreadClient, 'request'>,
-  method: 'threads.archive' | 'threads.unarchive' | 'threads.delete',
-  command: ArchiveCommand | DeleteThreadCommand
+  method: 'threads.archive' | 'threads.unarchive' | 'threads.delete' | 'chats.setArchived' | 'chats.delete',
+  command: ArchiveCommand | DeleteThreadCommand | {chatId:string; archived?:boolean}
 ): Promise<StoredCommandResult> {
   const result = await client.request<StoredCommandResult>(method, { commandId: newCommandId(), command })
   if (result.status === 'rejected') throw new ArchiveCommandRejected(result.code)

@@ -1,3 +1,4 @@
+import { isChatId } from '@contracts'
 import { UiText, uiAttribute } from './interface-language'
 import { useThreadClient } from './camp-client'
 import { useContext, useEffect, useState, type ComponentType } from 'react'
@@ -27,7 +28,7 @@ export function ExecutionNarration({ threadId, evidence, preview, Body = SafeMar
     let disposed = false
     setFailed(false)
     const read = async () => {
-      const result = await client.request<{ payload: { text?: string } }>('agentRunEvidence.getContent', { threadId, evidenceId: evidence.id })
+      const result = await client.request<{ payload: { text?: string } }>('agentRunEvidence.getContent', { ...(isChatId(threadId) ? { chatId: threadId } : { threadId }), evidenceId: evidence.id })
       if (typeof result.payload.text !== 'string') throw new Error(uiAttribute('执行正文格式不兼容'))
       return result.payload.text
     }

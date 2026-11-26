@@ -1,3 +1,4 @@
+import { isChatId } from '@contracts'
 import { useThreadClient } from './camp-client'
 import { ExecutionContentContext, ExecutionVirtualList, useExecutionRetainedState } from './ExecutionVirtualList'
 import { createContext, useContext, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
@@ -207,7 +208,7 @@ function ToolCallDetail({
     try {
       const response = await client.request<{ payload: unknown }>(
         'agentRunEvidence.getContent',
-        { threadId, evidenceId: completeEvidence.id }
+        { ...(isChatId(threadId) ? { chatId: threadId } : { threadId }), evidenceId: completeEvidence.id }
       )
       const fullText = executionEvidenceResultText(
         completeEvidence.eventType,
@@ -353,7 +354,7 @@ export function ModifiedFileRow({ threadId, change, semanticKind, completeEviden
     let disposed = false
     setDiffError(false)
     void client.request<{ canonical?: CanonicalRuntimeActivityView | null }>(
-      'agentRunEvidence.getContent', { threadId, evidenceId: completeEvidence.id }
+      'agentRunEvidence.getContent', { ...(isChatId(threadId) ? { chatId: threadId } : { threadId }), evidenceId: completeEvidence.id }
     ).then(response => {
       const entry = response.canonical?.diffProjection?.entries?.find(item => item.path === change.path)
       if (!entry) throw new Error(uiAttribute('文件差异不可用'))

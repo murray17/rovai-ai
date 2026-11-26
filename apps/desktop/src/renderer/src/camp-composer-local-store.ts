@@ -42,7 +42,7 @@ function isQuote(value: unknown): value is MessageQuoteSnapshot {
     || !string(value.text) || value.format !== 'plain_text' || !string(value.capturedAt, 128)) return false
   // Source labels are optional navigation hints, never a reason to lose saved text.
   if (value.source !== undefined && (!object(value.source) || !string(value.source.messageId, 512)
-    || !string(value.source.campId, 512) || !['camp', 'single_chat'].includes(String(value.source.scope)))) delete value.source
+    || (value.source.scope === 'chat' ? !string(value.source.conversationId, 512) : !string(value.source.campId, 512) || !['camp', 'single_chat'].includes(String(value.source.scope))))) delete value.source
   if (value.authorAtCapture !== undefined && (!object(value.authorAtCapture) || !string(value.authorAtCapture.displayName, 512)
     || !['user', 'agent'].includes(String(value.authorAtCapture.type)))) delete value.authorAtCapture
   return true

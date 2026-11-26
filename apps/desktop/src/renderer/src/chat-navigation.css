@@ -121,3 +121,9 @@ html[data-rovai-platform="win32"] .navigation-shell.icon-rail-only > .topbar { p
 .identity-card-header:has(.identity-card-message-button) { grid-template-columns: 48px minmax(0,1fr) 28px 24px; gap: 12px 4px; }
 .identity-card-header .identity-card-message-button { margin-right: 0; }
 .identity-card-message-button .navigation-icon, .member-message-button .navigation-icon { width: 16px; height: 16px; }
+
+.chat-inline-image { display: inline-block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; vertical-align: middle; }
+.chat-inline-image img { display: block; max-width: 100%; height: auto; }
+.independent-chat-content > .mission-preview-slot { flex: 1; }
+.independent-chat-content > .mission-preview-slot .file-preview-return { display: inline-flex; }
+.independent-chat-content:has(> .mission-preview-slot) > :is(.chat-timeline, .chat-composer-dock, .approval-dock) { display: none; }

@@ -85,7 +85,13 @@ fn input_identity_schema_matches(c: &Connection) -> bool {
             "context_manifest",
             "context_manifest_initial_run",
             "agent_run_id",
-            "source_delivery_idisnull",
+            if c.prepare("SELECT source_chat_input_id FROM context_manifest LIMIT 0")
+                .is_ok()
+            {
+                "source_delivery_idisnullandsource_chat_input_idisnull"
+            } else {
+                "source_delivery_idisnull"
+            },
         )
         && partial_unique_index(
             c,

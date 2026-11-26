@@ -9,7 +9,7 @@ use crate::{
     camp_id::ThreadId,
     collaboration::{
         CreateThreadCommand, ProjectBindingKind, ThreadActivationState, ThreadCollaborationMode,
-        actor_can_write_camp, admit_mission_start, append_domain_event, create_camp_in_tx,
+        actor_can_write_tool_target, admit_mission_start, append_domain_event, create_camp_in_tx,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, CommandResultStatus,
@@ -1154,7 +1154,7 @@ fn can_edit<T>(
     {
         return Ok(false);
     }
-    actor_can_write_camp(
+    actor_can_write_tool_target(
         tx,
         &envelope.actor,
         envelope.execution_epoch,

@@ -15,7 +15,7 @@ last_updated: 2026-11-25
 
 Migration 233 将 projection schema 升至 183，允许独立 `conversation` 使用空的 `camp_id`，并以 `chat_topic` 保存话题标题与排序。`chats.list` 在同一快照读取当前页和全部未归档话题的答复序号。Desktop 和 Web 将其与本机已读位置比较，驱动左栏总蓝点。标题修改按版本提交，成功改动后通知客户端刷新。[聊天后端提案](chat-backend-proposal.md#4-历史导航归档与删除)
 
-Migration 234 将 projection schema 升至 184。选人打开本机草稿，首发在一个事务内创建话题、首条消息、Run 和回执。活动轮存在时可提交 FIFO，未派发的输入可以移回编辑。草稿和续聊共用 `/` 选择器，按队员的运行端读取用户级技能，工具箱技能可逐条点选。运行端派发、插话签收和最终正文回写仍在接入中。[模型输入 R8](model-context-change-independent-chat.md)
+Migration 234 将 projection schema 升至 184。选人打开本机草稿，首发在一个事务内创建话题、首条消息、Run 和回执。活动轮存在时可提交 FIFO，未派发的输入可以移回编辑。草稿和续聊共用 `/` 选择器，按队员的运行端读取用户级技能，工具箱技能可逐条点选。Migration 235 将 projection schema 升至 185。Core 从聊天直接派发 Run，每段聊天使用自己的工作目录和原生会话。插话按原 Run 和执行代次签收，最终正文回写原话题。归档暂停队列，删除时由持久日志清理聊天目录。公开写入沿用队员身份并检查目标成员资格。[模型输入 R8](model-context-change-independent-chat.md) · [工具合同 v47](../../contracts/builtin-tool-transport-v47.md)
 
 ## macOS 应用内 ZIP 增量更新（2026-11-23）
 

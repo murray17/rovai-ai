@@ -4296,12 +4296,12 @@ fn load_approvals(
     pending_only: bool,
     limit: Option<i64>,
 ) -> Result<Vec<ApprovalView>> {
-    load_conversation_approvals(transaction, camp_id, None, pending_only, limit)
+    load_conversation_approvals(transaction, Some(camp_id), None, pending_only, limit)
 }
 
 pub(crate) fn load_conversation_approvals(
     connection: &rusqlite::Connection,
-    camp_id: &str,
+    camp_id: Option<&str>,
     conversation_id: Option<&str>,
     pending_only: bool,
     limit: Option<i64>,
@@ -4325,10 +4325,10 @@ pub(crate) fn load_conversation_approvals(
         JOIN agent_run ON agent_run.id = action_execution.agent_run_id
         LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
-        WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
+        WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) IS ?1
           AND (?2 = 0 OR approval.status = 'pending')
-          AND ((?4 IS NULL AND conversation.kind <> 'single_chat')
-            OR (?4 IS NOT NULL AND conversation.kind = 'single_chat' AND conversation.id = ?4))
+          AND ((?4 IS NULL AND ?1 IS NOT NULL AND conversation.kind <> 'single_chat')
+            OR (?4 IS NOT NULL AND conversation.kind IN ('single_chat','chat') AND conversation.id = ?4))
         ORDER BY approval.requested_at DESC, approval.id
         LIMIT COALESCE(?3, -1)
         "#,

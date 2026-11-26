@@ -102,6 +102,8 @@ it('rejects unbounded or malformed retention hints before reaching the window le
   const session = { threadId: 'rvcamp_01m1s4cranehs9cdc9r7ayj5d3', previewSessionId: 'session' }
   const handle = { handleId: 'handle', previewSessionId: 'session', tabId: 'tab', lastUsed: 1, visible: true, busy: false, recoverable: true }
   expect(parseRetentionState({ sessions: [session], handles: [handle] })).toEqual({ sessions: [session], handles: [handle] })
+  const chat = { ...session, threadId: 'fb016f75-7fc2-4432-973d-678639b5f935' }
+  expect(parseRetentionState({sessions:[chat],handles:[]})).toEqual({sessions:[chat],handles:[]})
   expect(() => parseRetentionState({ sessions: Array(25).fill(session), handles: [] })).toThrow()
   expect(() => parseRetentionState({ sessions: [session], handles: [{ ...handle, lastUsed: Infinity }] })).toThrow()
   expect(() => parseRetentionState({ sessions: [session], handles: [{ ...handle, visible: 'false' }] })).toThrow()

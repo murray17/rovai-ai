@@ -117,6 +117,8 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
         | "memory.view"
         | "memory.search"
         | "memory.read"
+        | "thread.create"
+        | "chat.history"
         | "single_chat.history"
         | "mission.list"
         | "mission.get"
@@ -250,6 +252,8 @@ fn project_success(operation: &str, result: Value) -> Result<Value> {
         | "memory.view"
         | "memory.search"
         | "memory.read"
+        | "thread.create"
+        | "chat.history"
         | "single_chat.history"
         | "mission.list"
         | "mission.get"
@@ -1190,6 +1194,15 @@ mod tests {
             )
             .unwrap();
             assert!(project_envelope(envelope).is_err(), "{field}");
+        }
+        for (operation, result) in [
+            ("chat.history", json!({"messages":[],"nextCursor":null})),
+            (
+                "thread.create",
+                json!({"threadId":"rvcamp_01h47kvsy5fk1shh6w1g60eecf"}),
+            ),
+        ] {
+            golden[operation] = json!({"canonicalResult":result,"agentOutput":result});
         }
         let documents = golden.as_object().unwrap();
         assert_eq!(documents.len(), builtin_tool_definitions().len());

@@ -549,7 +549,7 @@ pub struct HearthReviewItemView {
     pub base_revision_id: Option<String>,
     pub source_agent_id: String,
     #[serde(rename = "sourceThreadId", alias = "sourceCampId")]
-    pub source_camp_id: String,
+    pub source_camp_id: Option<String>,
     pub source_agent_run_id: String,
     pub source_execution_epoch: i64,
     pub stale: bool,
@@ -622,7 +622,7 @@ struct HearthReviewRecord {
     target_memory_id: Option<String>,
     base_revision_id: Option<String>,
     source_agent_id: String,
-    source_camp_id: String,
+    source_camp_id: Option<String>,
     source_agent_run_id: String,
     source_execution_epoch: i64,
     accepted_memory_id: Option<String>,
@@ -3026,6 +3026,34 @@ fn validate_agent_mutation<C: DomainCommand>(
             "Agent Memory mutation requires an AgentRun",
         ));
     };
+    if let Some(epoch) = envelope.execution_epoch
+        && crate::chat::run_conversation(transaction, source_agent_run_id, epoch)?.is_some()
+    {
+        let expected:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM agent_run r JOIN conversation c ON c.id=r.conversation_id WHERE r.id=?1 AND c.agent_id=?2)",params![source_agent_run_id,agent_id],|r|r.get(0))?;
+        if !expected
+            || (envelope.camp_id.as_ref().is_some()
+                && !crate::chat::authorize_destination(
+                    transaction,
+                    source_agent_run_id,
+                    epoch,
+                    agent_id,
+                    envelope.camp_id.as_deref().unwrap_or(""),
+                    true,
+                )?)
+        {
+            return Err(rule_violation(
+                "memory.run_not_current",
+                "Agent identity or target membership is unavailable",
+            ));
+        }
+        return Ok(RevisionActor {
+            kind: MemoryRevisionActorKind::Agent,
+            actor_id: agent_id.clone(),
+            source_camp_id: envelope.camp_id.clone(),
+            source_agent_run_id: Some(source_agent_run_id.clone()),
+            source_execution_epoch: Some(epoch),
+        });
+    }
     let camp_id = envelope.camp_id.as_deref().ok_or_else(|| {
         rule_violation(
             "memory.run_not_current",
@@ -3087,12 +3115,7 @@ fn agent_identity<C>(envelope: &CommandEnvelope<C>) -> Result<(&str, &str)> {
             "Agent identity is required",
         ));
     };
-    Ok((
-        agent_id,
-        envelope.camp_id.as_deref().ok_or_else(|| {
-            rule_violation("memory.run_not_current", "Agent mutation has no Thread")
-        })?,
-    ))
+    Ok((agent_id, envelope.camp_id.as_deref().unwrap_or("")))
 }
 
 fn enforce_agent_mutation_quota(
@@ -3498,7 +3521,7 @@ fn save_hearth_review_item<C: DomainCommand>(
             base_revision_id,
             pending_key,
             agent_id,
-            camp_id,
+            crate::runtime::run_thread_id(camp_id),
             source_agent_run_id,
             actor.source_execution_epoch,
             now,

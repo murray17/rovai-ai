@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     ffi::OsString,
     fs::{self, OpenOptions},
     io::Write,
@@ -203,7 +203,7 @@ impl BuiltinToolProcessConfig {
     }
 
     fn write_context(&self, lease: Option<BuiltinToolLeaseContext>) -> Result<()> {
-        self.write_context_with_capabilities(lease, false, false)
+        self.write_context_with_capabilities(lease, false, false, false)
     }
 
     fn write_context_with_capabilities(
@@ -211,6 +211,7 @@ impl BuiltinToolProcessConfig {
         lease: Option<BuiltinToolLeaseContext>,
         tasks_enabled: bool,
         memory_enabled: bool,
+        private_chat: bool,
     ) -> Result<()> {
         let Some(path) = self.context_path() else {
             return Ok(());
@@ -224,6 +225,7 @@ impl BuiltinToolProcessConfig {
             lease,
             tasks_enabled,
             memory_enabled,
+            private_chat,
         };
         atomic_write_private_json(path, &document)
     }
@@ -373,13 +375,15 @@ impl BuiltinToolLeaseRegistry {
         enabled_runs: &std::collections::HashSet<String>,
         target: Option<(&str, &str, i64)>,
     ) -> bool {
-        self.refresh_capabilities(enabled_runs, true, target).await
+        self.refresh_capabilities(enabled_runs, true, &HashSet::new(), target)
+            .await
     }
 
     pub(crate) async fn refresh_capabilities(
         &self,
         enabled_runs: &std::collections::HashSet<String>,
         memory_enabled: bool,
+        chat_runs: &HashSet<String>,
         target: Option<(&str, &str, i64)>,
     ) -> bool {
         let processes = self.processes.lock().await;
@@ -410,6 +414,7 @@ impl BuiltinToolLeaseRegistry {
                 Some(context),
                 enabled_runs.contains(&active.agent_run_id),
                 memory_enabled,
+                chat_runs.contains(&active.agent_run_id),
             ) {
                 eprintln!("Built-in CLI discovery refresh failed: {error:#}");
                 refreshed = false;

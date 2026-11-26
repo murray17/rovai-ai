@@ -165,6 +165,25 @@ pub fn create_member(
         details: None,
     })?;
 
+    if let Some(owner) = database
+        .connection()
+        .query_row(
+            "SELECT coalesce(conversation_id,camp_id) FROM member_creation WHERE creation_id=?1",
+            [format!("member-create:{creation_id}")],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        let chat = crate::chat::run_conversation(
+            database.connection(),
+            &authenticated_run.agent_run_id,
+            authenticated_run.execution_epoch,
+        )?;
+        anyhow::ensure!(
+            owner == chat.as_deref().unwrap_or(&authenticated_run.camp_id),
+            "member.creation_key_conflict"
+        );
+    }
     let avatar_ref = input
         .avatar_file
         .as_deref()
@@ -234,9 +253,11 @@ pub(crate) fn record_member_creation(
     source: &AuthenticatedTeamToolRun,
     receipt: &MemberCreationView,
 ) -> Result<()> {
+    let chat =
+        crate::chat::run_conversation(transaction, &source.agent_run_id, source.execution_epoch)?;
     transaction.execute(
-        "INSERT INTO member_creation(creation_id, camp_id, snapshot_json, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![receipt.creation_id, source.camp_id, serde_json::to_string(receipt)?, receipt.created_at],
+        "INSERT INTO member_creation(creation_id, camp_id, snapshot_json, created_at,conversation_id) VALUES (?1, ?2, ?3, ?4,?5)",
+        params![receipt.creation_id, crate::runtime::run_thread_id(&source.camp_id), serde_json::to_string(receipt)?, receipt.created_at,chat],
     )?;
     transaction.execute(
         "INSERT INTO member_creation_preference(singleton, helper_agent_id) VALUES (1, ?1)
@@ -288,6 +309,13 @@ pub(crate) fn has_direct_user_input(
     connection: &Connection,
     authenticated_run: &AuthenticatedTeamToolRun,
 ) -> Result<bool> {
+    if let Some(chat) = crate::chat::run_conversation(
+        connection,
+        &authenticated_run.agent_run_id,
+        authenticated_run.execution_epoch,
+    )? {
+        return Ok(connection.query_row("SELECT EXISTS(SELECT 1 FROM agent_run r JOIN conversation_message m ON m.id=r.trigger_conversation_message_id AND m.conversation_id=r.conversation_id WHERE r.id=?1 AND r.conversation_id=?2 AND m.author_type='user' AND m.author_id=?3)",params![authenticated_run.agent_run_id,chat,CURRENT_USER_ID],|row|row.get(0))?);
+    }
     let trigger = connection
         .query_row(
             r#"

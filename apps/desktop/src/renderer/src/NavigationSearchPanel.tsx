@@ -1,3 +1,4 @@
+import { MemberAvatar } from './MemberAvatar'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { isThreadId, type ProjectNavigationGroup } from '@contracts'
@@ -159,6 +160,17 @@ export function NavigationSearchPanel({
         }}>
           <div id={listId} role="listbox" aria-label={uiAttribute('搜索结果')} aria-busy={busy}>
             {state.rows.map(row => {
+              if (row.chat) {
+                const chat = row.chat
+                const selected = state.activeId === chat.chatId
+                return <button type="button" tabIndex={-1} key={chat.chatId} id={optionId(chat.chatId)}
+                  className={'command-palette-item search-result' + (selected ? ' active' : '')}
+                  role="option" aria-selected={selected} onMouseDown={event => event.preventDefault()}
+                  onMouseEnter={() => session.select(chat.chatId)} onClick={() => session.choose(row)}>
+                  <MemberAvatar agentId={chat.agentId} displayName={chat.displayName} avatarRef={chat.avatarRef} size="execution" decorative/>
+                  <span className="search-result-main"><strong>{chat.title}</strong><small>{chat.displayName}</small></span>
+                </button>
+              }
               const { target, hit } = row
               const title = formatThreadTitle(target.thread, firstRunThreadId)
               const active = state.activeId === target.thread.id

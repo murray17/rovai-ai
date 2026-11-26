@@ -33,7 +33,16 @@ pub(super) fn schema_matches(connection: &Connection) -> rusqlite::Result<bool> 
                 |row| row.get(0),
             )
             .optional()?;
-        let normalize = |sql: &str| sql.split_whitespace().collect::<String>();
+        // SQLite quotes the table identifier when a rebuild renames the replacement table.
+        let normalize = |sql: &str| {
+            sql.replacen(
+                &format!("CREATE TABLE \"{name}\""),
+                &format!("CREATE TABLE {name}"),
+                1,
+            )
+            .split_whitespace()
+            .collect::<String>()
+        };
         if actual.as_deref().map(normalize) != Some(normalize(expected)) {
             return Ok(false);
         }

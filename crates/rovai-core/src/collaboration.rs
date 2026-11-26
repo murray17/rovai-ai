@@ -1901,16 +1901,16 @@ impl CollaborationService {
                 ));
             }
             if matches!(envelope.actor, ActorRef::Agent { .. })
-                && (!actor_can_write_camp(
+                && (!actor_can_write_tool_target(
                     transaction,
                     &envelope.actor,
                     envelope.execution_epoch,
                     &envelope.payload.camp_id,
-                )? || !actor_is_default_lead(
+                )? || (!matches!(&envelope.actor, ActorRef::Agent {source_agent_run_id,..} if crate::chat::run_conversation(transaction,source_agent_run_id,envelope.execution_epoch.unwrap_or(-1))?.is_some()) && !actor_is_default_lead(
                     transaction,
                     &envelope.payload.camp_id,
                     &envelope.actor,
-                )?)
+                )?))
             {
                 return Ok(rejected(
                     "task.create_forbidden",
@@ -2057,6 +2057,11 @@ impl CollaborationService {
                 return Ok(rejected(crate::task_capability::DISABLED_CODE, crate::task_capability::DISABLED_MESSAGE));
             }
             let task = load_task_record(transaction, &envelope.payload.task_id)?;
+            if let ActorRef::Agent{agent_id,source_agent_run_id}=&envelope.actor
+                && crate::chat::run_conversation(transaction,source_agent_run_id,envelope.execution_epoch.unwrap_or(-1))?.is_some()
+                && !crate::chat::authorize_destination(transaction,source_agent_run_id,envelope.execution_epoch.unwrap_or(-1),agent_id,envelope.camp_id.as_deref().unwrap_or(""),true)? {
+                return Ok(rejected("task.update_forbidden","Active membership of the target Thread is required"));
+            }
             let Some(mut projected) = task else {
                 return Ok(rejected("task.not_found", "Task does not exist"));
             };
@@ -2206,8 +2211,10 @@ impl CollaborationService {
 
             let changed = task_business_fields_changed(&original, &projected);
             if !changed {
+                let mut public=original;
+                hide_private_task_sources(transaction,&mut public)?;
                 let detail = public_task_detail(
-                    original,
+                    public,
                     task_available_actions(&envelope.actor, &projected, can_update_any),
                 );
                 let mut value = serde_json::to_value(detail)?;
@@ -2333,6 +2340,7 @@ impl CollaborationService {
             if scope.can_read(&task) {
                 task.description =
                     synthesize_task_description(&task.description, &task.acceptance_criteria);
+                hide_private_task_sources(database.connection(), &mut task)?;
                 tasks.push(task);
             }
         }
@@ -2458,6 +2466,10 @@ impl CollaborationService {
                 task_record_from_row,
             )
             .optional()?;
+        let mut task = task;
+        if let Some(detail) = task.as_mut() {
+            hide_private_task_sources(database.connection(), detail)?;
+        }
         Ok(task
             .filter(|candidate| scope.can_read(candidate))
             .map(|task| {
@@ -4613,6 +4625,33 @@ fn active_address_target(
         .context("failed to resolve active Thread member Conversation")
 }
 
+pub(crate) fn actor_can_write_tool_target(
+    c: &Connection,
+    actor: &ActorRef,
+    epoch: Option<i64>,
+    target: &str,
+) -> Result<bool> {
+    if let (
+        ActorRef::Agent {
+            agent_id,
+            source_agent_run_id,
+        },
+        Some(epoch),
+    ) = (actor, epoch)
+        && crate::chat::authorize_destination(
+            c,
+            source_agent_run_id,
+            epoch,
+            agent_id,
+            target,
+            true,
+        )?
+    {
+        return Ok(true);
+    }
+    actor_can_write_camp(c, actor, epoch, target)
+}
+
 pub(crate) fn actor_can_write_camp(
     connection: &Connection,
     actor: &ActorRef,
@@ -4677,6 +4716,21 @@ fn task_read_scope(
     match actor {
         ActorRef::User { .. } => Ok(TaskReadScope::All),
         ActorRef::Agent { .. } => {
+            if let ActorRef::Agent {
+                source_agent_run_id,
+                agent_id,
+            } = actor
+                && crate::chat::authorize_destination(
+                    connection,
+                    source_agent_run_id,
+                    execution_epoch.unwrap_or(-1),
+                    agent_id,
+                    camp_id,
+                    false,
+                )?
+            {
+                return Ok(TaskReadScope::All);
+            }
             if !actor_can_write_camp(connection, actor, execution_epoch, camp_id)? {
                 anyhow::bail!(
                     "task.query_forbidden: AgentRun is stale or outside the active Thread"
@@ -4756,10 +4810,32 @@ fn load_task_detail(
     actor: &ActorRef,
     can_update_any: bool,
 ) -> Result<Option<TaskDetail>> {
-    Ok(load_task_record(transaction, task_id)?.map(|task| {
+    let mut task = load_task_record(transaction, task_id)?;
+    if let Some(detail) = task.as_mut() {
+        hide_private_task_sources(transaction, detail)?;
+    }
+    Ok(task.map(|task| {
         let available_actions = task_available_actions(actor, &task, can_update_any);
         public_task_detail(task, available_actions)
     }))
+}
+
+fn hide_private_task_sources(connection: &Connection, task: &mut TaskRecord) -> Result<()> {
+    for id in [
+        &mut task.source_agent_run_id,
+        &mut task.closed_by_agent_run_id,
+    ] {
+        if let Some(run) = id.as_deref()
+            && connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND invocation_kind='chat')",
+                [run],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            *id = None;
+        }
+    }
+    Ok(())
 }
 
 fn public_task_detail(mut task: TaskRecord, available_actions: Vec<String>) -> TaskDetail {
@@ -6530,6 +6606,20 @@ pub(crate) fn append_domain_event(
         }
     }
     let (actor_type, actor_id, source_agent_run_id) = actor_parts(actor);
+    let private_source = if let (Some(_), Some(source)) = (camp_id, source_agent_run_id) {
+        transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND invocation_kind='chat')",
+            [source],
+            |r| r.get::<_, bool>(0),
+        )?
+    } else {
+        false
+    };
+    let (source_agent_run_id, execution_epoch) = if private_source {
+        (None, None)
+    } else {
+        (source_agent_run_id, execution_epoch)
+    };
     transaction.execute(
         r#"
         INSERT INTO event_log(

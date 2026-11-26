@@ -66,7 +66,7 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
       remove: (conversationId, expectedDraftRevision, attachmentRefId) => transport.request('singleChat.composerDraft.removeAttachment', { conversationId, expectedDraftRevision, attachmentRefId })
     },
     composerAttachments: {
-      prepare: (threadId, revision, file) => transport.uploadFile(threadId, revision, file),
+      prepare: (threadId, revision, file) => transport.uploadFile(threadId, revision, file, /^(?:chat|chat-draft):/u.test(threadId) ? {kind:'chat'} : undefined),
       preparePastedText: (threadId, file) => transport.uploadFile(threadId, 1, file, { kind: 'pasted_text' }),
       removePastedText: async (threadId, attachmentRefId) => {
         const result = await transport.files<unknown>('removePastedText', { threadId, attachmentRefIds: [attachmentRefId] })

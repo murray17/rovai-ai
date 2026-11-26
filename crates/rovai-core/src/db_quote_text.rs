@@ -48,7 +48,12 @@ fn additions(guard: &str) -> Result<String> {
 }
 
 pub(super) fn schema_matches(c: &Connection, edited_messages: bool) -> rusqlite::Result<bool> {
-    let versions = if edited_messages {
+    let versions = if c
+        .prepare("SELECT source_chat_input_id FROM context_manifest LIMIT 0")
+        .is_ok()
+    {
+        "38, 39, 40, 41, 42, 43, 44, 45, 46)"
+    } else if edited_messages {
         EDITED_VERSIONS
     } else {
         VERSIONS

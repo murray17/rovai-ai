@@ -38,7 +38,7 @@ export function ThreadReferencePreviewProvider({ threadId, onOpen, children }: {
   virtualRef.current = request?.trigger ?? null
   useEffect(() => { returnFocus.current = null; setRequest(null) }, [threadId])
   useEffect(() => {
-    if (!request || !threadId) return
+    if (!request || threadId === null) return
     let cancelled = false
     setResult(null)
     void client.request<Array<ReferenceCandidate | null>>('threadReferences.resolve', { threadId, references: [request.reference] })

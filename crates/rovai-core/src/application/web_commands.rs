@@ -14,8 +14,20 @@ fn receipt<C: rovai_core::command::DomainCommand>(
     database: &Database,
     envelope: CommandEnvelope<C>,
 ) -> Result<Value> {
-    Ok(DomainCommandGateway
-        .replay_if_recorded(database, &envelope)?
+    let replay = match DomainCommandGateway.replay_if_recorded(database, &envelope) {
+        Err(error)
+            if matches!(
+                error.downcast_ref::<rovai_core::command::CommandGatewayError>(),
+                Some(rovai_core::command::CommandGatewayError::IdempotencyConflict { .. })
+            ) =>
+        {
+            return Ok(
+                json!({"state":"recorded","error":{"code":"COMMAND_IDEMPOTENCY_CONFLICT","message":"The same command was submitted with different content"}}),
+            );
+        }
+        other => other?,
+    };
+    Ok(replay
         .map(|execution| json!({"state":"recorded", "result":execution.result}))
         .unwrap_or_else(|| json!({"state":"unknown"})))
 }
@@ -188,6 +200,38 @@ pub(super) fn reconcile(
             )
         }
 
+        "chats.send" | "chats.pendingInputs.edit" => {
+            let mut recorded = if query.operation == "chats.send" {
+                let params: UserCommandParams<rovai_core::chat::SendInput> =
+                    serde_json::from_value(query.params)?;
+                let mut command = user_command_envelope(params.command_id, params.command);
+                rovai_core::chat::bind_send_identity(&mut command)?;
+                receipt(database, command)?
+            } else {
+                let params: UserCommandParams<rovai_core::chat::EditPending> =
+                    serde_json::from_value(query.params)?;
+                receipt(
+                    database,
+                    user_command_envelope(params.command_id, params.command),
+                )?
+            };
+            if recorded["result"]["code"] == "chat.deleted" {
+                return Ok(
+                    json!({"state":"recorded","error":{"code":"chat.deleted","message":"Chat deleted"}}),
+                );
+            }
+            if recorded.get("result").is_some() {
+                recorded["result"] =
+                    rovai_core::chat::public_input_result(recorded["result"]["payload"].take());
+            }
+            Ok(recorded)
+        }
+        "chats.setArchived" => user!(rovai_core::chat::SetArchived),
+        "chats.delete" => user!(rovai_core::chat::DeleteChat),
+        "agentRuns.cancel" if query.params["command"].get("chatId").is_some() => {
+            user!(rovai_core::chat::StopChat)
+        }
+        "chats.rename" => user!(rovai_core::chat::RenameChat),
         "camp.messages.send" => {
             let params: SendThreadMessageParams = serde_json::from_value(query.params)?;
             let mut value = receipt(database, params.envelope())?;
@@ -201,7 +245,7 @@ pub(super) fn reconcile(
         "camp.messages.delete" => camp!(DeleteThreadMessageCommand),
         "action.approvals.resolve" => {
             let params: ResolveActionApprovalParams = serde_json::from_value(query.params)?;
-            receipt(database, params.envelope())
+            receipt(database, params.envelope(database)?)
         }
         "agentRuns.cancel" => camp!(CancelAgentRunCommand),
         "agentRuns.continue" => camp!(crate::run_continuation::ContinueAgentRunCommand),

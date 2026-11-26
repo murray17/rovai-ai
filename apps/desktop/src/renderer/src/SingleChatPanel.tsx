@@ -337,7 +337,10 @@ export function SingleChatRunHistory({
   now,
   cancelling = false,
   onNotify = () => undefined,
-  onExpand
+  onExpand,
+  summaryLabel,
+  privateFinal,
+  chatId
 }: {
   threadId: string
   conversationId: string
@@ -347,6 +350,9 @@ export function SingleChatRunHistory({
   now: string
   cancelling?: boolean
   onNotify?(message: string): void
+  chatId?: string
+  summaryLabel?: string
+  privateFinal?: React.ReactNode
   onExpand?(expanded: boolean): void
 }): React.JSX.Element {
   const runtime = useRuntimePhase(threadId, run)
@@ -459,7 +465,7 @@ export function SingleChatRunHistory({
           onToggle={(event) => { if (terminal) { setOpen(event.currentTarget.open); onExpand?.(event.currentTarget.open) } }}
         >
           <summary hidden={!terminal}>
-            <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
+            <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && (summaryLabel ?? executionRunSummary(run, now))}</span>
             <span className="single-chat-disclosure" aria-hidden="true"><ChevronGlyph /></span>
           </summary>
           <div className="single-chat-execution-content process-content">
@@ -478,8 +484,8 @@ export function SingleChatRunHistory({
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}>
-            {handoff ? bodySlot(handoff) : <MessageMarkdown theme={theme}>{finalMessage.body}</MessageMarkdown>}
+          <div className="single-chat-final" data-reply-sequence={chatId ? finalMessage.sequence : undefined} data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}>
+            {privateFinal ?? (handoff ? bodySlot(handoff) : <MessageMarkdown theme={theme}>{finalMessage.body}</MessageMarkdown>)}
           </div>
         </>}
         {narration.map(item => {

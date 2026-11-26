@@ -857,6 +857,32 @@ pub(crate) fn camp_blob_references(
     camp_id: &str,
     camp_agent_run_ids: &str,
 ) -> Result<std::collections::BTreeSet<String>> {
+    aggregate_blob_references(
+        connection,
+        camp_id,
+        camp_agent_run_ids,
+        "conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
+    )
+}
+
+pub(crate) fn chat_blob_references(
+    connection: &Connection,
+    chat_id: &str,
+) -> Result<std::collections::BTreeSet<String>> {
+    aggregate_blob_references(
+        connection,
+        chat_id,
+        "SELECT id FROM agent_run WHERE conversation_id=?1",
+        "conversation_id=?1",
+    )
+}
+
+fn aggregate_blob_references(
+    connection: &Connection,
+    owner_id: &str,
+    run_ids: &str,
+    conversation_scope: &str,
+) -> Result<std::collections::BTreeSet<String>> {
     // Legacy migration fixtures can delete Camps before candidate GC was introduced.
     let gc_available: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('managed_blob') WHERE name='gc_candidate_owner')
@@ -873,10 +899,8 @@ pub(crate) fn camp_blob_references(
             | "agent_run_image"
             | "action_execution"
             | "runtime_input_delivery"
-            | "context_manifest" => format!("agent_run_id IN ({camp_agent_run_ids})"),
-            "native_session_bootstrap_evidence" => {
-                "conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)".to_owned()
-            }
+            | "context_manifest" => format!("agent_run_id IN ({run_ids})"),
+            "native_session_bootstrap_evidence" => conversation_scope.to_owned(),
             _ => continue, // Other owners are retained and protected by the final reference check.
         };
         let mut query = connection.prepare(&format!(
@@ -887,7 +911,7 @@ pub(crate) fn camp_blob_references(
         ))?;
         ids.extend(
             query
-                .query_map([camp_id], |row| row.get::<_, String>(0))?
+                .query_map([owner_id], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?,
         );
     }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NavigationMessageSearchPage, NavigationSearchResult, NavigationSearchTarget } from '@contracts'
-import { createNavigationSearchSession, navigationSearchHints } from './camp-navigation-search'
+import { createNavigationSearchSession, navigationSearchHints, searchRowId } from './camp-navigation-search'
 import { changeInterfaceLanguage } from './interface-language'
 import { languageTestApi } from './interface-language-test-api'
 
@@ -235,11 +235,11 @@ describe('window navigation search', () => {
     await settle()
     expect(readMessages).toHaveBeenCalledTimes(6)
     expect(owner.getSnapshot().messages).toBe('paused')
-    expect(owner.getSnapshot().rows.map(row => row.target.thread.id)).toEqual(['visible-name'])
+    expect(owner.getSnapshot().rows.map(row => searchRowId(row))).toEqual(['visible-name'])
     owner.more('action')
     await settle()
     expect(owner.getSnapshot().activeId).toBe('visible-name')
-    expect(owner.getSnapshot().rows.map(row => row.target.thread.id)).toEqual(['visible-name', 'oldest'])
+    expect(owner.getSnapshot().rows.map(row => searchRowId(row))).toEqual(['visible-name', 'oldest'])
     expect(choose).not.toHaveBeenCalled()
     owner.stop()
   })
@@ -286,7 +286,7 @@ describe('window navigation search', () => {
     owner.retry()
     await settle()
     expect(readMessages).toHaveBeenLastCalledWith({ query: '关键字', cursor: 'next' })
-    expect(owner.getSnapshot().rows.map(row => row.target.thread.id)).toEqual(['first', 'second'])
+    expect(owner.getSnapshot().rows.map(row => searchRowId(row))).toEqual(['first', 'second'])
     owner.stop()
   })
 })

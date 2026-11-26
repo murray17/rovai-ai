@@ -2524,7 +2524,7 @@ mod tests {
             "#!/bin/sh\n[ -f \"$ROVAI_CLI_CONTEXT\" ] && [ -d \"$ROVAI_RUN_TMP\" ] || exit 1\nIFS= read -r initialize || exit 1\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nIFS= read -r initialized || exit 1\nwhile IFS= read -r ignored; do :; done\n",
         );
         let attachment_authorization = ThreadOutputDirectory {
-            camp_id: "camp-process-compatibility".to_string(),
+            owner_id: "camp-process-compatibility".to_string(),
             output_root: root.join("attachments"),
         };
         std::fs::create_dir_all(&attachment_authorization.output_root).unwrap();

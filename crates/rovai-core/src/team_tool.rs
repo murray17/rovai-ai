@@ -51,7 +51,7 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 30] = [
+pub const TEAM_TOOL_NAMES: [&str; 32] = [
     "mission.list",
     "mission.get",
     "mission.update",
@@ -77,6 +77,8 @@ pub const TEAM_TOOL_NAMES: [&str; 30] = [
     HISTORY_SEARCH_TOOL_NAME,
     CAMP_READ_TOOL_NAME,
     crate::thread_runs::THREAD_RUNS_TOOL_NAME,
+    "thread.create",
+    crate::chat::HISTORY_TOOL,
     SINGLE_CHAT_HISTORY_TOOL_NAME,
     "memory.view",
     "memory.search",
@@ -93,6 +95,8 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ThreadMessageSendInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     #[serde(default)]
     pub body: String,
     #[serde(default)]
@@ -109,6 +113,8 @@ pub struct ThreadMessageSendInput {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamCreateTaskInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub title: String,
     #[serde(default)]
     pub description: String,
@@ -118,6 +124,8 @@ pub struct TeamCreateTaskInput {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamGetTaskInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub task_id: String,
 }
 
@@ -133,6 +141,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamUpdateTaskInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub task_id: String,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -149,6 +159,8 @@ pub struct TeamUpdateTaskInput {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamListTasksInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(default, deserialize_with = "deserialize_non_null_optional_string")]
     pub assignee_agent_id: Option<String>,
@@ -409,7 +421,7 @@ impl TeamToolService {
                 let supplied_credential_digest = credential_digest(binding_credential);
                 let mut statement = database.connection().prepare(
                     r#"
-                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id), conversation.agent_id,
+                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, ''), conversation.agent_id,
                            agent_run.id, agent_run.execution_epoch
                     FROM conversation
                     JOIN agent_run ON agent_run.conversation_id = conversation.id
@@ -508,7 +520,7 @@ impl TeamToolService {
             .connection()
             .query_row(
                 r#"
-                SELECT COALESCE(run.camp_id, turn.camp_id), run.workspace_json
+                SELECT COALESCE(run.camp_id, turn.camp_id, ''), run.workspace_json
                 FROM agent_run AS run
                 LEFT JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
                 WHERE run.id = ?1 AND run.execution_epoch = ?2
@@ -532,7 +544,7 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "properties": {
+            "properties": { "threadId":{"type":"string","description":"Target public Thread; required from a private Chat."},
                 "body": {
                     "type": "string",
                     "default": "",
@@ -574,7 +586,7 @@ impl TeamToolService {
             "additionalProperties": false,
             "description": TASK_CREATE_DESCRIPTION,
             "required": ["title", "assigneeAgentId"],
-            "properties": {
+            "properties": { "threadId":{"type":"string","description":"Target public Thread; required from a private Chat."},
                 "title": {
                     "type": "string",
                     "minLength": 1,
@@ -600,7 +612,7 @@ impl TeamToolService {
             "type": "object",
             "additionalProperties": false,
             "required": ["taskId"],
-            "properties": {
+            "properties": { "threadId":{"type":"string","description":"Target public Thread; required from a private Chat."},
                 "taskId": {"type": "string", "minLength": 1}
             }
         })
@@ -612,7 +624,7 @@ impl TeamToolService {
             "additionalProperties": false,
             "description": "Update explicit fields of a non-terminal task.\nUser/Default Lead may edit task content, assignment and status.\nOther assignees may update only their own status and matching blockedReason or completionSummary.\nDoes not notify or start work.",
             "required": ["taskId"],
-            "properties": {
+            "properties": { "threadId":{"type":"string","description":"Target public Thread; required from a private Chat."},
                 "taskId": {"type": "string", "minLength": 1},
                 "title": {"type": "string", "minLength": 1, "maxLength": 160},
                 "description": {
@@ -644,7 +656,7 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "properties": {
+            "properties": { "threadId":{"type":"string","description":"Target public Thread; required from a private Chat."},
                 "statuses": {
                     "type": "array",
                     "minItems": 1,
@@ -739,7 +751,7 @@ impl TeamToolService {
         let binding = transaction
             .query_row(
                 r#"
-                SELECT conversation.camp_id, conversation.id,
+                SELECT COALESCE(conversation.camp_id, ''), conversation.id,
                        conversation.native_binding_id,
                        conversation.native_binding_generation,
                        conversation.native_adapter_installation_id,
@@ -756,9 +768,9 @@ impl TeamToolService {
                        agent_run.runtime_native_session_compatibility_key
                 FROM agent_run
                 LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+                LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
                 JOIN conversation ON conversation.id = agent_run.conversation_id
-                JOIN camp_member
+                LEFT JOIN camp_member
                   ON camp_member.camp_id = camp.id
                  AND camp_member.agent_id = conversation.agent_id
                 JOIN agent_profile ON agent_profile.id = conversation.agent_id
@@ -777,12 +789,16 @@ impl TeamToolService {
                                  AND camp_turn.execution_budget_schema_version = 2))
                      )
                   )
-                  AND camp_member.status = 'active'
+                  AND ((camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
                   AND camp_member.version = CAST(
                       json_extract(agent_run.effective_config_json, '$.campMemberVersion')
                       AS INTEGER
-                  )
+                  )) OR (
+                    agent_run.invocation_kind='chat' AND conversation.kind='chat'
+                    AND agent_profile.profile_status='present' AND EXISTS(
+                        SELECT 1 FROM chat_topic t WHERE t.conversation_id=conversation.id
+                          AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
                 "#,
                 params![agent_run_id, execution_epoch, now],
                 |row| {
@@ -967,7 +983,7 @@ impl TeamToolService {
                 } else {
                     "builtin_tool.binding_credential_refreshed"
                 },
-                Some(&camp_id),
+                crate::runtime::run_thread_id(&camp_id),
                 Some(("conversation", &conversation_id)),
                 &ActorRef::System {
                     component_id: "builtin-tool-credential-issuer".to_string(),
@@ -1075,6 +1091,17 @@ impl TeamToolService {
                     "Recorded public send belongs to a different attested AgentRun",
                 ));
             }
+            if invocation
+                .input
+                .thread_id
+                .as_ref()
+                .is_some_and(|id| id != &recorded.camp_id)
+            {
+                return Err(invocation_error(
+                    "chat.thread_mismatch",
+                    "Recorded message belongs to another destination",
+                ));
+            }
             let command = ThreadMessageSendCommand {
                 native_binding_id: invocation.native_binding_id.clone(),
                 credential_digest: supplied_credential_digest.clone(),
@@ -1118,17 +1145,25 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
-        ChannelService::default().ensure_topic_roster_members(
-            database,
-            &sender.camp_id,
-            &invocation.input.to,
-            &command_id,
+        let target = tool_destination(
+            database.connection(),
+            &sender,
+            invocation.input.thread_id.as_deref(),
+            true,
         )?;
+        if !sender.camp_id.is_empty() {
+            ChannelService::default().ensure_topic_roster_members(
+                database,
+                &target,
+                &invocation.input.to,
+                &command_id,
+            )?;
+        }
         let command = ThreadMessageSendCommand {
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
             runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
-            camp_id: sender.camp_id.clone(),
+            camp_id: target.clone(),
             body: invocation.input.body.clone(),
             to: invocation.input.to.clone(),
             mention_user: invocation.input.mention_user,
@@ -1144,7 +1179,7 @@ impl TeamToolService {
                 agent_id: sender.agent_id.clone(),
                 source_agent_run_id: sender.agent_run_id.clone(),
             },
-            camp_id: Some(sender.camp_id.clone()),
+            camp_id: Some(target.clone()),
             expected_versions: Vec::new(),
             execution_epoch: Some(sender.execution_epoch),
             payload: command,
@@ -1177,8 +1212,14 @@ impl TeamToolService {
                     "Native Binding changed before the public send transaction",
                 ));
             }
-            if envelope.camp_id.as_deref() != Some(current.camp_id.as_str())
-                || envelope.payload.camp_id != current.camp_id
+            let current_target = tool_destination(
+                transaction,
+                &current,
+                invocation.input.thread_id.as_deref(),
+                true,
+            )?;
+            if envelope.camp_id.as_deref() != Some(current_target.as_str())
+                || envelope.payload.camp_id != current_target
             {
                 return Err(anyhow::anyhow!(
                     "internal Thread identity invariant violated for public message send"
@@ -1188,7 +1229,7 @@ impl TeamToolService {
                 transaction,
                 &SendQueuedAgentMessage {
                     command_id: &envelope.command_id,
-                    camp_id: &current.camp_id,
+                    camp_id: &current_target,
                     source_agent_run_id: &current.agent_run_id,
                     author_agent_id: &current.agent_id,
                     execution_epoch: current.execution_epoch,
@@ -1236,6 +1277,12 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
+        let target = tool_destination(
+            database.connection(),
+            &sender,
+            invocation.input.thread_id.as_deref(),
+            true,
+        )?;
         let envelope = CommandEnvelope {
             command_id: team_command_id(
                 &invocation.native_binding_id,
@@ -1246,11 +1293,11 @@ impl TeamToolService {
                 agent_id: sender.agent_id,
                 source_agent_run_id: sender.agent_run_id,
             },
-            camp_id: Some(sender.camp_id.clone()),
+            camp_id: Some(target.clone()),
             expected_versions: Vec::new(),
             execution_epoch: Some(sender.execution_epoch),
             payload: CreateTaskCommand {
-                camp_id: sender.camp_id,
+                camp_id: target,
                 title: invocation.input.title.clone(),
                 description: invocation.input.description.clone(),
                 assignee_agent_id: invocation.input.assignee_agent_id.clone(),
@@ -1297,10 +1344,16 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
+        let target = tool_destination(
+            database.connection(),
+            &sender,
+            invocation.input.thread_id.as_deref(),
+            false,
+        )?;
         CollaborationService::default()
             .get_visible_task(
                 database,
-                &sender.camp_id,
+                &target,
                 &invocation.input.task_id,
                 &ActorRef::Agent {
                     agent_id: sender.agent_id,
@@ -1343,6 +1396,12 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
+        let target = tool_destination(
+            database.connection(),
+            &sender,
+            invocation.input.thread_id.as_deref(),
+            true,
+        )?;
         if invocation.input.clear_assignee && invocation.input.assignee_agent_id.is_some() {
             return Err(invocation_error(
                 "team_tool.invalid_input",
@@ -1369,7 +1428,7 @@ impl TeamToolService {
                 agent_id: sender.agent_id,
                 source_agent_run_id: sender.agent_run_id,
             },
-            camp_id: Some(sender.camp_id),
+            camp_id: Some(target),
             expected_versions: Vec::new(),
             execution_epoch: Some(sender.execution_epoch),
             payload: UpdateTaskCommand {
@@ -1418,6 +1477,12 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
+        let target = tool_destination(
+            database.connection(),
+            &sender,
+            invocation.input.thread_id.as_deref(),
+            false,
+        )?;
         if invocation.input.unassigned_only && invocation.input.assignee_agent_id.is_some() {
             return Err(invocation_error(
                 "team_tool.invalid_input",
@@ -1436,7 +1501,7 @@ impl TeamToolService {
         };
         CollaborationService::default().query_visible_tasks(
             database,
-            &sender.camp_id,
+            &target,
             &ActorRef::Agent {
                 agent_id: sender.agent_id,
                 source_agent_run_id: sender.agent_run_id,
@@ -1558,15 +1623,15 @@ fn resolve_sender_identity_by_digest(
     let identity = connection
         .query_row(
             r#"
-            SELECT conversation.camp_id, conversation.agent_id,
+            SELECT COALESCE(conversation.camp_id, ''), conversation.agent_id,
                    agent_run.id, agent_run.execution_epoch,
                    agent_run.runtime_adapter_kind,
                    agent_run.runtime_capabilities_json,
                    conversation.native_binding_secret_digest,
                    agent_run.effective_config_json
             FROM conversation
-            JOIN camp ON camp.id = conversation.camp_id
-            JOIN camp_member
+            LEFT JOIN camp ON camp.id = conversation.camp_id
+            LEFT JOIN camp_member
               ON camp_member.camp_id = conversation.camp_id
              AND camp_member.agent_id = conversation.agent_id
             JOIN agent_profile ON agent_profile.id = conversation.agent_id
@@ -1587,12 +1652,16 @@ fn resolve_sender_identity_by_digest(
                     AND camp_turn.cancel_requested_at IS NULL
                  )
               )
-              AND camp_member.status = 'active'
+              AND ((camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND camp_member.version = CAST(
                   json_extract(agent_run.effective_config_json, '$.campMemberVersion')
                   AS INTEGER
-              )
+              )) OR (
+                    agent_run.invocation_kind='chat' AND conversation.kind='chat'
+                    AND agent_profile.profile_status='present' AND EXISTS(
+                        SELECT 1 FROM chat_topic t WHERE t.conversation_id=conversation.id
+                          AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
             "#,
             params![
                 native_binding_id,
@@ -1624,6 +1693,40 @@ fn resolve_sender_identity_by_digest(
     };
     ensure_runtime_is_frozen(adapter_kind.as_deref())?;
     Ok(identity)
+}
+
+fn tool_destination(
+    c: &Connection,
+    sender: &SenderIdentity,
+    target: Option<&str>,
+    write: bool,
+) -> Result<String> {
+    if !sender.camp_id.is_empty() {
+        if target.is_some_and(|id| id != sender.camp_id) {
+            return Err(invocation_error(
+                "team_tool.thread_mismatch",
+                "Operation is outside this Thread",
+            ));
+        }
+        return Ok(sender.camp_id.clone());
+    }
+    let id = target.ok_or_else(|| {
+        invocation_error("chat.thread_id_required", "Specify the target --thread-id")
+    })?;
+    if !crate::chat::authorize_destination(
+        c,
+        &sender.agent_run_id,
+        sender.execution_epoch,
+        &sender.agent_id,
+        id,
+        write,
+    )? {
+        return Err(invocation_error(
+            "chat.thread_unavailable",
+            "Target Thread or membership is unavailable",
+        ));
+    }
+    Ok(id.to_owned())
 }
 
 fn ensure_runtime_is_frozen(adapter_kind: Option<&str>) -> Result<()> {
@@ -2104,6 +2207,7 @@ mod tests {
                 binding_credential: credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),
                 input: ThreadMessageSendInput {
+                    thread_id: None,
                     body: body.to_string(),
                     to: to.iter().map(|value| (*value).to_string()).collect(),
                     mention_user: false,
@@ -2224,6 +2328,7 @@ mod tests {
             self.memory_write(
                 call_id,
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "revise".to_string(),
                     scope: None,
                     kind: None,
@@ -2256,6 +2361,7 @@ mod tests {
             self.memory_write(
                 call_id,
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "add".to_string(),
                     scope: Some(MemoryScopeKind::Hearth),
                     kind: Some(MemoryKind::Lesson),
@@ -6011,6 +6117,7 @@ mod tests {
         let invocation = fixture.task_invocation(
             "create-durable-task",
             TeamCreateTaskInput {
+                thread_id: None,
                 title: "Persistent follow-up".to_string(),
                 description: "Track this across runs".to_string(),
                 assignee_agent_id: "agent_1".to_string(),
@@ -6033,6 +6140,7 @@ mod tests {
         let conflicting = fixture.task_invocation(
             "create-durable-task",
             TeamCreateTaskInput {
+                thread_id: None,
                 title: "Different payload".to_string(),
                 description: String::new(),
                 assignee_agent_id: "agent_1".to_string(),
@@ -6050,6 +6158,7 @@ mod tests {
                 &fixture.task_invocation(
                     "list-durable-tasks",
                     TeamListTasksInput {
+                        thread_id: None,
                         statuses: None,
                         assignee_agent_id: None,
                         unassigned_only: false,
@@ -6063,6 +6172,7 @@ mod tests {
         let update_invocation = fixture.task_invocation(
             "claim-durable-task",
             TeamUpdateTaskInput {
+                thread_id: None,
                 task_id: task_id.clone(),
                 title: None,
                 description: None,
@@ -6125,6 +6235,7 @@ mod tests {
                 &fixture.task_invocation(
                     "ordinary-member-list",
                     TeamListTasksInput {
+                        thread_id: None,
                         statuses: None,
                         assignee_agent_id: None,
                         unassigned_only: false,
@@ -6150,6 +6261,7 @@ mod tests {
         let forbidden_invocation = fixture.task_invocation(
             "ordinary-member-create-forbidden",
             TeamCreateTaskInput {
+                thread_id: None,
                 title: "Ordinary member cannot define responsibility".to_string(),
                 assignee_agent_id: "agent_1".to_string(),
                 ..Default::default()
@@ -6231,6 +6343,7 @@ mod tests {
                 &fixture.task_invocation(
                     "membership-fenced-task-list",
                     TeamListTasksInput {
+                        thread_id: None,
                         statuses: None,
                         assignee_agent_id: None,
                         unassigned_only: false,
@@ -6657,6 +6770,7 @@ mod tests {
         let allowed_invocation = fixture.task_invocation(
             "capability-list-does-not-gate-builtin-cli",
             TeamCreateTaskInput {
+                thread_id: None,
                 title: "Must not exist".to_string(),
                 description: String::new(),
                 assignee_agent_id: "agent_1".to_string(),
@@ -6669,6 +6783,7 @@ mod tests {
         let later_invocation = fixture.task_invocation(
             "later-task-title",
             TeamUpdateTaskInput {
+                thread_id: None,
                 task_id: fixture.task_id.clone(),
                 title: Some("Latest title".to_string()),
                 description: None,
@@ -6728,6 +6843,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-search-current".to_string(),
                     input: MemorySearchInput {
+                        thread_id: None,
                         query: "immutable recovery".to_string(),
                         limit: Some(6),
                     },
@@ -6746,6 +6862,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-read-current".to_string(),
                     input: MemoryReadInput {
+                        thread_id: None,
                         memory_ids: vec![memory_id.clone()],
                     },
                 },
@@ -6791,6 +6908,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-read-changed".to_string(),
                     input: MemoryReadInput {
+                        thread_id: None,
                         memory_ids: vec![memory_id.clone()],
                     },
                 },
@@ -6826,6 +6944,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-read-inactive".to_string(),
                     input: MemoryReadInput {
+                        thread_id: None,
                         memory_ids: vec![memory_id.clone()],
                     },
                 },
@@ -6863,6 +6982,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-read-deleted".to_string(),
                     input: MemoryReadInput {
+                        thread_id: None,
                         memory_ids: vec![memory_id, Uuid::new_v4().to_string()],
                     },
                 },
@@ -6926,6 +7046,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "search-similar-relationships".to_string(),
                     input: MemorySearchInput {
+                        thread_id: None,
                         query: "test handoff".to_string(),
                         limit: Some(6),
                     },
@@ -6954,6 +7075,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "read-similar-relationships".to_string(),
                     input: MemoryReadInput {
+                        thread_id: None,
                         memory_ids: vec![agent_two_memory, agent_three_memory],
                     },
                 },
@@ -7149,6 +7271,7 @@ mod tests {
             .memory_view(
                 "view-hearth",
                 MemoryViewInput {
+                    thread_id: None,
                     scope: MemoryScopeKind::Hearth,
                     counterparty_agent_id: None,
                 },
@@ -7188,6 +7311,7 @@ mod tests {
             .memory_view(
                 "view-companion",
                 MemoryViewInput {
+                    thread_id: None,
                     scope: MemoryScopeKind::Companion,
                     counterparty_agent_id: None,
                 },
@@ -7202,6 +7326,7 @@ mod tests {
             .memory_view(
                 "view-relationship-agent-two",
                 MemoryViewInput {
+                    thread_id: None,
                     scope: MemoryScopeKind::Relationship,
                     counterparty_agent_id: Some("agent_2".to_string()),
                 },
@@ -7241,6 +7366,7 @@ mod tests {
             .memory_write(
                 "view-copy-target-revise",
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "revise".to_string(),
                     scope: None,
                     kind: None,
@@ -7257,6 +7383,7 @@ mod tests {
             .memory_write(
                 "view-mutual-target-revise",
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "revise".to_string(),
                     scope: None,
                     kind: None,
@@ -7304,6 +7431,7 @@ mod tests {
             .memory_view(
                 "view-away-counterparty",
                 MemoryViewInput {
+                    thread_id: None,
                     scope: MemoryScopeKind::Relationship,
                     counterparty_agent_id: Some("agent_3".to_string()),
                 },
@@ -7375,6 +7503,7 @@ mod tests {
             .memory_view(
                 "view-invalid-scope-state",
                 MemoryViewInput {
+                    thread_id: None,
                     scope: MemoryScopeKind::Hearth,
                     counterparty_agent_id: None,
                 },
@@ -7514,6 +7643,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-write-companion".to_string(),
                     input: MemoryWriteToolInput {
+                        thread_id: None,
                         action: "add".to_string(),
                         scope: Some(MemoryScopeKind::Companion),
                         kind: Some(MemoryKind::Lesson),
@@ -7547,6 +7677,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "memory-write-hearth".to_string(),
                     input: MemoryWriteToolInput {
+                        thread_id: None,
                         action: "add".to_string(),
                         scope: Some(MemoryScopeKind::Hearth),
                         kind: Some(MemoryKind::Agreement),
@@ -7611,6 +7742,7 @@ mod tests {
             .memory_write(
                 "directed-add",
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "add".to_string(),
                     scope: Some(MemoryScopeKind::Relationship),
                     kind: Some(MemoryKind::Agreement),
@@ -7643,6 +7775,7 @@ mod tests {
             .memory_write(
                 "directed-wrong-target-wrong-base",
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "revise".to_string(),
                     scope: None,
                     kind: None,
@@ -7666,6 +7799,7 @@ mod tests {
             .memory_write(
                 "directed-wrong-target-exact",
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "revise".to_string(),
                     scope: None,
                     kind: None,
@@ -7689,6 +7823,7 @@ mod tests {
             .memory_write(
                 "mutual-add",
                 MemoryWriteToolInput {
+                    thread_id: None,
                     action: "add".to_string(),
                     scope: Some(MemoryScopeKind::Relationship),
                     kind: Some(MemoryKind::Lesson),
@@ -7907,6 +8042,7 @@ mod tests {
                 .memory_write(
                     &format!("disabled-{scope:?}"),
                     MemoryWriteToolInput {
+                        thread_id: None,
                         action: "add".into(),
                         scope: Some(scope),
                         kind: Some(MemoryKind::Agreement),
@@ -7956,6 +8092,7 @@ mod tests {
             )
             .unwrap();
         let input = MemoryWriteToolInput {
+            thread_id: None,
             action: "add".to_string(),
             scope: Some(MemoryScopeKind::Relationship),
             kind: Some(MemoryKind::Agreement),
@@ -8004,6 +8141,7 @@ mod tests {
             assert_eq!(persisted.result.status, CommandResultStatus::Accepted);
         }
         let quota_input = MemoryWriteToolInput {
+            thread_id: None,
             action: "add".to_string(),
             scope: Some(MemoryScopeKind::Companion),
             kind: Some(MemoryKind::Lesson),
@@ -8040,6 +8178,7 @@ mod tests {
                             binding_credential: fixture.credential.binding_credential.clone(),
                             runtime_tool_call_id: call_id.to_string(),
                             input: MemoryWriteToolInput {
+                                thread_id: None,
                                 action: "add".to_string(),
                                 scope: Some(MemoryScopeKind::Hearth),
                                 kind: Some(MemoryKind::Lesson),
@@ -8203,6 +8342,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "hearth-revise-first".to_string(),
                     input: MemoryWriteToolInput {
+                        thread_id: None,
                         action: "revise".to_string(),
                         scope: None,
                         kind: None,
@@ -8235,6 +8375,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "search-pending-review".to_string(),
                     input: MemorySearchInput {
+                        thread_id: None,
                         query: "candidate-only-marker".to_string(),
                         limit: Some(6),
                     },
@@ -8250,6 +8391,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "read-review-id-as-memory".to_string(),
                     input: MemoryReadInput {
+                        thread_id: None,
                         memory_ids: vec![first_review_id.clone()],
                     },
                 },
@@ -8328,6 +8470,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "hearth-revise-before-forget".to_string(),
                     input: MemoryWriteToolInput {
+                        thread_id: None,
                         action: "revise".to_string(),
                         scope: None,
                         kind: None,
@@ -8358,6 +8501,7 @@ mod tests {
                     binding_credential: fixture.credential.binding_credential.clone(),
                     runtime_tool_call_id: "hearth-add-historical-body".to_string(),
                     input: MemoryWriteToolInput {
+                        thread_id: None,
                         action: "add".to_string(),
                         scope: Some(MemoryScopeKind::Hearth),
                         kind: Some(MemoryKind::Lesson),

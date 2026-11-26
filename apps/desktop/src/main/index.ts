@@ -116,6 +116,7 @@ import {
 } from './user-automation'
 import {
   isAttachmentId,
+  isAttachmentOwnerScope,
   openDesktopAttachmentTarget,
   parseDesktopAttachmentTarget,
   revealDesktopAttachmentTarget,
@@ -294,8 +295,11 @@ const allowedMethods = new Set<CoreMethod>([
   'navigation.findThread',
   'chats.list',
   'chats.open',
+  'chats.canPreviewFile',
   'chats.send',
   'chats.pendingInputs.edit',
+  'chats.setArchived',
+  'chats.delete',
   'chats.rename',
   'navigation.search',
   'navigation.searchMessages',
@@ -1245,6 +1249,13 @@ ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unkn
     }
   }
   try {
+    if (method === 'chats.send') {
+      const input=(params as {command?: {chatId?:string;draftId?:string;sourceAttachments?:{id:string;sourcePath:string}[]}})?.command
+      if (input?.sourceAttachments?.length) {
+        const owner=input.chatId ? 'chat:'+input.chatId : 'chat-draft:'+input.draftId
+        await localComposerAttachments.protectForSend(owner,input.sourceAttachments)
+      }
+    }
     if (method === 'thread.messages.send' && params && typeof params === 'object') {
       const input = params as { threadId?: unknown; sourceAttachments?: unknown }
       if (typeof input.threadId === 'string' && Array.isArray(input.sourceAttachments)) {
@@ -1973,7 +1984,7 @@ function requireAttachmentOwnerLocator(value: unknown): LocalAttachmentOwnerLoca
   const owner = input.owner
   const threadId = requireIpcString(input.threadId, 'Thread ID')
   const attachmentRefId = requireIpcString(input.attachmentRefId, '附件 ID')
-  if (!isThreadId(threadId) || !isAttachmentId(attachmentRefId)) {
+  if (!isAttachmentOwnerScope(owner, threadId, input.conversationId) || !isAttachmentId(attachmentRefId)) {
     throw new Error('Attachment Owner 无效。')
   }
   if (owner === 'composer') return { owner, threadId, attachmentRefId }

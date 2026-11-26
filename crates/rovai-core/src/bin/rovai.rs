@@ -159,6 +159,7 @@ async fn run() -> Result<u8> {
             rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
                 tasks_enabled: true,
                 memory_enabled: true,
+                private_chat: false,
             }
         } else {
             discover_capabilities().await?
@@ -170,21 +171,38 @@ async fn run() -> Result<u8> {
         return Ok(2);
     }
     if args.as_slice() == ["--help"] || args.is_empty() {
-        print!(
-            "{}",
-            root_help_text_with_memory(
-                !user_automation_available_in_current_process(),
-                tasks_enabled,
-                memory_enabled
-            )
-        );
+        let managed = !user_automation_available_in_current_process();
+        let mut help = root_help_text_with_memory(managed, tasks_enabled, memory_enabled);
+        if managed && !capabilities.private_chat {
+            help = help
+                .replace(
+                    "thread list|search|read|runs|create",
+                    "thread list|search|read|runs",
+                )
+                .replace("  rovai chat history\n", "");
+        }
+        print!("{help}");
         return Ok(0);
     }
     if args.as_slice() == ["task", "--help"] {
         print!("{}", task_family_help_text());
         return Ok(0);
     }
-    if let Some(description) = operation_help(&args, tasks_enabled, memory_enabled)? {
+    if let Some(identity) = operation_help_identity(&args)
+        && !user_automation_available_in_current_process()
+        && ((identity.operation == "single_chat.history" && capabilities.private_chat)
+            || (matches!(identity.operation, "thread.create" | "chat.history")
+                && !capabilities.private_chat))
+    {
+        print_invalid_input(None);
+        return Ok(2);
+    }
+    if let Some(description) = operation_help_in_scope(
+        &args,
+        tasks_enabled,
+        memory_enabled,
+        capabilities.private_chat || user_automation_available_in_current_process(),
+    )? {
         print_operation_help(&description);
         return Ok(0);
     }
@@ -522,18 +540,27 @@ fn envelope_exit_code(
     }
 }
 
-fn operation_help(
+fn operation_help_in_scope(
     args: &[String],
     tasks_enabled: bool,
     memory_enabled: bool,
+    private_chat: bool,
 ) -> Result<Option<BuiltinToolDescription>> {
     operation_help_identity(args)
         .map(|identity| {
-            rovai_core::builtin_tool_transport::builtin_tool_description_with_memory(
-                identity.operation,
-                tasks_enabled,
-                memory_enabled,
-            )
+            let mut description =
+                rovai_core::builtin_tool_transport::builtin_tool_description_with_memory(
+                    identity.operation,
+                    tasks_enabled,
+                    memory_enabled,
+                )?;
+            if identity.operation == "thread.message.send" && !private_chat {
+                description.arguments.retain(|arg| arg.field != "threadId");
+                if let Some(properties) = description.input_schema["properties"].as_object_mut() {
+                    properties.remove("threadId");
+                }
+            }
+            Ok(description)
         })
         .transpose()
 }
@@ -611,6 +638,7 @@ async fn discover_capabilities()
     Ok(BuiltinToolCapabilities {
         tasks_enabled: context.as_ref().is_some_and(|c| c.tasks_enabled),
         memory_enabled: context.as_ref().is_some_and(|c| c.memory_enabled),
+        private_chat: context.as_ref().is_some_and(|c| c.private_chat),
     })
 }
 
@@ -1696,7 +1724,7 @@ fn root_help_text_with_memory(
 }
 
 fn root_help_text(managed_runtime: bool, tasks_enabled: bool) -> String {
-    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs.\n".to_string();
+    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs|create\n  rovai history search\n  rovai chat history\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs.\n".to_string();
     if !tasks_enabled {
         text = text.replace("  rovai task create|get|list|update\n", "");
     }
@@ -2313,6 +2341,8 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
             "rovai thread read --reply-chain '<message-id>' --limit 20",
         ],
         "history.search" => &["rovai history search --query 'amount'"],
+        "thread.create" => &["rovai thread create --help"],
+        "chat.history" => &["rovai chat history", "rovai chat history --limit 20"],
         "single_chat.history" => &[
             "rovai single-chat history",
             "rovai single-chat history --before-sequence 12 --limit 20",
@@ -2377,6 +2407,14 @@ mod tests {
                 .unwrap(),
             large.trim_end()
         );
+    }
+
+    fn operation_help(
+        args: &[String],
+        tasks_enabled: bool,
+        memory_enabled: bool,
+    ) -> Result<Option<BuiltinToolDescription>> {
+        operation_help_in_scope(args, tasks_enabled, memory_enabled, false)
     }
 
     #[test]
@@ -3142,6 +3180,15 @@ mod tests {
         let description = operation_help(&["send".to_string(), "--help".to_string()], false, true)
             .unwrap()
             .unwrap();
+        let private = operation_help_in_scope(&["send".into(), "--help".into()], false, true, true)
+            .unwrap()
+            .unwrap();
+        assert!(
+            private
+                .arguments
+                .iter()
+                .any(|argument| argument.flag == "--thread-id")
+        );
         assert!(description.arguments.iter().all(|argument| {
             argument.field != "threadId"
                 && argument.flag != "--thread-id"

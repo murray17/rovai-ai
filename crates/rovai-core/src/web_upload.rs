@@ -29,6 +29,7 @@ pub enum UploadTarget {
     #[default]
     Camp,
     PastedText,
+    Chat,
     SingleChat {
         #[serde(rename = "conversationId")]
         conversation_id: String,
@@ -47,7 +48,7 @@ impl UploadTarget {
         matches!(self, Self::PastedText)
     }
     pub fn is_public(&self) -> bool {
-        matches!(self, Self::Camp | Self::PastedText)
+        matches!(self, Self::Camp | Self::PastedText | Self::Chat)
     }
     fn is_camp(&self) -> bool {
         matches!(self, Self::Camp)
@@ -61,7 +62,7 @@ pub fn snapshot(
     intent: &UploadIntent,
 ) -> Result<serde_json::Value> {
     match &intent.target {
-        UploadTarget::Camp | UploadTarget::PastedText => {
+        UploadTarget::Camp | UploadTarget::PastedText | UploadTarget::Chat => {
             let recorded = reconcile(database, client, intent.clone())?
                 .ok_or_else(|| anyhow::anyhow!("upload receipt is missing"))?;
             let mut source = recorded.result.payload["source"].clone();
@@ -105,7 +106,19 @@ fn envelope(client: &DraftClient, intent: UploadIntent) -> Result<CommandEnvelop
         !client.is_desktop(),
         "upload requires a verified Web editor"
     );
-    crate::camp_id::ThreadId::parse(&intent.camp_id)?;
+    if matches!(intent.target, UploadTarget::Chat) {
+        anyhow::ensure!(
+            intent.camp_id.len() <= 540
+                && (intent
+                    .camp_id
+                    .strip_prefix("chat:")
+                    .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+                    || intent.camp_id.starts_with("chat-draft:")),
+            "chat.invalid_draft"
+        );
+    } else {
+        crate::camp_id::ThreadId::parse(&intent.camp_id)?;
+    }
     uuid::Uuid::parse_str(&intent.command_id)?;
     ensure!(
         intent.sha256.len() == 64 && intent.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()),
@@ -116,7 +129,7 @@ fn envelope(client: &DraftClient, intent: UploadIntent) -> Result<CommandEnvelop
         actor: ActorRef::User {
             user_id: crate::current_user::CURRENT_USER_ID.into(),
         },
-        camp_id: Some(intent.camp_id.clone()),
+        camp_id: (!matches!(intent.target, UploadTarget::Chat)).then(|| intent.camp_id.clone()),
         expected_versions: Vec::new(),
         execution_epoch: None,
         payload: BindUpload {
@@ -134,6 +147,67 @@ pub fn reconcile(
     DomainCommandGateway.replay_if_recorded(database, &envelope(client, intent)?)
 }
 
+fn chat_upload_source(
+    db: &Database,
+    client: &DraftClient,
+    owner: &str,
+    attachment_id: &str,
+) -> Result<Option<LocalAttachmentSourceRef>> {
+    let receipt:Option<(String,String)>=db.connection().query_row(
+        "SELECT json_extract(result_payload_json,'$.chatComposer'),json_extract(result_payload_json,'$.source') FROM event_log
+         WHERE event_type='command.result' AND command_type='camp.source_attachment.upload.bind' AND command_id=?1
+           AND command_client_id=?2 AND actor_id=?3 AND result_code='attachment.upload_bound' AND result_status='applied'
+           AND json_type(result_payload_json,'$.chatComposer')='text'",
+        params![attachment_id,client.id(),crate::current_user::CURRENT_USER_ID],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+    if let Some((origin, raw)) = receipt {
+        // A second window may rotate a first-send draft while the user is editing it.
+        let draft_agent = |key: &str| {
+            key.strip_prefix("chat-draft:")
+                .and_then(|s| s.rsplit_once(':'))
+                .map(|(agent, _)| agent.to_owned())
+        };
+        if origin == owner
+            || draft_agent(owner).is_some_and(|a| draft_agent(&origin).as_ref() == Some(&a))
+        {
+            return Ok(Some(serde_json::from_str(&raw)?));
+        }
+    }
+    if let Some(chat) = owner.strip_prefix("chat:") {
+        let restored:Option<String>=db.connection().query_row("SELECT a.value FROM single_chat_pending_input p JOIN chat_topic t ON t.conversation_id=p.conversation_id, json_each(p.source_attachments_json) a
+            WHERE p.conversation_id=?1 AND t.owner_user_id=?2 AND t.deletion_operation_id IS NULL AND p.state='cancelled' AND json_extract(a.value,'$.id')=?3 LIMIT 1",
+            params![chat,crate::current_user::CURRENT_USER_ID,attachment_id],|r|r.get(0)).optional()?;
+        return restored
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()
+            .map_err(Into::into);
+    }
+    Ok(None)
+}
+
+pub(crate) fn authorize_chat_source(
+    db: &Database,
+    client: &DraftClient,
+    command: &crate::chat::SendInput,
+    source: &LocalAttachmentSourceRef,
+) -> Result<()> {
+    let owner = command
+        .chat_id
+        .as_ref()
+        .map(|id| format!("chat:{id}"))
+        .or_else(|| {
+            command
+                .draft_id
+                .as_ref()
+                .map(|id| format!("chat-draft:{id}"))
+        })
+        .ok_or_else(|| anyhow::anyhow!("chat.invalid_target"))?;
+    ensure!(
+        chat_upload_source(db, client, &owner, &source.id)?.as_ref() == Some(source),
+        "chat.attachment_not_prepared"
+    );
+    Ok(())
+}
+
 /// The upload receipt owns a Web Composer source after public drafts moved to
 /// the client. A path supplied by the browser is never an authorization source.
 pub fn load_composer_source(
@@ -146,8 +220,11 @@ pub fn load_composer_source(
         !client.is_desktop(),
         "upload requires a verified Web editor"
     );
-    crate::camp_id::ThreadId::parse(camp_id)?;
     uuid::Uuid::parse_str(attachment_id)?;
+    if camp_id.starts_with("chat:") || camp_id.starts_with("chat-draft:") {
+        return chat_upload_source(database, client, camp_id, attachment_id);
+    }
+    crate::camp_id::ThreadId::parse(camp_id)?;
     let source: Option<String> = database
         .connection()
         .query_row(
@@ -243,6 +320,11 @@ pub fn bind(
                     "camp.not_found"
                 );
             }
+            UploadTarget::Chat => {
+                if let Some(chat)=intent.camp_id.strip_prefix("chat:") {
+                    ensure!(transaction.query_row("SELECT EXISTS(SELECT 1 FROM chat_topic WHERE conversation_id=?1 AND owner_user_id=?2 AND archived_at IS NULL AND deletion_operation_id IS NULL)",params![chat,crate::current_user::CURRENT_USER_ID],|r|r.get::<_,bool>(0))?,"chat.unavailable");
+                }
+            }
             UploadTarget::SingleChat { conversation_id } => {
                 ensure!(transaction.query_row("SELECT EXISTS(SELECT 1 FROM conversation WHERE id=?1 AND camp_id=?2 AND kind='single_chat' AND ended_at IS NULL)", rusqlite::params![conversation_id,intent.camp_id], |r| r.get::<_, bool>(0))?, "single_chat.camp_mismatch");
                 crate::single_chat::SingleChatService::for_client(client.clone()).commit_source_attachment_in_transaction(transaction, conversation_id, intent.expected_revision, source.clone())?;
@@ -253,7 +335,7 @@ pub fn bind(
             transaction.execute("INSERT INTO web_pasted_text_attachment(attachment_id,camp_id,client_id,source_path) VALUES(?1,?2,?3,?4)", params![source.id,intent.camp_id,client.id(),source.source_path])?;
         }
         let payload = if intent.target.is_public() {
-            json!({"attachmentRefId":intent.command_id, "source":source})
+            if matches!(intent.target,UploadTarget::Chat) {json!({"attachmentRefId":intent.command_id,"chatComposer":intent.camp_id,"source":source})} else {json!({"attachmentRefId":intent.command_id, "source":source})}
         } else {
             json!({"attachmentRefId":intent.command_id, "draftId":client.draft_id(&intent.camp_id), "revision":intent.expected_revision+1})
         };

@@ -1,6 +1,17 @@
+#[path = "chat_lifecycle.rs"]
+mod lifecycle;
+pub(crate) use lifecycle::{
+    DeleteChat, SetArchived, StopChat, finish_deletions, request_delete, set_archived, stop,
+};
+#[path = "chat_steer.rs"]
+mod steer;
+pub(crate) use steer::{accept_steer, ready_steers, return_steer_to_queue, settle_steers};
 #[path = "chat_input.rs"]
 mod input;
-pub(crate) use input::{EditPending, SendInput, edit_pending, publish_ready, send};
+pub(crate) use input::{
+    ChatSkill, EditPending, SendInput, bind_send_identity, edit_pending, public_input_result,
+    publish_ready, send,
+};
 
 use std::collections::BTreeMap;
 
@@ -17,6 +28,183 @@ use crate::{
     db::Database,
 };
 use serde_json::json;
+
+/// Resolve a live private source independently of an explicitly named public destination.
+pub(crate) fn run_conversation(
+    c: &rusqlite::Connection,
+    run: &str,
+    epoch: i64,
+) -> Result<Option<String>> {
+    Ok(c.query_row("SELECT t.conversation_id FROM agent_run r JOIN chat_topic t ON t.conversation_id=r.conversation_id JOIN conversation v ON v.id=t.conversation_id JOIN agent_profile p ON p.id=v.agent_id
+        WHERE r.id=?1 AND r.execution_epoch=?2 AND r.invocation_kind='chat' AND r.operation_policy='chat_v1' AND r.status IN ('running','waiting') AND r.execution_lease_owner IS NOT NULL AND r.cancel_requested_at IS NULL
+          AND t.owner_user_id=?3 AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL AND p.profile_status='present'",params![run,epoch,CURRENT_USER_ID],|r|r.get(0)).optional()?)
+}
+
+pub(crate) fn authorize_destination(
+    c: &rusqlite::Connection,
+    run: &str,
+    epoch: i64,
+    agent: &str,
+    target: &str,
+    write: bool,
+) -> Result<bool> {
+    Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM chat_topic t JOIN agent_run r ON r.conversation_id=t.conversation_id JOIN conversation v ON v.id=t.conversation_id
+        JOIN agent_profile a ON a.id=v.agent_id JOIN camp dest ON dest.id=?4
+        WHERE r.id=?1 AND r.execution_epoch=?2 AND v.agent_id=?3 AND a.profile_status='present'
+          AND r.invocation_kind='chat' AND r.operation_policy='chat_v1' AND r.status IN ('running','waiting') AND r.execution_lease_owner IS NOT NULL AND r.cancel_requested_at IS NULL
+          AND t.owner_user_id=?5 AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL AND dest.deletion_operation_id IS NULL AND dest.archived_at IS NULL
+          AND (NOT ?6 OR EXISTS(SELECT 1 FROM camp_member m WHERE m.camp_id=dest.id AND m.agent_id=v.agent_id AND m.version>0 AND m.status='active' AND m.leave_requested_at IS NULL)))",params![run,epoch,agent,target,CURRENT_USER_ID,write],|r|r.get(0))?)
+}
+
+/// Keep the authenticated Run as the source; only these operation families expose a public destination.
+pub(crate) fn directory_target(
+    c: &rusqlite::Connection,
+    run: &crate::team_tool::AuthenticatedTeamToolRun,
+    target: Option<&str>,
+    write: bool,
+) -> Result<crate::team_tool::AuthenticatedTeamToolRun> {
+    let mut scoped = run.clone();
+    if let Some(target) = target {
+        ensure!(
+            (run.camp_id == target && !run.camp_id.is_empty())
+                || (run.camp_id.is_empty()
+                    && authorize_destination(
+                        c,
+                        &run.agent_run_id,
+                        run.execution_epoch,
+                        &run.agent_id,
+                        target,
+                        write
+                    )?),
+            "chat.thread_unavailable"
+        );
+        scoped.camp_id = target.to_owned();
+    } else if write && run.camp_id.is_empty() {
+        anyhow::bail!("chat.thread_id_required");
+    }
+    Ok(scoped)
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateThread {
+    pub title: String,
+    pub member_agent_ids: Vec<String>,
+    pub default_lead_agent_id: String,
+}
+impl sealed::Sealed for CreateThread {}
+impl DomainCommand for CreateThread {
+    const TYPE: &'static str = "chat.thread_create";
+    fn matches_replay(&self, result: &serde_json::Value) -> Result<bool> {
+        Ok(result["inputDigest"]
+            == crate::command::canonical_json_digest(&serde_json::to_value(self)?)?)
+    }
+}
+
+pub(crate) fn create_thread(
+    db: &mut Database,
+    run: &crate::team_tool::AuthenticatedTeamToolRun,
+    request_id: String,
+    input: CreateThread,
+    root: &std::path::Path,
+) -> Result<CommandExecution> {
+    use crate::collaboration::{
+        CreateThreadCommand, ProjectBindingKind, ThreadActivationState, ThreadCollaborationMode,
+        create_camp_in_tx,
+    };
+    ensure!(
+        run.camp_id.is_empty()
+            && run_conversation(db.connection(), &run.agent_run_id, run.execution_epoch)?.is_some(),
+        "chat.private_run_required"
+    );
+    let e = CommandEnvelope {
+        command_id: format!("chat-thread:{}:{request_id}", run.agent_run_id),
+        actor: ActorRef::Agent {
+            agent_id: run.agent_id.clone(),
+            source_agent_run_id: run.agent_run_id.clone(),
+        },
+        execution_epoch: Some(run.execution_epoch),
+        camp_id: None,
+        expected_versions: Vec::new(),
+        payload: input,
+    };
+    DomainCommandGateway.execute(db, &e, |tx| {
+        ensure!(
+            run_conversation(tx, &run.agent_run_id, run.execution_epoch)?.is_some()
+                && crate::member_studio::has_direct_user_input(tx, run)?,
+            "chat.user_required"
+        );
+        let command = CreateThreadCommand {
+            team: None,
+            name: Some(e.payload.title.clone()),
+            project_binding_kind: ProjectBindingKind::QuickChat,
+            project_path: root.to_string_lossy().into_owned(),
+            member_agent_ids: e.payload.member_agent_ids.clone(),
+            default_lead_agent_id: e.payload.default_lead_agent_id.clone(),
+            collaboration_mode: ThreadCollaborationMode::Peer,
+            activation_state: ThreadActivationState::Active,
+        };
+        let mut result = create_camp_in_tx(
+            tx,
+            &ActorRef::User {
+                user_id: CURRENT_USER_ID.into(),
+            },
+            None,
+            &command,
+            &crate::camp_id::ThreadId::new(),
+            &[],
+        )?;
+        result.payload["inputDigest"] = json!(crate::command::canonical_json_digest(
+            &serde_json::to_value(&e.payload)?
+        )?);
+        Ok(result)
+    })
+}
+
+pub const HISTORY_TOOL: &str = "chat.history";
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HistoryInput {
+    pub cursor: Option<String>,
+    pub limit: Option<usize>,
+}
+
+pub(crate) fn history(
+    database: &Database,
+    run_id: &str,
+    epoch: i64,
+    input: HistoryInput,
+) -> Result<serde_json::Value> {
+    use anyhow::Context;
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let (chat,boundary):(String,i64)=database.connection().query_row(
+        "SELECT c.id,m.sequence FROM agent_run r JOIN conversation c ON c.id=r.conversation_id AND c.id=r.destination_conversation_id
+         JOIN chat_topic t ON t.conversation_id=c.id JOIN conversation_message m ON m.id=r.trigger_conversation_message_id AND m.conversation_id=c.id AND m.author_type='user'
+         WHERE r.id=?1 AND r.execution_epoch=?2 AND r.invocation_kind='chat' AND r.operation_policy='chat_v1' AND r.status='running' AND r.cancel_requested_at IS NULL AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL AND c.kind='chat'",
+        params![run_id,epoch],|r|Ok((r.get(0)?,r.get(1)?))).optional()?.context("chat.history_unavailable")?;
+    let limit = input.limit.unwrap_or(20);
+    ensure!((1..=100).contains(&limit), "chat.invalid_limit");
+    let before = if let Some(cursor) = input.cursor {
+        ensure!(cursor.len() < 256, "chat.invalid_cursor");
+        let (owner, upper, before): (String, i64, i64) =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(cursor)?)?;
+        ensure!(
+            owner == chat && upper == boundary && (1..=boundary).contains(&before),
+            "chat.invalid_cursor"
+        );
+        Some(before)
+    } else {
+        None
+    };
+    let page = crate::single_chat::SingleChatService::history_page(
+        database, &chat, boundary, before, limit,
+    )?;
+    let next_cursor = page
+        .next_before_sequence
+        .map(|position| URL_SAFE_NO_PAD.encode(json!([chat, boundary, position]).to_string()));
+    Ok(json!({"messages":page.messages,"nextCursor":next_cursor}))
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -304,12 +492,31 @@ pub struct PendingInput {
     pub body: String,
     pub revision: i64,
     pub converted_from_steer: bool,
+    pub attachment_names: Vec<String>,
+    pub quote_preview: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Supplement {
+    pub input_id: String,
+    pub run_id: String,
+    pub evidence_sequence: i64,
+    pub message_id: Option<String>,
+    pub body: String,
+    pub quotes: Vec<crate::message_quote::MessageQuoteSnapshot>,
+    pub attachments: Vec<crate::local_attachment_source::LocalAttachmentSourceView>,
+    pub unconfirmed: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenChat {
+    pub approvals: Vec<crate::read_model::ApprovalView>,
+    pub native_interactions: Vec<crate::native_interaction::NativeInteractionView>,
     pub pending_inputs: Vec<PendingInput>,
+    pub supplements: Vec<Supplement>,
+    pub active_input: Option<crate::steer::ActiveInputAvailability>,
     pub chat: ChatHeader,
     pub messages: Vec<crate::single_chat::SingleChatMessageView>,
     pub runs: Vec<RunSummary>,
@@ -369,15 +576,22 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
         .first()
         .and_then(|m| has_more.then_some(m.sequence));
     let ids = serde_json::to_string(&messages.iter().map(|m| &m.id).collect::<Vec<_>>())?;
+    let message_runs = serde_json::to_string(
+        &messages
+            .iter()
+            .filter_map(|m| m.agent_run_id.as_ref())
+            .collect::<Vec<_>>(),
+    )?;
     let runs = {
         let mut stmt=tx.prepare(
             "SELECT id,trigger_conversation_message_id,final_conversation_message_id,status,
                     execution_epoch,execution_evidence_change_sequence,version,created_at,started_at,ended_at,cancel_requested_at,last_error_code FROM agent_run
              WHERE conversation_id=?1 AND (trigger_conversation_message_id IN (SELECT value FROM json_each(?2))
                OR final_conversation_message_id IN (SELECT value FROM json_each(?2))
+               OR id IN (SELECT value FROM json_each(?3))
                OR status IN ('queued','running','waiting')) ORDER BY created_at,id",
         )?;
-        stmt.query_map(params![chat.chat_id, ids], |r| {
+        stmt.query_map(params![chat.chat_id, ids, message_runs], |r| {
             Ok(RunSummary {
                 run_id: r.get(0)?,
                 trigger_message_id: r.get(1)?,
@@ -396,7 +610,7 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let pending_inputs = {
-        let mut stmt = tx.prepare("SELECT id,body,revision,target_run_id IS NOT NULL FROM single_chat_pending_input
+        let mut stmt = tx.prepare("SELECT id,body,revision,target_run_id IS NOT NULL,(SELECT json_group_array(json_extract(value,'$.displayName')) FROM json_each(source_attachments_json)),json_extract(quotes_json,'$[0].text') FROM single_chat_pending_input
             WHERE conversation_id=?1 AND requested_mode='start' AND state IN ('queued','needs_repair') ORDER BY enqueue_sequence")?;
         stmt.query_map([&chat.chat_id], |row| {
             Ok(PendingInput {
@@ -404,12 +618,53 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
                 body: row.get(1)?,
                 revision: row.get(2)?,
                 converted_from_steer: row.get(3)?,
+                attachment_names: serde_json::from_str(&row.get::<_, String>(4)?)
+                    .unwrap_or_default(),
+                quote_preview: row.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
+    let page_run_ids = serde_json::to_string(
+        &runs
+            .iter()
+            .map(|r: &RunSummary| &r.run_id)
+            .collect::<Vec<_>>(),
+    )?;
+    let supplements = {
+        let mut query=tx.prepare("SELECT p.id,p.target_run_id,e.sequence,p.published_conversation_message_id,p.body,p.quotes_json,p.source_attachments_json,COALESCE(i.status='delivery_unknown',0)
+            FROM single_chat_pending_input p JOIN agent_run_execution_evidence e ON e.id='steer-input:'||p.id AND e.agent_run_id=p.target_run_id
+            LEFT JOIN context_manifest m ON m.source_chat_input_id=p.id LEFT JOIN runtime_input_delivery i ON i.context_manifest_id=m.id AND i.execution_epoch=p.target_execution_epoch
+            WHERE p.conversation_id=?1 AND p.target_run_id IN (SELECT value FROM json_each(?2)) AND p.requested_mode='steer' AND p.state IN ('queued','published') ORDER BY e.sequence")?;
+        let mut rows = query.query(params![chat.chat_id, page_run_ids])?;
+        let mut items = Vec::new();
+        while let Some(r) = rows.next()? {
+            items.push(Supplement {
+                input_id: r.get(0)?,
+                run_id: r.get(1)?,
+                evidence_sequence: r.get(2)?,
+                message_id: r.get(3)?,
+                body: r.get(4)?,
+                quotes: crate::message_quote::parse_quotes(&r.get::<_, String>(5)?)?,
+                attachments: source_attachment_views(&r.get::<_, String>(6)?)?,
+                unconfirmed: r.get(7)?,
+            });
+        }
+        items
+    };
+    let active_input = runs
+        .iter()
+        .find(|r| matches!(r.status.as_str(), "queued" | "running" | "waiting"))
+        .map(|r| crate::steer::active_input_availability(&tx, &r.run_id, r.execution_epoch))
+        .transpose()?;
+    let approvals =
+        crate::read_model::load_conversation_approvals(&tx, None, Some(&chat.chat_id), true, None)?;
     tx.commit()?;
     Ok(OpenChat {
+        approvals,
+        native_interactions: Vec::new(),
+        supplements,
+        active_input,
         pending_inputs,
         chat,
         messages,

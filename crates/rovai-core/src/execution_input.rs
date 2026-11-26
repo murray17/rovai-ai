@@ -15,17 +15,35 @@ pub(crate) fn record(tx: &Transaction<'_>, delivery: &str) -> Result<()> {
     let (run, epoch, message, created): (String, i64, String, String) = tx.query_row(
         "SELECT claimed_agent_run_id,target_execution_epoch,message_id,updated_at FROM camp_message_delivery WHERE id=?1 AND requested_mode='steer' AND status='claimed'",
         [delivery], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+    record_marker(
+        tx,
+        delivery,
+        &run,
+        epoch,
+        &created,
+        json!({"deliveryId":delivery,"messageId":message}),
+    )?;
+    Ok(())
+}
+
+pub(crate) fn record_marker(
+    tx: &Transaction<'_>,
+    delivery: &str,
+    run: &str,
+    epoch: i64,
+    created: &str,
+    payload: serde_json::Value,
+) -> Result<i64> {
     let key = format!("steer-input:{delivery}");
-    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_run_execution_evidence WHERE agent_run_id=?1 AND source_event_key=?2)", params![run,key], |r|r.get(0))?;
-    if exists {
-        return Ok(());
+    if let Some(sequence) = tx.query_row("SELECT sequence FROM agent_run_execution_evidence WHERE agent_run_id=?1 AND source_event_key=?2", params![run,key], |r|r.get(0)).optional()? {
+        return Ok(sequence);
     }
-    let sequence: i64 = tx.query_row("SELECT COALESCE(MAX(sequence),0)+1 FROM agent_run_execution_evidence WHERE agent_run_id=?1", [&run], |r|r.get(0))?;
-    let change = allocate_change_sequence(tx, &run)?;
-    let payload = json!({"deliveryId":delivery,"messageId":message}).to_string();
+    let sequence: i64 = tx.query_row("SELECT COALESCE(MAX(sequence),0)+1 FROM agent_run_execution_evidence WHERE agent_run_id=?1", [run], |r|r.get(0))?;
+    let change = allocate_change_sequence(tx, run)?;
+    let payload = payload.to_string();
     tx.execute("INSERT INTO agent_run_execution_evidence(id,agent_run_id,execution_epoch,sequence,event_type,kind,phase,source_event_key,payload_preview_json,content_byte_count,is_truncated,occurred_at,revision,change_sequence,updated_at) VALUES(?1,?2,?3,?4,?5,'step','updated',?6,?7,?8,0,?9,1,?10,?9)",
         params![key,run,epoch,sequence,EVENT,key,payload,payload.len() as i64,created,change])?;
-    Ok(())
+    Ok(sequence)
 }
 
 /// Advance the normal execution change cursor without moving the input marker.

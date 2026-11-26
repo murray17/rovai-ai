@@ -130,7 +130,7 @@ pub(crate) fn project_builtin_result(operation: &str, result: &mut Value) -> Res
     let messages = match operation {
         "thread.read" => Some("items"),
         "thread.search" | "history.search" => Some("results"),
-        "single_chat.history" => Some("messages"),
+        "single_chat.history" | "chat.history" => Some("messages"),
         _ => None,
     };
     if let Some(messages) = messages

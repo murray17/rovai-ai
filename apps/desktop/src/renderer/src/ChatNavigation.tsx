@@ -22,6 +22,7 @@ export interface ChatNavigationProps extends ChatPickerProps {
   projects(): void
   open(id: string | null): void
   mark(item: ChatReplyPosition, unread: boolean): void
+  archive?(item: ChatListItem): Promise<void>
   rename(item: ChatListItem, title: string): Promise<void>
 }
 
@@ -73,6 +74,7 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => navigation.togglePin(item.chatId)}>{uiAttribute(navigation.pinnedIds.includes(item.chatId) ? '取消置顶' : '置顶')}</DropdownMenu.Item>
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => mark(item, !unread)}>{uiAttribute(unread ? '标为已读' : '标为未读')}</DropdownMenu.Item>
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => setEditing(item)}>{uiAttribute('重命名')}</DropdownMenu.Item>
+          {navigation.archive && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => void navigation.archive?.(item)}>{uiAttribute('归档')}</DropdownMenu.Item>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root>
     </div>

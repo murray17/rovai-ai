@@ -3506,6 +3506,7 @@ export function BusinessApp({
 
   const openSearchResult = (row: NavigationSearchRow): void => {
     setMobileConversationDrawerOpen(false)
+    if (row.chat) {void desktopNavigation.push({kind:'chat',chatId:row.chat.chatId}); return}
     const { thread, kind } = row.target
     if (kind === 'mission' && !missionList.missions.some(mission => mission.threadId === thread.id)) {
       void missionList.refresh()
@@ -4778,7 +4779,7 @@ export function BusinessApp({
     if (!manualUnread && !previous?.manualUnread && (previous?.readThroughReplySequence ?? 0) >= sequence) return
     void uiPreferences.navigationPreferences.setChatReadState(chatId, {
       manualUnread, readThroughReplySequence: manualUnread ? previous?.readThroughReplySequence ?? 0 : sequence
-    }).catch(error => notifyError(errorMessage(error)))
+    }).catch(error => showOperationError('preferences.save', error))
   }
   const renderNavigation = (drawer = false): React.JSX.Element => <ThreadNavigation
     chatNavigation={{list: chatList, pinnedIds:chatPinnedIds, togglePin:id => {void toggleNavigationPin('chat',id)}, profiles: agents, loadProfiles: loadAgents,
@@ -4786,6 +4787,13 @@ export function BusinessApp({
       projects: () => { setMobileConversationDrawerOpen(false); void desktopNavigation.push(selectedThreadId ? {kind:'camp',threadId:selectedThreadId} : {kind:'quick_chat'}) },
       open: chatId => { setMobileConversationDrawerOpen(false); void desktopNavigation.push({kind: 'chat',chatId}) },
       mark: (item, unread) => markChat(item.chatId, item.lastReplySequence, unread),
+      archive: async item => {
+        try {
+          const result=await client.request<StoredCommandResult>('chats.setArchived',{commandId:newCommandId(),command:{chatId:item.chatId,archived:true}})
+          if(result.status==='rejected') throw new OperationFailure(normalizeFailure(result))
+          if(activeChatId===item.chatId) await desktopNavigation.push({kind:'chat',chatId:null})
+        } catch(error) {showOperationError('navigation.action',error)}
+      },
       rename: async (item, title) => {
         const result = await client.request<StoredCommandResult>('chats.rename', {
           commandId: newCommandId(),
@@ -4890,11 +4898,11 @@ export function BusinessApp({
   return (
     <ThreadInterruptionAttentionContext.Provider value={interruptionAttention}>
     <MobileLayoutProvider value={mobile}>
-    <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
+    <FilePreviewProvider api={environment.files} threadId={view === 'chat' ? activeChatId : view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
       projectFilesEnabled={!!activeProjectPath}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
     <ConversationExportDialog state={conversationExport.state} reader={conversationExport.reader} />
-    <ThreadReferencePreviewProvider threadId={view === 'camp' ? activeThreadId : null} onOpen={async reference => {
+    <ThreadReferencePreviewProvider threadId={view === 'camp' ? activeThreadId : view === 'chat' ? '' : null} onOpen={async reference => {
       if (reference.kind === 'thread') await activateThread(reference.id, { reconcileDefaultLead: false })
       else {
         const mission = await client.request<MissionRecord | null>('missions.get', { missionId: reference.id })
@@ -4911,7 +4919,7 @@ export function BusinessApp({
         const id=page.items[0]?.chatId ?? null
         if (source) attachSourceThreadToDraft(agentId,id,source)
         await desktopNavigation.push(id ? {kind:'chat',chatId:id} : {kind:'chat',chatId:null,draftAgentId:agentId})
-      } catch (failure) { notifyError(failure instanceof Error ? failure.message : String(failure)); throw failure }
+      } catch (failure) { showOperationError('navigation.action', failure); throw failure }
     }}>
     <NavigationShell platform={client.platform} iconRail settings={view === 'settings' || view === 'memory'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={(view === 'camp' && !missionDrawer) || view === 'chat' ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!startupGateVisible && !shuttingDown && forkToast && <AppToast toast={forkToast}

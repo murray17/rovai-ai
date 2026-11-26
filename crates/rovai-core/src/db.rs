@@ -6,6 +6,8 @@ mod automation_naming;
 mod channel_native;
 #[path = "db_chat_inputs.rs"]
 mod chat_inputs;
+#[path = "db_chat_runtime.rs"]
+mod chat_runtime;
 #[path = "db_chat_topics.rs"]
 mod chat_topics;
 #[path = "db_claim_context.rs"]
@@ -534,7 +536,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 184;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 185;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1044,6 +1046,7 @@ struct CurrentMigrationState {
     v232: bool,
     v233: bool,
     v234: bool,
+    v235: bool,
 }
 
 impl CurrentMigrationState {
@@ -1065,6 +1068,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v235 {
+            let mut previous = *self;
+            previous.v235 = false;
+            return schema == 185 && previous.admits(contract, 184, classifier);
+        }
         if self.v234 {
             let mut previous = *self;
             previous.v234 = false;
@@ -3900,6 +3908,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 185
+                || chat_runtime::schema_matches(connection)?)
             && (marker.projection_schema_version < 184 || chat_inputs::schema_matches(connection)?)
             && (marker.projection_schema_version < 183 || chat_topics::schema_matches(connection)?)
             && (marker.projection_schema_version < 181
@@ -6342,7 +6352,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=231),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=232),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=233),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=234)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=234),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=235)
         "#,
         [],
         |row| {
@@ -6512,6 +6523,7 @@ fn load_current_migration_state(
                 v232: row.get(162)?,
                 v233: row.get(163)?,
                 v234: row.get(164)?,
+                v235: row.get(165)?,
             })
         },
     )
@@ -7072,6 +7084,18 @@ fn register_runtime_camp_files_functions(
         .to_str()
         .context("Runtime Camp Files Root is not valid UTF-8")?
         .to_string();
+    let chat_root = PathBuf::from(&root);
+    connection.create_scalar_function(
+        "rovai_chat_directory",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |ctx| {
+            let id: String = ctx.get(0)?;
+            crate::storage_layout::chat_directory(&chat_root, &id)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|err| rusqlite::Error::UserFunctionError(err.into()))
+        },
+    )?;
     let identity = root_identity_digest.to_string();
     connection.create_scalar_function(
         "rovai_runtime_camp_files_root",
@@ -8935,6 +8959,9 @@ impl Database {
         }
         if !self.schema_migration_applied(234)? {
             observe_migration_step(progress, "migration_234", || chat_inputs::migrate(self))?;
+        }
+        if !self.schema_migration_applied(235)? {
+            observe_migration_step(progress, "migration_235", || chat_runtime::migrate(self))?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40697,7 +40724,8 @@ mod tests {
             "migration_231".into(),
             "migration_232".into(),
             "migration_233".into(),
-            "migration_234".into()
+            "migration_234".into(),
+            "migration_235".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40779,7 +40807,8 @@ mod tests {
                 "migration_231",
                 "migration_232",
                 "migration_233",
-                "migration_234"
+                "migration_234",
+                "migration_235"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
@@ -42874,6 +42903,7 @@ mod tests {
             v232: version >= 232,
             v233: version >= 233,
             v234: version >= 234,
+            v235: version >= 235,
         }
     }
 

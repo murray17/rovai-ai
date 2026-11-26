@@ -161,6 +161,28 @@ pub fn camp_attachment_output_root(runtime_files_root: &Path, camp_id: &str) -> 
         .join(camp_id))
 }
 
+/// Each private conversation owns exactly one directory in this Core instance.
+pub fn chat_directory(runtime_root: &Path, chat_id: &str) -> Result<PathBuf> {
+    let id = uuid::Uuid::parse_str(chat_id)?;
+    ensure!(
+        id.to_string() == chat_id,
+        "Invalid chat directory identifier"
+    );
+    Ok(runtime_root
+        .parent()
+        .context("Runtime storage has no instance directory")?
+        .join("chats")
+        .join(id.to_string()))
+}
+
+pub fn prepare_chat_directory(runtime_root: &Path, chat_id: &str) -> Result<PathBuf> {
+    let path = chat_directory(runtime_root, chat_id)?;
+    crate::camp_attachment_view::reject_existing_symlink_components(&path)?;
+    std::fs::create_dir_all(&path)?;
+    crate::camp_attachment_view::reject_existing_symlink_components(&path)?;
+    Ok(path)
+}
+
 pub fn resolve_attachment_output_root(
     connection: &rusqlite::Connection,
     camp_id: &str,
@@ -178,7 +200,7 @@ pub fn resolve_attachment_output_root(
 
 #[derive(Debug, Clone)]
 pub struct ThreadOutputDirectory {
-    pub camp_id: String,
+    pub owner_id: String,
     pub output_root: PathBuf,
 }
 
@@ -196,7 +218,7 @@ impl ThreadOutputDirectory {
         crate::camp_attachment_view::reject_existing_symlink_components(&output_root)?;
         std::fs::create_dir_all(&output_root)?;
         Ok(Self {
-            camp_id: camp_id.to_string(),
+            owner_id: camp_id.to_string(),
             output_root,
         })
     }

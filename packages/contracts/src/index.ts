@@ -1069,6 +1069,8 @@ export interface ArchiveListQuery {
 }
 
 export interface ArchiveItem {
+  hasPausedInputs?: boolean
+  chatId?: string
   threadId: string
   missionId: string | null
   title: string
@@ -1130,7 +1132,16 @@ export type NavigationSearchTarget = {
   | { kind: 'mission'; mission: { missionId: string; number: number; status: MissionStatus } }
 )
 
+export interface NavigationChatSearchItem {
+  chatId: string
+  title: string
+  agentId: string
+  displayName: string
+  avatarRef: string | null
+}
+
 export interface NavigationSearchResult {
+  chats?: NavigationChatSearchItem[]
   schemaVersion: 1
   throughGlobalSequence: number
   query: string
@@ -1605,7 +1616,7 @@ export type LocalAttachmentOwnerLocator =
 export interface MessageQuoteSnapshot {
   version: 1
   quoteId: string
-  source?: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
+  source?: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string } | {scope:'chat';campId?:never;conversationId:string;messageId:string}
   authorAtCapture?: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
   text: string
   format: 'plain_text'
@@ -3863,11 +3874,48 @@ export type ChatSendResult =
   | { kind: 'queued'; chatId: string; inputId: string }
   | { kind: 'steer_submitted'; chatId: string; inputId: string; runId: string; executionEpoch: number; evidenceSequence: number }
 
+export interface ChatSupplement {
+  inputId: string
+  runId: string
+  evidenceSequence: number
+  messageId: string | null
+  body: string
+  quotes: SingleChatMessageView['quotes']
+  attachments: SingleChatMessageView['attachments']
+  unconfirmed: boolean
+}
+
 export interface ChatOpenResult {
-  pendingInputs: { inputId: string; body: string; revision: number; convertedFromSteer: boolean }[]
-  chat: Pick<ChatListItem, 'chatId' | 'agentId' | 'displayName' | 'avatarRef' | 'title' | 'version'> & { archivedAt: string | null }
+  approvals?: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
+  supplements?: ChatSupplement[]
+  activeInput?: { canSteer: boolean; ready: boolean; unavailableReason: string | null } | null
+  pendingInputs: {
+    inputId: string
+    body: string
+    revision: number
+    convertedFromSteer: boolean
+    attachmentNames?: string[]
+    quotePreview?: string
+  }[]
+  chat: Pick<ChatListItem, 'chatId' | 'agentId' | 'displayName' | 'avatarRef' | 'title' | 'version'> & {
+    archivedAt: string | null
+  }
   messages: SingleChatMessageView[]
-  runs: { runId: string; triggerMessageId: string; finalMessageId: string | null; status: SingleChatRunView['status']; executionEpoch: number; throughChangeSequence: number; version: number; createdAt: string; startedAt: string | null; endedAt: string | null; cancelRequestedAt: string | null; lastErrorCode: string | null }[]
+  runs: {
+    runId: string
+    triggerMessageId: string
+    finalMessageId: string | null
+    status: SingleChatRunView['status']
+    executionEpoch: number
+    throughChangeSequence: number
+    version: number
+    createdAt: string
+    startedAt: string | null
+    endedAt: string | null
+    cancelRequestedAt: string | null
+    lastErrorCode: string | null
+  }[]
   nextBeforeSequence: number | null
 }
 
@@ -4435,7 +4483,7 @@ export interface HearthReviewItem {
   targetMemoryId: string | null
   baseRevisionId: string | null
   sourceAgentId: string
-  sourceThreadId: string
+  sourceThreadId: string | null
   sourceAgentRunId: string
   sourceExecutionEpoch: number
   acceptedMemoryId: string | null
@@ -4804,8 +4852,11 @@ export type CoreMethod =
   | 'navigation.groupThreads'
   | 'navigation.findThread'
   | 'chats.open'
+  | 'chats.canPreviewFile'
   | 'chats.send'
   | 'chats.pendingInputs.edit'
+  | 'chats.setArchived'
+  | 'chats.delete'
   | 'chats.rename'
   | 'chats.list'
   | 'navigation.search'

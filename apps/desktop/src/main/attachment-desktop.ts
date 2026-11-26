@@ -1,3 +1,4 @@
+import { isThreadId } from '@contracts'
 import { isAbsolute } from 'node:path'
 import type { AttachmentOpenResult, AttachmentRevealResult } from '@contracts'
 
@@ -14,6 +15,16 @@ export interface DesktopAttachmentTarget {
 export function isAttachmentId(value: unknown): value is string {
   return typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)
+}
+
+export function isAttachmentOwnerScope(owner: unknown, id: unknown, conversationId: unknown): id is string {
+  if (isThreadId(id)) return true
+  if (typeof id !== 'string') return false
+  if (owner === 'composer') {
+    if (id.startsWith('chat:')) return isAttachmentId(id.slice(5))
+    return id.startsWith('chat-draft:') && id.length <= 540 && !/[\u0000-\u001f]/u.test(id) && id.length > 11
+  }
+  return (owner === 'single_chat_message' || owner === 'single_chat_pending') && id === conversationId && isAttachmentId(id)
 }
 
 export function parseDesktopAttachmentTarget(

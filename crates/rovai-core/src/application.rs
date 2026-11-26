@@ -355,6 +355,10 @@ enum RuntimeCancellationIngressFence {
     Unproven,
 }
 
+fn run_file_owner<'a>(thread_id: &'a str, conversation_id: &'a str) -> &'a str {
+    rovai_core::runtime::run_thread_id(thread_id).unwrap_or(conversation_id)
+}
+
 struct ThreadAttachmentReadAdmission {
     camp_id: String,
 }
@@ -380,7 +384,7 @@ fn release_agent_run_attachment_admission(
 ) -> bool {
     let camp_id = admission.camp_id.clone();
     drop(admission);
-    projection_requests.send(camp_id).is_ok()
+    uuid::Uuid::parse_str(&camp_id).is_ok() || projection_requests.send(camp_id).is_ok()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1573,7 +1577,8 @@ struct ThreadMessageFindParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceContentParams {
     #[serde(rename = "threadId", alias = "campId")]
-    camp_id: ThreadId,
+    camp_id: Option<ThreadId>,
+    chat_id: Option<String>,
     evidence_id: String,
 }
 
@@ -2056,7 +2061,8 @@ struct NotificationChangesSinceParams {
 struct ResolveActionApprovalParams {
     command_id: String,
     #[serde(rename = "threadId", alias = "campId")]
-    camp_id: ThreadId,
+    camp_id: Option<ThreadId>,
+    chat_id: Option<String>,
     approval_id: String,
     expected_version: i64,
     option_id: String,
@@ -2064,14 +2070,24 @@ struct ResolveActionApprovalParams {
 }
 
 impl ResolveActionApprovalParams {
-    fn envelope(self) -> CommandEnvelope<ResolveActionApprovalCommand> {
+    fn envelope(self, db: &Database) -> Result<CommandEnvelope<ResolveActionApprovalCommand>> {
+        anyhow::ensure!(
+            self.camp_id.is_some() != self.chat_id.is_some(),
+            "An approval requires one destination"
+        );
+        if let Some(chat) = &self.chat_id {
+            anyhow::ensure!(db.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM approval a JOIN action_execution e ON e.id=a.action_id JOIN agent_run r ON r.id=e.agent_run_id
+                 JOIN chat_topic t ON t.conversation_id=r.conversation_id WHERE a.id=?1 AND t.conversation_id=?2 AND t.owner_user_id=?3 AND t.deletion_operation_id IS NULL)",
+                rusqlite::params![self.approval_id,chat,CURRENT_USER_ID], |r|r.get::<_,bool>(0))?, "chat.approval_unavailable");
+        }
         let params = self;
-        CommandEnvelope {
+        Ok(CommandEnvelope {
             command_id: params.command_id,
             actor: ActorRef::User {
                 user_id: CURRENT_USER_ID.to_string(),
             },
-            camp_id: Some(params.camp_id.to_string()),
+            camp_id: params.camp_id.map(|id| id.to_string()),
             expected_versions: Vec::new(),
             execution_epoch: None,
             payload: ResolveActionApprovalCommand {
@@ -2080,7 +2096,7 @@ impl ResolveActionApprovalParams {
                 expected_version: params.expected_version,
                 reason: params.reason,
             },
-        }
+        })
     }
 }
 
@@ -2817,8 +2833,13 @@ struct RuntimeInputPreparationRequest<'a> {
 
 impl ThreadAttachmentRunAccess<'_> {
     fn prove(&self, execution: &AgentRunExecution) -> Result<()> {
-        self.admission.prove(&execution.camp_id)?;
-        if self.authorization.camp_id != execution.camp_id {
+        self.admission.prove(run_file_owner(
+            &execution.camp_id,
+            &execution.conversation_id,
+        ))?;
+        if self.authorization.owner_id
+            != run_file_owner(&execution.camp_id, &execution.conversation_id)
+        {
             anyhow::bail!(
                 "Thread Attachment Runtime authorization does not match the AgentRun Thread"
             );
@@ -3634,7 +3655,7 @@ impl Core {
             emit_navigation_group_invalidated(
                 &self.output,
                 "camp.deleted",
-                Some(&candidate.camp_id),
+                rovai_core::runtime::run_thread_id(&candidate.camp_id),
                 group_key.as_deref(),
             );
             eprintln!(
@@ -3722,7 +3743,7 @@ impl Core {
                     emit_navigation_invalidated(
                         &self.output,
                         "camps.deletion_attention",
-                        Some(&candidate.camp_id),
+                        rovai_core::runtime::run_thread_id(&candidate.camp_id),
                     );
                 }
             }
@@ -7049,14 +7070,15 @@ impl Core {
             BuiltinToolIpcRequestBody::Capabilities => {
                 let database = self.database.lock().await;
                 let capabilities = (|| -> Result<_> {
-                    let single_chat: bool = database.connection().query_row(
-                        "SELECT invocation_kind='single_chat' FROM agent_run WHERE id=?1",
+                    let invocation: String = database.connection().query_row(
+                        "SELECT invocation_kind FROM agent_run WHERE id=?1",
                         [&authorized.agent_run_id],
                         |r| r.get(0),
                     )?;
                     Ok(
                         rovai_core::builtin_tool_transport::BuiltinToolCapabilities {
-                            tasks_enabled: !single_chat
+                            private_chat: invocation == "chat",
+                            tasks_enabled: invocation != "single_chat"
                                 && rovai_core::task_capability::enabled(database.connection())?,
                             memory_enabled: rovai_core::memory_capability::discoverable(
                                 database.connection(),
@@ -7190,6 +7212,12 @@ impl Core {
                                 &format!("builtin-cli:{request_id}"),
                                 &authorized.agent_run_id,
                                 authorized.execution_epoch,
+                            )?;
+                            let run = crate::chat::directory_target(
+                                database.connection(),
+                                &run,
+                                input["threadId"].as_str(),
+                                false,
                             )?;
                             if let Some(agent_id) = input["agentId"].as_str() {
                                 authorize_member_target(
@@ -7452,7 +7480,8 @@ impl Core {
                         agent_id: execution.agent_id.clone(),
                         source_agent_run_id: execution.agent_run_id.clone(),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: Some(execution.execution_epoch),
                     payload: PrepareActionCommand {
@@ -7517,7 +7546,8 @@ impl Core {
                     actor: ActorRef::System {
                         component_id: "runtime-adapter:claude-code-cli".into(),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: ConfirmRuntimeRequestResolvedCommand {
@@ -7773,6 +7803,18 @@ impl Core {
             rovai_core::member_studio::resolve_member_avatar_input(
                 &database, &authenticated_run, &request.tool_name, &mut request.input,
             )?;
+            let directory_operation = request.tool_name.starts_with("automation.") || matches!(
+                request.tool_name.as_str(),
+                MEMBER_LIST_TOOL_NAME | MEMBER_GET_TOOL_NAME | MEMBER_UPDATE_TOOL_NAME | "mission.update" | "mission.status"
+            );
+            let authenticated_run = if directory_operation {
+                let run = crate::chat::directory_target(
+                    database.connection(), &authenticated_run, request.input["threadId"].as_str(),
+                    matches!(request.tool_name.as_str(), "mission.update" | "mission.status"),
+                )?;
+                if let Some(object) = request.input.as_object_mut() { object.remove("threadId"); }
+                run
+            } else { authenticated_run };
             let operation_result = match request.tool_name.as_str() {
                 CAMP_MESSAGE_SEND_TOOL_NAME => {
                     let input = serde_json::from_value::<ThreadMessageSendInput>(request.input)
@@ -7802,6 +7844,15 @@ impl Core {
                         .as_str()
                         .map(str::to_string);
                     command_execution_payload(execution)
+                }
+                "thread.create" => {
+                    let root=self.data_dir.join("quick-chat");
+                    std::fs::create_dir_all(&root)?;
+                    let result=crate::chat::create_thread(&mut database,&authenticated_run,request.runtime_tool_call_id,serde_json::from_value(request.input)?,&root)?;
+                    evidence_replayed=result.replayed;
+                    let payload=command_execution_payload(result)?;
+                    if !evidence_replayed {emit_navigation_invalidated(&self.output,"threads.created",payload["threadId"].as_str());}
+                    Ok(json!({"threadId":payload["threadId"]}))
                 }
                 MEMBER_LIST_TOOL_NAME => list_members(database.connection(),&authenticated_run),
                 MEMBER_GET_TOOL_NAME => {
@@ -8082,7 +8133,7 @@ impl Core {
                             agent_id: authenticated_run.agent_id.clone(),
                             source_agent_run_id: authenticated_run.agent_run_id.clone(),
                         };
-                        if !crate::collaboration::actor_can_write_camp(
+                        if !crate::collaboration::actor_can_write_tool_target(
                             database.connection(),
                             &actor,
                             Some(authenticated_run.execution_epoch),
@@ -8209,7 +8260,7 @@ impl Core {
                     let project_ref = resolve_automation_project(
                         &database,
                         &authenticated_run.camp_id,
-                        input.project.as_deref().unwrap_or("current"),
+                        input.project.as_deref().unwrap_or(if authenticated_run.camp_id.is_empty() {"quick-chat"} else {"current"}),
                     )?;
                     let schedule = schedule_from_tool_fields(
                         &input.repeat,
@@ -8470,6 +8521,8 @@ impl Core {
                         .map_err(|_| invalid_input_error("camp.read input is invalid"))?;
                     ThreadHistoryService.read(&mut database, &authenticated_run, &input)
                 }
+                rovai_core::chat::HISTORY_TOOL => rovai_core::chat::history(&database,&authenticated_run.agent_run_id,
+                    authenticated_run.execution_epoch,serde_json::from_value(request.input).map_err(|_|invalid_input_error("chat.history input is invalid"))?),
                 SINGLE_CHAT_HISTORY_TOOL_NAME => {
                     let input = serde_json::from_value::<SingleChatHistoryInput>(request.input)
                         .map_err(|_| invalid_input_error("single_chat.history input is invalid"))?;
@@ -11687,32 +11740,66 @@ impl Core {
                         json!({"chatId":envelope.payload.chat_id}),
                     );
                 }
-                let mut value = result.result.payload;
-                if let Some(object) = value.as_object_mut() {
-                    object.remove("inputDigest");
-                }
-                Ok(value)
+                Ok(rovai_core::chat::public_input_result(result.result.payload))
             }
             "chats.send" => {
                 let params: UserCommandParams<rovai_core::chat::SendInput> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
+                if !request.client.is_desktop() {
+                    for source in &params.command.source_attachments {
+                        rovai_core::web_upload::authorize_chat_source(
+                            &database,
+                            &request.client,
+                            &params.command,
+                            source,
+                        )?;
+                    }
+                }
                 let execution = rovai_core::chat::send(
                     &mut database,
                     user_command_envelope(params.command_id, params.command),
                 )?;
-                let mut value = execution.result.payload;
+                let value = execution.result.payload;
                 if !execution.replayed {
+                    self.execution_wake.runs.notify_one();
+                    if value["kind"] == "steer_submitted" {
+                        self.delivery_batch_scheduler_notify.notify_one();
+                    }
                     emit(
                         &self.output,
                         "chats.listChanged",
                         json!({"chatId":value["chatId"]}),
                     );
                 }
-                if let Some(object) = value.as_object_mut() {
-                    object.remove("inputDigest");
-                }
-                Ok(value)
+                Ok(rovai_core::chat::public_input_result(value))
+            }
+            "chats.setArchived" | "chats.delete" => {
+                let mut database = self.database.lock().await;
+                let execution = if request.method == "chats.setArchived" {
+                    let p: UserCommandParams<rovai_core::chat::SetArchived> =
+                        serde_json::from_value(request.params.clone())?;
+                    rovai_core::chat::set_archived(
+                        &mut database,
+                        &user_command_envelope(p.command_id, p.command),
+                    )?
+                } else {
+                    let p: UserCommandParams<rovai_core::chat::DeleteChat> =
+                        serde_json::from_value(request.params.clone())?;
+                    rovai_core::chat::request_delete(
+                        &mut database,
+                        &user_command_envelope(p.command_id, p.command),
+                    )?
+                };
+                drop(database);
+                self.agent_run_cancellation_notify.notify_one();
+                self.execution_wake.runs.notify_one();
+                emit(
+                    &self.output,
+                    "chats.listChanged",
+                    json!({"chatId":execution.result.payload["chatId"]}),
+                );
+                Ok(serde_json::to_value(execution.result)?)
             }
             "chats.rename" => {
                 let params: UserCommandParams<rovai_core::chat::RenameChat> =
@@ -11729,13 +11816,31 @@ impl Core {
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "chats.canPreviewFile" => {
+                let input = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(json!(
+                    rovai_core::file_preview_authority::can_preview_chat_reference(
+                        &database, input
+                    )?
+                ))
+            }
             "chats.open" => {
                 let input = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(rovai_core::chat::open(
-                    &mut database,
-                    input,
-                )?)?)
+                let mut chat = rovai_core::chat::open(&mut database, input)?;
+                drop(database);
+                if let Some(run) = chat.runs.iter().find(|r| {
+                    matches!(r.status.as_str(), "running" | "waiting")
+                        && r.cancel_requested_at.is_none()
+                }) && let Some(runtime) = self
+                    .pi
+                    .get_agent_run(&run.run_id, run.execution_epoch)
+                    .await
+                {
+                    chat.native_interactions = runtime.pending_interactions().await;
+                }
+                Ok(serde_json::to_value(chat)?)
             }
             "chats.list" => {
                 let input = serde_json::from_value(request.params.clone())?;
@@ -12467,6 +12572,25 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agentRuns.cancel" => {
+                if request.params["command"].get("chatId").is_some() {
+                    let p: UserCommandParams<rovai_core::chat::StopChat> =
+                        serde_json::from_value(request.params.clone())?;
+                    let mut db = self.database.lock().await;
+                    let execution = rovai_core::chat::stop(
+                        &mut db,
+                        &user_command_envelope(p.command_id, p.command),
+                    )?;
+                    drop(db);
+                    self.agent_run_cancellation_notify.notify_one();
+                    self.execution_wake.runs.notify_one();
+                    emit(
+                        &self.output,
+                        "chats.listChanged",
+                        json!({"chatId":execution.result.payload["chatId"]}),
+                    );
+                    return Ok(serde_json::to_value(execution.result)?);
+                }
+
                 let params: UserCommandParams<CancelAgentRunCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
@@ -12638,12 +12762,29 @@ impl Core {
                 let database = self.database.lock().await;
                 let lock_ms = lock_started_at.elapsed().as_millis();
                 let read_started_at = Instant::now();
-                let payload = ExecutionEvidenceService.read_full_payload(
-                    &database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    params.camp_id.as_str(),
-                    &params.evidence_id,
-                )?;
+                let store = ManagedBlobStore::new(&self.data_dir);
+                let payload = match (&params.camp_id, &params.chat_id) {
+                    (Some(thread), None) => ExecutionEvidenceService.read_full_payload(
+                        &database,
+                        &store,
+                        thread.as_str(),
+                        &params.evidence_id,
+                    )?,
+                    (None, Some(chat)) => {
+                        let allowed: bool = database.connection().query_row(
+                            "SELECT EXISTS(SELECT 1 FROM agent_run_execution_evidence e JOIN agent_run r ON r.id=e.agent_run_id
+                             JOIN chat_topic t ON t.conversation_id=r.conversation_id
+                             WHERE e.id=?1 AND t.conversation_id=?2 AND r.invocation_kind='chat' AND t.owner_user_id=?3 AND t.deletion_operation_id IS NULL)",
+                            rusqlite::params![params.evidence_id,chat,rovai_core::current_user::CURRENT_USER_ID], |row| row.get(0))?;
+                        anyhow::ensure!(allowed, "Chat execution evidence unavailable");
+                        ExecutionEvidenceService.read_full_payload_unscoped(
+                            &database,
+                            &store,
+                            &params.evidence_id,
+                        )?
+                    }
+                    _ => anyhow::bail!("Expected one execution scope"),
+                };
                 let canonical = rovai_core::execution_window::content_canonical(
                     &database,
                     &params.evidence_id,
@@ -12674,7 +12815,7 @@ impl Core {
                     "[execution-window] request={} method={} camp={:?} evidence={:?} stage=read_complete lock_ms={} read_ms={} serialization_ms={}",
                     request.id,
                     request.method,
-                    params.camp_id.as_str(),
+                    params.camp_id.as_ref().map(ThreadId::as_str),
                     params.evidence_id,
                     lock_ms,
                     read_ms,
@@ -13420,8 +13561,9 @@ impl Core {
                 let params: ResolveActionApprovalParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = ActionSafetyService::default()
-                    .resolve_approval(&mut database, &params.envelope())?;
+                let command = params.envelope(&database)?;
+                let execution =
+                    ActionSafetyService::default().resolve_approval(&mut database, &command)?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "notifications.inbox" => {
@@ -14379,7 +14521,7 @@ impl Core {
                 emit_navigation_invalidated(
                     &self.output,
                     "agent_run.network_recovery_waiting",
-                    Some(&execution.camp_id),
+                    rovai_core::runtime::run_thread_id(&execution.camp_id),
                 );
                 self.network_recovery_notify.notify_one();
             }
@@ -14641,7 +14783,8 @@ impl Core {
                             actor: ActorRef::System {
                                 component_id: "network-recovery-coordinator".to_string(),
                             },
-                            camp_id: Some(registration.camp_id.clone()),
+                            camp_id: rovai_core::runtime::run_thread_id(&registration.camp_id)
+                                .map(str::to_owned),
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: ArmAgentRunNetworkRecoveryCommand {
@@ -14789,22 +14932,26 @@ impl Core {
         use crate::native_interaction::{
             NativeInteractionResult, NativeInteractionStatus as Status,
         };
-        let valid = {
+        let runtime_thread = {
             let database = self.database.lock().await;
             database.connection().query_row(
-                "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
-                rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
+                "SELECT COALESCE(r.camp_id,turn.camp_id,'') FROM agent_run r LEFT JOIN camp_turn turn ON turn.id=r.camp_turn_id
+                 WHERE r.id=?1 AND r.execution_epoch=?2 AND r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL
+                   AND (COALESCE(r.camp_id,turn.camp_id)=?3 OR (r.invocation_kind='chat' AND EXISTS (
+                      SELECT 1 FROM chat_topic t WHERE t.conversation_id=r.conversation_id AND t.conversation_id=?3 AND t.owner_user_id=?4
+                        AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))",
+                rusqlite::params![params.agent_run_id,params.execution_epoch,params.thread_id,CURRENT_USER_ID],|r|r.get::<_,String>(0)).optional()?
         };
         let mut answer_preview = None;
-        let result = if valid {
+        let result = if let Some(thread) = &runtime_thread {
             if let Some(runtime) = self
                 .pi
                 .get_agent_run(&params.agent_run_id, params.execution_epoch)
                 .await
             {
                 anyhow::ensure!(
-                    runtime.camp_id() == params.thread_id,
-                    "Native interaction belongs to another Thread"
+                    runtime.camp_id() == thread,
+                    "Native interaction belongs to another execution"
                 );
                 let result = runtime
                     .answer_interaction(&params.interaction_id, &params.answer)
@@ -14823,6 +14970,14 @@ impl Core {
                 already_handled: false,
             }
         };
+        if runtime_thread.as_deref() == Some("") {
+            emit(
+                &self.output,
+                "chats.listChanged",
+                json!({"chatId":params.thread_id}),
+            );
+            return Ok(serde_json::to_value(result)?);
+        }
         // Channel result cards keep only the bounded preview of the first native answer.
         {
             let mut database = self.database.lock().await;
@@ -15402,10 +15557,19 @@ impl Core {
         };
         let workspace_path = PathBuf::from(&workspace.execution_root);
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
-        let (attachment_view_admission, attachment_authorization) = match self
-            .verified_camp_attachment_admission(&candidate.camp_id, &workspace_path)
-            .await
-        {
+        let admission = if candidate.project_binding_kind == "chat" {
+            Ok((
+                ThreadAttachmentReadAdmission::for_camp(&candidate.conversation_id),
+                ThreadOutputDirectory {
+                    owner_id: candidate.conversation_id.clone(),
+                    output_root: workspace_path.clone(),
+                },
+            ))
+        } else {
+            self.verified_camp_attachment_admission(&candidate.camp_id, &workspace_path)
+                .await
+        };
+        let (attachment_view_admission, attachment_authorization) = match admission {
             Ok(admission) => admission,
             Err(error) => {
                 self.reject_agent_run_dispatch(
@@ -15427,7 +15591,8 @@ impl Core {
                     actor: ActorRef::System {
                         component_id: "agent-run-scheduler".to_string(),
                     },
-                    camp_id: Some(candidate.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&candidate.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: ClaimAgentRunCommand {
@@ -15738,9 +15903,10 @@ impl Core {
                                     core.release_active_execution(&active_key).await;
                                     terminal_admission.complete_settlement();
                                     runtime_route_permit.complete_callback();
-                                    emit_agent_run_terminal(
+                                    emit_scoped_run_terminal(
                                         &output,
-                                        Some(&execution.camp_id),
+                                        &execution.camp_id,
+                                        &execution.conversation_id,
                                         json!({
                                             "agentRunId": execution.agent_run_id,
                                             "executionEpoch": execution.execution_epoch,
@@ -15771,9 +15937,10 @@ impl Core {
                                 )
                                 .await;
                             if failure_persisted {
-                                emit_agent_run_terminal(
+                                emit_scoped_run_terminal(
                                     &output,
-                                    Some(&execution.camp_id),
+                                    &execution.camp_id,
+                                    &execution.conversation_id,
                                     json!({
                                         "threadId": execution.camp_id,
                                         "threadTurnId": execution.camp_turn_id,
@@ -15833,6 +16000,21 @@ impl Core {
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
     ) -> Result<PathBuf> {
         let requested_path = PathBuf::from(&candidate.project_path);
+        if candidate.project_binding_kind == "chat" {
+            let root = self
+                .database
+                .lock()
+                .await
+                .runtime_camp_files_root()
+                .to_owned();
+            let id = candidate.conversation_id.clone();
+            return tokio::task::spawn_blocking(move || {
+                let actual = rovai_core::storage_layout::prepare_chat_directory(&root, &id)?;
+                anyhow::ensure!(requested_path == actual, "Chat workspace identity changed");
+                Ok(actual)
+            })
+            .await?;
+        }
         let validation_path = requested_path.clone();
         let data_dir = self.data_dir.clone();
         let allow_managed_quick_chat = candidate.project_binding_kind == "quick_chat";
@@ -15867,7 +16049,8 @@ impl Core {
                     actor: ActorRef::System {
                         component_id: "agent-run-scheduler".to_string(),
                     },
-                    camp_id: Some(candidate.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&candidate.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: RejectAgentRunDispatchCommand {
@@ -15883,9 +16066,10 @@ impl Core {
         };
         match rejection {
             Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                emit_agent_run_terminal(
+                emit_scoped_run_terminal(
                     output,
-                    Some(&candidate.camp_id),
+                    &candidate.camp_id,
+                    &candidate.conversation_id,
                     json!({
                         "threadId": candidate.camp_id,
                         "threadTurnId": candidate.camp_turn_id,
@@ -16141,7 +16325,8 @@ impl Core {
                     actor: ActorRef::System {
                         component_id: "agent-run-git-observer".to_string(),
                     },
-                    camp_id: Some(candidate.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&candidate.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: RecordCancelledAgentRunEndingGitObservationCommand {
@@ -16420,7 +16605,7 @@ impl Core {
                         actor: ActorRef::System {
                             component_id: component_id.clone(),
                         },
-                        camp_id: Some(candidate.camp_id.clone()),
+                        camp_id: candidate.camp_id.clone(),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: AcquireRuntimeDeliveryCommand {
@@ -16531,7 +16716,7 @@ impl Core {
                             actor: ActorRef::System {
                                 component_id: component_id.clone(),
                             },
-                            camp_id: Some(candidate.camp_id.clone()),
+                            camp_id: candidate.camp_id.clone(),
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: ClaimActionCommand {
@@ -16605,7 +16790,7 @@ impl Core {
                             actor: ActorRef::System {
                                 component_id: component_id.clone(),
                             },
-                            camp_id: Some(candidate.camp_id.clone()),
+                            camp_id: candidate.camp_id.clone(),
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: MarkActionDispatchStartedCommand {
@@ -16673,7 +16858,7 @@ impl Core {
                             actor: ActorRef::System {
                                 component_id: component_id.clone(),
                             },
-                            camp_id: Some(candidate.camp_id.clone()),
+                            camp_id: candidate.camp_id.clone(),
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: RecordActionResultCommand {
@@ -16713,7 +16898,7 @@ impl Core {
                         actor: ActorRef::System {
                             component_id: component_id.clone(),
                         },
-                        camp_id: Some(candidate.camp_id.clone()),
+                        camp_id: candidate.camp_id.clone(),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: AcknowledgeRuntimeDeliveryCommand {
@@ -16767,7 +16952,7 @@ impl Core {
             &CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
                 actor: ActorRef::System { component_id },
-                camp_id: Some(candidate.camp_id.clone()),
+                camp_id: candidate.camp_id.clone(),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: FailRuntimeDeliveryCommand {
@@ -17345,13 +17530,15 @@ impl Core {
                 } else {
                     HashSet::new()
                 };
-                Ok((enabled_runs, memory))
+                let chat_runs = database.connection().prepare("SELECT id FROM agent_run WHERE invocation_kind='chat' AND status IN ('queued','running','waiting')")?
+                    .query_map([],|row|row.get(0))?.collect::<rusqlite::Result<HashSet<String>>>()?;
+                Ok((enabled_runs, memory, chat_runs))
             })()
         };
         match state {
-            Ok((enabled_runs, memory)) => {
+            Ok((enabled_runs, memory, chat_runs)) => {
                 self.builtin_tool_leases
-                    .refresh_capabilities(&enabled_runs, memory, target)
+                    .refresh_capabilities(&enabled_runs, memory, &chat_runs, target)
                     .await
             }
             Err(error) => {
@@ -17405,7 +17592,8 @@ impl Core {
                             execution.runtime.adapter_kind.as_str()
                         ),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: BindNativeSessionCommand {
@@ -17904,7 +18092,7 @@ impl Core {
                 actor: ActorRef::System {
                     component_id: "agent-run-scheduler".into(),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: RebindAgentRunRuntimeCommand {
@@ -18103,7 +18291,8 @@ impl Core {
                     actor: ActorRef::System {
                         component_id: "agent-run-scheduler".to_string(),
                     },
-                    camp_id: Some(candidate.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&candidate.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: RebindAgentRunRuntimeCommand {
@@ -18285,7 +18474,10 @@ impl Core {
     ) -> Result<()> {
         launch_permit.check_cancelled()?;
         self.require_execution_subsystems(execution.runtime.adapter_kind)?;
-        attachment_admission.prove(&execution.camp_id)?;
+        attachment_admission.prove(run_file_owner(
+            &execution.camp_id,
+            &execution.conversation_id,
+        ))?;
         let Some(skill_exposure) = self
             .prepare_agent_run_skill_exposure(execution)
             .await
@@ -19657,7 +19849,7 @@ impl Core {
                         actor: ActorRef::System {
                             component_id: "runtime-adapter:claude-code-cli".into(),
                         },
-                        camp_id: Some(attempt.camp_id),
+                        camp_id: attempt.camp_id,
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: RecordActionResultCommand {
@@ -19785,7 +19977,7 @@ impl Core {
                         execution.runtime.adapter_kind.as_str()
                     ),
                 },
-                camp_id: Some(current.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&current.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: SucceedAgentRunCommand {
@@ -19826,9 +20018,10 @@ impl Core {
                 .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit_agent_run_terminal(
+                emit_scoped_run_terminal(
                     output,
-                    Some(&current.camp_id),
+                    &current.camp_id,
+                    &current.conversation_id,
                     json!({
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
@@ -20922,7 +21115,8 @@ impl Core {
                             actor: ActorRef::System {
                                 component_id: "runtime-recovery-coordinator".to_string(),
                             },
-                            camp_id: Some(execution.camp_id.clone()),
+                            camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                                .map(str::to_owned),
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: ReconcileRuntimeLossCommand {
@@ -20954,7 +21148,12 @@ impl Core {
                     recovery.result.code.as_str(),
                     "agent_run.failed" | "agent_run.cancelled"
                 ) {
-                    emit_agent_run_terminal(output, Some(&execution.camp_id), payload);
+                    emit_scoped_run_terminal(
+                        output,
+                        &execution.camp_id,
+                        &execution.conversation_id,
+                        payload,
+                    );
                     self.agent_run_cancellation_notify.notify_one();
                 } else {
                     emit(output, "agent_run.recovering", payload);
@@ -21039,9 +21238,10 @@ impl Core {
                 )
                 .await;
             }
-            emit_agent_run_terminal(
+            emit_scoped_run_terminal(
                 output,
-                Some(&execution.camp_id),
+                &execution.camp_id,
+                &execution.conversation_id,
                 json!({
                     "threadId": execution.camp_id,
                     "threadTurnId": execution.camp_turn_id,
@@ -21092,7 +21292,7 @@ impl Core {
                         execution.runtime.adapter_kind.as_str()
                     ),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: FailAgentRunCommand {
@@ -21133,7 +21333,8 @@ impl Core {
                         actor: ActorRef::System {
                             component_id: "runtime-recovery-coordinator".to_string(),
                         },
-                        camp_id: Some(execution.camp_id.clone()),
+                        camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                            .map(str::to_owned),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: ReconcileRuntimeLossCommand {
@@ -21263,7 +21464,8 @@ impl Core {
                     actor: ActorRef::System {
                         component_id: "runtime-adapter:configuration".to_string(),
                     },
-                    camp_id: Some(candidate.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&candidate.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: FailAgentRunCommand {
@@ -21291,9 +21493,10 @@ impl Core {
             }
         };
         if failure_persisted {
-            emit_agent_run_terminal(
+            emit_scoped_run_terminal(
                 output,
-                Some(&candidate.camp_id),
+                &candidate.camp_id,
+                &candidate.conversation_id,
                 json!({
                     "threadId": candidate.camp_id,
                     "threadTurnId": candidate.camp_turn_id,
@@ -23946,7 +24149,7 @@ async fn persist_pi_prompt_completion(
                 actor: ActorRef::System {
                     component_id: format!("runtime-adapter:{}", AdapterKind::Pi.as_str()),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: SucceedAgentRunCommand {
@@ -23982,7 +24185,8 @@ async fn persist_pi_prompt_completion(
                     actor: ActorRef::System {
                         component_id: format!("runtime-adapter:{}", AdapterKind::Pi.as_str()),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: FailAgentRunCommand {
@@ -24007,9 +24211,10 @@ async fn persist_pi_prompt_completion(
                 .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit_agent_run_terminal(
+                emit_scoped_run_terminal(
                     output,
-                    Some(&execution.camp_id),
+                    &execution.camp_id,
+                    &execution.conversation_id,
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
@@ -25729,7 +25934,7 @@ async fn record_runtime_model_observation(
                 actor: ActorRef::System {
                     component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
                 },
-                camp_id: Some(camp_id.to_string()),
+                camp_id: rovai_core::runtime::run_thread_id(camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: RecordObservedRuntimeModelCommand {
@@ -26367,7 +26572,7 @@ async fn process_agent_run_acp_approval_request(
                     agent_id: execution.agent_id.clone(),
                     source_agent_run_id: agent_run_id.to_string(),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: Some(execution_epoch),
                 payload: PrepareActionCommand {
@@ -26510,7 +26715,8 @@ async fn record_acp_action_completion(
                         agent_id: execution.agent_id.clone(),
                         source_agent_run_id: agent_run_id.to_string(),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: Some(execution_epoch),
                     payload: RecordObservedActionCommand {
@@ -26563,7 +26769,7 @@ async fn record_acp_action_completion(
                     actor: ActorRef::System {
                         component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
                     },
-                    camp_id: Some(attempt.camp_id.clone()),
+                    camp_id: attempt.camp_id.clone(),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: RecordActionResultCommand {
@@ -26770,7 +26976,8 @@ async fn persist_acp_prompt_completion(
                             actor: ActorRef::System {
                                 component_id: "network-recovery-coordinator".to_string(),
                             },
-                            camp_id: Some(execution.camp_id.clone()),
+                            camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                                .map(str::to_owned),
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: MarkAgentRunForNetworkRecoveryCommand {
@@ -26923,7 +27130,7 @@ async fn persist_acp_prompt_completion(
                 actor: ActorRef::System {
                     component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: SucceedAgentRunCommand {
@@ -26954,7 +27161,8 @@ async fn persist_acp_prompt_completion(
                     actor: ActorRef::System {
                         component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: FailAgentRunCommand {
@@ -26979,9 +27187,10 @@ async fn persist_acp_prompt_completion(
                 .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit_agent_run_terminal(
+                emit_scoped_run_terminal(
                     output,
-                    Some(&execution.camp_id),
+                    &execution.camp_id,
+                    &execution.conversation_id,
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
@@ -28051,7 +28260,7 @@ async fn process_agent_run_codex_message(
                 actor: ActorRef::System {
                     component_id: "runtime-adapter:codex".to_string(),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: None,
                 payload: SucceedAgentRunCommand {
@@ -28090,7 +28299,8 @@ async fn process_agent_run_codex_message(
                     actor: ActorRef::System {
                         component_id: "runtime-adapter:codex".to_string(),
                     },
-                    camp_id: Some(execution.camp_id.clone()),
+                    camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id)
+                        .map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: FailAgentRunCommand {
@@ -28115,9 +28325,10 @@ async fn process_agent_run_codex_message(
                 .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
-                emit_agent_run_terminal(
+                emit_scoped_run_terminal(
                     output,
-                    Some(&execution.camp_id),
+                    &execution.camp_id,
+                    &execution.conversation_id,
                     json!({
                         "agentRunId": agent_run_id,
                         "executionEpoch": execution_epoch,
@@ -28278,7 +28489,7 @@ async fn process_agent_run_approval_request(
                     agent_id: execution.agent_id.clone(),
                     source_agent_run_id: server_request.agent_run_id.to_string(),
                 },
-                camp_id: Some(execution.camp_id.clone()),
+                camp_id: rovai_core::runtime::run_thread_id(&execution.camp_id).map(str::to_owned),
                 expected_versions: Vec::new(),
                 execution_epoch: Some(server_request.execution_epoch),
                 payload: PrepareActionCommand {
@@ -28373,7 +28584,7 @@ async fn record_intercepted_action_completion(
                     actor: ActorRef::System {
                         component_id: "runtime-adapter:codex".to_string(),
                     },
-                    camp_id: Some(attempt.camp_id.clone()),
+                    camp_id: attempt.camp_id.clone(),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: RecordActionResultCommand {
@@ -28487,6 +28698,7 @@ async fn process_agent_run_exit(
 async fn dispatch_pending_single_chat_inputs(core: &Core) -> Result<()> {
     let chats = {
         let mut db = core.database.lock().await;
+        rovai_core::chat::finish_deletions(&mut db)?;
         rovai_core::chat::publish_ready(&mut db)?
     };
     for chat_id in chats {
@@ -29627,6 +29839,20 @@ fn emit_member_roster_invalidated(output: &mpsc::UnboundedSender<String>, reason
     emit(output, "members.invalidated", json!({ "reason": reason }));
 }
 
+fn emit_scoped_run_terminal(
+    output: &mpsc::UnboundedSender<String>,
+    thread: &str,
+    conversation: &str,
+    params: Value,
+) {
+    if thread.is_empty() {
+        emit(output, "chats.listChanged", json!({"chatId":conversation}));
+        emit(output, "agent_run.terminal", params);
+    } else {
+        emit_agent_run_terminal(output, Some(thread), params);
+    }
+}
+
 fn emit_agent_run_terminal(
     output: &mpsc::UnboundedSender<String>,
     camp_id: Option<&str>,
@@ -29836,7 +30062,7 @@ fn agent_builtin_command_envelope<P>(
             agent_id: run.agent_id.clone(),
             source_agent_run_id: run.agent_run_id.clone(),
         },
-        camp_id: Some(run.camp_id.clone()),
+        camp_id: rovai_core::runtime::run_thread_id(&run.camp_id).map(str::to_owned),
         expected_versions: Vec::new(),
         execution_epoch: Some(run.execution_epoch),
         payload,
@@ -34280,7 +34506,7 @@ done
             .verified_camp_runtime_authorization(&camp_id, &workspace)
             .await
             .expect("a newly-created Channel Camp must be dispatchable immediately");
-        assert_eq!(authorization.camp_id, camp_id);
+        assert_eq!(authorization.owner_id, camp_id);
 
         let attachment_root = authorization.output_root;
         drop(core);
@@ -34576,7 +34802,7 @@ done
             .await
             .expect("a missing source and broken legacy view must not block Camp dispatch");
         admission.prove(&camp_id).unwrap();
-        assert_eq!(authorization.camp_id, camp_id);
+        assert_eq!(authorization.owner_id, camp_id);
         assert!(authorization.output_root.is_dir());
         {
             let database = core.database.lock().await;

@@ -840,7 +840,7 @@ export function ThreadNavigation({
         onChoose={row => {
           setPaletteOpen(false)
           if (onSearchResult) onSearchResult(row)
-          else onThread(row.target.thread)
+          else if (row.target) onThread(row.target.thread)
         }}
       />}
 

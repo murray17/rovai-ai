@@ -15,11 +15,14 @@ export interface NavigationFindIntent {
   anchorMessageId: string
 }
 
-export interface NavigationSearchRow {
+export type NavigationSearchRow = { chat: import('@contracts').NavigationChatSearchItem; query: string; target?: never; hit?: never } | {
+  chat?: never
   target: NavigationSearchTarget
   query: string
   hit?: NavigationMessageHit
 }
+
+export const searchRowId = (row: NavigationSearchRow) => row.chat ? row.chat.chatId : row.target.thread.id
 
 interface SearchState {
   input: string
@@ -126,7 +129,7 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
       resolveEnter()
       return
     }
-    const seen = new Set(state.rows.map(row => row.target.thread.id))
+    const seen = new Set(state.rows.map(row => searchRowId(row)))
     const added: NavigationSearchRow[] = []
     for (const hit of page.items) {
       const id = hit.target.thread.id
@@ -137,7 +140,7 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
     cursor = page.nextCursor
     update({
       rows: [...state.rows, ...added],
-      activeId: state.activeId ?? added[0]?.target.thread.id ?? null,
+      activeId: state.activeId ?? (added[0] ? searchRowId(added[0]) : null),
       messages: !cursor ? 'done' : automaticPages >= AUTO_PAGE_LIMIT ? 'paused' : 'more'
     })
     resolveEnter()
@@ -158,9 +161,10 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
       return
     }
     if (!current(generation)) return
+    const rows: NavigationSearchRow[] = [...result.items.map(target => ({ target, query })), ...(result.chats ?? []).map(chat => ({ chat, query }))]
     update({
-      phase: 'results', displayedQuery: query, rows: result.items.map(target => ({ target, query })),
-      activeId: result.items[0]?.thread.id ?? null, truncated: result.truncated,
+      phase: 'results', displayedQuery: query, rows,
+      activeId: rows.length ? searchRowId(rows[0]) : null, truncated: result.truncated,
       messages: messages ? 'loading' : 'off'
     })
     resolveEnter()
@@ -233,14 +237,14 @@ export function createNavigationSearchSession(dependencies: SearchDependencies) 
     move(direction: -1 | 1): number {
       pendingEnter = false
       if (!state.rows.length) return -1
-      const index = state.rows.findIndex(row => row.target.thread.id === state.activeId)
+      const index = state.rows.findIndex(row => searchRowId(row) === state.activeId)
       const next = Math.max(0, Math.min(state.rows.length - 1, index + direction))
-      update({ activeId: state.rows[next].target.thread.id })
+      update({ activeId: searchRowId(state.rows[next]) })
       return next
     },
     enter(): void {
       if (state.phase === 'results' && state.rows.length) {
-        const selected = state.rows.find(row => row.target.thread.id === state.activeId) ?? state.rows[0]
+        const selected = state.rows.find(row => searchRowId(row) === state.activeId) ?? state.rows[0]
         choose(selected)
       } else if (state.phase === 'names' || (state.phase === 'results'
         && (state.messages === 'loading' || state.messages === 'loadingEarlier' || state.messages === 'more'))) {

@@ -11,6 +11,7 @@ pub const MAX_QUOTE_SCALARS: usize = 12_000;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MessageQuoteSource {
     pub scope: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub camp_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,

@@ -144,6 +144,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::chat_runtime::downgrade_for_test(c);
     if !schema_matches(c).unwrap() {
         return;
     }

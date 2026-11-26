@@ -697,9 +697,9 @@ pub fn load_source_attachment_for_client(
                 SELECT input.source_attachments_json
                 FROM single_chat_pending_input AS input
                 JOIN conversation ON conversation.id = input.conversation_id
-                WHERE conversation.camp_id = ?1
+                WHERE ((conversation.camp_id=?1 AND conversation.kind='single_chat') OR (conversation.id=?1 AND conversation.kind='chat' AND EXISTS(SELECT 1 FROM chat_topic t WHERE t.conversation_id=?1 AND t.deletion_operation_id IS NULL AND t.owner_user_id='local_user')))
                   AND conversation.id = ?2
-                  AND conversation.kind = 'single_chat'
+
                   AND input.conversation_id = conversation.id
                   AND input.id = ?3
                 "#,
@@ -741,9 +741,9 @@ pub fn load_source_attachment_for_client(
                 SELECT message.source_attachments_json
                 FROM conversation_message AS message
                 JOIN conversation ON conversation.id = message.conversation_id
-                WHERE conversation.camp_id = ?1
+                WHERE ((conversation.camp_id=?1 AND conversation.kind='single_chat') OR (conversation.id=?1 AND conversation.kind='chat' AND EXISTS(SELECT 1 FROM chat_topic t WHERE t.conversation_id=?1 AND t.deletion_operation_id IS NULL AND t.owner_user_id='local_user')))
                   AND conversation.id = ?2
-                  AND conversation.kind = 'single_chat'
+
                   AND message.conversation_id = conversation.id
                   AND message.id = ?3
                   AND message.author_type = 'user'

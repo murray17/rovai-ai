@@ -49,7 +49,7 @@ export function useArchiveRecords(client: ThreadClient) {
     refreshRef.current = () => request(true)
     const unsubscribe = client.onEvent?.(event => { if (invalidatesArchiveRecords(event)) request() })
     const unsubscribeWeb = client.onInvalidated?.(change => {
-      if (!change || change.resync || change.referencesChanged) request()
+      if (!change || change.resync || change.referencesChanged || change.chatsChanged) request()
     })
     const onFocus = () => { if (document.visibilityState === 'visible') request() }
     const onVisibility = () => { coordinator.setVisible(document.visibilityState === 'visible'); onFocus() }

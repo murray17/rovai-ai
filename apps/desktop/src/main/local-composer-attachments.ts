@@ -80,6 +80,14 @@ export class LocalComposerAttachmentRegistry {
     this.#path = path
   }
 
+  #findEntry(owner: string, id: string): RegistryEntry | undefined {
+    const entry = this.#entries.get(entryKey(owner, id))
+    if (entry || !owner.startsWith('chat-draft:')) return entry
+    const agent = owner.slice(0, owner.lastIndexOf(':'))
+    return [...this.#entries.values()].find(item => item.attachmentId === id
+      && item.threadId.slice(0, item.threadId.lastIndexOf(':')) === agent)
+  }
+
   async prepare(input: {
     threadId: string
     sourcePath: string
@@ -121,7 +129,7 @@ export class LocalComposerAttachmentRegistry {
     await this.#ensureLoaded()
     const restored: LocalAttachmentSourceView[] = []
     for (const requested of attachments.slice(0, 10)) {
-      const entry = this.#entries.get(entryKey(threadId, requested.id))
+      const entry = this.#findEntry(threadId, requested.id)
       if (!entry) {
         restored.push({ ...requested, availability: 'missing', sourcePath: undefined })
         continue
@@ -204,7 +212,7 @@ export class LocalComposerAttachmentRegistry {
   async preview(locator: LocalAttachmentOwnerLocator): Promise<AttachmentPreviewResult | null> {
     if (locator.owner !== 'composer') return null
     await this.#ensureLoaded()
-    const entry = this.#entries.get(entryKey(locator.threadId, locator.attachmentRefId))
+    const entry = this.#findEntry(locator.threadId, locator.attachmentRefId)
     if (!entry) return { preview: null, availability: 'missing' }
     const inspected = await this.#inspect(entry, false)
     if (inspected.view.availability !== 'available'
@@ -235,7 +243,7 @@ export class LocalComposerAttachmentRegistry {
   ): Promise<{ target: DesktopAttachmentTarget | null; availability: LocalAttachmentAvailability } | null> {
     if (locator.owner !== 'composer') return null
     await this.#ensureLoaded()
-    const entry = this.#entries.get(entryKey(locator.threadId, locator.attachmentRefId))
+    const entry = this.#findEntry(locator.threadId, locator.attachmentRefId)
     if (!entry) return { target: null, availability: 'missing' }
     const inspected = await this.#inspect(entry, false)
     if (inspected.view.availability !== 'available') {

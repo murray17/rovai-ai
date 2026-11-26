@@ -591,7 +591,7 @@ impl DomainCommand for ReconcileRuntimeLossCommand {
 #[derive(Debug, Clone)]
 pub struct RuntimeDeliveryCandidate {
     pub delivery_id: String,
-    pub camp_id: String,
+    pub camp_id: Option<String>,
     pub agent_run_id: String,
     pub action_id: String,
     pub action_version: i64,
@@ -609,7 +609,7 @@ pub struct RuntimeDeliveryCandidate {
 #[derive(Debug, Clone)]
 pub struct InterceptedActionAttempt {
     pub action_id: String,
-    pub camp_id: String,
+    pub camp_id: Option<String>,
     pub attempt_id: String,
     pub action_execution_epoch: i64,
     pub action_kind: String,
@@ -643,10 +643,7 @@ impl ActionSafetyService {
         envelope.payload.input.validate()?;
         validate_prepare_action(&envelope.payload)?;
         self.gateway.execute(database, envelope, |transaction| {
-            let camp_id = match envelope.camp_id.as_deref() {
-                Some(camp_id) => camp_id,
-                None => return Ok(rejected("action.camp_required", "Action requires a Thread")),
-            };
+            let camp_id = envelope.camp_id.as_deref();
             let context = match match envelope.payload.control_mode {
                 ActionControlMode::Observed => agent_action_observation_context(
                     transaction,
@@ -1035,7 +1032,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "action.prepared",
-                Some(camp_id),
+                camp_id,
                 Some(("action_execution", &envelope.payload.action_id)),
                 &envelope.actor,
                 envelope.execution_epoch,
@@ -1084,15 +1081,7 @@ impl ActionSafetyService {
             &envelope.payload.effect_disposition,
         )?;
         self.gateway.execute(database, envelope, |transaction| {
-            let camp_id = match envelope.camp_id.as_deref() {
-                Some(camp_id) => camp_id,
-                None => {
-                    return Ok(rejected(
-                        "action.camp_required",
-                        "Observed Action requires a Thread",
-                    ));
-                }
-            };
+            let camp_id = envelope.camp_id.as_deref();
             let context = match agent_action_observation_context(
                 transaction,
                 &envelope.actor,
@@ -1227,7 +1216,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "action.observed",
-                Some(camp_id),
+                camp_id,
                 Some(("action_execution", &envelope.payload.action_id)),
                 &envelope.actor,
                 envelope.execution_epoch,
@@ -1300,7 +1289,7 @@ impl ActionSafetyService {
                             row.get::<_, String>(9)?,
                             row.get::<_, String>(10)?,
                             row.get::<_, i64>(11)?,
-                            row.get::<_, String>(12)?,
+                            row.get::<_, Option<String>>(12)?,
                             row.get::<_, i64>(13)?,
                             row.get::<_, i64>(14)?,
                             row.get::<_, String>(15)?,
@@ -1333,7 +1322,7 @@ impl ActionSafetyService {
             else {
                 return Ok(rejected("approval.not_found", "Action Approval does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id != camp_id {
                 return Ok(rejected("approval.camp_mismatch", "Approval is outside the Thread"));
             }
             if requested_for_user != *user_id {
@@ -1556,7 +1545,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "approval.resolved",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("approval", &envelope.payload.approval_id)),
                 &envelope.actor,
                 None,
@@ -1624,7 +1613,7 @@ impl ActionSafetyService {
                             row.get::<_, i64>(4)?,
                             row.get::<_, i64>(5)?,
                             row.get::<_, String>(6)?,
-                            row.get::<_, String>(7)?,
+                            row.get::<_, Option<String>>(7)?,
                             row.get::<_, String>(8)?,
                             row.get::<_, i64>(9)?,
                             row.get::<_, Option<String>>(10)?,
@@ -1648,7 +1637,7 @@ impl ActionSafetyService {
             else {
                 return Ok(rejected("action.not_found", "Action does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id != camp_id {
                 return Ok(rejected("action.camp_mismatch", "Action is outside the Thread"));
             }
             if status != "prepared" || version != envelope.payload.expected_version {
@@ -1822,7 +1811,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "action.claimed",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("action_execution", &envelope.payload.action_id)),
                 &envelope.actor,
                 None,
@@ -1953,7 +1942,7 @@ impl ActionSafetyService {
                             row.get::<_, String>(4)?,
                             row.get::<_, String>(5)?,
                             row.get::<_, Option<String>>(6)?,
-                            row.get::<_, String>(7)?,
+                            row.get::<_, Option<String>>(7)?,
                             row.get::<_, i64>(8)?,
                         ))
                     },
@@ -1973,7 +1962,7 @@ impl ActionSafetyService {
             else {
                 return Ok(rejected("action.not_found", "Action does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id != camp_id {
                 return Ok(rejected("action.camp_mismatch", "Action is outside the Thread"));
             }
             let zcode_background_result: bool = if matches!(&envelope.actor, ActorRef::System { component_id } if component_id == "runtime-adapter:zcode-app") {
@@ -2104,7 +2093,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "action.result_recorded",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("action_execution", &envelope.payload.action_id)),
                 &envelope.actor,
                 None,
@@ -2179,7 +2168,7 @@ impl ActionSafetyService {
                             row.get::<_, i64>(5)?,
                             row.get::<_, String>(6)?,
                             row.get::<_, String>(7)?,
-                            row.get::<_, String>(8)?,
+                            row.get::<_, Option<String>>(8)?,
                             row.get::<_, String>(9)?,
                             row.get::<_, i64>(10)?,
                             row.get::<_, Option<String>>(11)?,
@@ -2207,9 +2196,7 @@ impl ActionSafetyService {
                     "Runtime Delivery does not exist",
                 ));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
-                || version != envelope.payload.expected_version
-            {
+            if envelope.camp_id != camp_id || version != envelope.payload.expected_version {
                 return Ok(rejected(
                     "runtime_delivery.version_or_scope_conflict",
                     "Runtime Delivery scope or version is stale",
@@ -2327,7 +2314,7 @@ impl ActionSafetyService {
                             row.get::<_, String>(2)?,
                             row.get::<_, i64>(3)?,
                             row.get::<_, Option<String>>(4)?,
-                            row.get::<_, String>(5)?,
+                            row.get::<_, Option<String>>(5)?,
                             row.get::<_, String>(6)?,
                             row.get::<_, i64>(7)?,
                         ))
@@ -2350,7 +2337,7 @@ impl ActionSafetyService {
                     "Runtime Delivery does not exist",
                 ));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
+            if envelope.camp_id != camp_id
                 || status != "delivering"
                 || payload_digest != envelope.payload.payload_digest
                 || target_epoch != envelope.payload.target_execution_epoch
@@ -2392,7 +2379,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "runtime_delivery.acknowledged",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("runtime_delivery_checkpoint", &envelope.payload.delivery_id)),
                 &envelope.actor,
                 None,
@@ -2466,7 +2453,7 @@ impl ActionSafetyService {
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                             row.get::<_, Option<String>>(3)?,
-                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(4)?,
                             row.get::<_, String>(5)?,
                             row.get::<_, i64>(6)?,
                             row.get::<_, Option<String>>(7)?,
@@ -2499,7 +2486,7 @@ impl ActionSafetyService {
             if envelope
                 .camp_id
                 .as_deref()
-                .is_some_and(|scope| scope != camp_id)
+                .is_some_and(|scope| Some(scope) != camp_id.as_deref())
                 || native_thread_id.as_deref() != Some(envelope.payload.native_thread_id.as_str())
                 || run_epoch != envelope.payload.execution_epoch
                 || !matches!(run_status.as_str(), "running" | "waiting")
@@ -2599,7 +2586,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "runtime_request.resolved",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("action_execution", &action_id)),
                 &envelope.actor,
                 Some(envelope.payload.execution_epoch),
@@ -2655,7 +2642,7 @@ impl ActionSafetyService {
                     [&envelope.payload.agent_run_id],
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
@@ -2670,7 +2657,7 @@ impl ActionSafetyService {
             else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
+            if envelope.camp_id != camp_id
                 || run_version != envelope.payload.expected_version
                 || run_epoch != envelope.payload.execution_epoch
                 || !matches!(run_status.as_str(), "running" | "waiting")
@@ -2705,7 +2692,9 @@ impl ActionSafetyService {
                 )?;
                 let camp_turn_status = recompute_camp_turn(
                     transaction,
-                    &camp_id,
+                    camp_id
+                        .as_deref()
+                        .context("Single Chat AgentRun has no Thread")?,
                     camp_turn_id,
                     &envelope.actor,
                     Some(run_epoch),
@@ -2906,7 +2895,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "agent_run.runtime_loss_reconciled",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("agent_run", &envelope.payload.agent_run_id)),
                 &envelope.actor,
                 Some(envelope.payload.execution_epoch),
@@ -2969,7 +2958,7 @@ impl ActionSafetyService {
                     [&envelope.payload.delivery_id],
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                         ))
@@ -2982,9 +2971,7 @@ impl ActionSafetyService {
                     "Runtime Delivery does not exist",
                 ));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
-                || run_epoch != envelope.payload.target_execution_epoch
-            {
+            if envelope.camp_id != camp_id || run_epoch != envelope.payload.target_execution_epoch {
                 return Ok(rejected(
                     "runtime_delivery.failure_fenced",
                     "Runtime Delivery failure is outside the active Run epoch",
@@ -3019,7 +3006,7 @@ impl ActionSafetyService {
             append_domain_event(
                 transaction,
                 "runtime_delivery.failed",
-                Some(&camp_id),
+                camp_id.as_deref(),
                 Some(("runtime_delivery_checkpoint", &envelope.payload.delivery_id)),
                 &envelope.actor,
                 None,
@@ -3285,7 +3272,7 @@ fn agent_action_admission_context(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
-    camp_id: &str,
+    camp_id: Option<&str>,
 ) -> Result<Option<AgentActionContext>> {
     load_agent_action_context(transaction, actor, execution_epoch, camp_id, true)
 }
@@ -3294,7 +3281,7 @@ fn agent_action_observation_context(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
-    camp_id: &str,
+    camp_id: Option<&str>,
 ) -> Result<Option<AgentActionContext>> {
     load_agent_action_context(transaction, actor, execution_epoch, camp_id, false)
 }
@@ -3303,7 +3290,7 @@ fn load_agent_action_context(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
-    camp_id: &str,
+    camp_id: Option<&str>,
     require_effect_admission: bool,
 ) -> Result<Option<AgentActionContext>> {
     let ActorRef::Agent {
@@ -3324,18 +3311,21 @@ fn load_agent_action_context(
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
-            JOIN camp_member
+            LEFT JOIN camp_member
               ON camp_member.camp_id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
              AND camp_member.agent_id = conversation.agent_id
             JOIN agent_profile ON agent_profile.id = conversation.agent_id
             WHERE agent_run.id = ?1
-              AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?2
+              AND COALESCE(agent_run.camp_id, camp_turn.camp_id) IS ?2
               AND conversation.agent_id = ?3
               AND agent_run.execution_epoch = ?4
               AND agent_run.status IN ('running', 'waiting')
               AND (?5 = 0 OR agent_run.cancel_requested_at IS NULL)
-              AND camp_member.status = 'active'
-              AND camp_member.leave_requested_at IS NULL
+              AND ((?2 IS NOT NULL AND camp_member.status='active' AND camp_member.leave_requested_at IS NULL)
+                OR (?2 IS NULL AND agent_run.invocation_kind='chat' AND conversation.kind='chat'
+                    AND agent_run.execution_lease_owner IS NOT NULL AND EXISTS (
+                      SELECT 1 FROM chat_topic t WHERE t.conversation_id=conversation.id AND t.owner_user_id=?6
+                        AND t.deletion_operation_id IS NULL AND (?5=0 OR t.archived_at IS NULL))))
             "#,
             params![
                 source_agent_run_id,
@@ -3343,6 +3333,7 @@ fn load_agent_action_context(
                 agent_id,
                 execution_epoch,
                 i64::from(require_effect_admission),
+                crate::current_user::CURRENT_USER_ID,
             ],
             |row| {
                 Ok((

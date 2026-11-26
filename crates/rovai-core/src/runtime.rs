@@ -548,6 +548,11 @@ pub struct ThreadTurnExecutionBudgetExpiry {
     pub agent_runs_fenced: i64,
 }
 
+/// Runtime DTOs retain the legacy empty identifier for a missing Thread/Turn.
+pub fn run_thread_id(id: &str) -> Option<&str> {
+    (!id.is_empty()).then_some(id)
+}
+
 impl QueuedAgentRunCandidate {
     pub fn execution_workspace(&self) -> AgentRunWorkspace {
         self.workspace.clone().unwrap_or_else(|| {
@@ -825,13 +830,13 @@ impl ExecutionRuntimeService {
         let targets = {
             let mut statement = transaction.prepare(
                 r#"
-                SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                        COALESCE(agent_run.camp_turn_id, ''),
                        agent_run.execution_epoch
                 FROM agent_run
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                WHERE agent_run.invocation_kind = 'single_chat'
-                  AND agent_run.status IN ('queued', 'running', 'waiting')
+                LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE (agent_run.invocation_kind='single_chat' AND agent_run.status IN ('queued','running','waiting'))
+                   OR (agent_run.invocation_kind='chat' AND agent_run.status IN ('running','waiting'))
                 ORDER BY agent_run.created_at, agent_run.id
                 "#,
             )?;
@@ -859,14 +864,16 @@ impl ExecutionRuntimeService {
                 &actor,
                 &now,
             )?;
-            recompute_camp_turn(
-                &transaction,
-                &camp_id,
-                &camp_turn_id,
-                &actor,
-                Some(execution_epoch),
-                &now,
-            )?;
+            if !camp_turn_id.is_empty() {
+                recompute_camp_turn(
+                    &transaction,
+                    &camp_id,
+                    &camp_turn_id,
+                    &actor,
+                    Some(execution_epoch),
+                    &now,
+                )?;
+            }
             cancelled.push(agent_run_id);
         }
         transaction.commit()?;
@@ -902,7 +909,7 @@ impl ExecutionRuntimeService {
             let target = transaction
                 .query_row(
                     r#"
-                SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                        json_extract(agent_run.runtime_model_selection_json, '$.source'),
                        agent_run.runtime_observed_model_id,
                        agent_run.cancel_requested_at
@@ -933,7 +940,7 @@ impl ExecutionRuntimeService {
                     None,
                 ));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -1378,18 +1385,18 @@ impl ExecutionRuntimeService {
             .transpose()?;
         let mut statement = database.connection().prepare(
             r#"
-            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    COALESCE(agent_run.camp_turn_id, ''),
                    agent_run.version, agent_run.execution_epoch, agent_run.status,
                    agent_run.wait_reason, COALESCE(agent_run.runtime_adapter_kind, ''),
-                   camp.project_binding_kind, camp.project_path,
+                   COALESCE(camp.project_binding_kind, 'chat'), COALESCE(camp.project_path, rovai_chat_directory(agent_run.conversation_id)),
                    agent_run.cancel_reason_code, COALESCE(
                        json_extract(agent_run.workspace_json, '$.executionRoot'),
-                       camp.project_path
+                       COALESCE(camp.project_path, rovai_chat_directory(agent_run.conversation_id))
                    )
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+            LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
             WHERE agent_run.cancel_requested_at IS NOT NULL
               AND agent_run.cancel_acknowledged_at IS NULL
               AND agent_run.status IN ('succeeded', 'failed', 'cancelled')
@@ -1483,18 +1490,18 @@ impl ExecutionRuntimeService {
         let now = camp_turn_execution_budget_now().to_rfc3339();
         let mut statement = database.connection().prepare(
             r#"
-            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    COALESCE(agent_run.camp_turn_id, ''),
                    agent_run.conversation_id, conversation.agent_id,
                    agent_run.task_id, agent_run.version,
-                   agent_run.permission_semantics, camp.project_binding_kind,
-                   camp.project_path, agent_run.effective_config_json,
+                   agent_run.permission_semantics, COALESCE(camp.project_binding_kind, 'chat'),
+                   COALESCE(camp.project_path, rovai_chat_directory(agent_run.conversation_id)), agent_run.effective_config_json,
                    agent_run.workspace_json
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+            LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
             JOIN conversation ON conversation.id = agent_run.conversation_id
-            JOIN camp_member
+            LEFT JOIN camp_member
               ON camp_member.camp_id = camp.id
              AND camp_member.agent_id = conversation.agent_id
             JOIN agent_profile ON agent_profile.id = conversation.agent_id
@@ -1504,9 +1511,11 @@ impl ExecutionRuntimeService {
                        AND agent_run.runtime_recovery_required = 1))
               AND agent_run.input_ready_at IS NOT NULL
               AND agent_run.cancel_requested_at IS NULL
-              AND camp.deletion_operation_id IS NULL
-              AND camp_member.status = 'active'
-              AND camp_member.leave_requested_at IS NULL
+              AND ((camp.id IS NOT NULL AND camp.deletion_operation_id IS NULL)
+                   OR (agent_run.invocation_kind='chat' AND EXISTS (
+                       SELECT 1 FROM chat_topic t WHERE t.conversation_id=agent_run.conversation_id
+                         AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
+              AND (agent_run.invocation_kind='chat' OR (camp_member.status = 'active' AND camp_member.leave_requested_at IS NULL))
               AND agent_profile.profile_status = 'present'
               AND (
                   ?3 = 'all'
@@ -1517,7 +1526,7 @@ impl ExecutionRuntimeService {
                   OR (?3 = 'exact' AND agent_run.id = ?4)
               )
               AND (
-                  agent_run.invocation_kind = 'batch'
+                  agent_run.invocation_kind IN ('batch','chat')
                   OR (
                       camp_turn.status IN ('running', 'waiting')
                       AND camp_turn.cancel_requested_at IS NULL
@@ -1632,7 +1641,7 @@ impl ExecutionRuntimeService {
             .connection()
             .query_row(
                 r#"
-                SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                        COALESCE(agent_run.camp_turn_id, ''),
                        agent_run.conversation_id, conversation.version,
                        conversation.agent_id, agent_run.task_id,
@@ -1663,19 +1672,22 @@ impl ExecutionRuntimeService {
                        agent_run.runtime_installation_generation,
                        agent_run.runtime_search_environment_generation,
                        agent_run.runtime_native_session_compatibility_key,
-                       camp.project_binding_kind, camp.project_path,
+                       COALESCE(camp.project_binding_kind, 'chat'), COALESCE(camp.project_path, rovai_chat_directory(agent_run.conversation_id)),
                        agent_run.runtime_compatibility_digest
                 FROM agent_run
                 LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+                LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 WHERE agent_run.id = ?1
                   AND agent_run.status IN ('running', 'waiting')
                   AND agent_run.cancel_requested_at IS NULL
-                  AND camp.deletion_operation_id IS NULL
+                  AND ((camp.id IS NOT NULL AND camp.deletion_operation_id IS NULL)
+                   OR (agent_run.invocation_kind='chat' AND EXISTS (
+                       SELECT 1 FROM chat_topic t WHERE t.conversation_id=agent_run.conversation_id
+                         AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
                   AND agent_run.execution_epoch = ?2
                   AND (
-                      agent_run.invocation_kind = 'batch'
+                      agent_run.invocation_kind IN ('batch','chat')
                       OR (
                           camp_turn.status IN ('running', 'waiting')
                           AND camp_turn.cancel_requested_at IS NULL
@@ -1856,7 +1868,7 @@ impl ExecutionRuntimeService {
             actor: ActorRef::System {
                 component_id: "agent-run-scheduler".into(),
             },
-            camp_id: Some(candidate.camp_id.clone()),
+            camp_id: run_thread_id(&candidate.camp_id).map(str::to_owned),
             expected_versions: vec![],
             execution_epoch: None,
             payload: ClaimAgentRunCommand {
@@ -1932,7 +1944,7 @@ impl ExecutionRuntimeService {
                 (None, None) => None,
             };
             if let Some(workspace) = frozen_workspace.as_ref()
-                && !workspace_matches_camp(transaction, &run.camp_id, workspace)?
+                && !workspace_matches_run(transaction, &run, workspace)?
             {
                 return Ok(rejected(
                     "agent_run.workspace_scope_mismatch",
@@ -1968,7 +1980,7 @@ impl ExecutionRuntimeService {
                            AND runtime_recovery_required = 1))
                   AND cancel_requested_at IS NULL
                   AND (
-                      agent_run.invocation_kind = 'batch'
+                      agent_run.invocation_kind IN ('batch','chat')
                       OR EXISTS (
                           SELECT 1 FROM camp_turn
                           WHERE camp_turn.id = agent_run.camp_turn_id
@@ -2064,7 +2076,7 @@ impl ExecutionRuntimeService {
             let camp_id = transaction
                 .query_row(
                     r#"
-                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id)
+                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, '')
                     FROM agent_run
                     LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                     WHERE agent_run.id = ?1
@@ -2076,7 +2088,7 @@ impl ExecutionRuntimeService {
             let Some(camp_id) = camp_id else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -2165,7 +2177,7 @@ impl ExecutionRuntimeService {
             let Some(run) = run else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&run.camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -2307,7 +2319,7 @@ impl ExecutionRuntimeService {
             let Some(run) = run else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&run.camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -2468,7 +2480,7 @@ impl ExecutionRuntimeService {
             let Some(run) = run else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&run.camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -2560,7 +2572,7 @@ impl ExecutionRuntimeService {
             let target = transaction
                 .query_row(
                     r#"
-                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                            COALESCE(agent_run.camp_turn_id, ''),
                            agent_run.status, agent_run.wait_reason,
                            agent_run.version, agent_run.execution_epoch,
@@ -2599,7 +2611,7 @@ impl ExecutionRuntimeService {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
             if envelope.payload.camp_id != camp_id
-                || envelope.camp_id.as_deref() != Some(camp_id.as_str())
+                || envelope.camp_id.as_deref() != run_thread_id(&camp_id)
             {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
@@ -2775,7 +2787,7 @@ impl ExecutionRuntimeService {
             let Some((camp_id, status, version, cancel_requested_at)) = turn else {
                 return Ok(rejected("camp_turn.not_found", "ThreadTurn does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&camp_id) {
                 return Ok(rejected(
                     "camp_turn.camp_mismatch",
                     "ThreadTurn is outside the Thread",
@@ -2853,7 +2865,7 @@ impl ExecutionRuntimeService {
             let target = transaction
                 .query_row(
                     r#"
-                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                            COALESCE(agent_run.camp_turn_id, ''),
                            agent_run.status, agent_run.wait_reason,
                            agent_run.version, agent_run.execution_epoch,
@@ -2891,7 +2903,7 @@ impl ExecutionRuntimeService {
             else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
+            if envelope.camp_id.as_deref() != run_thread_id(&camp_id)
                 || envelope.payload.camp_id != camp_id
             {
                 return Ok(rejected(
@@ -3036,7 +3048,7 @@ impl ExecutionRuntimeService {
             let target = transaction
                 .query_row(
                     r#"
-                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id), agent_run.status,
+                    SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, ''), agent_run.status,
                            agent_run.execution_epoch,
                            agent_run.ending_git_observation_json,
                            agent_run.cancel_requested_at IS NOT NULL
@@ -3066,7 +3078,7 @@ impl ExecutionRuntimeService {
             else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -3170,7 +3182,7 @@ impl ExecutionRuntimeService {
             let row = transaction
                 .query_row(
                     r#"
-                    SELECT conversation.camp_id,
+                    SELECT COALESCE(conversation.camp_id, ''),
                            conversation.native_adapter_installation_id,
                            conversation.native_session_id,
                            conversation.native_binding_compatibility_digest,
@@ -3252,7 +3264,7 @@ impl ExecutionRuntimeService {
                     "Conversation and AgentRun binding does not exist",
                 ));
             };
-            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
+            if envelope.camp_id.as_deref() != run_thread_id(&camp_id)
                 || version != envelope.payload.expected_conversation_version
                 || epoch != envelope.payload.expected_execution_epoch
                 || !matches!(run_status.as_str(), "running" | "waiting")
@@ -3534,7 +3546,7 @@ impl ExecutionRuntimeService {
             let conversation = transaction
                 .query_row(
                     r#"
-                    SELECT camp_id, version, native_adapter_installation_id,
+                    SELECT COALESCE(camp_id, ''), version, native_adapter_installation_id,
                            native_session_id, native_binding_id
                     FROM conversation WHERE id = ?1
                     "#,
@@ -3753,7 +3765,7 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
-            if target.invocation_kind == "single_chat" {
+            if matches!(target.invocation_kind.as_str(), "single_chat" | "chat") {
                 return persist_single_chat_success(
                     transaction,
                     &target,
@@ -3969,7 +3981,7 @@ impl ExecutionRuntimeService {
             let Some(target) = target else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(target.camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&target.camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -4186,7 +4198,7 @@ impl ExecutionRuntimeService {
             let Some(target) = target else {
                 return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
             };
-            if envelope.camp_id.as_deref() != Some(target.camp_id.as_str()) {
+            if envelope.camp_id.as_deref() != run_thread_id(&target.camp_id) {
                 return Ok(rejected(
                     "agent_run.camp_mismatch",
                     "AgentRun is outside the Thread",
@@ -4379,7 +4391,7 @@ impl ExecutionRuntimeService {
                 && target.runtime_adapter_kind.as_deref() == Some("codex-cli")
                 && target.version == envelope.payload.expected_version
                 && target.execution_epoch == envelope.payload.execution_epoch
-                && envelope.camp_id.as_deref() == Some(target.camp_id.as_str()) {
+                && envelope.camp_id.as_deref() == run_thread_id(&target.camp_id) {
                 let uncertain: bool = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM runtime_input_delivery WHERE agent_run_id = ?1
                      AND (status IN ('accepted', 'delivery_unknown') OR (status = 'prepared' AND dispatch_started_at IS NOT NULL)))",
@@ -4565,17 +4577,17 @@ impl ExecutionRuntimeService {
         let targets = {
             let mut statement = transaction.prepare(
                 r#"
-                SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                        agent_run.camp_turn_id,
                        agent_run.execution_epoch, agent_run.cancel_requested_at,
                        agent_run.cancel_reason_code,
                        COALESCE(
                            json_extract(agent_run.workspace_json, '$.executionRoot'),
-                           camp.project_path
+                           COALESCE(camp.project_path, rovai_chat_directory(agent_run.conversation_id))
                        )
                 FROM agent_run
                 LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+                LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
                 WHERE agent_run.status IN ('queued', 'running', 'waiting')
                 ORDER BY agent_run.created_at, agent_run.id
                 "#,
@@ -5297,7 +5309,7 @@ fn persist_single_chat_success(
         UPDATE conversation
         SET last_message_sequence = last_message_sequence + ?3,
             version = version + 1, updated_at = ?2
-        WHERE id = ?1 AND kind = 'single_chat' AND ended_at IS NULL
+        WHERE id = ?1 AND kind IN ('single_chat','chat') AND ended_at IS NULL
         "#,
         params![
             target.conversation_id,
@@ -5333,7 +5345,7 @@ fn persist_single_chat_success(
                 target.agent_id,
                 target.agent_run_id,
                 envelope.payload.final_output,
-                target.camp_turn_id,
+                run_thread_id(&target.camp_turn_id),
                 target.now,
             ],
         )?;
@@ -5354,9 +5366,8 @@ fn persist_single_chat_success(
             ended_at = ?3, version = version + 1, updated_at = ?3
         WHERE id = ?1 AND status = 'running'
           AND version = ?4 AND execution_epoch = ?5
-          AND invocation_kind = 'single_chat'
+          AND ((invocation_kind='single_chat' AND operation_policy='single_chat_v1') OR (invocation_kind='chat' AND operation_policy='chat_v1'))
           AND response_delivery = 'conversation_message'
-          AND operation_policy = 'single_chat_v1'
           AND operation_policy_version IN (1, 2)
           AND destination_conversation_id = ?8
         "#,
@@ -5389,7 +5400,7 @@ fn persist_single_chat_success(
             "finalThreadMessageId": Value::Null,
             "finalOutputDigest": final_output_digest,
             "responseDelivery": "conversation_message",
-            "operationPolicy": "single_chat_v1",
+            "operationPolicy": target.operation_policy,
             "terminalResolutionSource": "runtime_terminal",
             "terminalReasonCode": terminal_reason_code,
             "endingGitObservation": envelope.payload.ending_git_observation,
@@ -5408,19 +5419,26 @@ fn persist_single_chat_success(
             now: &target.now,
         },
     )?;
-    let camp_turn_status = recompute_camp_turn(
-        transaction,
-        &target.camp_id,
-        &target.camp_turn_id,
-        &envelope.actor,
-        Some(envelope.payload.execution_epoch),
-        &target.now,
-    )?;
+    if target.invocation_kind == "chat" && has_final_output {
+        transaction.execute("UPDATE chat_topic SET last_activity_global_sequence=(SELECT max(global_sequence) FROM event_log) WHERE conversation_id=?1", [&target.conversation_id])?;
+    }
+    let camp_turn_status = if target.camp_turn_id.is_empty() {
+        None
+    } else {
+        Some(recompute_camp_turn(
+            transaction,
+            &target.camp_id,
+            &target.camp_turn_id,
+            &envelope.actor,
+            Some(envelope.payload.execution_epoch),
+            &target.now,
+        )?)
+    };
     Ok(CommandHandlerResult::applied(
         "agent_run.succeeded",
         json!({
             "agentRunId": target.agent_run_id,
-            "threadTurnId": target.camp_turn_id,
+            "threadTurnId": run_thread_id(&target.camp_turn_id),
             "threadTurnStatus": camp_turn_status,
             "finalConversationMessageId": final_conversation_message_id,
             "finalThreadMessageId": Value::Null,
@@ -5704,7 +5722,7 @@ fn load_terminal_target(
     transaction
         .query_row(
             r#"
-            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    COALESCE(agent_run.camp_turn_id, ''),
                    conversation.id, conversation.kind, conversation.ended_at,
                    conversation.agent_id,
@@ -5721,10 +5739,13 @@ fn load_terminal_target(
                    agent_run.anchor_message_id
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+            LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
             JOIN conversation ON conversation.id = agent_run.conversation_id
             WHERE agent_run.id = ?1
-              AND camp.deletion_operation_id IS NULL
+              AND ((camp.id IS NOT NULL AND camp.deletion_operation_id IS NULL)
+                   OR (agent_run.invocation_kind='chat' AND EXISTS (
+                       SELECT 1 FROM chat_topic t WHERE t.conversation_id=agent_run.conversation_id
+                         AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
             "#,
             [agent_run_id],
             |row| {
@@ -5766,7 +5787,7 @@ fn validate_terminal_target(
     expected_version: i64,
     execution_epoch: i64,
 ) -> Result<Option<CommandHandlerResult>> {
-    if camp_id != Some(target.camp_id.as_str()) {
+    if camp_id != run_thread_id(&target.camp_id) {
         return Ok(Some(rejected(
             "agent_run.camp_mismatch",
             "AgentRun is outside the Thread",
@@ -5794,6 +5815,20 @@ fn validate_terminal_target(
         return Ok(Some(rejected(
             "agent_run.output_already_recorded",
             "AgentRun already has a final output",
+        )));
+    }
+    if target.invocation_kind == "chat"
+        && (target.conversation_kind != "chat"
+            || target.conversation_ended_at.is_some()
+            || target.operation_policy != "chat_v1"
+            || target.operation_policy_version != 1
+            || target.response_delivery != "conversation_message"
+            || target.destination_conversation_id.as_deref()
+                != Some(target.conversation_id.as_str()))
+    {
+        return Ok(Some(rejected(
+            "agent_run.terminal_fenced",
+            "Chat output route is closed",
         )));
     }
     if target.invocation_kind == "single_chat"
@@ -6019,7 +6054,7 @@ fn settle_interrupted_run_in_tx(
     }
     let RunFacts { camp_id, camp_turn_id, conversation_id, execution_epoch, status,
         requested_at, previous_reason, cleanup_ack } = transaction.query_row(
-        "SELECT COALESCE(run.camp_id, turn.camp_id), COALESCE(run.camp_turn_id, ''),
+        "SELECT COALESCE(run.camp_id, turn.camp_id, ''), COALESCE(run.camp_turn_id, ''),
                 run.conversation_id, run.execution_epoch,
                 run.status, run.cancel_requested_at, run.cancel_reason_code, run.cancel_acknowledged_at
          FROM agent_run AS run LEFT JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
@@ -6568,7 +6603,7 @@ pub(crate) fn pump_target_after_run_terminal(
         .connection()
         .query_row(
             r#"
-            SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id),
+            SELECT COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    conversation.agent_id, agent_run.invocation_kind
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -6588,6 +6623,10 @@ pub(crate) fn pump_target_after_run_terminal(
     let Some((camp_id, recipient_agent_id, invocation_kind)) = target else {
         return Ok(());
     };
+    if invocation_kind == "chat" {
+        database.execution_wake.runs.notify_one();
+        return Ok(());
+    }
     if invocation_kind == "batch" {
         return Ok(());
     }
@@ -6606,7 +6645,7 @@ fn claim_admission_rejection(
     run: &ClaimableRun,
     envelope: &CommandEnvelope<ClaimAgentRunCommand>,
 ) -> Result<Option<CommandHandlerResult>> {
-    if envelope.camp_id.as_deref() != Some(run.camp_id.as_str()) {
+    if envelope.camp_id.as_deref() != run_thread_id(&run.camp_id) {
         return Ok(Some(rejected(
             "agent_run.camp_mismatch",
             "AgentRun is outside the Thread",
@@ -6748,7 +6787,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
     transaction
         .query_row(
             r#"
-            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    COALESCE(agent_run.camp_turn_id, ''),
                    agent_run.conversation_id,
                    agent_run.task_id,
@@ -6765,22 +6804,24 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                      WHEN camp_turn.execution_budget_schema_version = 2 THEN camp_turn.execution_budget_deadline_at
                      ELSE COALESCE(camp_turn.execution_budget_deadline_at, 'invalid')
                    END,
-                   CASE WHEN camp_member.status = 'active'
-                             AND camp_member.leave_requested_at IS NULL
+                   CASE WHEN (agent_run.invocation_kind='chat' OR (camp_member.status = 'active' AND camp_member.leave_requested_at IS NULL))
                              AND agent_profile.profile_status = 'present'
                         THEN 1 ELSE 0 END,
                    agent_profile.default_capabilities_json,
-                   camp_member.capability_overrides_json
+                   COALESCE(camp_member.capability_overrides_json, '{}')
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+            LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
             JOIN conversation ON conversation.id = agent_run.conversation_id
             JOIN agent_profile ON agent_profile.id = conversation.agent_id
-            JOIN camp_member
+            LEFT JOIN camp_member
               ON camp_member.camp_id = camp.id
              AND camp_member.agent_id = conversation.agent_id
             WHERE agent_run.id = ?1
-              AND camp.deletion_operation_id IS NULL
+              AND ((camp.id IS NOT NULL AND camp.deletion_operation_id IS NULL)
+                   OR (agent_run.invocation_kind='chat' AND EXISTS (
+                       SELECT 1 FROM chat_topic t WHERE t.conversation_id=agent_run.conversation_id
+                         AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
             "#,
             [run_id],
             |row| {
@@ -6972,11 +7013,20 @@ fn has_recovery_safety_blocker(transaction: &Transaction<'_>, run_id: &str) -> R
     Ok(blockers != 0)
 }
 
-fn workspace_matches_camp(
+fn workspace_matches_run(
     transaction: &Transaction<'_>,
-    camp_id: &str,
+    run: &ClaimableRun,
     workspace: &Value,
 ) -> Result<bool> {
+    if run.camp_id.is_empty() {
+        let directory: String = transaction.query_row(
+            "SELECT rovai_chat_directory(?1)",
+            [&run.conversation_id],
+            |row| row.get(0),
+        )?;
+        return Ok(workspace["executionRoot"].as_str() == Some(directory.as_str()));
+    }
+    let camp_id = &run.camp_id;
     let project_path = transaction.query_row(
         "SELECT project_path FROM camp WHERE id = ?1",
         [camp_id],
@@ -7218,7 +7268,7 @@ fn append_domain_event(
             Uuid::new_v4().to_string(),
             event_type,
             serde_json::to_string(payload)?,
-            camp_id,
+            run_thread_id(camp_id),
             entity.0,
             entity.1,
             actor_type,

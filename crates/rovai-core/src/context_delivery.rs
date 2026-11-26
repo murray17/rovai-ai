@@ -17,7 +17,7 @@ pub struct ContextDeliveryProfile {
 
 impl ContextDeliveryProfile {
     pub fn validate(self) -> Result<Self> {
-        if !matches!(self.profile_version, 5..=16) {
+        if !matches!(self.profile_version, 5..=17) {
             anyhow::bail!("unsupported Context Delivery Profile version");
         }
         if self.max_public_messages == 0
@@ -150,6 +150,11 @@ pub const CURRENT_CONTEXT_DELIVERY_PROFILE_V16: ContextDeliveryProfile = Context
     ..CURRENT_CONTEXT_DELIVERY_PROFILE_V12
 };
 
+pub const CHAT_CONTEXT_DELIVERY_PROFILE_V17: ContextDeliveryProfile = ContextDeliveryProfile {
+    profile_version: 17,
+    ..CURRENT_CONTEXT_DELIVERY_PROFILE_V16
+};
+
 pub fn current_context_delivery_profile() -> Result<ContextDeliveryProfile> {
     CURRENT_CONTEXT_DELIVERY_PROFILE_V16.validate()
 }
@@ -221,7 +226,7 @@ mod tests {
     fn profile_validation_rejects_unknown_versions_and_invalid_limits() {
         for invalid in [
             ContextDeliveryProfile {
-                profile_version: 17,
+                profile_version: 18,
                 ..CONTEXT_DELIVERY_PROFILE_V6
             },
             ContextDeliveryProfile {

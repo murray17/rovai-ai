@@ -325,8 +325,17 @@ pub fn persist_queued_agent_message(
         .collect::<Vec<_>>();
     effective_recipients.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     effective_recipients.dedup();
-    let anchor_message_id =
-        load_run_reply_anchor(transaction, request.source_agent_run_id, request.camp_id)?;
+    let private_source = crate::chat::run_conversation(
+        transaction,
+        request.source_agent_run_id,
+        request.execution_epoch,
+    )?
+    .is_some();
+    let anchor_message_id = if private_source {
+        None
+    } else {
+        load_run_reply_anchor(transaction, request.source_agent_run_id, request.camp_id)?
+    };
     let source_files =
         reuse_camp_source_attachment_ids(transaction, request.camp_id, request.source_files)?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -400,7 +409,7 @@ pub fn persist_queued_agent_message(
             request.camp_id,
             camp_sequence,
             request.author_agent_id,
-            request.source_agent_run_id,
+            (!private_source).then_some(request.source_agent_run_id),
             projected_body,
             structured_content_json,
             content_digest,
@@ -446,6 +455,10 @@ pub fn persist_queued_agent_message(
         agent_id: request.author_agent_id.to_string(),
         source_agent_run_id: request.source_agent_run_id.to_string(),
     };
+    let mut event_payload = json!({"sequence":camp_sequence,"addressSource":"agent_send","addressedAgentIds":effective_recipients,"deliveryIds":delivery_ids,"anchorMessageId":anchor_message_id});
+    if !private_source {
+        event_payload["sourceAgentRunId"] = json!(request.source_agent_run_id);
+    }
     append_domain_event(
         transaction,
         "camp_message.sent",
@@ -453,14 +466,7 @@ pub fn persist_queued_agent_message(
         Some(("camp_message", &message_id)),
         &actor,
         Some(request.execution_epoch),
-        &json!({
-            "sequence": camp_sequence,
-            "addressSource": "agent_send",
-            "addressedAgentIds": effective_recipients,
-            "deliveryIds": delivery_ids,
-            "sourceAgentRunId": request.source_agent_run_id,
-            "anchorMessageId": anchor_message_id,
-        }),
+        &event_payload,
     )?;
     crate::message_changes::record(transaction, request.camp_id, false, &[]);
     for delivery in &deliveries {

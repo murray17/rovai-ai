@@ -408,8 +408,23 @@ impl SingleChatService {
         let (conversation_id, current_input_sequence) =
             load_single_chat_history_target(database, agent_run_id, execution_epoch)?
                 .ok_or_else(|| anyhow::anyhow!("Single Chat history target is unavailable"))?;
-        let before_sequence = input
-            .before_sequence
+        Self::history_page(
+            database,
+            &conversation_id,
+            current_input_sequence,
+            input.before_sequence,
+            limit,
+        )
+    }
+
+    pub(crate) fn history_page(
+        database: &Database,
+        conversation_id: &str,
+        current_input_sequence: i64,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<SingleChatHistoryOutput> {
+        let before_sequence = before
             .unwrap_or(current_input_sequence)
             .min(current_input_sequence);
         let mut statement = database.connection().prepare(
@@ -1687,7 +1702,7 @@ impl SingleChatService {
             native_interactions: None,
             approvals: crate::read_model::load_conversation_approvals(
                 database.connection(),
-                &conversation.camp_id,
+                Some(&conversation.camp_id),
                 Some(conversation_id),
                 true,
                 None,
