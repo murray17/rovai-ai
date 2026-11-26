@@ -13,6 +13,7 @@ import {
 } from './attachment-presentation'
 import { UiText, uiAttribute } from './interface-language'
 import { ImageContextMenu, type ImageAction, type ImageMenuPosition } from './ImageContextMenu'
+import { ImagePreviewUrl } from './image-preview-url'
 import { writeClipboardImage } from './clipboard'
 import { pendingAttachmentDownload, startAttachmentDownload, type AttachmentDownloadResult } from './attachment-download'
 
@@ -70,7 +71,8 @@ export function AttachmentCard({
   onNotify = () => undefined,
   disabled = false,
   menuItems,
-  presentation = 'composer'
+  presentation = 'composer',
+  displayedImages
 }: {
   attachment: ThreadMessageAttachmentView
   onRemove?: () => void
@@ -79,10 +81,12 @@ export function AttachmentCard({
   disabled?: boolean
   menuItems?: ReactNode
   presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
+  displayedImages?: Map<string, ImagePreviewUrl>
 }): JSX.Element {
   const client = useThreadClient()
   const filePreview = useOptionalFilePreview()
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewImage, setPreviewImage] = useState<ImagePreviewUrl | null>(null)
+  const previewUrl = previewImage?.url ?? null
   const [previewFailed, setPreviewFailed] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [attachmentAction, setAttachmentAction] = useState<'open' | 'reveal' | null>(null)
@@ -115,8 +119,8 @@ export function AttachmentCard({
     if (attachment.previewKind !== 'image') return
     if (timeline && attachment.availability === 'unknown') return
     let active = true
-    let objectUrl: string | null = null
-    setPreviewUrl(null)
+    let image: ImagePreviewUrl | null = null
+    setPreviewImage(null)
     setPreviewFailed(false)
     setImageReady(false)
     setPreviewOpen(false)
@@ -129,20 +133,23 @@ export function AttachmentCard({
           return
         }
         const preview = result.preview
-        objectUrl = URL.createObjectURL('blob' in preview ? preview.blob : new Blob(
+        image = new ImagePreviewUrl('blob' in preview ? preview.blob : new Blob(
           [Uint8Array.from(preview.bytes).buffer],
           { type: preview.mediaType }
         ))
-        setPreviewUrl(objectUrl)
+        setPreviewImage(image)
       })
       .catch(() => {
         if (active) setPreviewFailed(true)
       })
     return () => {
       active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (image) {
+        if (displayedImages?.get(attachment.id) === image) displayedImages.delete(attachment.id)
+        image.release()
+      }
     }
-  }, [client, attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline])
+  }, [client, attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline, displayedImages])
 
   useEffect(() => {
     if (!imageNotice || imageAction || imageMenu) return
@@ -283,8 +290,18 @@ export function AttachmentCard({
     ? (
         <span className="attachment-visual composer-image-preview" aria-hidden="true">
           {previewUrl && !previewFailed
-            ? <img src={previewUrl} alt="" onLoad={() => setImageReady(true)}
-                onError={() => { setImageReady(false); setPreviewFailed(true) }} />
+            ? <img src={previewUrl} alt=""
+                onLoad={event => {
+                  setImageReady(true)
+                  if (previewImage && event.currentTarget.currentSrc === previewImage.url) {
+                    displayedImages?.set(attachment.id, previewImage)
+                  }
+                }}
+                onError={() => {
+                  if (previewImage && displayedImages?.get(attachment.id) === previewImage) displayedImages.delete(attachment.id)
+                  setImageReady(false)
+                  setPreviewFailed(true)
+                }} />
             : !previewFailed ? <i className="attachment-loading" /> : <b>!</b>}
         </span>
       )

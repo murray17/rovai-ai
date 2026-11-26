@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-attachments
 authority: live-source-references-and-legacy-attachment-reads
 status: accepted
-last_updated: 2026-11-15
+last_updated: 2026-11-25
 ---
 
 # Thread Attachments：原路径引用、默认输出与历史读取
@@ -63,7 +63,8 @@ Run Facts 只投影顶层 attachmentOutputRoot，含义是默认输出位置；�
 队员普通文件行可以直接下载当前文件。Desktop 由 Main 按 exact owner 解析源，系统保存窗口选择目标后再次核验，
 以字节流保存副本；Web 复用已有附件下载授权。不依赖预览、不额外登记附件或改变原文件生命周期。
 
-Desktop/Web 复用现有预览缓存与更新反馈，候选刷新失败保留旧内容，切 Thread 不冷加载。
+Desktop/Web 公屏用户图片在确认公开后复用同一客户端输入框已显示的预览，缓存条目归属正式消息和附件。
+缓存命中时直接显示，淘汰或重启后才按路径读取当前内容。队员图片沿用原有缓存与刷新流程。
 HTML 按真实来源目录解析资源；Web 资源能力绑定已有句柄、Session 和源记录，每次限制在授权目录，
 不授予页面业务凭据，iframe 和直接资源导航均保持 CSP 沙箱。细节见 [File Preview v18](../contracts/file-preview-v18.md)。
 

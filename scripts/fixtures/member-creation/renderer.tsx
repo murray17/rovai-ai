@@ -10,6 +10,7 @@ import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
 import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { runTeamCreationRegression } from './team-creation-regression'
+import { runUserImageRegression } from './user-image-regression'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 import '../../../apps/web/src/mobile.css'
@@ -151,5 +152,7 @@ const root = createRoot(document.getElementById('root')!)
 const app = <ThreadClientProvider client={client as any}><CurrentUserProfileContext.Provider value={{ profile: { displayName: '', avatarDataUrl: null }, update: async () => {} } as any}><BusinessApp environment={environment} /></CurrentUserProfileContext.Provider></ThreadClientProvider>
 if (new URLSearchParams(location.search).get('flow') === 'teams') {
   environment.navigationHistory.initial = { entries: [{ kind: 'teams' }], index: 0 }
-  ;(window as any).teamCreationResult = runTeamCreationRegression(root, app, client, profiles, environment, events)
+  ;(window as any).regressionResult = runTeamCreationRegression(root, app, client, profiles, environment, events)
+} else if (new URLSearchParams(location.search).get('flow') === 'user-images') {
+  ;(window as any).regressionResult = runUserImageRegression(root, app, client, environment, threads, events)
 } else root.render(app)
