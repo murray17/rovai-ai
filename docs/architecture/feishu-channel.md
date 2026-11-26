@@ -311,7 +311,7 @@ present/published Rovai Bot 建立 membership，但首条消息仍只为明确 m
 初始目标”和“Thread 可协作队员”是两个独立集合。父群新增 Bot 后，完整快照通过同一 membership source 把它加入新旧
 Topic Thread；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Thread 和冻结项目不变。
 
-有效群消息先通过本地过滤并持久记录，Host 再逐个对已发布 Bot 调用 `isInChat`。普通群和话题的开工资格由 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 统一规定。群名和类型共用群资料读取，设置页只显示本地状态。
+有效群消息通过本地过滤并持久记录后，Host 先提交给 Core。Core 缺少晚于该消息的父群名单时，Host 才逐个对已发布 Bot 调用 `isInChat`，成功后重提一次。普通群和话题的开工资格由 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 统一规定。群名和类型共用群资料读取，设置页只显示本地状态。
 
 
 ## 输出、恢复与秘密

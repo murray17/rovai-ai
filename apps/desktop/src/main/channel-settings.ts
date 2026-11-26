@@ -2081,13 +2081,14 @@ export class ChannelSettingsService {
     const existing = this.#finalizing.get(aggregateId)
     if (existing) return existing
     const finish = async () => {
-      if (conversationKind !== 'p2p' && !await this.#reconcileChatRoster(chatId, tenantKey)) return false
       const submit = () => this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
         aggregateId, requireFreshRoster: true
       }, false)
       let finalized = await submit()
-      if (finalized.code === 'channel.roster_sync_required' && conversationKind !== 'p2p'
-        && await this.#reconcileChatRoster(chatId, tenantKey)) finalized = await submit()
+      if (finalized.code === 'channel.roster_sync_required' && conversationKind !== 'p2p') {
+        if (!await this.#reconcileChatRoster(chatId, tenantKey)) return false
+        finalized = await submit()
+      }
       if (finalized.code === 'channel.membership_sync_required') {
         const threadId = stringPayload(finalized, 'threadId')
         const bindingId = stringPayload(finalized, 'bindingId')

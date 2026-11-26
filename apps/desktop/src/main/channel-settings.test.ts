@@ -3331,6 +3331,47 @@ describe('channel settings service', () => {
     }
   )
 
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])(
+    '$kind asks Core before reading the parent group during recovery', async profile => {
+      const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: '审阅员' } })
+      const pending = new Set(['ready', 'duplicate', 'stale'])
+      const submissions: string[] = []
+      let reconciled = false
+      const service = new ChannelSettingsService({
+        ...inertInterval(), profile, createChannel: harness.createChannel,
+        credentialStore: memoryCredentialStore({ 'bot-cred': { appId: 'cli_a', appSecret: 'secret' } }, () => profile.kind),
+        core: channelCore((method, raw) => {
+          if (method === `${profile.methodPrefix}snapshot`) return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: profile.kind, appId: 'cli_a',
+            botDisplayName: '审阅员', credentialRef: 'bot-cred', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }], pendingAggregates: [...pending].map(id => ({
+            aggregateId: id, tenantKey: 'tenant-1', chatId: `group-${id}`, conversationKind: 'topic'
+          })) })
+          if (method === `${profile.hostMethodPrefix}inbound.finalize`) {
+            const { aggregateId, requireFreshRoster } = (raw as { command: { aggregateId: string; requireFreshRoster: boolean } }).command
+            expect(requireFreshRoster).toBe(true)
+            submissions.push(aggregateId)
+            if (aggregateId === 'stale' && !reconciled) return { status: 'rejected', code: 'channel.roster_sync_required', payload: {} }
+            pending.delete(aggregateId)
+            return aggregateId === 'duplicate'
+              ? { status: 'applied', code: 'channel.inbound.already_finalized', payload: {} }
+              : { status: 'accepted', code: 'channel.turn.admitted', payload: {} }
+          }
+          if (method === `${profile.hostMethodPrefix}roster.reconcile`) reconciled = true
+          if (method === `${profile.hostMethodPrefix}host.tick`) return { deliveries: [] }
+          return { status: 'applied', payload: {} }
+        })
+      })
+      try {
+        await service.start()
+        await vi.waitFor(() => expect(pending.size).toBe(0))
+        expect(submissions.sort()).toEqual(['duplicate', 'ready', 'stale', 'stale'])
+        expect(harness.isInChat.get('cli_a')).toHaveBeenCalledExactlyOnceWith({ path: { chat_id: 'group-stale' } })
+      } finally { await service.stop() }
+    }
+  )
+
   it('accepts topics only from a standalone topic-group chat mode', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     harness.getChatMode.mockImplementation(async (chatId: string) => (
@@ -3338,6 +3379,7 @@ describe('channel settings service', () => {
     ))
     const observations: Record<string, unknown>[] = []
     let hostTicks = 0
+    let needsRoster = false
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
@@ -3364,8 +3406,13 @@ describe('channel settings service', () => {
             payload: { classification: 'owner' }
           }
         }
+        if (method === 'channels.inbound.finalize' && needsRoster) {
+          return { status: 'rejected', code: 'channel.roster_sync_required', payload: {} }
+        }
+        if (method === 'channels.roster.reconcile') needsRoster = false
         if (method === 'channels.inbound.observe') {
           observations.push(command)
+          needsRoster = true
           return {
             status: 'accepted',
             code: 'channel.inbound.collecting',

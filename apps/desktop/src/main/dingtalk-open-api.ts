@@ -58,8 +58,9 @@ export class DingTalkOpenApiError extends Error {
   }
 
   get retryable(): boolean {
-    return this.status === 0 || this.status === 429 || this.status >= 500
-      || this.remoteCode === '90002' || this.remoteCode === '15' || this.remoteCode === '88'
+    if (this.status === 0 || this.status === 429 || this.status >= 500) return true
+    return this.status >= 200 && this.status < 300
+      && (this.remoteCode === '90002' || this.remoteCode === '15' || this.remoteCode === '88')
   }
 }
 
@@ -366,13 +367,16 @@ export class DingTalkOpenApiClient {
       throw new DingTalkOpenApiError('dingtalk_open_api_network', 0)
     }
     const body = await response.json().catch(() => null)
-    if (!response.ok || !body || typeof body !== 'object' || Array.isArray(body)) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status)
     }
     const value = body as Record<string, unknown>
+    const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode')
+    if (!response.ok) {
+      throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status, code)
+    }
     if (containsBusinessFailure(value)) {
-      const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode') ?? 'failed'
-      throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, code)
+      throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, code ?? 'failed')
     }
     if (value.code && value.code !== '0' && value.code !== 0) {
       throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, String(value.code))
