@@ -4,7 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { attachmentRevealLabel } from './AttachmentCard'
 import { ImageContextMenu, type ImageAction, type ImageMenuPosition } from './ImageContextMenu'
 import { writeClipboardImage, writeClipboardText } from './clipboard'
-import { useThreadClient, type ThreadClient } from './camp-client'
+import { useImagePreviewSession, useThreadClient, type ThreadClient } from './camp-client'
 import type {
   AgentRunImageContent,
   AgentRunImageView,
@@ -189,12 +189,13 @@ export class ImagePayloadCache {
 type ClientImageState = {
   payloads: ImagePayloadCache
   loading: Map<string, Promise<ImagePayload | null>>
+  publications: Set<ImagePublication>
 }
 const clientImageStates = new WeakMap<ThreadClient, ClientImageState>()
 function clientImages(client: ThreadClient): ClientImageState {
   let state = clientImageStates.get(client)
   if (!state) {
-    state = { payloads: new ImagePayloadCache(MAX_IMAGE_PAYLOAD_CACHE_BYTES), loading: new Map() }
+    state = { payloads: new ImagePayloadCache(MAX_IMAGE_PAYLOAD_CACHE_BYTES), loading: new Map(), publications: new Set() }
     clientImageStates.set(client, state)
   }
   return state
@@ -332,6 +333,17 @@ export function loadUserImagePreview(source: GalleryImage, client: ThreadClient,
   })
 }
 
+/** Keep the image being exported available to other viewers until the export preview closes. */
+export async function acquireExportImage(source: GalleryImage, client: ThreadClient, reuseUserPreview: boolean):
+  Promise<{ url: string; release(): void } | null> {
+  const state = clientImages(client)
+  const payload = reuseUserPreview ? await loadUserImagePreview(source, client) : await getOrLoadImagePayload(source, client)
+  if (!payload || clientImageStates.get(client) !== state) return null
+  const image = payload.displayed?.retain() ?? new ImagePreviewUrl(payload.blob)
+  const unregister = reuseUserPreview ? state.payloads.registerViewer(imageCacheKey(source), image) : undefined
+  return { url: image.url, release() { unregister?.(); image.release() } }
+}
+
 export interface ImagePublication {
   awaitingReceipt(threadId: string, message: Pick<ThreadMessageView, 'authorType' | 'sequence' | 'attachments'>): boolean
   publish(messageId: string, visible: boolean): void
@@ -350,7 +362,7 @@ export function prepareImagePublication(
   }
   if (!images.size) return
   const state = clientImages(client)
-  return {
+  const publication: ImagePublication = {
     // A projection can precede the receipt. Only the receipt binds these bytes to an exact public owner.
     awaitingReceipt: (thread, message) => images.size > 0 && thread === threadId && message.authorType === 'user'
       && message.sequence >= firstSequence && message.attachments.length === attachments.length
@@ -360,10 +372,13 @@ export function prepareImagePublication(
       state.payloads.publish(threadId, messageId, images, visible)
     },
     release() {
+      state.publications.delete(publication)
       for (const displayed of images.values()) displayed.release()
       images.clear()
     }
   }
+  state.publications.add(publication)
+  return publication
 }
 
 export function releaseUnshownUserImages(client: ThreadClient, threadId: string): void {
@@ -371,8 +386,11 @@ export function releaseUnshownUserImages(client: ThreadClient, threadId: string)
 }
 
 export function releaseClientImageCache(client: ThreadClient): void {
-  clientImageStates.get(client)?.payloads.clear()
+  const state = clientImageStates.get(client)
+  if (!state) return
   clientImageStates.delete(client)
+  state.payloads.clear()
+  for (const publication of state.publications) publication.release()
 }
 
 export function ImageGallery({
@@ -382,9 +400,11 @@ export function ImageGallery({
   images: GalleryImage[]
   variant?: ImageGalleryVariant
 }): JSX.Element | null {
-  if (images.length === 0) return null
+  const session = useImagePreviewSession()
+  if (session === null || images.length === 0) return null
   return (
     <section
+      key={session}
       className={`image-gallery image-gallery-${variant}`}
       aria-label={variant === 'user-attachment' ? uiAttribute("消息图片") : uiAttribute("Agent 输出图片")}
     >

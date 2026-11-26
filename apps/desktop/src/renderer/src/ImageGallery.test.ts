@@ -7,6 +7,7 @@ import { ImagePreviewUrl } from './image-preview-url'
 import {
   ImageGallery,
   ImagePayloadCache,
+  acquireExportImage,
   imageCacheKey,
   cacheDecodedImagePayload,
   releaseClientImageCache,
@@ -242,22 +243,61 @@ describe('shared image presentation', () => {
     expect(preview).not.toHaveBeenCalled()
   })
 
-  it('shares a cold user read with another viewer arriving while decoding, then reuses the decoded result', async () => {
+  it.each(['timeline', 'export'])('shares the %s reader with the other view even while decoding', async firstViewer => {
     const preview = vi.fn().mockResolvedValue({ availability: 'available', preview: { blob: new Blob(['pixels']) } })
     vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
     let finishDecode!: () => void
     const decode = vi.fn(() => new Promise<void>(resolve => { finishDecode = resolve }))
     vi.stubGlobal('Image', class { naturalWidth = 3840; naturalHeight = 2160; decode = decode })
     const source = attachmentSource('cold')
-    const first = loadUserImagePreview(source, desktopThreadClient)
+    const timeline = () => loadUserImagePreview(source, desktopThreadClient)
+    const openExport = () => acquireExportImage(source, desktopThreadClient, true)
+    let gallery, exported
+    if (firstViewer === 'timeline') gallery = timeline()
+    else exported = openExport()
     await vi.waitFor(() => expect(decode).toHaveBeenCalledOnce())
-    const second = loadUserImagePreview(source, desktopThreadClient)
+    gallery ??= timeline()
+    exported ??= openExport()
     finishDecode()
-    const result = await first
-    expect(result?.displayed).toBeDefined()
-    expect(await second).toBe(result)
-    expect(await loadUserImagePreview(source, desktopThreadClient)).toBe(result)
+    const [result, exportView] = await Promise.all([gallery, exported])
+    expect(exportView).not.toBeNull()
+    expect(exportView!.url).toBe(result!.displayed!.url)
+    exportView!.release()
+    expect(await timeline()).toBe(result)
     expect(preview).toHaveBeenCalledOnce()
+    expect(decode).toHaveBeenCalledOnce()
+  })
+
+  it('discards pending reads and composer transfers when the same client authenticates again', async () => {
+    const old = new Blob(['blue'])
+    const fresh = new Blob(['orange'])
+    let returnOld!: (value: { availability: string; preview: { blob: Blob } }) => void
+    const preview = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { returnOld = resolve }))
+      .mockResolvedValue({ availability: 'available', preview: { blob: fresh } })
+    vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: (blob: Blob) => blob === old ? 'blob:old' : 'blob:new', revokeObjectURL })
+    const decode = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('Image', class { naturalWidth = 32; naturalHeight = 32; decode = decode })
+    const source = attachmentSource('photo')
+    const oldExport = acquireExportImage(source, desktopThreadClient, true)
+    const draft = new ImagePreviewUrl(old)
+    const publication = prepareImagePublication(desktopThreadClient, { threadId: 'camp', attachments: [attachment('photo')] },
+      1, new Map([['photo', draft]]))!
+    draft.release()
+    releaseClientImageCache(desktopThreadClient)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:old')
+    expect(await oldExport).toBeNull()
+
+    publication.publish('message-1', true)
+    publication.release()
+    expect((await loadUserImagePreview(source, desktopThreadClient))?.blob).toBe(fresh)
+    returnOld({ availability: 'available', preview: { blob: old } })
+    const view = await acquireExportImage(source, desktopThreadClient, true)
+    expect(view?.url).toBe('blob:new')
+    view?.release()
+    expect(preview).toHaveBeenCalledTimes(2)
     expect(decode).toHaveBeenCalledOnce()
   })
 

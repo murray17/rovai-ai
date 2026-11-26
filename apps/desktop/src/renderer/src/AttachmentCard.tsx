@@ -1,5 +1,5 @@
 import { AttachmentLocationItems, useAttachmentLocation } from './attachment-location'
-import { useThreadClient } from './camp-client'
+import { useImagePreviewSession, useThreadClient } from './camp-client'
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -64,16 +64,7 @@ function localAttachmentLocatorKey(locator: LocalAttachmentOwnerLocator): string
   return `single-chat-pending-edit:${locator.threadId}:${locator.conversationId}:${locator.pendingInputId}:${locator.editToken}:${locator.attachmentRefId}`
 }
 
-export function AttachmentCard({
-  attachment,
-  onRemove,
-  locator,
-  onNotify = () => undefined,
-  disabled = false,
-  menuItems,
-  presentation = 'composer',
-  displayedImages
-}: {
+type AttachmentCardProps = {
   attachment: ThreadMessageAttachmentView
   onRemove?: () => void
   locator: LocalAttachmentOwnerLocator
@@ -82,7 +73,18 @@ export function AttachmentCard({
   menuItems?: ReactNode
   presentation?: 'composer' | 'user-timeline' | 'agent-timeline'
   displayedImages?: Map<string, ImagePreviewUrl>
-}): JSX.Element {
+}
+
+export function AttachmentCard(props: AttachmentCardProps): JSX.Element | null {
+  const session = useImagePreviewSession()
+  if (props.attachment.previewKind !== 'image') return <AttachmentCardContent {...props} />
+  return session === null ? null : <AttachmentCardContent key={session} {...props} />
+}
+
+function AttachmentCardContent({
+  attachment, onRemove, locator, onNotify = () => undefined, disabled = false,
+  menuItems, presentation = 'composer', displayedImages
+}: AttachmentCardProps): JSX.Element {
   const client = useThreadClient()
   const filePreview = useOptionalFilePreview()
   const [previewImage, setPreviewImage] = useState<ImagePreviewUrl | null>(null)

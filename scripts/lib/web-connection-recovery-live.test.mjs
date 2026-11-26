@@ -9,15 +9,19 @@ import { launchHost, within } from './host-test-client.mjs'
 import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from './runtime-camp-files-root.mjs'
 
+const root = resolve(import.meta.dirname, '../..')
+const uiDirectory = process.env.ROVAI_WEB_RECOVERY_UI_DIRECTORY ?? join(root, 'out/web')
+const binary = process.env.ROVAI_HOST_BIN ?? join(root, 'target/debug/rovai-host')
+const chrome = process.env.ROVAI_REVIEW_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+async function hasLiveEnvironment(t) {
+  try { await Promise.all([access(binary), access(chrome), access(join(uiDirectory, 'index.html'))]); return true }
+  catch { t.skip('Requires a built Host, WebUI and Chrome'); return false }
+}
+
 // Owns production WebEntry/Composer + real Rust receipts, including sends after
 // refresh. No configured model is needed: send commands use execution: null.
 test('production Web retains its mounted Composer and authentication across a real Host stop/restart', { timeout: 90_000 }, async t => {
-  const root = resolve(import.meta.dirname, '../..')
-  const uiDirectory = process.env.ROVAI_WEB_RECOVERY_UI_DIRECTORY ?? join(root, 'out/web')
-  const binary = process.env.ROVAI_HOST_BIN ?? join(root, 'target/debug/rovai-host')
-  const chrome = process.env.ROVAI_REVIEW_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-  try { await access(binary); await access(chrome); await access(join(uiDirectory, 'index.html')) }
-  catch { t.skip('Requires a built Host, WebUI and Chrome'); return }
+  if (!await hasLiveEnvironment(t)) return
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-web-recovery-live-')))
   const dataDir = join(fixture, 'core')
   const output = process.env.ROVAI_WEB_RECOVERY_OUTPUT ?? join(fixture, 'evidence')
@@ -249,6 +253,146 @@ test('production Web retains its mounted Composer and authentication across a re
     console.log(`Live recovery evidence: ${output}`)
   } finally {
     await browser?.close(); await host?.close()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir)
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+function installPreviewProbe(messageId) {
+  const probe = window.imageProbe = { opens: 0, reads: 0, release: null }
+  const fetchSource = window.fetch.bind(window)
+  window.fetch = async (url, init) => {
+    const path = new URL(url, location.href).pathname
+    if (path === '/api/v1/files') {
+      const { action, request } = JSON.parse(init.body)
+      if (action === 'open' && request.locator?.messageId === messageId) probe.opens++
+    }
+    if (path !== '/api/v1/files/bytes' || JSON.parse(init.body).action !== 'readBinary') return fetchSource(url, init)
+    const first = ++probe.reads === 1
+    const response = await fetchSource(url, init)
+    if (first) {
+      // Hold the original response only after the real Host has sent all of its bytes.
+      await response.clone().arrayBuffer()
+      await new Promise(resolve => { probe.release = resolve })
+    }
+    return response
+  }
+  probe.pixel = selector => {
+    const image = document.querySelector(selector)
+    if (!image?.naturalWidth) return null
+    const context = document.createElement('canvas').getContext('2d')
+    context.drawImage(image, 0, 0, 1, 1)
+    return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).join(',')
+  }
+}
+
+test('Web shares image reads with export and releases previews at the authentication boundary', { timeout: 90_000 }, async t => {
+  if (!await hasLiveEnvironment(t)) return
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-image-preview-live-')))
+  const dataDir = join(fixture, 'core')
+  const skills = join(dataDir, 'skills')
+  const profile = join(fixture, 'chrome')
+  console.log(JSON.stringify({ channel: 'automatic_acceptance', dataDir, skillLibraryRoot: skills, browserProfile: profile, runtime: false }))
+  let host, browser
+  try {
+    host = launchHost(binary, [...coreDataDirectoryArguments(dataDir), '--skill-library-root', skills, '--mcp-config-path', join(dataDir, 'mcp.json')], { cwd: root })
+    browser = await launchAcceptanceBrowser({ executable: chrome, args: ['--headless=new', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', 'about:blank'] })
+    const [member] = await host.request('members.list')
+    const created = await host.request('camps.create', { commandId: crypto.randomUUID(), name: '图片预览验收', workspace: null,
+      memberAgentIds: [member.agentId], defaultLeadAgentId: member.agentId, collaborationMode: 'peer' })
+    assert.equal(created.status, 'applied')
+    const threadId = created.payload.threadId
+    const sourcePath = join(fixture, 'source.png')
+    const png = async color => Buffer.from(await browser.evaluate(`(() => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 32;
+      const context = canvas.getContext('2d'); context.fillStyle = ${JSON.stringify(color)}; context.fillRect(0, 0, 32, 32);
+      return canvas.toDataURL('image/png').split(',')[1];
+    })()`), 'base64')
+    const blue = await png('#0050f0'), orange = await png('#ff7800')
+    await writeFile(sourcePath, blue)
+    const sent = await host.request('thread.messages.send', { commandId: crypto.randomUUID(), threadId, content: { version: 2, segments: [{ kind: 'text', text: '共享原图' }] },
+      sourceAttachments: [{ id: crypto.randomUUID(), kind: 'file', displayName: 'source.png', mediaType: 'image/png', sourcePath, observedByteSize: blue.length }],
+      quotes: [], replyToThreadMessageId: null, execution: null })
+    assert.equal(sent.commandResult.status, 'applied')
+    const messageId = sent.commandResult.payload.threadMessageId
+    const service = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory })
+    await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${installPreviewProbe.toString()})(${JSON.stringify(messageId)})` })
+    await browser.send('Page.navigate', { url: service.origin })
+    const element = selector => `document.querySelector(${JSON.stringify(selector)})`
+    const click = selector => browser.click(element(selector))
+    const login = async token => {
+      await browser.wait(`!!${element('#administrator-token')}`)
+      await click('#administrator-token')
+      await browser.send('Input.insertText', { text: token })
+      await click('.web-login button[type=submit]')
+      await browser.wait(`!${element('.web-login-overlay')}`)
+    }
+    const openThread = `[data-thread-id="${threadId}"] .camp-nav-open`
+    const timeline = `[data-message-id="${messageId}"] .image-tile-preview img`
+    const exported = `[data-export-message-id="${messageId}"] .message-export-image`
+    const pixel = selector => `imageProbe.pixel(${JSON.stringify(selector)})`
+    const counts = () => browser.evaluate('[imageProbe.opens, imageProbe.reads]')
+    const openExport = async () => {
+      await click(`[data-message-id="${messageId}"] .message-more-button`)
+      const select = `[...document.querySelectorAll('.message-action-menu [role=menuitem]')].find(e => e.textContent.trim() === '多选')`
+      await browser.wait(`!!(${select})`)
+      await browser.click(select)
+      await browser.wait(`!!${element('.message-selection-actions .primary-button:not(:disabled)')}`)
+      await click('.message-selection-actions .primary-button')
+      await browser.wait(`!!${element(`[data-export-message-id="${messageId}"] .message-export-attachment`)}`)
+    }
+    await login(service.administratorToken)
+    await browser.wait(`!!${element(openThread)}`)
+    await click(openThread)
+    await browser.wait('!!imageProbe.release')
+    await writeFile(sourcePath, orange)
+    await openExport()
+    await browser.evaluate('imageProbe.release()')
+    await browser.wait(`${pixel(timeline)} && ${pixel(exported)}`)
+    assert.deepEqual(await browser.evaluate(`[${pixel(timeline)}, ${pixel(exported)}]`), ['0,80,240', '0,80,240'])
+    assert.deepEqual(await counts(), [1, 1], 'public and export viewers share a single Host open/read')
+    await browser.evaluate(`void(imageProbe.oldUrl = ${element(timeline)}.src)`)
+    await browser.key('Escape')
+    await browser.wait(`!${element('.message-export-dialog')}`)
+    await browser.key('Escape')
+    await click('.sidebar-settings-main')
+    const remote = `[...document.querySelectorAll('.settings-sidebar-menu button')].find(e => e.textContent.trim() === '远程连接')`
+    await browser.wait(`!!(${remote})`)
+    await browser.click(remote)
+    await click('.remote-connection-page .quiet-button')
+    await browser.wait(`!!${element('#administrator-token')}`)
+    assert.equal(await browser.evaluate('fetch(imageProbe.oldUrl).then(() => false, () => true)'), true, 'logout revokes the old preview URL')
+    await login(service.administratorToken)
+    await click('.settings-sidebar-back')
+    await browser.wait(`!!${element(openThread)}`)
+    await click(openThread)
+    await browser.wait(`${pixel(timeline)} === '255,120,0'`)
+    assert.deepEqual(await counts(), [2, 2], 'same-tab login reads the changed original exactly once')
+
+    // Expire the session with the editor, gallery, export and enlarged image all mounted.
+    const editor = '#camp-message'
+    await click(editor)
+    await browser.send('Input.insertText', { text: '认证恢复时保留' })
+    await browser.wait(`${element(editor)}.textContent === '认证恢复时保留'`)
+    await browser.evaluate(`Object.assign(imageProbe, { editor: ${element(editor)}, oldUrl: ${element(timeline)}.src }); void 0`)
+    await openExport()
+    await browser.wait(`${pixel(exported)} === '255,120,0'`)
+    await click(exported)
+    await browser.wait(`${pixel('.message-export-zoom img')} === '255,120,0'`)
+    assert.deepEqual(await counts(), [2, 2])
+    const rotated = await host.request('host.web.rotate')
+    await browser.wait(`!!${element('#administrator-token')} && !${element(timeline)} && !${element('.message-export-dialog, .message-export-zoom')}`)
+    assert.equal(await browser.evaluate('fetch(imageProbe.oldUrl).then(() => false, () => true)'), true)
+    await writeFile(sourcePath, blue)
+    await login(rotated.administratorToken)
+    await browser.wait(`${pixel(timeline)} === '0,80,240' && ${pixel(exported)} === '0,80,240'`)
+    assert.deepEqual(await counts(), [3, 3])
+    assert.equal(await browser.evaluate(`!!${element('.message-export-zoom')}`), false)
+    assert.equal(await browser.evaluate(`${element(editor)} === imageProbe.editor && imageProbe.editor.textContent === '认证恢复时保留'`), true)
+    assert.deepEqual(browser.errors, [])
+  } finally {
+    await browser?.close()
+    await host?.close()
     await removeEphemeralRuntimeCampFilesRoot(dataDir)
     await rm(fixture, { recursive: true, force: true })
   }
