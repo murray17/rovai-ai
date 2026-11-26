@@ -3631,6 +3631,8 @@
   "结果区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。": "When the result region has focus, use arrow keys, Page Up, Page Down, Space, Home, and End to scroll; press Escape to return to the command row.",
   "（第 {0}/{1} 次）。本次执行尚未结束，可继续等待或停止执行。": " (attempt {0}/{1}). This run is still active. You can wait or stop it.",
   "标记未读": "Mark as unread",
+  "标为已读": "Mark as read",
+  "标为未读": "Mark as unread",
   "标记已读": "Mark as read",
   "在文件管理器中显示": "Reveal in File Manager",
   "复制项目路径": "Copy project path",

@@ -7,6 +7,7 @@ import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } fro
 import { normalizeThreadTitle, THREAD_TITLE_MAX_SCALARS } from './camp-title'
 import type { AppUpdateBadgePresentation } from './app-update-presentation'
 import { MemberAvatar } from './MemberAvatar'
+import { MoreMenuIcon, SidebarMenuIcon } from './SidebarMenuIcon'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 import { chatHasUnread, chatRailHasUnread } from './navigation-unread'
 import { uiAttribute } from './interface-language'
@@ -61,6 +62,8 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
   const [deleteBusy, setDeleteBusy] = useState(false)
   function row(item: ChatListItem) {
     const unread = chatHasUnread(item, states[item.chatId])
+    const pinned = navigation.pinnedIds.includes(item.chatId)
+    const menuLabel = uiAttribute('管理“{0}”', item.title)
     return <div key={item.chatId} className={'camp-nav-row chat-list-row' + (item.chatId === activeId ? ' selected' : '')}>
       <button type="button" className="camp-nav-open" onClick={() => open(item.chatId)}
         title={item.title + ' · ' + item.displayName} aria-current={item.chatId === activeId ? 'page' : undefined}
@@ -73,14 +76,35 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
         </span>
       </button>
       <DropdownMenu.Root modal={false}>
-        <DropdownMenu.Trigger asChild><button className="sidebar-menu-trigger camp-menu-trigger" type="button" aria-label={uiAttribute('管理“{0}”', item.title)}>⋯</button></DropdownMenu.Trigger>
-        <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu" align="end" sideOffset={4} loop>
-          <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => navigation.togglePin(item.chatId)}>{uiAttribute(navigation.pinnedIds.includes(item.chatId) ? '取消置顶' : '置顶')}</DropdownMenu.Item>
-          <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => mark(item, !unread)}>{uiAttribute(unread ? '标为已读' : '标为未读')}</DropdownMenu.Item>
-          <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => setEditing(item)}>{uiAttribute('重命名')}</DropdownMenu.Item>
-          {navigation.archive && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => void navigation.archive?.(item)}>{uiAttribute('归档')}</DropdownMenu.Item>}
-          {navigation.remove && <DropdownMenu.Item className="sidebar-action-menu-item danger" onSelect={() => setDeleting(item)}>{uiAttribute('删除')}</DropdownMenu.Item>}
-        </DropdownMenu.Content></DropdownMenu.Portal>
+        <DropdownMenu.Trigger asChild>
+          <button className="sidebar-menu-trigger camp-menu-trigger" type="button" aria-label={menuLabel} title={uiAttribute('更多操作')}>
+            <MoreMenuIcon />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content className="sidebar-action-menu" aria-label={menuLabel} align="end" sideOffset={4} collisionPadding={8} loop>
+            <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => navigation.togglePin(item.chatId)}>
+              <SidebarMenuIcon kind="pin" filled={pinned} /><span>{uiAttribute(pinned ? '取消置顶' : '置顶')}</span>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => mark(item, !unread)}>
+              <SidebarMenuIcon kind={unread ? 'read' : 'unread'} /><span>{uiAttribute(unread ? '标为已读' : '标为未读')}</span>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => setEditing(item)}>
+              <SidebarMenuIcon kind="edit" /><span>{uiAttribute('重命名')}</span>
+            </DropdownMenu.Item>
+            {navigation.archive && (
+              <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => void navigation.archive?.(item)}>
+                <SidebarMenuIcon kind="archive" /><span>{uiAttribute('归档')}</span>
+              </DropdownMenu.Item>
+            )}
+            {navigation.remove && <>
+              <DropdownMenu.Separator className="sidebar-action-menu-separator" />
+              <DropdownMenu.Item className="sidebar-action-menu-item danger" onSelect={() => setDeleting(item)}>
+                <SidebarMenuIcon kind="trash" /><span>{uiAttribute('删除')}</span>
+              </DropdownMenu.Item>
+            </>}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
       </DropdownMenu.Root>
     </div>
   }
