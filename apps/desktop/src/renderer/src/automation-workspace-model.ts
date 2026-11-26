@@ -110,6 +110,9 @@ export function draftFingerprint(draft: AutomationDraft): string {
 
 export function automationFromResult(result: StoredCommandResult): AutomationView {
   if (result.status === 'rejected') {
+    if (result.code === 'automation.schedule_in_past') {
+      throw new AutomationCommandError(result.code, uiAttribute('请选择晚于现在的时间。'))
+    }
     const message = typeof result.payload.message === 'string'
       ? result.payload.message
       : result.code === 'command.version_conflict'
@@ -196,9 +199,21 @@ export function runStatus(run: AutomationRunSummary | null): { label: string; to
 
 export type AutomationFilter = 'all' | 'enabled' | 'closed'
 
+export type OnceSchedule = Extract<AutomationSchedule, { kind: 'once' }>
+
+export function futureOnceSchedule(schedule: OnceSchedule, now = Date.now()): boolean {
+  return new Date(`${schedule.date}T${schedule.at}:00`).getTime() > now
+}
+
+export function automationPlanState(task: AutomationView): 'manual' | 'ended' | 'scheduled' {
+  if (task.schedule.kind === 'manual') return 'manual'
+  if (!task.enabled && task.schedule.kind === 'once' && !futureOnceSchedule(task.schedule)) return 'ended'
+  return 'scheduled'
+}
+
 export function filterAutomations(automations: AutomationView[], filter: AutomationFilter, query: string): AutomationView[] {
   const needle = query.trim().toLocaleLowerCase()
-  return automations.filter((item) => (filter === 'all' || item.enabled === (filter === 'enabled'))
+  return automations.filter((item) => (filter === 'all' || (item.schedule.kind !== 'manual' && item.enabled === (filter === 'enabled')))
     && (!needle || [item.name, item.prompt, scheduleLabel(item.schedule)].some((value) => value.toLocaleLowerCase().includes(needle))))
 }
 

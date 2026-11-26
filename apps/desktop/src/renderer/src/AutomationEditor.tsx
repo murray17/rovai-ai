@@ -5,7 +5,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, AutomationRunListPage, AutomationRunSummary, AutomationView, ChannelSettingsSnapshot, ProjectNavigationGroup } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { AutomationGlyph, type AutomationIcon } from './AutomationControls'
-import { dateTimeLabel, projectValue, projectFromValue, runStatus, scheduleKinds, scheduleWithKind, weekdays, type AutomationDraft } from './automation-workspace-model'
+import { automationPlanState, dateTimeLabel, projectValue, projectFromValue, runStatus, scheduleKinds, scheduleWithKind, weekdays, type AutomationDraft } from './automation-workspace-model'
 import { readErrorMessage } from './error-message'
 import { automationScheduleError } from './automation-schedule-validation'
 import { AutomationDatePicker, AutomationTimePicker } from './AutomationSchedulePickers'
@@ -111,7 +111,7 @@ function RunHistory({ automation, onOpenThread }: { automation: AutomationView; 
   </section>
 }
 
-export function AutomationEditor({ draft, onChange, agents, projects, automation, busy, onOpenThread, onCreate }: {
+export function AutomationEditor({ draft, onChange, agents, projects, automation, busy, onOpenThread, onCreate, children }: {
   draft: AutomationDraft
   onChange: Dispatch<SetStateAction<AutomationDraft>>
   agents: AgentProfile[]
@@ -120,6 +120,7 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
   busy: boolean
   onOpenThread(threadId: string): void
   onCreate(): void
+  children?: React.ReactNode
 }): React.JSX.Element {
   const client = useThreadClient()
   const [channels, setChannels] = useState<ChannelSettingsSnapshot | null>(null)
@@ -144,7 +145,7 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
   const scheduleError = automationScheduleError(schedule)
   const cronId = useId()
 
-  return <div className="automation-editor-scroll"><form className="automation-form" onSubmit={(event) => { event.preventDefault(); if (!automation && !busy && !scheduleError && draft.prompt.trim() && member?.presence === 'present') onCreate() }}>
+  return <div className="automation-editor-scroll">{children}<form className="automation-form" onSubmit={(event) => { event.preventDefault(); if (!automation && !busy && !scheduleError && draft.prompt.trim() && member?.presence === 'present') onCreate() }}>
     <input className="automation-name-input" aria-label={uiAttribute("定时任务名称")} value={draft.name} maxLength={80} placeholder={uiAttribute("定时任务名称")} disabled={busy} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} />
     <textarea className="automation-prompt-input" aria-label={uiAttribute("执行内容")} rows={3} value={draft.prompt} placeholder={uiAttribute("告诉队员需要按时完成什么…")} disabled={busy} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} />
     <div className="automation-context" aria-label={uiAttribute("执行上下文")}>
@@ -178,7 +179,7 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
       </div>
       {schedule.kind !== 'cron' && scheduleError && <p className="automation-schedule-error" role="alert">{scheduleError}</p>}
       {automation?.nextRunAt && <p className="automation-next-run"><UiText zh={"下次 "} /><time dateTime={automation.nextRunAt}>{dateTimeLabel(automation.nextRunAt)}</time><span><UiText zh={"本地时间"} /></span></p>}
-      {automation && !automation.enabled && <p className="automation-next-run"><UiText zh={"已关闭，可在任务操作中运行一次。"} /></p>}
+      {automation && !automation.enabled && automationPlanState(automation) === 'scheduled' && <p className="automation-next-run"><UiText zh={"已关闭，可在任务操作中运行一次。"} /></p>}
     </section>
     <AutomationNamingControls name={draft.name} prompt={draft.prompt} value={draft.threadNaming} disabled={busy} onChange={(threadNaming) => onChange((current) => ({ ...current, threadNaming }))} />
     <details className="automation-channel-disclosure" onToggle={(event) => setChannelsOpen(event.currentTarget.open)}>
