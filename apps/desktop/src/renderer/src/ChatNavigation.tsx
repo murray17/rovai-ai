@@ -29,22 +29,26 @@ export interface ChatNavigationProps extends ChatPickerProps {
   rename(item: ChatListItem, title: string): Promise<void>
 }
 
-export function ChatSectionRail({ chat, view, projects, missions, automations, members, teams, settings, missionUnread, update }: {
-  chat: ChatNavigationProps; view: string
+export function ChatSectionRail({ chat, view, mobile, projects, missions, automations, members, teams, settings, missionUnread, update }: {
+  chat: ChatNavigationProps; view: string; mobile: boolean
   projects(): void; missions(): void; automations(): void; members(): void; teams(): void; settings(): void
   missionUnread: boolean; update: AppUpdateBadgePresentation | null
 }): React.JSX.Element {
   const unread = chatRailHasUnread(chat.list.page?.replyIndex ?? [], chat.states)
-  const item = (label: string, name: NavigationIconName, current: boolean, click: () => void, note?: string, dotClass = '') =>
+  const item = (label: string, name: NavigationIconName, current: boolean, click: (() => void) | undefined, note?: string, dotClass = '', disabled = false) =>
     <button type="button" className={current ? 'section-rail-item active' : 'section-rail-item'}
       aria-current={current ? 'page' : undefined} aria-label={note ? uiAttribute('{0}，{1}', label, note) : uiAttribute(label)}
-      title={uiAttribute(label)} onClick={click}>
+      title={uiAttribute(label)} onClick={click} disabled={disabled}>
       <NavigationIcon name={name}/>{note && <i className={('section-rail-dot ' + dotClass).trim()} aria-hidden="true"/>}
     </button>
+  const topic = chat.activeId ?? chat.list.page?.items[0]?.chatId ?? chat.list.page?.pinnedItems?.[0]?.chatId ?? null
+  const pickMember = mobile && !topic
+  const chatButton = item('聊天', 'chats', view === 'chat', pickMember ? undefined : () => chat.open(topic),
+    unread ? '有未读回复' : undefined, '', pickMember && !chat.list.page && !chat.list.failed)
   return <nav className="section-rail" aria-label={uiAttribute('主要页面')}>
     <div className="section-rail-drag" />
     {item('项目','folder-open',view === 'camp' || view === 'compose',projects)}
-    {item('聊天','chats',view === 'chat',() => chat.open(chat.activeId ?? chat.list.page?.items[0]?.chatId ?? chat.list.page?.pinnedItems?.[0]?.chatId ?? null),unread ? '有未读回复' : undefined)}
+    {pickMember ? <ChatMemberPicker {...chat} trigger={chatButton} /> : chatButton}
     <i className="section-rail-divider"/>
     {item('使命板','briefcase-business',view === 'missions',missions,missionUnread ? '有新消息' : undefined)}
     {item('定时任务','calendar-clock',view === 'automations',automations)}
@@ -53,6 +57,10 @@ export function ChatSectionRail({ chat, view, projects, missions, automations, m
     {item('团队','users',view === 'teams',teams)}
     <div className="section-rail-bottom">{item('设置','settings',view === 'settings' || view === 'memory',settings, update?.accessibleLabel, update ? `is-update is-${update.kind}` : '')}</div>
   </nav>
+}
+
+function revealSelectedChat(row: HTMLDivElement | null) {
+  row?.scrollIntoView({ block: 'nearest' })
 }
 
 export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNavigationProps; headerAction?: ReactNode }): React.JSX.Element {
@@ -64,7 +72,7 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
     const unread = chatHasUnread(item, states[item.chatId])
     const pinned = navigation.pinnedIds.includes(item.chatId)
     const menuLabel = uiAttribute('管理“{0}”', item.title)
-    return <div key={item.chatId} className={'camp-nav-row chat-list-row' + (item.chatId === activeId ? ' selected' : '')}>
+    return <div key={item.chatId} ref={item.chatId === activeId ? revealSelectedChat : undefined} className={'camp-nav-row chat-list-row' + (item.chatId === activeId ? ' selected' : '')}>
       <button type="button" className="camp-nav-open" onClick={() => open(item.chatId)}
         title={item.title + ' · ' + item.displayName} aria-current={item.chatId === activeId ? 'page' : undefined}
         aria-label={[item.title,item.displayName,unread && uiAttribute('有未读回复'),item.isProcessing && uiAttribute('正在处理')].filter(Boolean).join('，')}>
@@ -115,7 +123,8 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
     <div className="sidebar-group-title navigation-section-title"><span>{uiAttribute('聊天')}</span>{headerAction ?? <ChatMemberPicker {...navigation} />}</div>
     {list.failed && <button type="button" className="quiet-button" onClick={() => void list.refresh()}>{uiAttribute('重新读取聊天列表')}</button>}
     {list.page?.items.map(row)}
-    {list.page && !list.page.items.length && !list.page.pinnedItems?.length && <p className="sidebar-empty">{uiAttribute('还没有聊天')}</p>}
+    {list.page?.activeItem && list.page.activeItem.chatId === activeId && row(list.page.activeItem)}
+    {list.page && !list.page.items.length && !list.page.pinnedItems?.length && !list.page.activeItem && <p className="sidebar-empty">{uiAttribute('还没有聊天')}</p>}
     {(list.hasPrevious || list.page?.nextCursor) && <div className="camp-pagination-actions">
       {list.hasPrevious && <button type="button" disabled={list.loading} onClick={list.previous}>{uiAttribute('上一页')}</button>}
       {list.page?.nextCursor && <button type="button" disabled={list.loading} onClick={list.next}>{uiAttribute('下一页')}</button>}

@@ -694,9 +694,12 @@ pub fn load_source_attachment_for_client(
         } => connection
             .query_row(
                 r#"
-                SELECT input.source_attachments_json
+                SELECT COALESCE(published.source_attachments_json, input.source_attachments_json)
                 FROM single_chat_pending_input AS input
                 JOIN conversation ON conversation.id = input.conversation_id
+                LEFT JOIN conversation_message AS published ON conversation.kind = 'chat'
+                  AND published.id = input.published_conversation_message_id
+                  AND published.conversation_id = input.conversation_id
                 WHERE ((conversation.camp_id=?1 AND conversation.kind='single_chat') OR (conversation.id=?1 AND conversation.kind='chat' AND EXISTS(SELECT 1 FROM chat_topic t WHERE t.conversation_id=?1 AND t.deletion_operation_id IS NULL AND t.owner_user_id='local_user')))
                   AND conversation.id = ?2
 

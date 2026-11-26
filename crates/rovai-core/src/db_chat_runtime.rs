@@ -257,6 +257,38 @@ pub(super) fn repair_chat_runtime(db: &mut Database) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn repair_chat_inputs(db: &mut Database) -> Result<()> {
+    let tx = db
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // Older chat runs cancelled an undispatched supplement on ordinary failure.
+    // Use the same receipt checks and queue order as live settlement.
+    let runs = tx.prepare(
+        "UPDATE single_chat_pending_input AS p SET state='queued'
+         WHERE p.requested_mode='steer' AND p.state='cancelled' AND EXISTS(
+             SELECT 1 FROM agent_run r JOIN chat_topic t ON t.conversation_id=r.conversation_id
+             WHERE r.id=p.target_run_id AND r.conversation_id=p.conversation_id
+               AND r.execution_epoch=p.target_execution_epoch AND r.status='failed' AND r.cancel_requested_at IS NULL
+               AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)
+         RETURNING target_run_id"
+    )?.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<std::collections::BTreeSet<String>>>()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for run in runs {
+        crate::chat::settle_steers(&tx, &run, "failed", &now)?;
+    }
+    tx.execute_batch(
+        "UPDATE single_chat_pending_input AS p
+         SET body='',quotes_json='[]',source_attachments_json='[]',chat_skills_json='[]'
+         WHERE state='published' AND conversation_id IN (SELECT conversation_id FROM chat_topic)
+           AND EXISTS(SELECT 1 FROM conversation_message m
+                      WHERE m.id=p.published_conversation_message_id AND m.conversation_id=p.conversation_id);
+         INSERT INTO schema_migration VALUES(237,datetime('now'));
+         UPDATE rovai_data_contract SET projection_schema_version=187,updated_at=datetime('now') WHERE singleton=1;"
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 pub(super) fn schema_matches(c: &Connection) -> rusqlite::Result<bool> {
     c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='index' AND name='context_manifest_chat_input') AND
         EXISTS(SELECT 1 FROM pragma_table_info('camp_attachment_view_operation') WHERE name='chat_id')",[],|r| r.get(0))
@@ -299,7 +331,7 @@ pub(super) fn downgrade_for_test(c: &Connection) {
     c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     let tx = c.unchecked_transaction().unwrap();
     schema(&tx, false).unwrap();
-    tx.execute_batch("DELETE FROM schema_migration WHERE version IN (235,236); UPDATE rovai_data_contract SET projection_schema_version=184 WHERE projection_schema_version IN (185,186);").unwrap();
+    tx.execute_batch("DELETE FROM schema_migration WHERE version IN (235,236,237); UPDATE rovai_data_contract SET projection_schema_version=184 WHERE projection_schema_version IN (185,186,187);").unwrap();
     tx.commit().unwrap();
     c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
 }

@@ -571,7 +571,7 @@ export function ThreadNavigation({
           onClick={onNewConversation}><NavigationIcon name="square-pen" /></button>}
       </>, actionsHost)}
       <aside id={navigationId} className={`unified-sidebar ${chatNavigation ? 'has-chat-rail' : ''} ${settingsSidebar ? 'settings-navigation-mode' : ''}${navigationCollapsed ? ' is-collapsed' : ''}`} inert={disabled || (navigationCollapsed && !chatNavigation)} aria-label={settingsSidebar ? uiAttribute("设置分类") : uiAttribute("全局导航")}>
-        {chatNavigation && <ChatSectionRail chat={chatNavigation} view={view} projects={chatNavigation.projects} missions={onMissions} automations={onAutomations} members={onMembers} teams={onTeams}
+        {chatNavigation && <ChatSectionRail chat={chatNavigation} view={view} mobile={mobile} projects={chatNavigation.projects} missions={onMissions} automations={onAutomations} members={onMembers} teams={onTeams}
           settings={updateBadge ? onOpenUpdates : onSettings} missionUnread={unreadMissionCount > 0} update={updateBadge}/>}
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">

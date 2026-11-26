@@ -33,7 +33,8 @@ pub(crate) fn return_steer_to_queue(tx: &Transaction<'_>, id: &str, now: &str) -
             WHERE r.id=target_run_id AND r.execution_epoch=target_execution_epoch
               AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL
               AND ((r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL)
-                   OR r.status='succeeded' OR (r.status='cancelled' AND r.cancel_reason_code='core_restarted')))
+                   OR r.status='succeeded' OR (r.status='failed' AND r.cancel_requested_at IS NULL)
+                   OR (r.status='cancelled' AND r.cancel_reason_code='core_restarted')))
         AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id WHERE m.source_chat_input_id=?1 AND (i.status IN ('accepted','delivery_unknown') OR (i.status='prepared' AND i.dispatch_started_at IS NOT NULL)))",params![id,now])?;
     if changed > 0 {
         crate::execution_input::changed(tx, id)?;
@@ -87,6 +88,5 @@ pub(crate) fn accept_steer(
         &msg,
         &parse_quotes(&quotes)?,
     )?;
-    tx.execute("UPDATE single_chat_pending_input SET state='published',published_conversation_message_id=?2,published_agent_run_id=?3,published_at=?4,updated_at=?4,revision=revision+1 WHERE id=?1",params![id,msg,run,now])?;
-    Ok(())
+    super::input::mark_input_published(tx, id, &msg, run, now)
 }

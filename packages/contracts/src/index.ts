@@ -3874,22 +3874,22 @@ export type ChatSendResult =
   | { kind: 'queued'; chatId: string; inputId: string }
   | { kind: 'steer_submitted'; chatId: string; inputId: string; runId: string; executionEpoch: number; evidenceSequence: number }
 
-export interface ChatSupplement {
+export type ChatSupplement = {
   inputId: string
   runId: string
   evidenceSequence: number
-  messageId: string | null
-  body: string
-  quotes: SingleChatMessageView['quotes']
-  attachments: SingleChatMessageView['attachments']
+  occurredAt: string
   unconfirmed: boolean
-}
+} & (
+  | { messageId: string }
+  | ({ messageId: null } & Pick<SingleChatMessageView, 'body' | 'quotes' | 'attachments'>)
+)
 
 export interface ChatOpenResult {
   approvals?: ActionApprovalView[]
   nativeInteractions?: NativeInteractionView[]
   supplements?: ChatSupplement[]
-  activeInput?: { canSteer: boolean; ready: boolean; unavailableReason: string | null } | null
+  activeInput?: { canSteer: boolean; ready: boolean; unavailableReason: NonNullable<AgentRunView['steerUnavailableReason']> | null } | null
   pendingInputs: {
     inputId: string
     body: string
@@ -3921,6 +3921,7 @@ export interface ChatOpenResult {
 }
 
 export interface ChatListPage {
+  activeItem?: ChatListItem
   pinnedItems?: ChatListItem[]
   items: ChatListItem[]
   nextCursor: ChatListCursor | null

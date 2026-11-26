@@ -12,7 +12,7 @@ import { useRuntimePhase } from './useRuntimePhase'
 import { useOptionalFilePreview } from './file-preview-context'
 import { MessageMarkdown } from './MessageMarkdown'
 import { ExecutionNarration } from './ExecutionNarration'
-import { revealMessageQuote } from './message-quote-reveal'
+import { revealPrivateQuote } from './message-quote-reveal'
 import { ReturnToLatest } from './ReturnToLatest'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import type { MessageQuoteAction, MessageQuoteSnapshot } from '@contracts'
@@ -338,7 +338,6 @@ export function SingleChatRunHistory({
   cancelling = false,
   onNotify = () => undefined,
   onExpand,
-  summaryLabel,
   privateFinal,
   chatId
 }: {
@@ -351,7 +350,6 @@ export function SingleChatRunHistory({
   cancelling?: boolean
   onNotify?(message: string): void
   chatId?: string
-  summaryLabel?: string
   privateFinal?: React.ReactNode
   onExpand?(expanded: boolean): void
 }): React.JSX.Element {
@@ -465,7 +463,7 @@ export function SingleChatRunHistory({
           onToggle={(event) => { if (terminal) { setOpen(event.currentTarget.open); onExpand?.(event.currentTarget.open) } }}
         >
           <summary hidden={!terminal}>
-            <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && (summaryLabel ?? executionRunSummary(run, now))}</span>
+            <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
             <span className="single-chat-disclosure" aria-hidden="true"><ChevronGlyph /></span>
           </summary>
           <div className="single-chat-execution-content process-content">
@@ -495,14 +493,6 @@ export function SingleChatRunHistory({
       </div>
     </section>
   )
-}
-
-async function revealPrivateQuote(quote: MessageQuoteSnapshot): Promise<void> {
-  if (!quote.source) return
-  const root = document.querySelector<HTMLElement>(`[data-single-chat-owner="${CSS.escape(quote.source.conversationId ?? '')}"]`)
-  const target = root?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(quote.source.messageId)}"]`)
-  if (!target) throw new Error('quote.source_unavailable')
-  revealMessageQuote(target)
 }
 
 function SingleChatTranscript({

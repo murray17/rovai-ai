@@ -1160,7 +1160,7 @@ export function BusinessApp({
   const [chatDraftAgentId, setChatDraftAgentId] = useState<string | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const chatPinnedIds = useMemo(() => navigationPins.filter(pin => pin.kind === 'chat').map(pin => pin.targetKey), [navigationPins])
-  const chatList = useChatList(client, startupStatus === 'resolved' && !shuttingDown, chatPinnedIds)
+  const chatList = useChatList(client, startupStatus === 'resolved' && !shuttingDown, chatPinnedIds, activeChatId)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
   const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
@@ -5097,7 +5097,7 @@ export function BusinessApp({
         {!startupGateVisible && view === 'chat' && <ChatWorkspace key={activeChatId ?? chatDraftAgentId ?? 'index'}
           client={client} chatId={activeChatId} draftAgentId={chatDraftAgentId} profiles={agents} header={chatHeadingHost} theme={appearance.resolvedTheme}
           onRead={(id, sequence) => markChat(id, sequence, false)}
-          onNavigate={id => { desktopNavigation.captureCurrentEntry().update({kind:'chat',chatId:id}); setChatDraftAgentId(null); setActiveChatId(id); void chatList.refresh() }}/>}
+          onNavigate={id => { desktopNavigation.captureCurrentEntry().update({kind:'chat',chatId:id}); setChatDraftAgentId(null); setActiveChatId(id) }}/>}
         {!startupGateVisible && view === 'compose' && (
           <QuickChatWorkspace
             agents={agents}

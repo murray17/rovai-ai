@@ -12,6 +12,7 @@ use crate::single_chat::{PrivateRun, insert_private_run};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use serde_json::Value;
+use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -235,7 +236,7 @@ pub(crate) fn send(
     Ok(execution)
 }
 
-fn reference_title(tx: &Transaction<'_>, line: &str) -> Result<String> {
+fn initial_text_title(tx: &Transaction<'_>, line: &str) -> Result<String> {
     if let Some(link) = line.strip_prefix('[').and_then(|s| s.strip_suffix(')'))
         && let Some((_, target)) = link.rsplit_once("](rovai://")
     {
@@ -249,7 +250,12 @@ fn reference_title(tx: &Transaction<'_>, line: &str) -> Result<String> {
                 .context("chat.reference_unavailable")?);
         }
     }
-    Ok(line.into())
+    Ok(line
+        .split_sentence_bounds()
+        .next()
+        .unwrap_or(line)
+        .trim_end()
+        .to_owned())
 }
 
 fn topic_for_send(
@@ -279,7 +285,7 @@ fn topic_for_send(
         .lines()
         .next()
         .filter(|line| !line.is_empty())
-        .map(|line| reference_title(tx, line))
+        .map(|line| initial_text_title(tx, line))
         .transpose()?
         .or_else(|| {
             input
@@ -294,7 +300,7 @@ fn topic_for_send(
                 .map(|quote| quote.text.trim().to_owned())
         })
         .unwrap_or_default();
-    let title: String = first_line.chars().take(20).collect();
+    let title: String = first_line.graphemes(true).take(20).collect();
     ensure!(!title.is_empty(), "chat.empty_input");
     tx.execute(
         "INSERT INTO conversation(id,camp_id,agent_id,kind,version,created_at,updated_at)
@@ -370,6 +376,22 @@ const READY_FIFO: &str = "SELECT p.id FROM single_chat_pending_input p
       AND (?1 IS NULL OR p.id=?1)
     ORDER BY p.created_at,p.id";
 
+pub(super) fn mark_input_published(
+    tx: &Transaction<'_>,
+    input_id: &str,
+    message_id: &str,
+    run_id: &str,
+    now: &str,
+) -> Result<()> {
+    tx.execute(
+        "UPDATE single_chat_pending_input SET state='published',revision=revision+1,
+         published_conversation_message_id=?2,published_agent_run_id=?3,published_at=?4,updated_at=?4,
+         body='',quotes_json='[]',source_attachments_json='[]',chat_skills_json='[]' WHERE id=?1",
+        params![input_id, message_id, run_id, now],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn publish_ready(db: &mut Database) -> Result<Vec<String>> {
     let ids = db
         .connection()
@@ -406,9 +428,7 @@ pub(crate) fn publish_ready(db: &mut Database) -> Result<Vec<String>> {
             });
         match publication {
             Ok((message, run)) => {
-                tx.execute("UPDATE single_chat_pending_input SET state='published',revision=revision+1,
-                    published_conversation_message_id=?2,published_agent_run_id=?3,published_at=?4,updated_at=?4 WHERE id=?1",
-                    params![id,message,run,now])?;
+                mark_input_published(&tx, &id, &message, &run, &now)?;
                 tx.commit()?;
                 changes.push(chat);
             }
@@ -690,9 +710,10 @@ mod tests {
             upload.clone(),
         )
         .unwrap();
-        let first = json!({"draftId":"shared","agentId":"agent_1","mode":"start","body":"讨论发布计划","sourceAttachments":[upload]});
+        let first = json!({"draftId":"shared","agentId":"agent_1","mode":"start","body":"讨论发布计划。再核对发布时间。","sourceAttachments":[upload]});
         let result = submit(&mut db, "first", first.clone()).unwrap();
         assert_eq!(result["kind"], "started");
+        assert_eq!(result["title"], "讨论发布计划。");
         assert_eq!(
             submit(&mut db, "another-window", first.clone()).unwrap(),
             result
@@ -701,7 +722,7 @@ mod tests {
         modified["skills"] = json!([{"skillId":"rovai:review-duo","nameAtSend":"review-duo"}]);
         assert!(submit(&mut db, "changed", modified).is_err());
         let chat = result["chatId"].as_str().unwrap();
-        let queue = json!({"chatId":chat,"mode":"start","body":"用 $review-duo 评审","skills":[{"skillId":"rovai:review-duo","nameAtSend":"review-duo"}]});
+        let queue = json!({"chatId":chat,"mode":"start","body":"用 $review-duo 评审","sourceAttachments":[upload],"skills":[{"skillId":"rovai:review-duo","nameAtSend":"review-duo"}]});
         let accepted = submit(&mut db, "queue", queue.clone()).unwrap();
         assert_eq!(accepted["kind"], "queued");
         assert_eq!(submit(&mut db, "queue", queue).unwrap(), accepted);
@@ -715,7 +736,7 @@ mod tests {
         use crate::runtime::{ExecutionRuntimeService, SucceedAgentRunCommand};
         let service = ExecutionRuntimeService::default();
         let run_id = result["runId"].as_str().unwrap();
-        let (epoch, _) = claim_chat(&mut db, chat, run_id, "讨论发布计划");
+        let (epoch, _) = claim_chat(&mut db, chat, run_id, "讨论发布计划。再核对发布时间。");
         let store = crate::managed_blob::ManagedBlobStore::new(db.path().parent().unwrap());
         let availability =
             crate::steer::active_input_availability(db.connection(), run_id, epoch).unwrap();
@@ -776,6 +797,10 @@ mod tests {
         db.reopen_production().unwrap();
         let uncertain = snapshot(&mut db);
         assert!(uncertain.supplements[0].unconfirmed);
+        assert_eq!(
+            uncertain.supplements[0].pending.as_ref().unwrap().body,
+            "用中文"
+        );
         assert!(uncertain.supplements[0].message_id.is_none());
         assert!(
             crate::chat::ready_steers(db.connection())
@@ -795,6 +820,13 @@ mod tests {
         let after = snapshot(&mut db);
         assert_eq!(after.supplements.len(), 1);
         assert!(!after.supplements[0].unconfirmed);
+        let marker = serde_json::to_value(&after.supplements[0]).unwrap();
+        assert!(marker["messageId"].is_string() && marker["occurredAt"].is_string());
+        assert!(
+            ["body", "quotes", "attachments"]
+                .iter()
+                .all(|key| marker.get(*key).is_none())
+        );
         let supplement_only = super::super::open(
             &mut db,
             super::super::OpenParams {
@@ -906,6 +938,44 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&frozen).unwrap()[0]["skillId"],
             "rovai:review-duo"
+        );
+        let queued_id = accepted["inputId"].as_str().unwrap();
+        let locator =
+            crate::local_attachment_source::LocalAttachmentOwnerLocator::SingleChatPending {
+                camp_id: chat.into(),
+                conversation_id: chat.into(),
+                pending_input_id: queued_id.into(),
+                attachment_ref_id: upload.id.clone(),
+            };
+        assert_eq!(
+            crate::local_attachment_source::load_source_attachment(&db, &locator).unwrap(),
+            Some(upload.clone())
+        );
+        let has_payload = |db: &Database| {
+            db.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM single_chat_pending_input WHERE conversation_id=?1 AND state='published'
+             AND (body<>'' OR quotes_json<>'[]' OR source_attachments_json<>'[]' OR chat_skills_json<>'[]'))",
+            [chat], |r| r.get::<_,bool>(0)).unwrap()
+        };
+        assert!(!has_payload(&db));
+        // Reopen a database with a published payload left by the previous release.
+        db.connection()
+            .execute(
+                "UPDATE single_chat_pending_input SET body='old copy' WHERE id=?1",
+                [queued_id],
+            )
+            .unwrap();
+        db.connection()
+            .execute_batch(
+                "DELETE FROM schema_migration WHERE version=237;
+            UPDATE rovai_data_contract SET projection_schema_version=186",
+            )
+            .unwrap();
+        db.reopen_production().unwrap();
+        assert!(!has_payload(&db));
+        assert_eq!(
+            crate::local_attachment_source::load_source_attachment(&db, &locator).unwrap(),
+            Some(upload)
         );
         let queued_file = db.directory().join("queue.txt");
         std::fs::write(&queued_file, "queued file").unwrap();
@@ -1031,7 +1101,7 @@ mod tests {
         assert_eq!(reopened.pending_inputs[1].body, "keep me");
         // An upgrade also restores the exact interrupted input left by a 235 restart.
         db.connection().execute("UPDATE single_chat_pending_input SET requested_mode='steer',state='cancelled' WHERE id=?1",[unsent["inputId"].as_str().unwrap()]).unwrap();
-        db.connection().execute_batch("DELETE FROM schema_migration WHERE version=236; UPDATE rovai_data_contract SET projection_schema_version=185;").unwrap();
+        db.connection().execute_batch("DELETE FROM schema_migration WHERE version IN (236,237); UPDATE rovai_data_contract SET projection_schema_version=185;").unwrap();
         db.reopen_production().unwrap();
         let restored = super::super::open(
             &mut db,
@@ -1045,6 +1115,103 @@ mod tests {
         .unwrap();
         assert_eq!(restored.pending_inputs[1].input_id, unsent["inputId"]);
         assert!(restored.pending_inputs[1].converted_from_steer);
+        let failed_turn = submit(
+            &mut db,
+            "provider-failure",
+            json!({"draftId":"provider-failure",
+            "agentId":"agent_1","mode":"start","body":"write the plan"}),
+        )
+        .unwrap();
+        let chat = failed_turn["chatId"].as_str().unwrap();
+        let next_run = failed_turn["runId"].as_str().unwrap().to_owned();
+        let (epoch, _) = claim_chat(&mut db, chat, &next_run, "write the plan");
+        let queued = submit(
+            &mut db,
+            "older-input",
+            json!({"chatId":chat,"mode":"start","body":"next"}),
+        )
+        .unwrap();
+        let budget = submit(
+            &mut db,
+            "budget",
+            json!({"chatId":chat,"mode":"steer","body":"预算控制在五万以内",
+            "runId":next_run,"executionEpoch":epoch}),
+        )
+        .unwrap();
+        let version = db
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id=?1",
+                [&next_run],
+                |r| r.get(0),
+            )
+            .unwrap();
+        service
+            .fail_agent_run(
+                &mut db,
+                &CommandEnvelope {
+                    command_id: "ordinary-failure".into(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex-cli".into(),
+                    },
+                    camp_id: None,
+                    expected_versions: vec![],
+                    execution_epoch: None,
+                    payload: crate::runtime::FailAgentRunCommand {
+                        agent_run_id: next_run.clone(),
+                        execution_epoch: epoch,
+                        expected_version: version,
+                        error_code: "provider_error".into(),
+                        error_detail: None,
+                        failure: None,
+                        manual_retry_allowed: true,
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        let after_failure = super::super::open(
+            &mut db,
+            super::super::OpenParams {
+                chat_id: chat.into(),
+                before_sequence: None,
+                limit: None,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            after_failure
+                .pending_inputs
+                .iter()
+                .map(|p| p.input_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                queued["inputId"].as_str().unwrap(),
+                budget["inputId"].as_str().unwrap()
+            ]
+        );
+        assert!(after_failure.pending_inputs[1].converted_from_steer);
+        assert_eq!(after_failure.pending_inputs[1].body, "预算控制在五万以内");
+        db.connection().execute("UPDATE single_chat_pending_input SET requested_mode='steer',state='cancelled' WHERE id=?1",
+            [budget["inputId"].as_str().unwrap()]).unwrap();
+        db.connection()
+            .execute_batch(
+                "DELETE FROM schema_migration WHERE version=237;
+            UPDATE rovai_data_contract SET projection_schema_version=186",
+            )
+            .unwrap();
+        db.reopen_production().unwrap();
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT state,requested_mode FROM single_chat_pending_input WHERE id=?1",
+                    [budget["inputId"].as_str().unwrap()],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                )
+                .unwrap(),
+            ("queued".into(), "start".into())
+        );
     }
     #[test]
     fn private_history_and_public_writes_stay_with_their_respective_owners() {
@@ -1053,7 +1220,7 @@ mod tests {
         };
         let mut db = crate::test_support::seeded_runtime_database_owned();
         // A previous preview already committed 235 with guards referencing the wrong table.
-        db.connection().execute_batch("DELETE FROM schema_migration WHERE version=236;
+        db.connection().execute_batch("DELETE FROM schema_migration WHERE version IN (236,237);
             UPDATE rovai_data_contract SET projection_schema_version=185;
             DROP TRIGGER chat_memory_revision_source;
             CREATE TRIGGER chat_memory_revision_source BEFORE INSERT ON memory_revision
@@ -1071,7 +1238,9 @@ mod tests {
             .unwrap()
         };
         let a = open(&mut db, "draft-a", "新建团队会话，建任务并通知小林。");
-        let b = open(&mut db, "draft-b", "这是另一个话题。");
+        let prefix = "这是另一个话题".to_owned() + &"好".repeat(12);
+        let b = open(&mut db, "draft-b", &format!("{prefix}👨‍👩‍👧‍👦。"));
+        assert_eq!(b["title"], format!("{prefix}👨‍👩‍👧‍👦"));
         let chat = a["chatId"].as_str().unwrap();
         let run = a["runId"].as_str().unwrap();
         let (epoch, binding) = claim_chat(&mut db, chat, run, "新建团队会话，建任务并通知小林。");

@@ -2267,6 +2267,8 @@
   "刷新": "Refresh",
   "运行配置": "Agent configuration",
   "未配置智能体": "No Agent configured",
+  "这位队员暂离，归队后可以发送。": "This teammate is away. You can send when they return.",
+  "这位队员未配置智能体，请在队员资料中设置。": "This teammate has no Agent configured. Set one up in their profile.",
   "配置智能体": "Configure an Agent",
   "本地安装": "Local installation",
   "更多操作": "More actions",

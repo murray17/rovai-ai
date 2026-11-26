@@ -4,7 +4,7 @@ import { newCommandId } from '../../shared/command-id'
 import type { ThreadClient } from './camp-client'
 import { loadLocalThreadComposerDraft } from './camp-composer-local-store'
 import { composerDocumentToPlainText, emptyComposerDocument } from './composer-document'
-import { MessageQuoteSelectionToolbar } from './MessageQuotes'
+import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import { AttachmentCard } from './AttachmentCard'
 import { ComposerPrimaryAction } from './ComposerPrimaryAction'
 import { ChatQueue } from './ChatQueue'
@@ -27,6 +27,7 @@ import { chatDraftRecovery, requestChatDraftCommand } from './chat-draft-recover
 import { reportOperationFailure } from './operation-failure'
 import { attachmentErrorMessage } from './ThreadWorkspace'
 import { useComposerSendShortcut } from './ShortcutProvider'
+import { revealPrivateQuote } from './message-quote-reveal'
 
 export function ChatComposer({
   client,
@@ -286,21 +287,12 @@ export function ChatComposer({
             }
           }}
         >
-          {extras.quotes.map((quote) => (
-            <blockquote key={quote.quoteId}>
-              {quote.text}
-              <button
-                type="button"
-                disabled={locked}
-                aria-label={uiAttribute('移除引用')}
-                onClick={() =>
-                  changeExtras({ ...extras, quotes: extras.quotes.filter((q) => q.quoteId !== quote.quoteId) })
-                }
-              >
-                ×
-              </button>
-            </blockquote>
-          ))}
+          <MessageQuotes quotes={extras.quotes} disabled={locked} onReveal={revealPrivateQuote}
+            onEmptyFocus={() => handle.current?.focus('end')}
+            onMutate={async (action) => {
+              if (action.type === 'remove')
+                changeExtras({ ...extras, quotes: extras.quotes.filter(quote => quote.quoteId !== action.quoteId) })
+            }} />
           {extras.attachments.length > 0 && (
             <div className="composer-attachment-strip">
               {extras.attachments.map((file) => (
@@ -416,7 +408,7 @@ export function ChatComposer({
                             name,
                             target: { agentRunId: active.runId, executionEpoch: active.executionEpoch },
                             canSteer: Boolean(detail?.activeInput?.canSteer),
-                            reason: null,
+                            reason: detail?.activeInput?.unavailableReason,
                             route: detail?.activeInput?.canSteer && mode === 'steer' ? 'steer' : 'queue'
                           }
                         ]

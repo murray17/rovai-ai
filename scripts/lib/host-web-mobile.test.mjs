@@ -787,6 +787,22 @@ test('phone workbench uses shared navigation, schedules and per-tab drafts', { t
     await browser.key('Escape')
     await browser.wait(`!document.querySelector('#mobile-app-menu') && document.activeElement?.getAttribute('aria-label')==='打开主菜单'`)
 
+    stage = 'first private chat on phone'
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    await browser.click(byLabel('打开主菜单'))
+    const chatRail = "document.querySelector('.mobile-conversation-drawer [title=聊天]:not(:disabled)')"
+    await browser.wait('!!' + chatRail)
+    await browser.click(chatRail)
+    const firstOption = "document.querySelector('.chat-start-option')"
+    await browser.wait('!!' + firstOption)
+    assert.equal(await browser.evaluate(`(() => {
+      const row = ${firstOption}, [avatar, name] = row.children
+      return avatar.getBoundingClientRect().right <= name.getBoundingClientRect().left
+    })()`), true)
+    await browser.click(firstOption)
+    await browser.wait("!!document.querySelector('#independent-chat-input') && !document.querySelector('#mobile-app-menu')")
+    assert.deepEqual((await host.request('chats.list')).items, [])
+
     assert.deepEqual(browser.errors, [])
     assert.equal((await host.request('camps.snapshot', { threadId })).agentRuns.length, 0)
     await writeFile(join(output, 'validation.json'), JSON.stringify({

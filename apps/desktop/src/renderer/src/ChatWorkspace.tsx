@@ -18,6 +18,8 @@ import { useOptionalFilePreview } from './file-preview-context'
 import { newCommandId } from '../../shared/command-id'
 import { ApprovalDock } from './ThreadWorkspace'
 import { ChatReply } from './ChatReply'
+import { MessageQuotes } from './MessageQuotes'
+import { revealPrivateQuote } from './message-quote-reveal'
 import { createRuntimeRefresh } from './runtime-check'
 import { AttachmentCard } from './AttachmentCard'
 import { SingleChatRunHistory } from './SingleChatPanel'
@@ -60,6 +62,35 @@ function ChatUserText({ body }: { body: string }) {
   })
 }
 
+function ChatUserMessage({ chatId, message, source, unconfirmed }: {
+  chatId: string
+  message: Pick<SingleChatMessageView, 'body' | 'quotes' | 'attachments'>
+  source: { messageId: string } | { inputId: string }
+  unconfirmed?: boolean
+}) {
+  const messageId = 'messageId' in source ? source.messageId : undefined
+  return (
+    <div className="single-chat-user-message">
+      <div className="single-chat-user-content">
+        <MessageQuotes history quotes={message.quotes} onReveal={revealPrivateQuote} />
+        {(message.body || message.attachments.length > 0) && <div className="single-chat-user-bubble">
+          <span data-message-quote-body={messageId} data-quote-owner={messageId ? 'single_chat:' + chatId : undefined}>
+            <ChatUserText body={message.body} />
+          </span>
+          {message.attachments.map(file => (
+            <AttachmentCard key={file.id} attachment={file} locator={'messageId' in source
+              ? { owner: 'single_chat_message', threadId: chatId, conversationId: chatId,
+                  conversationMessageId: source.messageId, attachmentRefId: file.id }
+              : { owner: 'single_chat_pending', threadId: chatId, conversationId: chatId,
+                  pendingInputId: source.inputId, attachmentRefId: file.id }} />
+          ))}
+        </div>}
+        {unconfirmed && <small>{uiAttribute('未确认送达')}</small>}
+      </div>
+    </div>
+  )
+}
+
 function ChatRound({
   client,
   chatId,
@@ -67,10 +98,10 @@ function ChatRound({
   final,
   supplements,
   theme,
-  visibleMessages,
+  messages,
   latestPage
 }: {
-  visibleMessages: ReadonlySet<string>
+  messages: ReadonlyMap<string, SingleChatMessageView>
   latestPage: boolean
   theme: ResolvedTheme
   supplements: ChatSupplement[]
@@ -149,10 +180,12 @@ function ChatRound({
       {Array.from({ length: supplements.length + 1 }, (_, index) => {
         const previous = supplements[index - 1]
         const next = supplements[index]
-        const showSupplement = previous && (previous.messageId ? visibleMessages.has(previous.messageId) : latestPage)
+        const supplement = previous?.messageId === null
+          ? (latestPage ? previous : undefined)
+          : previous && messages.get(previous.messageId)
         const showSegment =
-          showSupplement ||
-          (!previous && visibleMessages.has(run.triggerMessageId)) ||
+          supplement ||
+          (!previous && messages.has(run.triggerMessageId)) ||
           (!next && (final || (latestPage && processing(run.status))))
         if (!showSegment) return null
         const evidence = (page?.evidence ?? []).filter(
@@ -161,48 +194,13 @@ function ChatRound({
             (!previous || step.sequence > previous.evidenceSequence) &&
             (!next || step.sequence < next.evidenceSequence)
         )
+        const segmentActive = processing(run.status) && (!next ||
+          evidence.some(step => step.phase === 'started' || step.phase === 'updated'))
         return (
           <Fragment key={previous?.inputId ?? 'initial'}>
-            {showSupplement && (
-              <div className="single-chat-user-message">
-                <div className="single-chat-user-column">
-                  <div className="single-chat-user-bubble">
-                    {previous.quotes.map((quote) => (
-                      <blockquote key={quote.quoteId}>{quote.text}</blockquote>
-                    ))}
-                    <span
-                      data-message-quote-body={previous.messageId ?? undefined}
-                      data-quote-owner={previous.messageId ? 'single_chat:' + chatId : undefined}
-                    >
-                      <ChatUserText body={previous.body} />
-                    </span>
-                    {previous.attachments.map((file) => (
-                      <AttachmentCard
-                        key={file.id}
-                        attachment={file}
-                        locator={
-                          previous.messageId
-                            ? {
-                                owner: 'single_chat_message',
-                                threadId: chatId,
-                                conversationId: chatId,
-                                conversationMessageId: previous.messageId,
-                                attachmentRefId: file.id
-                              }
-                            : {
-                                owner: 'single_chat_pending',
-                                threadId: chatId,
-                                conversationId: chatId,
-                                pendingInputId: previous.inputId,
-                                attachmentRefId: file.id
-                              }
-                        }
-                      />
-                    ))}
-                  </div>
-                  {previous.unconfirmed && <small>{uiAttribute('未确认送达')}</small>}
-                </div>
-              </div>
+            {supplement && previous && (
+              <ChatUserMessage chatId={chatId} message={supplement} unconfirmed={previous.unconfirmed}
+                source={previous.messageId === null ? { inputId: previous.inputId } : { messageId: previous.messageId }} />
             )}
             {(!next || evidence.length > 0 || !page) && (
               <SingleChatRunHistory
@@ -210,7 +208,6 @@ function ChatRound({
                 threadId={chatId}
                 conversationId={chatId}
                 onExpand={setExpanded}
-                summaryLabel={next ? uiAttribute('插话前的步骤') : undefined}
                 privateFinal={
                   !next && final ? (
                     <ChatReply
@@ -224,13 +221,9 @@ function ChatRound({
                 run={{
                   ...run,
                   id: run.runId,
-                  status:
-                    next &&
-                    !evidence.some(
-                      (step) => processing(run.status) && (step.phase === 'started' || step.phase === 'updated')
-                    )
-                      ? 'succeeded'
-                      : run.status,
+                  status: next && !segmentActive ? 'succeeded' : run.status,
+                  startedAt: previous?.occurredAt ?? run.startedAt,
+                  endedAt: segmentActive ? null : next?.occurredAt ?? run.endedAt,
                   triggerConversationMessageId: run.triggerMessageId,
                   finalConversationMessageId: next ? null : run.finalMessageId,
                   executionEvidenceCount: evidence.length,
@@ -379,7 +372,6 @@ export function ChatWorkspace({
   const avatar = profile?.avatarRef ?? detail?.chat.avatarRef ?? null
   const title = detail?.chat.title ?? uiAttribute(chatId || !id ? '聊天' : '新聊天')
   const byId = new Map(detail?.messages.map((message) => [message.id, message]))
-  const visibleMessages = new Set(byId.keys())
   const roundsByMessage = new Map<string, Run>()
   const roundsById = new Map(detail?.runs.map((run) => [run.runId, run]))
   for (const run of roundsById.values()) {
@@ -417,6 +409,7 @@ export function ChatWorkspace({
       <div
         className="chat-timeline"
         ref={root}
+        data-single-chat-owner={chatId ?? undefined}
         onScroll={(event) => {
           const el = event.currentTarget
           followsLatest.current = before === null && el.scrollHeight - el.scrollTop - el.clientHeight < 48
@@ -490,39 +483,12 @@ export function ChatWorkspace({
               return (
                 <div className="single-chat-turn" key={run?.runId ?? message.id}>
                   {(!run || run.triggerMessageId === message.id) && (
-                    <div className="single-chat-user-message">
-                      <div className="single-chat-user-column">
-                        <div className="single-chat-user-bubble">
-                          {message.quotes.map((quote) => (
-                            <blockquote key={quote.quoteId}>{quote.text}</blockquote>
-                          ))}
-                          <span
-                            data-message-quote-body={message.id}
-                            data-quote-owner={'single_chat:' + detail.chat.chatId}
-                          >
-                            <ChatUserText body={message.body} />
-                          </span>
-                          {message.attachments.map((item) => (
-                            <AttachmentCard
-                              key={item.id}
-                              attachment={item}
-                              locator={{
-                                owner: 'single_chat_message',
-                                threadId: detail.chat.chatId,
-                                conversationId: detail.chat.chatId,
-                                conversationMessageId: message.id,
-                                attachmentRefId: item.id
-                              }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    <ChatUserMessage chatId={detail.chat.chatId} message={message} source={{ messageId: message.id }} />
                   )}
                   {run && chatId && (
                     <ChatRound
                       latestPage={before === null}
-                      visibleMessages={visibleMessages}
+                      messages={byId}
                       theme={theme}
                       client={client}
                       chatId={chatId}

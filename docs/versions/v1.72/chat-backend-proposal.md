@@ -21,7 +21,7 @@ last_updated: 2026-11-25
 | 左栏话题 | `chat_topic.conversation_id` 同时是主键和指向 `conversation.id` 的外键，只接收 `chat`。其余字段为 `owner_user_id`、`title`、`archived_at`、`last_activity_global_sequence`、`version`，永久删除受理时记录 `deletion_operation_id`。队员和头像经 Conversation 查 `agent_profile`。 |
 | 用户消息和最终答复 | `conversation_message` 按 `(conversation_id, sequence)` 排序。用户消息可带引用、附件及沿用 Thread 格式的技能选择（`skill_mention` 的 `skillId` 和 `nameAtSend`）。Core 把队员最终答复的正文写回 Run 的目的 Conversation。`rovai send` 用于显式发布到公开 Thread。 |
 | 执行过程 | `agent_run` 直接引用 `conversation_id` 和 `trigger_conversation_message_id`。聊天 Run 的 `camp_id`、`camp_turn_id` 均为空。`agent_run_execution_evidence` 保存工具调用、进度、输出和插话的位置，按 Run 与 `execution_epoch` 读取。 |
-| 忙时输入 | `single_chat_pending_input` 保存 FIFO 输入和指向原 Run 的插话，随输入保留本条技能选择的顺序，发表时写回对应的用户消息。只有 FIFO 可以开启下一轮。运行端的接收凭据保存在 `runtime_input_delivery`。 |
+| 忙时输入 | `single_chat_pending_input` 保存 FIFO 输入和指向原 Run 的插话，随输入保留本条技能选择的顺序，发表时正文、引用、附件描述和技能以正式用户消息为准，队列行保留顺序、状态和关联 ID。只有 FIFO 可以开启下一轮。运行端的接收凭据保存在 `runtime_input_delivery`。 |
 | 公开业务结果 | `event_log` 的 `command.result` 关联已有工具请求与结果。任务读 `task`，消息和逐收件人投递读 `camp_message`、`camp_message_delivery`。 |
 
 私下问答的整个过程，包括首发、排队、插话和最终回复，对 `camp`、`camp_member`、`camp_turn` 均为零写入。工作目录按 `chatId` 管理，引用 Thread 只定位业务对象。置顶与已读沿用本机偏好，以聊天类型保存 ID。
@@ -30,7 +30,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 ## 2. 首发、排队与插话
 
-**首发。** 选人只读队员资料。本机按用户与队员保存未发送草稿，同一份草稿跨窗口共用 `draftId`。首发校验队员、引用和附件，在事务内建立 `conversation`，沿用 `resolve_frozen_runtime` 核对运行端配置、授权和就绪状态。运行端未就绪就回滚并返回具体原因，草稿保留在本机。校验通过才一并提交 Conversation、`chat_topic`、首条 `conversation_message`、首个 `agent_run` 和成功回执。[现有发送准入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L715-L744)
+**首发。** 手机首次从导航进入聊天且没有话题时，直接打开队员选择器。选人只读队员资料，暂离或未配置智能体时就地标出原因。本机按用户与队员保存未发送草稿，同一份草稿跨窗口共用 `draftId`。首发校验队员、引用和附件，在事务内建立 `conversation`，沿用 `resolve_frozen_runtime` 核对运行端配置、授权和就绪状态。运行端未就绪就回滚并返回具体原因，草稿保留在本机。校验通过才一并提交 Conversation、`chat_topic`、首条 `conversation_message`、首个 `agent_run` 和成功回执。[现有发送准入](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L715-L744)
 
 输入框里的 `/` 使用队员档案中的运行端。选人后的草稿和已有话题都按需读取现有工具箱与该运行端的用户级技能，省去项目级扫描。工具箱里可以临时点选队员尚未配置的一项。候选不依赖 `chatId`，只把用户实际点选的技能随本条输入保存。模型侧按 [R8](model-context-change-independent-chat.md) 投递。
 
@@ -61,6 +61,8 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 **模型输入。** 首次建立原生会话时，Bootstrap 的 `SESSION_CHARTER` 写明队员身处 Rovai，答复发在当前私聊。随后是所选队员的 `MEMBER_IDENTITY` 和平台技能索引 `ROVAI_PLATFORM_SKILLS`。同一运行端下，独立聊天与 Thread 使用相同的身份投递通道。Hermes 首条 `user` 输入在动态正文前携带完整 Bootstrap。`CURRENT_INPUT` 只含当次用户输入。直发、FIFO 出队和插话都按队员当时配置与本条显式选用的工具箱技能生成完整 `ROVAI_ADDITIONAL_SKILLS`，空时也发 `skills: []`。工作目录由 Host 设置。[完整 Bootstrap 示例及每轮输入](model-context-change-independent-chat.md#新建原生会话)
 
+运行失败时，话题仍可发送且确定尚未派发的插话保留原顺序转入 FIFO。已签收和送达未知的输入保留原回执。
+
 **插话提交与定位。** `single_chat_pending_input` 增加 `requested_mode` 和原目标 Run／代次。Core 在受理事务里写入私有输入，并在目标 `agent_run_execution_evidence` 中登记一项插话。该项以 `inputId` 稳定定位，沿用执行记录分配的固定 `sequence`，即接口的 `evidenceSequence`。相同请求重放返回原项和原序号。提交后即可显示，正文、附件及引用取自原输入。进入送达未知、签收或转队时，通过原项的 `change_sequence` 刷新视图，定位用的 `sequence` 不变。
 
 `active_input_availability` 为 `chat` 复用冻结的适配器、协议、版本和绑定检查。`canSteer` 允许登记输入，`ready` 还须同一绑定及代次的初始输入已接收。启动中的绑定按既有预计代次等待，实际投递前再验原目标，每条插话按提交顺序单独投递。私有路径对 `camp_message` 和 `camp_message_delivery` 均为零写入。
@@ -83,7 +85,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 **导航。** `navigation.search` 在 §1 的话题范围内按 `chat_topic.archived_at IS NULL` 筛选，再连接 `conversation`、`agent_profile` 匹配标题和队员名。结果为 `kind:'chat', chatId`。`navigation.searchMessages` 继续只搜 `camp_message`。[导航搜索合同](../../contracts/navigation-search-v1.md)
 
-`chats.list` 每行在 `chatId`、标题和队员头像等身份字段外返回以下三项。列表按活动序号降序、`chatId` 升序稳定分页，可按队员过滤。置顶沿用 §1 的本机偏好。
+`chats.list` 每行在 `chatId`、标题和队员头像等身份字段外返回以下三项。列表按活动序号降序、`chatId` 升序稳定分页，可按队员过滤。置顶沿用 §1 的本机偏好。传入 `activeChatId` 时，列表用 `activeItem` 补显页外的当前话题，分页游标沿用本页末行。
 
 | 列表字段 | 来源和用途 |
 | --- | --- |
@@ -157,7 +159,7 @@ Desktop 和已认证的 Web 共用 Core 的用户入口，由 Core 确定当前�
 
 **打开聊天与展开步骤。** Desktop 和认证 Web 共用 `chats.open`。话题已删除时返回 `null`，界面回到聊天列表。读取暂时失败时保留当前页面。首屏返回本页聊天消息、输入框上方的 FIFO、当前 Run 的插话能力与进度，以及本页各轮摘要。摘要从 `agent_run` 取 `runId`、状态、执行代次与 `execution_evidence_change_sequence`。
 
-对本页轮次（含正展示的活动轮）按原 Run 和 `inputId` 取插话及其固定 `evidenceSequence`。运行端签收前就返回原输入的正文、附件、引用与这个位置。签收后关联正式消息，回队项只出现在 FIFO 或后来开启的新轮。Renderer 用 `inputId` 合并提交响应、打开结果和步骤增量，在原位置只显示一次。折叠历史只按键取这些插话项，无需遍历各轮工具记录。[旧单聊快照的读取路径](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L1639-L1685)
+对本页轮次（含正展示的活动轮）按原 Run 和 `inputId` 取插话及其固定 `evidenceSequence`。运行端签收前就返回原输入的正文、附件、引用与这个位置。签收后返回正式消息 ID，正文、引用和附件从本页消息读取。界面沿插话标记的时间显示各段耗时。回队项只出现在 FIFO 或后来开启的新轮。Renderer 用 `inputId` 合并提交响应、打开结果和步骤增量，在原位置只显示一次。折叠历史只按键取这些插话项，无需遍历各轮工具记录。[旧单聊快照的读取路径](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/single_chat.rs#L1639-L1685)
 
 只有正在展示的执行和用户展开的历史轮次才调用 `agentRunExecution.page` 取步骤。若首屏已附当前轮第一页，沿该页的 `nextBeforeSequence` 翻到更早步骤，从该页的 `throughChangeSequence` 调用 `agentRunExecution.changes` 接续变化。展开单项输出才用 `agentRunEvidence.getContent`。分页、增量和单项读取共用 §1 的话题查询，只取该话题下的 Run。读单项时再核对证据属于该 Run，然后复用既有窗口查询。[当前窗口归属校验](https://github.com/murray17/rovai-ai/blob/a181754bc88c2d1e5773ce3db37a2647e03f1dfa/crates/rovai-core/src/execution_window.rs#L63-L103) · [按需展开规则](../../contracts/run-process-detail-surface-v34.md#按窗口阅读与-dom)
 

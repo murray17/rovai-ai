@@ -139,6 +139,9 @@ export function failureFeedback(
 ): FailureFeedback {
   const { code, kind } = failure
   if (operation === 'chat.send' && (code === 'chat.runtime_not_ready' || failure.raw.startsWith('chat.runtime_not_ready:'))) {
+    const reason = failure.raw.split(':').at(-1)?.trim()
+    if (reason === 'member_away') return failed(uiAttribute('这位队员暂离，归队后可以发送。'))
+    if (reason === 'runtime_not_configured') return failed(uiAttribute('这位队员未配置智能体，请在队员资料中设置。'))
     return failed(uiAttribute('目标队员的智能体暂不可用。'))
   }
   if ((operation === 'chat.send' || operation === 'chat.queue' || operation === 'run.stop')

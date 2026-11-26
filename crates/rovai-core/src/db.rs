@@ -536,7 +536,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 186;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 187;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1048,6 +1048,7 @@ struct CurrentMigrationState {
     v234: bool,
     v235: bool,
     v236: bool,
+    v237: bool,
 }
 
 impl CurrentMigrationState {
@@ -1069,6 +1070,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v237 {
+            let mut previous = *self;
+            previous.v237 = false;
+            return schema == 187 && previous.admits(contract, 186, classifier);
+        }
         if self.v236 {
             let mut previous = *self;
             previous.v236 = false;
@@ -6360,7 +6366,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=233),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=234),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=235),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=236)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=236),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=237)
         "#,
         [],
         |row| {
@@ -6532,6 +6539,7 @@ fn load_current_migration_state(
                 v234: row.get(164)?,
                 v235: row.get(165)?,
                 v236: row.get(166)?,
+                v237: row.get(167)?,
             })
         },
     )
@@ -8974,6 +8982,11 @@ impl Database {
         if !self.schema_migration_applied(236)? {
             observe_migration_step(progress, "migration_236", || {
                 chat_runtime::repair_chat_runtime(self)
+            })?;
+        }
+        if !self.schema_migration_applied(237)? {
+            observe_migration_step(progress, "migration_237", || {
+                chat_runtime::repair_chat_inputs(self)
             })?;
         }
         if let Err(error) =

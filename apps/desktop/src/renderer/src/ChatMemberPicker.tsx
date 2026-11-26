@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactElement } from 'react'
 import type { AgentProfile } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon } from './NavigationIcon'
@@ -12,7 +12,7 @@ export interface ChatPickerProps {
   chooseMember(agentId: string): void
 }
 
-export function ChatMemberPicker({ profiles, loadProfiles, chooseMember, toolbar = false }: ChatPickerProps & { toolbar?: boolean }) {
+export function ChatMemberPicker({ profiles, loadProfiles, chooseMember, toolbar = false, trigger }: ChatPickerProps & { toolbar?: boolean; trigger?: ReactElement }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
@@ -20,6 +20,7 @@ export function ChatMemberPicker({ profiles, loadProfiles, chooseMember, toolbar
   const [failed, setFailed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [retry, setRetry] = useState(0)
+  const anchor = useRef<HTMLButtonElement>(null)
   const input = useRef<HTMLInputElement>(null)
   const picked = useRef(false)
   const listId = useId()
@@ -51,9 +52,9 @@ export function ChatMemberPicker({ profiles, loadProfiles, chooseMember, toolbar
     if (value) { picked.current = false; setRoster(profiles); setHighlight(0); setQuery('') }
     setOpen(value)
   }}>
-    <Popover.Trigger asChild><button className={toolbar ? 'navigation-collapse-button' : 'section-create-button chat-new-button'}
-      type="button" title={uiAttribute('新聊天')} aria-label={uiAttribute('新聊天')}><NavigationIcon name="square-pen" /></button></Popover.Trigger>
-    <Popover.Portal><Popover.Content className="sidebar-action-menu chat-start-menu" side={toolbar ? 'bottom' : 'right'} align="start" sideOffset={6}
+    <Popover.Trigger asChild ref={anchor}>{trigger ?? <button className={toolbar ? 'navigation-collapse-button' : 'section-create-button chat-new-button'}
+      type="button" title={uiAttribute('新聊天')} aria-label={uiAttribute('新聊天')}><NavigationIcon name="square-pen" /></button>}</Popover.Trigger>
+    <Popover.Portal container={anchor.current?.closest<HTMLElement>('.mobile-conversation-drawer')}><Popover.Content className="sidebar-action-menu chat-start-menu" side={toolbar ? 'bottom' : 'right'} align="start" sideOffset={6}
       collisionPadding={8} aria-label={uiAttribute('新聊天')} onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
       onCloseAutoFocus={event => { if (picked.current) event.preventDefault() }}>
       <div className="runtime-model-search chat-start-search"><NavigationIcon name="search" />
@@ -75,7 +76,7 @@ export function ChatMemberPicker({ profiles, loadProfiles, chooseMember, toolbar
           className="sidebar-action-menu-item chat-start-option" onMouseDown={event => event.preventDefault()}
           onPointerMove={() => setHighlight(index)} onClick={() => choose(person)}>
           <MemberAvatar agentId={person.agentId} avatarRef={person.avatarRef} displayName={person.displayName} size="execution" decorative />
-          <span className="chat-start-copy"><strong>{person.displayName}</strong><small>{person.teamRole}</small></span>
+          <span className="chat-start-copy"><strong>{person.displayName}</strong><small>{person.presence === 'away' ? uiAttribute('暂离') : !person.runtimeConfiguration ? uiAttribute('未配置智能体') : person.teamRole}</small></span>
           {hasNewChatDraft(person.agentId) && <span className="chat-start-draft">{uiAttribute('草稿')}</span>}
         </button>)}
       </div>
