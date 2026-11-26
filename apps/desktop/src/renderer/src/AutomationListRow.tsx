@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, AutomationView } from '@contracts'
 import { AutomationGlyph, AutomationRunSwitch } from './AutomationControls'
-import { describeAutomationPlan, type AutomationDetailMode } from './automation-workspace-model'
+import { describeAutomationPlan } from './automation-workspace-model'
 import { UiText, uiAttribute } from './interface-language'
 import { MemberAvatar } from './MemberAvatar'
 import { useMobileLayout } from './MobileLayout'
@@ -15,7 +15,7 @@ interface RowProps {
   overview: boolean
   disabled: boolean
   switching: boolean
-  onOpen(mode: AutomationDetailMode): void
+  onOpen(): void
   onToggle(): void
   onRun(): void
   onDelete(): void
@@ -41,7 +41,7 @@ export function AutomationListRow({ task, member, selected, overview, disabled, 
   return <DropdownMenu.Root open={menu.open} onOpenChange={menu.setOpen}>
     <div className={`automation-list-item${selected ? ' active' : ''}${menu.open ? ' menu-open' : ''}`}
       data-plan={plan.kind} data-enabled={task.enabled} {...gestures}>
-      <button ref={row} type="button" className="automation-task-open" onClick={() => onOpen('details')}
+      <button ref={row} type="button" className="automation-task-open" onClick={onOpen}
         aria-current={selected ? 'true' : undefined} aria-haspopup={hasPopup} aria-description={menuDescription}
         aria-keyshortcuts="Shift+F10" aria-label={[task.name, plan.summary, plan.label, plan.timing, memberName].filter(Boolean).join(uiAttribute('，'))}>
         {!memberColumn && avatar}
@@ -68,9 +68,6 @@ export function AutomationListRow({ task, member, selected, overview, disabled, 
         restoreFocus.current = false
       }}>
       <DropdownMenu.Item className="automation-menu-item" onSelect={onRun}><AutomationGlyph name="play" /><UiText zh="运行一次" /></DropdownMenu.Item>
-      {plan.endedSchedule && <DropdownMenu.Item className="automation-menu-item" onSelect={() => onOpen('reschedule')}>
-        <AutomationGlyph name="calendar" /><UiText zh="重新安排" />
-      </DropdownMenu.Item>}
       <DropdownMenu.Separator className="automation-menu-separator" />
       <DeleteMenuItem onDelete={onDelete} />
     </DropdownMenu.Content></DropdownMenu.Portal>

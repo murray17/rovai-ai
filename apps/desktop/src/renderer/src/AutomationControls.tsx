@@ -38,7 +38,6 @@ export function AutomationRunSwitch({ enabled, disabled, switching, taskName, on
 }): React.JSX.Element {
   return <button type="button" role="switch" aria-checked={enabled} aria-busy={switching || undefined} className="automation-run-switch"
     aria-label={taskName === undefined ? uiAttribute('自动运行') : uiAttribute('{0}自动运行', taskName)}
-    title={enabled ? uiAttribute('已开启，按计划自动运行。点击关闭') : uiAttribute('已关闭，不会自动运行。点击开启')}
     disabled={disabled} onClick={onChange}>
     {taskName === undefined && <UiText zh="自动运行" />}
     <span className="automation-switch-track" aria-hidden="true" />
