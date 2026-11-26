@@ -105,10 +105,10 @@ sidecar。Stream 从始至终由 Main 内的 `dingtalk-stream` SDK 直接连接�
 `corpId/userId/userName/corpName`，再调用 `channels.dingtalk.account.commitConnection`，由单一 SQLite 事务同时替换当前
 Developer Session 与 connected account。Core 失败时只丢弃 staged jar，旧 SQLite/内存 Session 均不变。Cookie 轮换
 通过 Session revision CAS 保存；失败的轮换结果暂存在 Main，下次先回读 revision 并补存，不能覆盖新账号或复活断开状态。
-启动恢复同一 Cookie Snapshot；明确登录拒绝时先允许官方 SSO 在隐藏窗口续接，不承诺固定有效天数，也没有 Rovai refresh token。
+执行需要开发者身份的操作时，从 SQLite 恢复同一 Cookie Snapshot；明确登录拒绝时先允许官方 SSO 在隐藏窗口续接，不承诺固定有效天数，也没有 Rovai refresh token。
 断网、timeout、未知响应和 SQLite 失败保留 Session；本地加载失败必须可重试，不缓存成未登录。
 只有明确没有 Session、SSO 无法续接的登录失效或身份漂移时才按 account/version expire。断开/明确过期仍在 Core 同一事务
-删除当前 Provider Session 并更新账号状态，不关闭、迁移或删除已发布 Bot。显式连接/断开或 Host stop 使旧启动检查失效。
+删除当前 Provider Session 并更新账号状态，不关闭、迁移或删除已发布 Bot。显式连接/断开或 Host stop 使在途的开发者身份验证失效。
 
 ## 队员应用发布
 
@@ -275,17 +275,14 @@ Renderer 渠道设置已开放钉钉管理入口：Snapshot 中的飞书、钉�
 
 ## 恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v5](../contracts/channel-host-maintenance-v5.md) 使用无 commandId 的直接
+共享 Host tick 按 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 使用无 commandId 的直接
 维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用
 provider-scoped outstanding 判定和按需调度；钉钉不再永久每 800ms 扫描，事件/入站/settlement 走合并快路径，
 只有 Core 仍报告未收口工作时才保留十分钟 one-shot watchdog。
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 Cookie jar。启动恢复所有
-published Bot Stream，同时独立检查 Developer Session；Bot 不等待开发者页面或网络检查。暂时检查失败保留 Session，明确
-Session 失效只阻止新的发布，不停止已有 Bot。按需 worker 在启动恢复、渠道活动、Core 执行事件和 active watchdog
-唤醒时重取已知群 roster、finalize ready aggregate、领取 delivery 并结算；清空后不再周期运行。任何外部失败都不从
-Renderer 状态重建业务事实。
+published Bot Stream。纯重连使用已有 Bot 凭据，网页身份在管理操作需要时核验。恢复入站和多 Bot 聚合均按父群验证完整名单，再提交原记录。有效空数组代表全员缺席，响应无法解析时按未知退避。待开工名单查询与回复发送独立执行。
 
 DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card create/update/recall/failed 计数，用于判断链路阶段；
 不暴露正文、附件内容、tenant/chat/App/Agent/Owner identity、credential、URL、token 或远端响应。计数不参与 admission。

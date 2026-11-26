@@ -95,9 +95,7 @@ Session 均保持不变。本地事务期间禁止扫码取消与重复连接；
 Developer Session revision CAS 保存远端刷新；断开/过期在 Core 同一事务删除 Session row 与更新账号状态。隔离验收只依赖
 不同 `userData`/SQLite，不改变 `app.setName(APP_NAME)`，也没有 Keychain namespace。
 
-启动先恢复 published Bot 和消息 worker，再异步复核开发者账号；两者不共享等待或失败生命周期。Session 检查区分 valid、
-明确 invalid 和 unavailable：网络、页面、身份字段不完整、Cookie 恢复和 SQLite/CAS 异常均保留原 Session；只有明确失效
-才允许 Core expire。后台检查有 Host/账号代次与版本保护，不能用迟到结果覆盖或清理新登录态。
+启动恢复 published Bot 和消息 worker。设置页显示本地上次验证时间。连接、发布、修改配置或恢复凭据时再验证网页身份，暂时无法访问时保留 Session。
 
 普通队员发布先创建持久 `MemberBotPublicationIntent`，再要求当前 Web Session 仍属于 intent 冻结的
 `userId + tenantId`。`FeishuWebSessionMemberBotProvisioner` 通过统一 Session HTTP 层请求开放平台 HTML，
@@ -313,22 +311,18 @@ present/published Rovai Bot 建立 membership，但首条消息仍只为明确 m
 初始目标”和“Thread 可协作队员”是两个独立集合。父群新增 Bot 后，完整快照通过同一 membership source 把它加入新旧
 Topic Thread；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Thread 和冻结项目不变。
 
-Host 在新 Topic 建 Thread、每条 Owner 根消息和项目卡 resolve 前强制重读完整 `isInChat` 快照，并消费 Bot 加入/移出
-事件与按需恢复。普通 A2A、waiting Delivery claim 与运输恢复等内部路径在真正物化 Topic AgentRun 前，由 Core 建立
-所需的下一 roster generation 门闩；Host tick 取得请求、重读父群并提交 generation，Core 完成 membership
-reconciliation 后才恢复物化。若目标已经移出则 fail closed。已经运行的 AgentRun 继续使用创建时冻结的执行上下文；
-为避免 membership remove 取消它，实际离群队员的 membership cutover 可延迟到其非终态 Run 结束，但最新 roster 已立即
-阻止任何新 Run。群 roster 读取不完整时所有这些边界都 fail closed。
+有效群消息先通过本地过滤并持久记录，Host 再逐个对已发布 Bot 调用 `isInChat`。普通群和话题的开工资格由 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 统一规定。群名和类型共用群资料读取，设置页只显示本地状态。
+
 
 ## 输出、恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v5](../contracts/channel-host-maintenance-v5.md) 使用直接参数与响应，
+共享 Host tick 按 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 使用直接参数与响应，
 不生成 commandId 或永久 poll 回执；超时、投影、FIFO 提升和 delivery 领取仍原子提交。Main 不再永久每 750ms
 扫描：入站、状态变更卡片、Bot/roster 和 settlement 继续显式唤醒；active 状态下只有 Run started/terminal 与
 当前 `opening | active | terminal_pending` 执行卡对应的 live Runtime event 进入事件快路径，其他 Run 和事件忽略。
 Core 返回 provider-scoped `hasOutstandingWork`，只有为真时才保留十分钟 one-shot watchdog，为假立即休眠。终态另有
 跨过 900ms quiet window 的 one-shot，短重试按 `availableAt` 唤醒。启动恢复先执行 Core tick，不先扫描全部历史群；
-精确 roster refresh 和运行期 fallback 保留。事件丢失仍依靠持久领域事实和 watchdog 恢复，真实入站、绑定、
+只有 Core 点名的父群才触发 roster refresh。事件丢失仍依靠持久领域事实和 watchdog 恢复，真实入站、绑定、
 admission 与 delivery settlement 的防重不变；历史 tick 回执不清理。
 
 `project_selection` 是唯一不依赖普通 inbound receipt 的 delivery：它关联 exact PendingCampBinding，使用冻结的

@@ -6588,6 +6588,12 @@ pub(crate) fn pump_target_after_run_terminal(
     let Some((camp_id, recipient_agent_id, invocation_kind)) = target else {
         return Ok(());
     };
+    crate::channel::finish_deferred_roster_removal(
+        database,
+        &camp_id,
+        &recipient_agent_id,
+        agent_run_id,
+    )?;
     if invocation_kind == "batch" {
         return Ok(());
     }

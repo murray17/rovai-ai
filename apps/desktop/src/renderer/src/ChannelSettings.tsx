@@ -678,6 +678,7 @@ export function ChannelConnectionRow({
               </span>
             </span>
             <small>{account.email ? `${account.email} · ` : ''}{account.tenantName ?? uiAttribute("当前企业")} · {account.brand === 'lark' ? 'Lark' : providerName}</small>
+            <small>{uiAttribute("上次验证时间")} · {new Date(account.lastVerifiedAt).toLocaleString()}</small>
           </span>
         </div>
       ) : (

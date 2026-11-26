@@ -1,3 +1,4 @@
+import { ChannelRosterQueries } from './channel-roster'
 import type { PendingChannelAttachments } from './channel-inbound-attachments'
 import { withDingTalkInboundFiles, dingtalkAttachmentFailureCode } from './dingtalk-inbound-attachments'
 import { createHash, randomUUID } from 'node:crypto'
@@ -321,7 +322,6 @@ export type DingTalkChannelHostDependencies = {
 
 const WORKER_ID = `desktop-dingtalk-${randomUUID()}`
 const NON_OWNER_HINT_MS = 24 * 60 * 60_000
-const ROSTER_SWEEP_MS = 30_000
 const MULTI_BOT_OBSERVATION_WINDOW_MS = 3_000
 const STEP_RANK: Readonly<Record<DingTalkPublicationState, number>> = {
   created: 0, account_verified: 1, app_created: 2, credentials_read: 3,
@@ -335,6 +335,9 @@ export class DingTalkChannelSettingsService {
   readonly #dependencies: DingTalkChannelHostDependencies
   readonly #stream: DingTalkStreamRegistry
   readonly #listeners = new Set<() => void>()
+  readonly #apiCredential = new Map<string, string>()
+  readonly #rosters = new ChannelRosterQueries(Date.now, ms => this.#hostPump.wakeAfter(ms))
+  readonly #finalizing = new Map<string, Promise<void>>()
   readonly #apis = new Map<string, DingTalkOpenApiClient>()
   readonly #inboundDownloads = new Set<string>()
   #inboundAbort = new AbortController()
@@ -356,11 +359,11 @@ export class DingTalkChannelSettingsService {
   #sessionStatus: 'valid' | 'invalid' | 'unavailable' | 'unknown' = 'unknown'
   #sessionCheckGeneration = 0
   #sessionNeedsReconnect = false
-  #nextRosterSweepAt = 0
 
   constructor(dependencies: DingTalkChannelHostDependencies) {
     this.#dependencies = dependencies
     this.#hostPump = new AdaptiveChannelHostPump({
+      provider: 'dingtalk',
       run: () => this.#pumpOnce(),
       onError: (error) => {
         console.warn(`[rovai] DingTalk outbox pump failed: ${failureCode(error)}`)
@@ -390,7 +393,7 @@ export class DingTalkChannelSettingsService {
   async start(): Promise<void> {
     this.#stopped = false
     if (this.#inboundAbort.signal.aborted) this.#inboundAbort = new AbortController()
-    const sessionCheckGeneration = ++this.#sessionCheckGeneration
+    ++this.#sessionCheckGeneration
     const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
     const credentialsByRef = new Map(publishedCredentials
       .filter((item): item is PublishedChannelCredential & {
@@ -406,11 +409,7 @@ export class DingTalkChannelSettingsService {
     }
     this.#hostPump.start()
     this.#notify()
-    // Bot credentials are independent of developer-console SSO. Restore Stream
-    // before checking a web session that may need a slow portal navigation.
-    if (snapshot.account?.status === 'connected') {
-      void this.#checkSavedAccount(snapshot.account, sessionCheckGeneration).catch(() => undefined)
-    }
+
   }
 
   async stop(): Promise<void> {
@@ -423,6 +422,9 @@ export class DingTalkChannelSettingsService {
     this.#hostPump.stop()
     this.#stream.stopAll()
     this.#apis.clear()
+    this.#apiCredential.clear()
+    this.#rosters.clear()
+    this.#finalizing.clear()
     this.#inboundBatch.clear()
     for (const state of this.#executionCardStates.values()) {
       this.#dependencies.executionView?.revokeExecutionViewUrl(state.executionViewUrl)
@@ -671,16 +673,45 @@ export class DingTalkChannelSettingsService {
     const snapshot = await this.#snapshot()
     const account = snapshot.account
     if (!account || account.status !== 'connected') throw new Error('请先连接钉钉开发者账号。')
-    const identity = await this.#inspectDeveloperSession()
-    if (!identity
-      || identity.userIdDigest !== account.userIdDigest
-      || identity.corpId !== account.corpId) {
-      this.#sessionStatus = 'invalid'
+    const existing = snapshot.publicationIntents.find(intent => intent.agentId === agentId)
+    const existingBot = snapshot.memberBots.find(bot => bot.agentId === agentId)
+    if (existingBot?.status === 'published' && existing?.state === 'completed'
+      && existing.accountId === account.accountId && existingBot.accountId === account.accountId
+      && existing.expectedUserIdDigest === account.userIdDigest && existing.expectedCorpId === account.corpId
+      && existing.appKey === existingBot.appKey && existing.credentialRef === existingBot.credentialRef
+      && existing.remoteUnifiedAppId === existingBot.unifiedAppId && existing.robotCode === existingBot.robotCode) {
+      const credential = await this.#dependencies.credentialStore.readDingTalk(existingBot.credentialRef)
+      if (credential) {
+        await this.#startBot(existingBot, credential)
+        this.#failures.delete(agentId)
+        this.#notify()
+        return
+      }
+    }
+    const generation = this.#sessionCheckGeneration
+    let identity: DingTalkDeveloperIdentity | null
+    try {
+      identity = await this.#inspectDeveloperSession()
+    } catch (error) {
+      if (generation !== this.#sessionCheckGeneration) throw error
+      if (error instanceof Error && error.message === 'dingtalk_legacy_session_requires_reconnect') {
+        this.#sessionNeedsReconnect = true
+        this.#notify()
+      }
+      if (!(error instanceof Error) || !['dingtalk_developer_session_expired','dingtalk_login_identity_mismatch'].includes(error.message)) throw error
+      identity = null
+    }
+    const currentAccount = (await this.#snapshot()).account
+    if (generation !== this.#sessionCheckGeneration || currentAccount?.accountId !== account.accountId || currentAccount.version !== account.version) {
       throw new Error('钉钉账号已变化，请重新连接。')
     }
+    if (!identity || identity.userIdDigest !== account.userIdDigest || identity.corpId !== account.corpId) {
+      this.#sessionStatus = 'invalid'
+      await this.#command('channels.dingtalk.account.expire', { accountId: account.accountId, expectedVersion: account.version })
+      throw new Error('钉钉账号已变化，请重新连接。')
+    }
+    await this.#upsertAccount(identity)
     const agent = await this.#dependencies.core.request<AgentProfile>('members.get', { agentId })
-    const existing = snapshot.publicationIntents.find((intent) => intent.agentId === agentId)
-    const existingBot = snapshot.memberBots.find((bot) => bot.agentId === agentId)
     if (existing && (existing.accountId !== account.accountId
       || existing.expectedCorpId !== identity.corpId
       || existing.expectedUserIdDigest !== identity.userIdDigest)) {
@@ -1008,41 +1039,6 @@ export class DingTalkChannelSettingsService {
     return credential
   }
 
-  async #checkSavedAccount(
-    account: NonNullable<CoreDingTalkSnapshot['account']>,
-    generation: number
-  ): Promise<void> {
-    let identity: DingTalkDeveloperIdentity | null
-    try {
-      identity = await this.#inspectDeveloperSession()
-    } catch (error) {
-      if (error instanceof Error && error.message === 'dingtalk_legacy_session_requires_reconnect') {
-        if (!this.#stopped && this.#sessionCheckGeneration === generation) {
-          this.#sessionNeedsReconnect = true
-          this.#notify()
-        }
-        return
-      }
-      if (!(error instanceof Error)
-        || !['dingtalk_developer_session_expired', 'dingtalk_login_identity_mismatch'].includes(error.message)) return
-      identity = null
-    }
-    const current = (await this.#snapshot()).account
-    if (this.#stopped || this.#sessionCheckGeneration !== generation
-      || current?.status !== 'connected' || current.accountId !== account.accountId
-      || current.version !== account.version) return
-    if (!identity || identity.userIdDigest !== account.userIdDigest || identity.corpId !== account.corpId) {
-      await this.#command('channels.dingtalk.account.expire', {
-        accountId: account.accountId,
-        expectedVersion: account.version
-      })
-      await this.#dependencies.developerSession.disconnect()
-    } else {
-      await this.#upsertAccount(identity)
-    }
-    this.#notify()
-  }
-
   async #upsertAccount(identity: DingTalkDeveloperIdentity): Promise<void> {
     await this.#command('channels.dingtalk.account.upsert', dingtalkConnectionAccount(identity))
   }
@@ -1112,7 +1108,10 @@ export class DingTalkChannelSettingsService {
 
   #api(credential: { appKey: string; appSecret: string }): DingTalkOpenApiClient {
     const existing = this.#apis.get(credential.appKey)
-    if (existing) return existing
+    const revision = digestNamespaced('bot-credential', credential.appSecret)
+    if (existing && this.#apiCredential.get(credential.appKey) === revision) return existing
+    if (existing) this.#stream.stop(credential.appKey)
+    this.#apiCredential.set(credential.appKey, revision)
     const api = this.#dependencies.createApiClient?.(credential)
       ?? new DingTalkOpenApiClient(credential)
     this.#apis.set(credential.appKey, api)
@@ -1149,6 +1148,7 @@ export class DingTalkChannelSettingsService {
 
   async #queueInbound(message: DingTalkInboundMessage): Promise<void> {
     if (this.#stopped || !hasCanonicalSingleDingTalkBotTarget(message)) return
+    if (message.conversationKind === 'group' && message.body.trim() === '/new') return
     const owner = await this.#command('channels.dingtalk.owner.verify', {
       provider: 'dingtalk',
       appId: message.appId,
@@ -1268,8 +1268,7 @@ export class DingTalkChannelSettingsService {
     if (observed.code === 'channel.inbound.ignored_archived') return 'ignored'
     this.#hostPump.wake()
     if (canonicalMentionsComplete && observed.payload.readyToFinalize === true) {
-      if (message.conversationKind === 'group') await this.#reconcileRoster(message)
-      await this.#finalize(String(observed.payload.aggregateId ?? ''))
+      await this.#finishInbound(String(observed.payload.aggregateId ?? ''), message, message.appId)
       this.#hostPump.wake()
     }
     this.#notify()
@@ -1292,24 +1291,20 @@ export class DingTalkChannelSettingsService {
     })
   }
 
-  async #reconcileRoster(message: DingTalkInboundMessage): Promise<void> {
-    const api = this.#apis.get(message.appId)
-    if (!api) throw new Error('dingtalk_bot_not_connected')
-    const remoteRobotCodes = new Set(await api.groupRobotCodes(message.chatId))
-    const presentAppIds = presentDingTalkAppIds(
-      (await this.#snapshot()).memberBots,
-      remoteRobotCodes
-    )
-    await this.#command('channels.dingtalk.roster.reconcile', {
-      provider: 'dingtalk',
-      tenantKey: message.tenantKey,
-      chatId: message.chatId,
-      presentAppIds
-    })
+  #finishInbound(aggregateId: string, group: { conversationKind: string; tenantKey: string; chatId: string }, preferredAppId: string): Promise<void> {
+    const active = this.#finalizing.get(aggregateId)
+    if (active) return active
+    const result = this.#finalize(aggregateId, group, preferredAppId).finally(() => this.#finalizing.delete(aggregateId))
+    this.#finalizing.set(aggregateId, result)
+    return result
   }
 
-  async #finalize(aggregateId: string): Promise<StoredCommandResult> {
-    let result = await this.#command('channels.dingtalk.inbound.finalize', { aggregateId }, false)
+  async #finalize(aggregateId: string, group: { conversationKind: string; tenantKey: string; chatId: string }, preferredAppId: string): Promise<void> {
+    if (group.conversationKind !== 'p2p' && !await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)) return
+    const submit = () => this.#command('channels.dingtalk.inbound.finalize', { aggregateId, requireFreshRoster: true }, false)
+    let result = await submit()
+    if (result.code === 'channel.roster_sync_required' && group.conversationKind !== 'p2p'
+      && await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)) result = await submit()
     if (result.code === 'channel.membership_sync_required') {
       let membership = Number(result.payload.expectedMembershipGeneration)
       let reconciliation = Number(result.payload.nextReconciliationGeneration)
@@ -1328,9 +1323,8 @@ export class DingTalkChannelSettingsService {
         membership = Number(added.payload.membershipGeneration)
         reconciliation += 1
       }
-      result = await this.#command('channels.dingtalk.inbound.finalize', { aggregateId }, false)
+      await submit()
     }
-    return result
   }
 
   async #handleCard(callback: DingTalkCardCallback): Promise<void> {
@@ -1357,7 +1351,7 @@ export class DingTalkChannelSettingsService {
     if (!operatorUserId) return
     if (typeof value.pendingBindingId === 'string') {
       this.#hostPump.wake()
-      const result = await this.#command('channels.dingtalk.pendingBinding.resolve', {
+      const command = {
         pendingBindingId: value.pendingBindingId,
         appId: callback.appKey,
         externalPickerMessageId: outTrackId,
@@ -1368,7 +1362,14 @@ export class DingTalkChannelSettingsService {
         operatorOpenId: null,
         operatorUserId,
         operatorUnionId: null
+      }
+      let result = await this.#command('channels.dingtalk.pendingBinding.resolve', {
+        ...command, checkRoster: ['bind','quick_chat'].includes(command.action)
       }, false)
+      if (result.code === 'channel.binding.roster_required') {
+        if (!await this.#reconcileGroup(String(result.payload.tenantKey), String(result.payload.chatId))) return
+        result = await this.#command('channels.dingtalk.pendingBinding.resolve', command, false)
+      }
       const api = this.#apis.get(callback.appKey)
       if (api && result.status !== 'rejected' && value.action !== 'refresh') {
         await api.updateCard(outTrackId, dingtalkCardParams({
@@ -1499,16 +1500,6 @@ export class DingTalkChannelSettingsService {
   async #pumpOnce(): Promise<boolean> {
     if (this.#stopped) return false
     const snapshot = await this.#snapshot()
-    if (Date.now() >= this.#nextRosterSweepAt) {
-      this.#nextRosterSweepAt = Date.now() + ROSTER_SWEEP_MS
-      const conversations = new Map(snapshot.transportConversations.map((conversation) => [
-        `${conversation.tenantKey}\0${conversation.chatId}`,
-        conversation
-      ]))
-      await Promise.allSettled([...conversations.values()].map((conversation) => (
-        this.#reconcileKnownGroup(conversation.tenantKey, conversation.chatId, snapshot)
-      )))
-    }
     const now = Date.now()
     for (const aggregate of snapshot.pendingAggregates) {
       const deadline = Date.parse(aggregate.deadlineAt)
@@ -1518,10 +1509,11 @@ export class DingTalkChannelSettingsService {
         this.#hostPump.wakeAt(aggregate.deadlineAt)
         continue
       }
-      await this.#finalize(aggregate.aggregateId).catch(() => undefined)
+      void this.#finishInbound(aggregate.aggregateId, aggregate, aggregate.acknowledgementAppId).catch(() => undefined)
     }
     const tick = await this.#dependencies.core.request<{
       deliveries: ClaimedDelivery[]
+      rosterRefreshes?: Array<{ provider: string; tenantKey: string; chatId: string }>
       hasOutstandingWork: boolean
       inboundAttachments?: PendingChannelAttachments[]
     }>('channels.dingtalk.host.tick', {
@@ -1531,6 +1523,12 @@ export class DingTalkChannelSettingsService {
         .filter(bot => bot.status === 'published' && this.#apis.has(bot.appKey))
         .map(bot => bot.appKey)
     })
+    for (const group of tick.rosterRefreshes ?? []) {
+      if (group.provider !== 'dingtalk' || !group.tenantKey || !group.chatId) continue
+      void this.#reconcileGroup(group.tenantKey, group.chatId).then(updated => {
+        if (updated) this.#hostPump.wake()
+      })
+    }
     const deliveries = Array.isArray(tick.deliveries)
       ? tick.deliveries
       : []
@@ -1870,27 +1868,31 @@ export class DingTalkChannelSettingsService {
     }
   }
 
-  async #reconcileKnownGroup(
-    tenantKey: string,
-    chatId: string,
-    snapshot: CoreDingTalkSnapshot
-  ): Promise<void> {
-    let remoteRobotCodes: Set<string> | null = null
-    for (const bot of snapshot.memberBots.filter((candidate) => candidate.status === 'published')) {
-      const api = this.#apis.get(bot.appKey)
-      if (!api) continue
-      try {
-        remoteRobotCodes = new Set(await api.groupRobotCodes(chatId))
-        break
-      } catch { /* try another Bot that may still be in the group */ }
-    }
-    if (!remoteRobotCodes) throw new Error('dingtalk_group_roster_unavailable')
-    const presentAppIds = presentDingTalkAppIds(snapshot.memberBots, remoteRobotCodes)
-    await this.#command('channels.dingtalk.roster.reconcile', {
-      provider: 'dingtalk',
-      tenantKey,
-      chatId,
-      presentAppIds
+  #reconcileGroup(tenantKey: string, chatId: string, preferredAppId?: string): Promise<boolean> {
+    const signal = this.#inboundAbort.signal
+    return this.#rosters.run(tenantKey, chatId, async () => {
+      const { startedAt } = await this.#dependencies.core.request<{ startedAt: string }>(
+        'channels.dingtalk.roster.begin', {}
+      )
+      if (!startedAt) return false
+      const snapshot = await this.#snapshot()
+      const bots = snapshot.memberBots.filter(bot => bot.status === 'published')
+      // The receiving Bot can normally read this group in one API call.
+      if (preferredAppId) bots.sort((a, b) => Number(b.appKey === preferredAppId) - Number(a.appKey === preferredAppId))
+      for (const bot of bots) {
+        const api = this.#apis.get(bot.appKey)
+        if (!api) continue
+        let robotCodes: string[]
+        try { robotCodes = await api.groupRobotCodes(chatId) } catch { continue }
+        if (signal.aborted) return false
+        const result = await this.#command('channels.dingtalk.roster.reconcile', {
+          provider: 'dingtalk', tenantKey, chatId, startedAt,
+          observedAppIds: bots.map(candidate => candidate.appKey),
+          presentAppIds: presentDingTalkAppIds(bots, new Set(robotCodes))
+        }, false)
+        return result.status !== 'rejected'
+      }
+      return false
     })
   }
 

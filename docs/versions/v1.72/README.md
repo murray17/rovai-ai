@@ -6,10 +6,14 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-23
+last_updated: 2026-11-26
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 渠道名单按需验证
+
+三个渠道仅为有效入站、项目绑定与待开工任务读取父群名单。范围和验收依据见[本版决定](decisions.md#v1-72-d96)和[渠道维护契约](../../contracts/channel-host-maintenance-v6.md)。
 
 ## macOS 应用内 ZIP 增量更新（2026-11-23）
 

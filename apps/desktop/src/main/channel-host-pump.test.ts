@@ -91,6 +91,21 @@ describe('AdaptiveChannelHostPump', () => {
     pump.stop()
   })
 
+  it('wakes for groups requested from its own provider', async () => {
+    vi.useFakeTimers()
+    const run = vi.fn(async () => false)
+    const pump = new AdaptiveChannelHostPump({ provider: 'lark', run, onError: vi.fn() })
+    pump.start()
+    await vi.advanceTimersByTimeAsync(0)
+    pump.handleCoreEvent({ method: 'channel.roster_refresh.requested', params: { groups: [{ provider: 'feishu' }] } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledOnce()
+    pump.handleCoreEvent({ method: 'channel.roster_refresh.requested', params: { groups: [{ provider: 'lark' }] } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenCalledTimes(2)
+    pump.stop()
+  })
+
   it('wakes a dormant provider when an Automation notification becomes available', async () => {
     vi.useFakeTimers()
     const run = vi.fn().mockResolvedValue(false)
