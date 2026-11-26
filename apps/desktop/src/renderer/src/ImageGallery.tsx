@@ -40,6 +40,9 @@ export type ImagePayload = {
   displayed?: ImagePreviewUrl
 }
 
+type UserImageRead = { payload: ImagePayload | null; availability: ThreadMessageAttachmentView['availability'] }
+type PendingUserPreview = { result: Promise<UserImageRead>; finish: (read: UserImageRead) => void }
+
 export const MAX_IMAGE_PAYLOAD_CACHE_BYTES = 128 * 1024 * 1024
 
 function attachmentOwnerKey(locator: LocalAttachmentOwnerLocator): string {
@@ -62,6 +65,8 @@ function attachmentOwnerKey(locator: LocalAttachmentOwnerLocator): string {
 export class ImagePayloadCache {
   readonly #entries = new Map<string, ImagePayload>()
   readonly #firstDisplay = new Map<string, ImagePreviewUrl>()
+  readonly #visible = new Map<string, { payload: ImagePayload; viewers: number }>()
+  readonly #userReads = new Map<string, PendingUserPreview>()
   #sendingThread: string | null = null
   #byteSize = 0
 
@@ -74,6 +79,27 @@ export class ImagePayloadCache {
     return this.#entries.get(key)
   }
 
+  loadUserPreview(key: string, read: (isCurrent: () => boolean) => Promise<UserImageRead>): Promise<UserImageRead> {
+    const cached = this.forDisplay(key)
+    if (cached) return Promise.resolve({ payload: cached, availability: 'available' })
+    const pending = this.#userReads.get(key)
+    if (pending) return pending.result
+
+    let finish!: PendingUserPreview['finish']
+    let fail!: (error: unknown) => void
+    const completion = new Promise<UserImageRead>((resolve, reject) => {
+      finish = resolve
+      fail = reject
+    })
+    const entry: PendingUserPreview = { finish, result: completion.finally(() => {
+      if (isCurrent()) this.#userReads.delete(key)
+    }) }
+    const isCurrent = (): boolean => this.#userReads.get(key) === entry
+    this.#userReads.set(key, entry)
+    void read(isCurrent).then(finish, fail)
+    return entry.result
+  }
+
   publish(threadId: string, messageId: string, images: ReadonlyMap<string, ImagePreviewUrl>, visible: boolean): void {
     if (visible) {
       this.releaseUnshown()
@@ -83,6 +109,12 @@ export class ImagePayloadCache {
       const key = attachmentImageCacheKey({ owner: 'message', threadId, messageId, attachmentRefId })
       const payload = { blob: displayed.blob, byteSize: displayed.blob.size, displayed }
       this.put(key, payload)
+      // A reader opened before the receipt must also get the confirmed image, even if disk is still busy.
+      const pending = this.#userReads.get(key)
+      if (pending) {
+        this.#userReads.delete(key)
+        pending.finish({ payload, availability: 'available' })
+      }
       // A batch can outgrow the cache before React mounts even its first tile.
       if (visible) this.#firstDisplay.set(key, displayed.retain())
     }
@@ -90,7 +122,7 @@ export class ImagePayloadCache {
 
   forDisplay(key: string): ImagePayload | undefined {
     const handoff = this.#firstDisplay.get(key)
-    if (!handoff) return this.get(key)
+    if (!handoff) return this.get(key) ?? this.#visible.get(key)?.payload
     // All layout effects in this commit (including another viewer) can acquire the same ready URL.
     queueMicrotask(() => {
       if (this.#firstDisplay.get(key) !== handoff) return
@@ -98,6 +130,19 @@ export class ImagePayloadCache {
       handoff.release()
     })
     return { blob: handoff.blob, byteSize: handoff.blob.size, displayed: handoff }
+  }
+
+  /** Share a mounted tile's own URL with a later viewer even after the byte cache evicts the entry. */
+  registerViewer(key: string, displayed: ImagePreviewUrl): () => void {
+    let view = this.#visible.get(key)
+    if (view?.payload.displayed !== displayed) {
+      view = { payload: { blob: displayed.blob, byteSize: displayed.blob.size, displayed }, viewers: 0 }
+      this.#visible.set(key, view)
+    }
+    view.viewers++
+    return () => {
+      if (--view.viewers === 0 && this.#visible.get(key) === view) this.#visible.delete(key)
+    }
   }
 
   releaseUnshown(threadId?: string): void {
@@ -134,21 +179,22 @@ export class ImagePayloadCache {
 
   clear(): void {
     this.releaseUnshown()
+    this.#visible.clear()
+    for (const pending of this.#userReads.values()) pending.finish({ payload: null, availability: 'unknown' })
+    this.#userReads.clear()
     for (const key of this.#entries.keys()) this.delete(key)
   }
 }
 
-type UserImageRead = { payload: ImagePayload | null; availability: ThreadMessageAttachmentView['availability'] }
 type ClientImageState = {
   payloads: ImagePayloadCache
   loading: Map<string, Promise<ImagePayload | null>>
-  userPreviews: Map<string, Promise<UserImageRead>>
 }
 const clientImageStates = new WeakMap<ThreadClient, ClientImageState>()
 function clientImages(client: ThreadClient): ClientImageState {
   let state = clientImageStates.get(client)
   if (!state) {
-    state = { payloads: new ImagePayloadCache(MAX_IMAGE_PAYLOAD_CACHE_BYTES), loading: new Map(), userPreviews: new Map() }
+    state = { payloads: new ImagePayloadCache(MAX_IMAGE_PAYLOAD_CACHE_BYTES), loading: new Map() }
     clientImageStates.set(client, state)
   }
   return state
@@ -263,20 +309,18 @@ export function cacheDecodedImagePayload(source: GalleryImage, payload: ImagePay
 /** Keep a cold user read shared until decode and cache insertion, including across a tile remount. */
 export function loadUserImagePreview(source: GalleryImage, client: ThreadClient,
   onAvailability?: (availability: ThreadMessageAttachmentView['availability']) => void): Promise<ImagePayload | null> {
-  const state = clientImages(client)
+  const cache = clientImages(client).payloads
   const key = imageCacheKey(source)
-  const cached = state.payloads.get(key)
-  if (cached) return Promise.resolve(cached)
-  return shareImageLoad(state.userPreviews, key, async (): Promise<UserImageRead> => {
+  return cache.loadUserPreview(key, async isCurrent => {
     let availability: UserImageRead['availability'] = 'unknown'
-    const payload = await fetchImagePayload(source, client, value => { availability = value })
-    if (!payload) return { payload: null, availability }
+    const payload = await readImagePayload(source, client, value => { availability = value })
+    if (!payload || !isCurrent()) return { payload: null, availability }
     const displayed = new ImagePreviewUrl(payload.blob)
     try {
       await decodeObjectUrl(displayed.url)
-      if (clientImageStates.get(client) !== state) return { payload: null, availability }
-      state.payloads.put(key, { ...payload, displayed })
-      return { payload: state.payloads.get(key) ?? payload, availability: 'available' }
+      if (!isCurrent()) return { payload: null, availability }
+      cache.put(key, { ...payload, displayed })
+      return { payload: cache.get(key) ?? payload, availability: 'available' }
     } catch {
       return { payload: null, availability }
     } finally {
@@ -374,6 +418,7 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
   const hadCachedPayload = useRef(false)
   const committedUrl = useRef<string | null>(null)
   const ownedUrls = useRef(new Map<string, ImagePreviewUrl>())
+  const unregisterViewer = useRef<(() => void) | undefined>(undefined)
   const canDownload = source.kind === 'attachment' && client.attachments.kind === 'download'
   const downloadAvailable = canDownload && ['available', 'unknown'].includes(availability)
 
@@ -475,7 +520,16 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
     ownedUrls.current.delete(ownedUrl)
   }, [])
 
+  const showUrl = useCallback((next: string | null): void => {
+    unregisterViewer.current?.()
+    const image = next ? ownedUrls.current.get(next) : undefined
+    unregisterViewer.current = reuseUserPreview && image ? imagePayloadCache.registerViewer(cacheKey, image) : undefined
+    setUrl(next)
+  }, [cacheKey, imagePayloadCache, reuseUserPreview])
+
   useLayoutEffect(() => () => {
+    unregisterViewer.current?.()
+    unregisterViewer.current = undefined
     for (const image of ownedUrls.current.values()) image.release()
     ownedUrls.current.clear()
     committedUrl.current = null
@@ -489,8 +543,8 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
     setFailed(false)
     const cached = reuseUserPreview ? imagePayloadCache.forDisplay(cacheKey) : imagePayloadCache.get(cacheKey)
     hadCachedPayload.current = Boolean(cached)
-    setUrl(cached ? createOwnedUrl(cached) : null)
-  }, [cacheKey, createOwnedUrl, imagePayloadCache, reuseUserPreview])
+    showUrl(cached ? createOwnedUrl(cached) : null)
+  }, [cacheKey, createOwnedUrl, imagePayloadCache, reuseUserPreview, showUrl])
 
   useLayoutEffect(() => {
     const previousUrl = committedUrl.current
@@ -506,7 +560,7 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
     const markUnavailable = (): void => {
       if (!committedUrl.current) {
         imagePayloadCache.delete(cacheKey)
-        setUrl(null)
+        showUrl(null)
         setFailed(true)
       } else setNotice(uiAttribute('源文件暂不可用，保留已加载的图片。'))
     }
@@ -527,7 +581,7 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
       imagePayloadCache.put(cacheKey, payload)
       setFailed(false)
       setNotice(null)
-      setUrl(candidateUrl)
+      showUrl(candidateUrl)
       return true
     }
 
@@ -542,7 +596,7 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
         if (!payload) { markUnavailable(); return }
         setAvailability('available')
         if (reuseUserPreview && payload.displayed) {
-          setUrl(createOwnedUrl(payload))
+          showUrl(createOwnedUrl(payload))
           setFailed(false)
           return
         }
@@ -561,7 +615,7 @@ function ImageTile({ source, reuseUserPreview }: { source: GalleryImage; reuseUs
     if (observer && tile.current) observer.observe(tile.current)
     else load(hadCachedPayload.current)
     return () => { active = false; observer?.disconnect() }
-  }, [cacheKey, createOwnedUrl, releaseOwnedUrl, source.kind, client, imagePayloadCache, refreshRevision, reuseUserPreview])
+  }, [cacheKey, createOwnedUrl, releaseOwnedUrl, showUrl, source.kind, client, imagePayloadCache, refreshRevision, reuseUserPreview])
 
   useEffect(() => {
     if (source.kind !== 'attachment') return

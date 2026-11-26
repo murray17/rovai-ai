@@ -2699,13 +2699,16 @@ export function ThreadWorkspace({
     }
     return ids
   }, [snapshot.messages, snapshot.agentRuns])
+  const imagePublicationReady = useCallback((message: ThreadMessageView): boolean =>
+    !imagePublications?.some(publication => publication.awaitingReceipt(snapshot.thread.id, message)),
+  [imagePublications, snapshot.thread.id])
   const visibleThreadMessages = useMemo(() => mergeNavigationMessages(
     runSourceNavigation.messages, anchoredMessages, anchorNavigation.navigation.windowMessages(), optimisticMessages, snapshot.messages
   ).filter(message => !message.missionStart && !deletedMessageIds.has(message.id)
-    && !imagePublications?.some(publication => publication.awaitingReceipt(snapshot.thread.id, message))
+    && imagePublicationReady(message)
     && (message.withdrawn || !anchorNavigation.navigation.bodyIsUnavailable(message.id))),
   [runSourceNavigation.messages, anchoredMessages, anchorNavigation.window, anchorNavigation.anchors,
-    anchorNavigation.navigation, optimisticMessages, snapshot.messages, snapshot.thread.id, deletedMessageIds, imagePublications])
+    anchorNavigation.navigation, optimisticMessages, snapshot.messages, deletedMessageIds, imagePublicationReady])
   const messageExport = useMessageExport(snapshot.thread.id, visibleThreadMessages)
   const normalStart = messageHistory?.oldestLoadedSequence ?? snapshot.messages[0]?.sequence ?? null
   const anchorWindowEnd = anchorNavigation.window?.messages.at(-1)?.sequence ?? null
@@ -6624,6 +6627,7 @@ export function ThreadWorkspace({
         </section>
 
         {replyDetail.messageId && <ReplyDetails state={replyDetail} reader={replyReader} width={replyWidth} full={replyFull}
+          imagePublicationReady={imagePublicationReady}
           onWidth={setReplyWidth} onFull={() => setReplyFull(value => !value)} onClose={() => closeReplyDetails()}
           snapshot={snapshot} profiles={agents} eventsByRunId={executionEventsByRunId} windowedEvidence={openCoverage !== null}
           author={message => campMessageAuthorLabel(message, memberById, currentUserName)}

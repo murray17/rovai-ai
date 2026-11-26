@@ -150,11 +150,19 @@ describe('shared image presentation', () => {
     expect(cache.byteSize).toBe(1)
     expect(cache.get(firstKey)).toBeUndefined()
     const tile = cache.forDisplay(firstKey)!.displayed!.retain()
+    const closeTimeline = cache.registerViewer(firstKey, tile)
     await Promise.resolve()
+    const reply = cache.forDisplay(firstKey)!.displayed!.retain()
+    const closeReply = cache.registerViewer(firstKey, reply)
+    expect(reply).toBe(tile)
+    closeTimeline()
+    tile.release()
+    expect(cache.forDisplay(firstKey)?.displayed).toBe(reply)
+    closeReply()
     expect(cache.forDisplay(firstKey)).toBeUndefined()
     cache.clear()
     expect(revokeObjectURL.mock.calls).toEqual([['blob:second']])
-    tile.release()
+    reply.release()
     expect(revokeObjectURL.mock.calls).toEqual([['blob:second'], ['blob:first']])
   })
 
@@ -251,6 +259,35 @@ describe('shared image presentation', () => {
     expect(await loadUserImagePreview(source, desktopThreadClient)).toBe(result)
     expect(preview).toHaveBeenCalledOnce()
     expect(decode).toHaveBeenCalledOnce()
+  })
+
+  it.each(['success', 'failure'])('hands an in-flight reader the published preview before a late decode %s', async outcome => {
+    const old = new Blob(['disk'])
+    const preview = vi.fn().mockResolvedValue({ availability: 'available', preview: { blob: old } })
+    vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: (blob: Blob) => blob === old ? 'blob:disk' : 'blob:composer', revokeObjectURL })
+    let complete!: () => void
+    let fail!: (error: Error) => void
+    const decode = vi.fn(() => new Promise<void>((resolve, reject) => { complete = resolve; fail = reject }))
+    vi.stubGlobal('Image', class { naturalWidth = 32; naturalHeight = 32; decode = decode })
+
+    const source = attachmentSource('photo')
+    const earlier = loadUserImagePreview(source, desktopThreadClient)
+    await vi.waitFor(() => expect(decode).toHaveBeenCalledOnce())
+    const displayed = new ImagePreviewUrl(new Blob(['composer']))
+    const publication = prepareImagePublication(desktopThreadClient, { threadId: 'camp', attachments: [attachment('photo')] },
+      1, new Map([['photo', displayed]]))!
+    publication.publish('message-1', true)
+    publication.release()
+    displayed.release()
+    expect((await earlier)?.displayed).toBe(displayed)
+
+    if (outcome === 'success') complete()
+    else fail(new Error('disk decode failed'))
+    await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:disk'))
+    expect((await loadUserImagePreview(source, desktopThreadClient))?.displayed).toBe(displayed)
+    expect(preview).toHaveBeenCalledOnce()
   })
 
   it('distinguishes a normal unavailable Runtime result from a thrown Core request', async () => {

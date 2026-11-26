@@ -44,7 +44,7 @@ const projection = (thread: any) => {
   return { ...structuredClone(thread), schemaVersion: 9, throughGlobalSequence: sequence,
     coverage: { tasks: coverage(0), messages: { ...coverage(thread.messages.length), hasEarlier: false,
       oldestLoadedSequence: thread.messages[0]?.sequence ?? null, newestLoadedSequence: thread.messages.at(-1)?.sequence ?? null },
-    messageDeliveries: coverage(0), turns: coverage(0), agentRuns: coverage(thread.agentRuns.length), approvals: coverage(0) } }
+    messageDeliveries: coverage(thread.messageDeliveries.length), turns: coverage(0), agentRuns: coverage(thread.agentRuns.length), approvals: coverage(0) } }
 }
 const client = { ...model.client, onInvalidated: undefined,
   onEvent: (fn: any) => { events.add(fn); return () => events.delete(fn) },

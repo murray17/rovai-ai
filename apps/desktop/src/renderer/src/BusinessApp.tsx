@@ -4308,8 +4308,7 @@ export function BusinessApp({
       commandId,
       draft
     )
-    // Core decides direct publication versus private queue admission. Never expose
-    // a pending input as an optimistic public ThreadMessage before that decision.
+    // The public message ID confirms the image owner, including when recipient delivery is still waiting.
     const imagePublication = prepareImagePublication(client, draft, optimisticMessage.sequence, displayedImages)
     if (imagePublication) setImagePublications(current => [...current, imagePublication])
     setBusy('camp-message')

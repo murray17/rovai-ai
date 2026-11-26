@@ -1,7 +1,13 @@
 import type { ReactNode } from 'react'
 import type { Root } from 'react-dom/client'
 import type { LocalAttachmentOwnerLocator, LocalAttachmentSourceView, ThreadSnapshot } from '@contracts'
-import { initial } from '../host-web-parity/data'
+import { initial, message } from '../host-web-parity/data'
+
+declare global {
+  interface Window {
+    userImageFrames: { messageId: string; armed: boolean; captured: boolean }
+  }
+}
 
 const tile = '.image-gallery-user-attachment .image-tile-preview'
 const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
@@ -42,14 +48,22 @@ export async function runUserImageRegression(root: Root, app: ReactNode, client:
   const thread = structuredClone(initial)
   const threadId = thread.thread.id
   thread.thread = { ...thread.thread, projectBindingKind: 'quick_chat', projectPath: '', activationState: 'active' }
-  thread.messages = []
+  const parent = message(1, 'Screenshot requested', 'user')
+  const reply = { ...message(2, 'Reply here with the screenshot', 'agent'), replyToThreadMessageId: parent.id }
+  thread.messages = [parent, reply]
+  const sentId = 'review-message-3'
+  window.userImageFrames = { messageId: sentId, armed: false, captured: false }
+  const timelineRow = '[data-message-id="' + sentId + '"]'
+  const replyRow = '[data-reply-message-id="' + sentId + '"]'
+  const query = new URLSearchParams(location.search)
+  const projectionFirst = query.get('order') === 'projection-first'
   threads.set(threadId, thread)
   const otherId = 'rvcamp_01m3rs4y3gfjssw5nstbzbdx7h'
   threads.set(otherId, { ...thread, messages: [], thread: { ...thread.thread, id: otherId, title: 'Other thread' } })
   environment.navigationHistory.initial = { entries: [{ kind: 'camp', threadId }], index: 0 }
   const original = await png('#336699')
   let disk: Blob | null = original
-  const previewFormat = new URLSearchParams(location.search).get('preview')
+  const previewFormat = query.get('preview')
   const attachment: LocalAttachmentSourceView = { id: 'pasted-image', displayName: 'screenshot.png', kind: 'file',
     mediaType: 'image/png', fileCount: 1, byteSize: original.size, previewKind: 'image', availability: 'available',
     sourcePath: '/fixture/screenshot.png' }
@@ -72,29 +86,61 @@ export async function runUserImageRegression(root: Root, app: ReactNode, client:
   const request = client.request
   let releaseReceipt!: () => void
   const receipt = new Promise<void>(resolve => { releaseReceipt = resolve })
-  let projectsBeforeReceipt = 0
-  let waiting = false
-  let rejected = 0
-  let queueNext = false
+  let releaseProjection!: () => void
+  const projection = new Promise<void>(resolve => { releaseProjection = resolve })
+  let sent = false
+  let rejected = false
+  let timelineProjected = false
+  let replyProjected = false
+  const notifyProjection = () => {
+    releaseProjection()
+    for (const notify of events) notify({ method: 'thread.messages.changed',
+      params: { threadId, throughGlobalSequence: 2, indexChanged: true } })
+  }
   client.request = async (method: string, params: any) => {
     if (method === 'thread.messages.send') {
-      if (queueNext) {
-        queueNext = false
-        return { commandResult: { status: 'applied', code: 'ok', payload: { pendingInputId: 'private-input' } } }
+      if (!rejected) {
+        rejected = true
+        return { commandResult: { status: 'rejected', code: 'fixture.rejected', payload: {} } }
       }
-      if (!rejected++) return { commandResult: { status: 'rejected', code: 'fixture.rejected', payload: {} } }
+      check(params.sourceAttachments[0]?.id === attachment.id && params.replyToThreadMessageId === reply.id,
+        'Send must use the original attachment and reply to the open chain')
       const result = await request(method, params)
-      check(params.sourceAttachments[0]?.id === attachment.id, 'Send must use the original attachment reference')
-      thread.messages.at(-1)!.attachments = [attachment]
-      waiting = true
-      for (const notify of events) notify({ method: 'thread.messages.changed', params: { threadId, indexChanged: true } })
+      const published = thread.messages.at(-1)!
+      check(result.commandResult.payload.threadMessageId === sentId && published.id === sentId, 'Wrong public message owner')
+      published.attachments = [attachment]
+      published.replyToThreadMessageId = reply.id
+      const deliveryId = 'recipient-waiting'
+      thread.messageDeliveries = [{ id: deliveryId, messageId: sentId, threadTurnId: null, taskId: null,
+        deliveryKind: 'public_a2a', recipientAgentId: reply.authorId, recipientMembershipVersionAtAdmission: 1,
+        dispatchDisposition: 'dispatch', completionRole: 'required', gatherId: null, gatherDispatchDeliveryId: null,
+        recipientCanonicalPosition: 0, edgeKind: 'forward', targetParentAgentRunId: null, returnToAgentRunId: null,
+        status: 'pending', dispatchPhase: 'attempted_waiting', waitCondition: 'target_busy', dispatchAttemptCount: 1,
+        retryGeneration: 0, contextManifestId: null, targetAgentRunId: null, manualInterventionRequired: false,
+        failureCode: null, version: 1, createdAt: published.createdAt, updatedAt: published.createdAt, endedAt: null }]
+      sent = true
+      if (projectionFirst) notifyProjection()
       await receipt
-      waiting = false
-      return result
+      return { commandResult: { status: 'accepted', code: 'camp_message.deliveries_waiting',
+        payload: { threadMessageId: sentId, contentRevision: 1, sequence: published.sequence, deliveryIds: [deliveryId] } } }
     }
-    const result = await request(method, params)
-    if (waiting && method === 'threads.open') projectsBeforeReceipt++
-    return result
+    if (params?.threadId === threadId && method === 'thread.messages.replies') {
+      if (sent) { await projection; replyProjected = true }
+      return { schemaVersion: 1, throughGlobalSequence: sent ? 2 : 1, threadId, messageId: params.messageId,
+        rootMessageId: parent.id, sourceAvailable: true, replyCount: thread.messages.length - 1,
+        hasEarlier: false, hasLater: false, runAnchorMessageIds: [], messages: structuredClone(thread.messages) }
+    }
+    if (params?.threadId === threadId && method === 'thread.messages.around') {
+      if (sent) await projection
+      return { schemaVersion: 1, throughGlobalSequence: sent ? 2 : 1, threadId, anchorMessageId: params.messageId,
+        sourceAvailable: thread.messages.some(row => row.id === params.messageId),
+        nextMessageSequence: null, messages: structuredClone(thread.messages) }
+    }
+    if (sent && params?.threadId === threadId && method === 'threads.open') {
+      await projection
+      timelineProjected = true
+    }
+    return request(method, params)
   }
   const send = () => find<HTMLButtonElement>('.composer-primary-action.is-send:not(:disabled)')
   const open = (id: string) => find(`[data-thread-id="${id}"] .camp-nav-open`)!.click()
@@ -105,6 +151,12 @@ export async function runUserImageRegression(root: Root, app: ReactNode, client:
   }
   root.render(app)
   const editor = await until(() => find('#camp-message[contenteditable="true"]'), 'No editable composer')
+  const replyActions = '[data-message-id="' + reply.id + '"] '
+  const openDetails = await until(() => find(replyActions + '.reply-parent-quote'), 'No reply details entry')
+  openDetails.click()
+  await until(() => find('[data-reply-message-id="' + reply.id + '"]'), 'Reply details did not load')
+  find(replyActions + '.message-reply-button')!.click()
+  await until(() => find('.composer-reply-line'), 'Reply composer did not open')
   const transfer = new DataTransfer()
   transfer.items.add(new File([original], 'screenshot.png', { type: 'image/png' }))
   editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
@@ -114,27 +166,29 @@ export async function runUserImageRegression(root: Root, app: ReactNode, client:
   send()!.click()
   await until(() => rejected && send(), 'Rejected send was not retryable')
   check(draft()?.src === draftUrl && !find(tile), 'Rejected send must preserve the displayed draft')
-  send()!.click()
-  await until(() => projectsBeforeReceipt, 'Missing projection before receipt')
-  await frame()
-  check(!find(tile) && reads.message === 0, 'Early projection exposed or reread the outgoing image')
-
-  // Mutation observers see the first committed tile (including layout effects) before the browser paints.
-  const firstPixels = new Promise<string>(resolve => {
-    const observer = new MutationObserver(() => {
-      const button = find(tile)
-      if (!button) return
-      observer.disconnect()
-      resolve(pixel(button.querySelector('img')))
-    })
-    observer.observe(document.body, { childList: true, subtree: true })
-  })
-  releaseReceipt()
-  const firstTile = await until(() => find(tile), 'Published image did not appear')
-  check(await firstPixels === '51,102,153,255', 'First committed tile had no screenshot pixels')
-  check(pixel(firstTile.querySelector('img')) === '51,102,153,255', 'First animation frame had no screenshot pixels')
-  await until(() => !draft(), 'Accepted draft did not clear')
+  // Any unexpected second read now gets different pixels from the already displayed screenshot.
   disk = await png('#cc6633')
+  await until(() => window.userImageFrames.armed, 'Compositor observer was not armed')
+  send()!.click()
+  await until(() => sent, 'Send was not recorded')
+  if (projectionFirst) {
+    await until(() => timelineProjected && replyProjected, 'Both projections must arrive before the receipt')
+    await frame()
+    check(!find(timelineRow) && !find(replyRow) && reads.message === 0, 'Early projection exposed or reread the outgoing image')
+  }
+  releaseReceipt()
+  const firstTile = await until(() => find(timelineRow + ' ' + tile), 'Published timeline image did not appear')
+  if (!projectionFirst) {
+    check(!timelineProjected && !replyProjected && !find(replyRow), 'Projection unexpectedly preceded the receipt')
+    notifyProjection()
+  }
+  const detailTile = await until(() => find(replyRow + ' ' + tile), 'Published reply image did not appear')
+  await until(() => window.userImageFrames.captured, 'The compositor did not present both public rows')
+  check(firstTile.querySelector('img')?.src === draftUrl && detailTile.querySelector('img')?.src === draftUrl,
+    'Both views must use the displayed composer preview')
+  await until(() => find(timelineRow + ' .user-message-receipt.is-queued')?.textContent?.includes('排队中'),
+    'Public image should be visible while its recipient delivery is waiting')
+  await until(() => !draft(), 'Accepted draft did not clear')
   window.dispatchEvent(new Event('focus'))
   firstTile.click()
   await until(() => pixel(find('.image-gallery-lightbox img')) === '51,102,153,255', 'Viewer changed the cached image')
@@ -146,18 +200,14 @@ export async function runUserImageRegression(root: Root, app: ReactNode, client:
   await until(() => pixel(find(tile + ' img')) === '51,102,153,255', 'Returning lost the cached screenshot')
   check(reads.composer === 1 && reads.message === 0, 'Warm display reread the source: ' + JSON.stringify(reads))
 
+  const warmPreviewReads = reads.message
   await restart()
   await until(() => pixel(find(tile + ' img')) === '204,102,51,255', 'Cold display did not load the modified source')
   check(Number(reads.message) === 1, 'Cold display must read the source exactly once')
+  const coldPreviewReads = reads.message - warmPreviewReads
   disk = null
   await restart()
   await until(() => find(tile)?.textContent?.includes('图片已丢失'), 'Cold missing file did not report its actual state')
-  queueNext = true
-  find('#camp-message')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
-  await until(() => pixel(draft()) === '51,102,153,255' && send(), 'Second draft did not load')
-  send()!.click()
-  await until(() => !queueNext && !draft(), 'Queue admission did not clear the submitted draft')
-  check(document.querySelectorAll(tile).length === 1 && reads.message === 2, 'Private input changed public images')
-  return { ok: true, previewFormat, width: 3840, height: 2160, firstFramePixel: [51, 102, 153, 255],
-    warmPreviewReads: 0, coldPreviewReads: 1, rejectedDraftPreserved: true, privateInputStayedPrivate: true }
+  return { ok: true, previewFormat, order: query.get('order'), warmPreviewReads,
+    coldPreviewReads, rejectedDraftPreserved: true, deliveryStillWaiting: true }
 }
