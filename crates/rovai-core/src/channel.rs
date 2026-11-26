@@ -540,6 +540,8 @@ impl DomainCommand for StartNewFeishuDmCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvePendingThreadBindingCommand {
+    #[serde(default)]
+    pub check_roster: bool,
     pub pending_binding_id: String,
     pub app_id: String,
     pub external_picker_message_id: String,
@@ -667,6 +669,8 @@ impl DomainCommand for ObserveChannelInboundCommand {
 #[serde(rename_all = "camelCase")]
 pub struct FinalizeChannelInboundCommand {
     pub aggregate_id: String,
+    #[serde(default)]
+    pub require_fresh_roster: bool,
 }
 
 impl sealed::Sealed for FinalizeChannelInboundCommand {}
@@ -681,6 +685,17 @@ pub struct ReconcileFeishuGroupRosterCommand {
     pub tenant_key: String,
     pub chat_id: String,
     pub present_app_ids: Vec<String>,
+    #[serde(default)]
+    pub absent_app_ids: Option<BTreeSet<String>>,
+    #[serde(default)]
+    pub membership_event: Option<GroupBotMembershipEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupBotMembershipEvent {
+    pub app_id: String,
+    pub present: bool,
 }
 
 impl sealed::Sealed for ReconcileFeishuGroupRosterCommand {}
@@ -4877,6 +4892,29 @@ impl ChannelService {
                 .filter(|(_, _, status)| status == "published")
                 .map(|(app_id, _, _)| app_id.clone())
                 .collect::<BTreeSet<_>>();
+            if let Some(event) = &envelope.payload.membership_event {
+                record_group_bot_presence(
+                    transaction,
+                    &envelope.payload.provider,
+                    &envelope.payload.tenant_key,
+                    &envelope.payload.chat_id,
+                    &event.app_id,
+                    event.present,
+                    &Utc::now().to_rfc3339(),
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "channel.group_roster.member_changed",
+                    json!({"appId": event.app_id, "present": event.present}),
+                    None,
+                ));
+            }
+            let absent = envelope.payload.absent_app_ids.as_ref();
+            if absent.is_some_and(|apps| apps.is_empty() && present_app_ids.is_empty()) {
+                return Ok(rejected(
+                    "channel.roster_incomplete",
+                    "No Bot returned a membership result",
+                ));
+            }
             let unknown_present = present_app_ids
                 .difference(&published_app_ids)
                 .cloned()
@@ -4925,11 +4963,14 @@ impl ChannelService {
                     now,
                 ],
             )?;
-            let mut present_agent_ids = Vec::new();
             for (app_id, agent_id, bot_status) in known_bots {
+                if absent.is_some_and(|apps| {
+                    !apps.contains(&app_id) && !present_app_ids.contains(&app_id)
+                }) {
+                    continue;
+                }
                 let roster_status =
                     if bot_status == "published" && present_app_ids.contains(&app_id) {
-                        present_agent_ids.push(agent_id.clone());
                         "present"
                     } else {
                         "absent"
@@ -4963,6 +5004,12 @@ impl ChannelService {
                     ],
                 )?;
             }
+            let present_agent_ids = present_group_agents(
+                transaction,
+                &envelope.payload.provider,
+                &envelope.payload.tenant_key,
+                &envelope.payload.chat_id,
+            )?;
             Ok(CommandHandlerResult::applied(
                 "channel.group_roster.reconciled",
                 json!({
@@ -5127,6 +5174,15 @@ impl ChannelService {
             } else {
                 ""
             };
+            let display_name = if envelope.payload.conversation_display_name.is_empty()
+                && matches!(
+                    envelope.payload.conversation_kind.as_str(),
+                    "group" | "topic"
+                ) {
+                String::new()
+            } else {
+                normalize_display_name(&envelope.payload.conversation_display_name)?
+            };
             upsert_channel_conversation(
                 transaction,
                 &conversation_id,
@@ -5136,7 +5192,7 @@ impl ChannelService {
                 &envelope.payload.topic_key,
                 bot_scope_app_id,
                 &envelope.payload.conversation_kind,
-                &normalize_display_name(&envelope.payload.conversation_display_name)?,
+                &display_name,
                 &sender_display_name,
                 Some(&principal_id),
                 &now_text,
@@ -5460,7 +5516,7 @@ impl ChannelService {
             }
             let now = Utc::now();
             let now_text = now.to_rfc3339();
-            let frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
+            let mut frozen: FrozenInboundPayload = serde_json::from_str(&aggregate.frozen_payload_json)
                 .context("channel inbound frozen payload is invalid")?;
             if let Some(ignored) = discard_archived_inbound(
                 transaction, &envelope.actor, &aggregate.provider, &frozen.conversation_id,
@@ -5535,35 +5591,60 @@ impl ChannelService {
                 transaction,
                 &frozen.conversation_id,
             )?.context("channel inbound conversation is missing")?;
-            let roster_agent_ids = match group_roster_readiness(
-                transaction,
-                &conversation,
-                &expected,
-            )? {
-                GroupRosterReadiness::NotRequired => Vec::new(),
-                GroupRosterReadiness::MissingState => {
-                    return Ok(CommandHandlerResult::rejected(
-                        "channel.roster_sync_required",
-                        json!({
-                            "message": "The channel group Bot roster must be reconciled before admission",
-                            "tenantKey": conversation.tenant_key,
-                            "chatId": conversation.chat_id,
-                        }),
+            let mut roster_agent_ids = Vec::new();
+            if matches!(conversation.conversation_kind.as_str(), "group" | "topic") {
+                // A receiving Bot is present even when its platform credentials cannot read the roster.
+                for app_id in &observed {
+                    record_group_bot_presence(
+                        transaction, &conversation.provider, &conversation.tenant_key,
+                        &conversation.chat_id, app_id, true, &now_text,
+                    )?;
+                }
+                if envelope.payload.require_fresh_roster {
+                    let fresh: bool = transaction.query_row(
+                        r#"
+                        SELECT EXISTS(
+                            SELECT 1 FROM external_group_bot_roster_state AS roster
+                            JOIN channel_inbound_aggregate AS inbound USING (provider, tenant_key, chat_id)
+                            WHERE inbound.id = ?1 AND roster.observed_at > inbound.created_at
+                        )
+                        "#,
+                        [&aggregate.id],
+                        |row| row.get(0),
+                    )?;
+                    if !fresh {
+                        return Ok(rejected(
+                            "channel.roster_sync_required",
+                            "A fresh group roster was requested",
+                        ));
+                    }
+                }
+                roster_agent_ids = present_group_agents(
+                    transaction, &conversation.provider, &conversation.tenant_key, &conversation.chat_id,
+                )?;
+                frozen.target_agent_ids.retain(|id| roster_agent_ids.contains(id));
+                frozen.structured_content.retain(|segment| match segment {
+                    StructuredThreadMessageSegment::MemberMention { agent_id } => frozen.target_agent_ids.contains(agent_id),
+                    _ => true,
+                });
+                if frozen.target_agent_ids.is_empty() {
+                    mark_aggregate_failed(transaction, &aggregate.id, "channel.target_bot_not_in_roster", &now_text)?;
+                    return Ok(CommandHandlerResult::applied(
+                        "channel.inbound.failed",
+                        json!({ "aggregateId": aggregate.id, "status": "failed", "failureCode": "channel.target_bot_not_in_roster" }),
+                        None,
                     ));
                 }
-                GroupRosterReadiness::MissingApps(app_ids) => {
-                    return Ok(CommandHandlerResult::rejected(
-                        "channel.bot_not_in_roster",
-                        json!({
-                            "message": "A mentioned member Bot is no longer in this channel group",
-                            "tenantKey": conversation.tenant_key,
-                            "chatId": conversation.chat_id,
-                            "appIds": app_ids,
-                        }),
-                    ));
+                if !observed.contains(&frozen.acknowledgement_app_id) {
+                    let targets = frozen.target_agent_ids.iter().cloned().collect();
+                    let apps = app_ids_for_agents(transaction, &conversation.provider, &targets)?;
+                    if !apps.contains(&frozen.acknowledgement_app_id)
+                        && let Some(receiver) = observed.intersection(&apps).next()
+                    {
+                        frozen.acknowledgement_app_id = receiver.clone();
+                    }
                 }
-                GroupRosterReadiness::Ready(agent_ids) => agent_ids,
-            };
+            }
 
             let mut camp_created = false;
             let mut binding = if let Some(observed_binding_id) =
@@ -6117,6 +6198,13 @@ impl ChannelService {
                     "This channel conversation already has an immutable Thread binding",
                 ));
             }
+            if envelope.payload.check_roster && matches!(pending.conversation.conversation_kind.as_str(), "group" | "topic") {
+                return Ok(CommandHandlerResult::applied(
+                    "channel.binding.roster_required",
+                    json!({"tenantKey": pending.conversation.tenant_key, "chatId": pending.conversation.chat_id}),
+                    None,
+                ));
+            }
             let messages = load_pending_messages(transaction, &pending.id)?;
             if messages.is_empty() {
                 anyhow::bail!("pending Thread binding has no frozen messages");
@@ -6136,7 +6224,7 @@ impl ChannelService {
                             "The channel group Bot roster must be reconciled before binding",
                         ));
                     }
-                    GroupRosterReadiness::MissingApps(_) => {
+                    GroupRosterReadiness::MissingApps => {
                         return Ok(rejected(
                             "channel.bot_not_in_roster",
                             "A selected message target Bot is no longer in the channel group",
@@ -6223,13 +6311,17 @@ impl ChannelService {
                 queued.push((request_id, queue_position, message.ack_app_id.clone()));
             }
             for (request_id, queue_position, ack_app_id) in &queued {
-                let admission = try_admit_request(
-                    transaction,
-                    request_id,
-                    &now_text,
-                    &envelope.command_id,
-                    &mut settled_run_ids,
-                )?;
+                let admission = if *queue_position == 1 {
+                    try_admit_request(
+                        transaction,
+                        request_id,
+                        &now_text,
+                        &envelope.command_id,
+                        &mut settled_run_ids,
+                    )?
+                } else {
+                    AdmissionAttempt::Deferred
+                };
                 if matches!(admission, AdmissionAttempt::Deferred) {
                     insert_queue_ack_delivery(
                         transaction,
@@ -7421,7 +7513,7 @@ struct ChannelConversationAdmission {
 enum GroupRosterReadiness {
     NotRequired,
     MissingState,
-    MissingApps(Vec<String>),
+    MissingApps,
     Ready(Vec<String>),
 }
 
@@ -8313,10 +8405,12 @@ fn upsert_channel_conversation(
             conversation_kind, display_name, last_sender_display_name,
             last_sender_principal_id,
             first_seen_at, last_seen_at, version
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 1)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+            COALESCE(NULLIF(?8,''), CASE ?2 WHEN 'lark' THEN 'Lark 群聊' ELSE '飞书群聊' END),
+            ?9, ?10, ?11, ?11, 1)
         ON CONFLICT(provider, tenant_key, chat_id, topic_key, bot_scope_app_id) DO UPDATE SET
             conversation_kind = excluded.conversation_kind,
-            display_name = excluded.display_name,
+            display_name = COALESCE(NULLIF(?8,''),channel_conversation.display_name),
             last_sender_display_name = excluded.last_sender_display_name,
             last_sender_principal_id = excluded.last_sender_principal_id,
             last_seen_at = excluded.last_seen_at,
@@ -8366,6 +8460,37 @@ fn load_channel_conversation(
         .map_err(Into::into)
 }
 
+fn record_group_bot_presence(
+    tx: &Transaction<'_>,
+    provider: &str,
+    tenant: &str,
+    chat: &str,
+    app: &str,
+    present: bool,
+    now: &str,
+) -> Result<()> {
+    // Only a platform lookup sets the parent snapshot time. An empty value sorts before every inbound timestamp.
+    tx.execute(
+        "INSERT OR IGNORE INTO external_group_bot_roster_state
+            (provider, tenant_key, chat_id, generation, observed_at, updated_at)
+         VALUES (?1, ?2, ?3, 1, '', ?4)",
+        params![provider, tenant, chat, now],
+    )?;
+    tx.execute(
+        r#"
+        INSERT INTO external_group_bot_roster
+            (provider, tenant_key, chat_id, app_id, agent_id, status, version, observed_at, updated_at)
+        SELECT provider, ?2, ?3, app_id, agent_id, ?5, 1, ?6, ?6 FROM channel_member_bot_directory
+        WHERE provider = ?1 AND app_id = ?4 AND status = 'published'
+        ON CONFLICT(provider, tenant_key, chat_id, app_id) DO UPDATE SET
+            status = excluded.status, observed_at = excluded.observed_at, updated_at = excluded.updated_at,
+            version = external_group_bot_roster.version + (external_group_bot_roster.status != excluded.status)
+        "#,
+        params![provider, tenant, chat, app, if present { "present" } else { "absent" }, now],
+    )?;
+    Ok(())
+}
+
 fn group_roster_readiness(
     transaction: &Transaction<'_>,
     conversation: &ChannelConversationAdmission,
@@ -8408,14 +8533,24 @@ fn group_roster_readiness(
     )?
     .into_iter()
     .collect::<BTreeSet<_>>();
-    let missing_apps = expected_app_ids
-        .difference(&present_app_ids)
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_apps.is_empty() {
-        return Ok(GroupRosterReadiness::MissingApps(missing_apps));
+    if !expected_app_ids.is_subset(&present_app_ids) {
+        return Ok(GroupRosterReadiness::MissingApps);
     }
-    let present_agents = query_rows(
+    Ok(GroupRosterReadiness::Ready(present_group_agents(
+        transaction,
+        &conversation.provider,
+        &conversation.tenant_key,
+        &conversation.chat_id,
+    )?))
+}
+
+fn present_group_agents(
+    transaction: &Transaction<'_>,
+    provider: &str,
+    tenant: &str,
+    chat: &str,
+) -> Result<Vec<String>> {
+    query_rows(
         transaction,
         r#"
         SELECT roster.agent_id
@@ -8428,14 +8563,9 @@ fn group_roster_readiness(
           AND roster.status = 'present' AND bot.status = 'published'
         ORDER BY roster.agent_id
         "#,
-        params![
-            conversation.provider,
-            conversation.tenant_key,
-            conversation.chat_id
-        ],
+        params![provider, tenant, chat],
         |row| row.get::<_, String>(0),
-    )?;
-    Ok(GroupRosterReadiness::Ready(present_agents))
+    )
 }
 
 fn discard_archived_inbound(
@@ -9782,7 +9912,7 @@ fn fail_queued_request(
         &json!({
             "kind": "attention",
             "failureCode": failure_code,
-            "text": "这条消息当前无法交给目标队员，请确认 Bot 仍在群内且队员运行配置可用。",
+            "text": if failure_code=="channel.target_bot_not_in_roster" {"未派发，机器人已离群"} else {"这条消息当前无法交给目标队员，请确认 Bot 仍在群内且队员运行配置可用。"},
         }),
         now,
     )?;
@@ -11554,7 +11684,8 @@ fn promote_ready_requests(
           AND queued.id = (
               SELECT next.id FROM channel_turn_request AS next
               WHERE next.binding_id = queued.binding_id AND next.status = 'queued'
-              ORDER BY next.queue_position, next.created_at, next.id
+              -- Positions are assigned from queue depth and can be reused as requests finish.
+              ORDER BY next.rowid
               LIMIT 1
           )
         ORDER BY queued.created_at, queued.id
@@ -12174,15 +12305,17 @@ fn validate_observation_input(command: &ObserveChannelInboundCommand) -> Result<
         (&command.external_message_id, "externalMessageId"),
         (&command.tenant_key, "tenantKey"),
         (&command.chat_id, "chatId"),
-        (
-            &command.conversation_display_name,
-            "conversationDisplayName",
-        ),
         (&command.sender_external_user_id, "senderExternalUserId"),
         (&command.sender_display_name, "senderDisplayName"),
         (&command.acknowledgement_app_id, "acknowledgementAppId"),
     ] {
         validate_nonempty(value, field)?;
+    }
+    if command.conversation_kind == "p2p" || command.provider == DINGTALK_PROVIDER {
+        validate_nonempty(
+            &command.conversation_display_name,
+            "conversationDisplayName",
+        )?;
     }
     validate_owner_identity_input(
         &command.provider,
@@ -13920,6 +14053,7 @@ mod tests {
                                 &actor,
                                 wrong("finalize"),
                                 FinalizeChannelInboundCommand {
+                                    require_fresh_roster: false,
                                     aggregate_id: world.open_aggregate_id.clone(),
                                 },
                             ),
@@ -13965,6 +14099,7 @@ mod tests {
                                 &actor,
                                 wrong("finalize-finalized"),
                                 FinalizeChannelInboundCommand {
+                                    require_fresh_roster: false,
                                     aggregate_id: world.finalized_aggregate_id.clone(),
                                 },
                             ),
@@ -14009,6 +14144,8 @@ mod tests {
                                 &actor,
                                 wrong("roster"),
                                 ReconcileFeishuGroupRosterCommand {
+                                    absent_app_ids: None,
+                                    membership_event: None,
                                     provider: provider.to_string(),
                                     tenant_key: "tenant_1".to_string(),
                                     chat_id: format!("oc_{provider}_group"),
@@ -14032,6 +14169,7 @@ mod tests {
                                 &actor,
                                 wrong("resolve"),
                                 ResolvePendingThreadBindingCommand {
+                                    check_roster: false,
                                     pending_binding_id: world.pending_binding_id.clone(),
                                     app_id: world.app_id.clone(),
                                     external_picker_message_id: "om_picker".to_string(),
@@ -14272,6 +14410,7 @@ mod tests {
                     lark.spec,
                     "lark-file-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: aggregate_id.to_string(),
                     },
                 ),
@@ -15106,7 +15245,10 @@ mod tests {
                         &host_envelope_for(
                             spec,
                             &format!("finalize-{id}"),
-                            FinalizeChannelInboundCommand { aggregate_id },
+                            FinalizeChannelInboundCommand {
+                                require_fresh_roster: false,
+                                aggregate_id,
+                            },
                         ),
                     )
                     .unwrap(),
@@ -15173,6 +15315,8 @@ mod tests {
                         spec,
                         "roster",
                         ReconcileFeishuGroupRosterCommand {
+                            absent_app_ids: None,
+                            membership_event: None,
                             provider: provider.to_string(),
                             tenant_key: "tenant_1".to_string(),
                             chat_id: group_chat.clone(),
@@ -15296,6 +15440,7 @@ mod tests {
                     world.spec,
                     "finalize-next-root",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -15457,6 +15602,7 @@ mod tests {
                     &host_envelope(
                         &format!("finalize-late-console-{ordinal}"),
                         FinalizeChannelInboundCommand {
+                            require_fresh_roster: false,
                             aggregate_id: observed.result.payload["aggregateId"]
                                 .as_str()
                                 .unwrap()
@@ -15602,6 +15748,7 @@ mod tests {
                 &host_envelope(
                     "finalize-root-during-card-update",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -15935,6 +16082,7 @@ mod tests {
                     provider,
                     "restored-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: new.result.payload["aggregateId"].as_str().unwrap().into(),
                     },
                 ),
@@ -16049,7 +16197,10 @@ mod tests {
                     &provider_host_envelope(
                         provider,
                         "images-finalize",
-                        FinalizeChannelInboundCommand { aggregate_id },
+                        FinalizeChannelInboundCommand {
+                            require_fresh_roster: false,
+                            aggregate_id,
+                        },
                     ),
                 )
                 .unwrap();
@@ -16441,6 +16592,7 @@ mod tests {
                         provider,
                         "native-finalize",
                         FinalizeChannelInboundCommand {
+                            require_fresh_roster: false,
                             aggregate_id: observed.result.payload["aggregateId"]
                                 .as_str()
                                 .unwrap()
@@ -17045,9 +17197,7 @@ mod tests {
             publish_dingtalk_bot(&service, &mut database, "agent_2");
         }
         let quick = quick_chat_path(&database);
-        // Bot B's second message lets us finish its download first and prove
-        // that filtering download candidates does not reorder Camp admission.
-        for index in 0..22 {
+        let enqueue = |database: &mut Database, index: usize, with_file: bool| {
             let (agent_id, app_id, chat_id) = if index < 20 {
                 ("agent_1", app_one, "offline-chat")
             } else {
@@ -17067,15 +17217,17 @@ mod tests {
             if provider == DINGTALK_PROVIDER {
                 use_dingtalk_observation_identity(&mut observation);
             }
-            observation.resources = vec![InboundResource {
-                file_key: format!("file-{index}"),
-                download_code: None,
-                name: "note.txt".into(),
-                kind: "file".into(),
-            }];
+            if with_file {
+                observation.resources.push(InboundResource {
+                    file_key: format!("file-{index}"),
+                    download_code: None,
+                    name: "note.txt".into(),
+                    kind: "file".into(),
+                });
+            }
             let observed = service
                 .observe_inbound(
-                    &mut database,
+                    database,
                     &provider_host_envelope(provider, &format!("observe-{index}"), observation),
                 )
                 .unwrap();
@@ -17085,12 +17237,13 @@ mod tests {
                 .to_string();
             let finalized = service
                 .finalize_inbound(
-                    &mut database,
+                    database,
                     &quick,
                     &provider_host_envelope(
                         provider,
                         &format!("finalize-{index}"),
                         FinalizeChannelInboundCommand {
+                            require_fresh_roster: false,
                             aggregate_id: aggregate_id.clone(),
                         },
                     ),
@@ -17104,6 +17257,10 @@ mod tests {
                     params![aggregate_id, format!("2026-09-23T00:00:{index:02}Z")],
                 )
                 .unwrap();
+            finalized
+        };
+        for index in 0..23 {
+            enqueue(&mut database, index, true);
         }
         let actor = ActorRef::System {
             component_id: if provider == FEISHU_PROVIDER {
@@ -17133,7 +17290,7 @@ mod tests {
                 .iter()
                 .map(|item| item.message_id.as_str())
                 .collect::<Vec<_>>(),
-            ["attachment-20", "attachment-21"]
+            ["attachment-20", "attachment-21", "attachment-22"]
         );
         assert!(pending.iter().all(|item| item.app_id == app_two));
         let source = quick.join("download.txt");
@@ -17192,6 +17349,16 @@ mod tests {
         let published = messages(&database);
         assert_eq!(published.len(), 2);
         assert!(published[1].ends_with("attachment-21"));
+        let later = enqueue(&mut database, 23, false);
+        assert_eq!(later.result.payload["queuePosition"], 2);
+        service
+            .host_tick(&mut database, &actor, &tick_request)
+            .unwrap();
+        assert_eq!(
+            messages(&database),
+            published,
+            "a new text at position 2 must wait for the older file originally queued at position 3",
+        );
     }
 
     #[test]
@@ -18761,6 +18928,7 @@ mod tests {
                 (app_id, payload, picker_message_id)
             };
         ResolvePendingThreadBindingCommand {
+            check_roster: false,
             pending_binding_id: pending_binding_id.to_string(),
             app_id,
             external_picker_message_id: picker_message_id,
@@ -18793,6 +18961,8 @@ mod tests {
                 &host_envelope(
                     &format!("{chat_id}-roster"),
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: chat_id.to_string(),
@@ -18832,6 +19002,7 @@ mod tests {
                     &host_envelope(
                         &format!("{chat_id}-finalize-{index}"),
                         FinalizeChannelInboundCommand {
+                            require_fresh_roster: false,
                             aggregate_id: observed.result.payload["aggregateId"]
                                 .as_str()
                                 .unwrap()
@@ -18926,6 +19097,8 @@ mod tests {
                         &host_envelope(
                             &format!("quick-roster-{index}"),
                             ReconcileFeishuGroupRosterCommand {
+                                absent_app_ids: None,
+                                membership_event: None,
                                 provider: FEISHU_PROVIDER.to_string(),
                                 tenant_key: "tenant_1".to_string(),
                                 chat_id: "oc_workspace".to_string(),
@@ -19000,6 +19173,27 @@ mod tests {
             assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
             let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
             let binding_id = resolved.result.payload["bindingId"].as_str().unwrap();
+            assert_eq!(
+                database.connection().query_row(
+                    "SELECT COUNT(*) FROM channel_turn_request WHERE binding_id = ?1 AND status = 'queued'",
+                    [binding_id], |row| row.get::<_, i64>(0),
+                ).unwrap(),
+                1,
+                "even when both messages are ready, binding only admits the queue head",
+            );
+            service
+                .host_tick(
+                    &mut database,
+                    &ActorRef::System {
+                        component_id: FEISHU_CHANNEL_HOST_COMPONENT.into(),
+                    },
+                    &ChannelHostTickRequest {
+                        worker_id: "quick-binding-worker".into(),
+                        inbound_attachment_app_ids: Vec::new(),
+                        limit: 20,
+                    },
+                )
+                .unwrap();
             let persisted: (String, String, String, Option<String>, Option<String>) = database.connection().query_row(
                 "SELECT camp.project_binding_kind, camp.project_path, binding.execution_scope_kind,
                         binding.project_id, pending.project_id
@@ -19100,6 +19294,7 @@ mod tests {
                     &host_envelope(
                         "quick-next-finalize",
                         FinalizeChannelInboundCommand {
+                            require_fresh_roster: false,
                             aggregate_id: observed.result.payload["aggregateId"]
                                 .as_str()
                                 .unwrap()
@@ -19749,6 +19944,7 @@ mod tests {
                 &host_envelope(
                     "dingtalk-finalize-wrong-host",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -19766,6 +19962,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-finalize-incomplete",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -19814,6 +20011,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -20053,6 +20251,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-finalize-queued",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: queued_observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -20247,6 +20446,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-timeout-recover",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: aggregate_id.to_string(),
                     },
                 ),
@@ -20271,6 +20471,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-timeout-recover-replay",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: aggregate_id.to_string(),
                     },
                 ),
@@ -20329,6 +20530,8 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-multi-roster",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         tenant_key: "ding-corp-1".to_string(),
                         chat_id: "ding-multi-group".to_string(),
@@ -20443,6 +20646,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-multi-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: aggregate_id.clone(),
                     },
                 ),
@@ -20648,6 +20852,8 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-group-roster-initial",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         tenant_key: "ding-corp-1".to_string(),
                         chat_id: "ding-group-roster".to_string(),
@@ -20689,6 +20895,7 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-group-roster-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -20879,6 +21086,8 @@ mod tests {
                 &dingtalk_host_envelope(
                     "dingtalk-group-roster-updated",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: DINGTALK_PROVIDER.to_string(),
                         tenant_key: "ding-corp-1".to_string(),
                         chat_id: "ding-group-roster".to_string(),
@@ -21552,6 +21761,7 @@ mod tests {
                 &host_envelope(
                     "finalize-canonical-workspace",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -21699,7 +21909,13 @@ mod tests {
             .finalize_inbound(
                 &mut database,
                 &quick_chat_path,
-                &host_envelope("finalize-1", FinalizeChannelInboundCommand { aggregate_id }),
+                &host_envelope(
+                    "finalize-1",
+                    FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
+                        aggregate_id,
+                    },
+                ),
             )
             .unwrap();
         assert_eq!(finalized.result.code, "channel.turn.admitted");
@@ -22563,6 +22779,7 @@ mod tests {
                 &host_envelope(
                     "finalize-for-exact-cancel",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observed.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -22724,7 +22941,10 @@ mod tests {
                 &quick_chat_path,
                 &host_envelope(
                     "finalize-terminal-console",
-                    FinalizeChannelInboundCommand { aggregate_id },
+                    FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
+                        aggregate_id,
+                    },
                 ),
             )
             .unwrap();
@@ -23585,55 +23805,82 @@ mod tests {
         publish_bot(&service, &mut database, "agent_2", "cli_app_2");
         let project_path = seed_project(&database, "binding");
         let quick_chat_path = quick_chat_path(&database);
+        let roster = ReconcileFeishuGroupRosterCommand {
+            absent_app_ids: None,
+            membership_event: None,
+            provider: FEISHU_PROVIDER.to_string(),
+            tenant_key: "tenant_1".to_string(),
+            chat_id: "oc_group_binding".to_string(),
+            present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
+        };
         service
             .reconcile_feishu_group_roster(
                 &mut database,
-                &host_envelope(
-                    "binding-roster",
-                    ReconcileFeishuGroupRosterCommand {
-                        provider: FEISHU_PROVIDER.to_string(),
-                        tenant_key: "tenant_1".to_string(),
-                        chat_id: "oc_group_binding".to_string(),
-                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
-                    },
-                ),
+                &host_envelope("binding-roster", roster.clone()),
             )
             .unwrap();
 
+        let mut file_message = observation_command(
+            "cli_app_2",
+            "om_pending_first",
+            "oc_group_binding",
+            "",
+            "group",
+            "先由二号确认项目",
+            &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
+            true,
+        );
+        file_message
+            .resources
+            .push(inbound_attachments::InboundResource {
+                file_key: "group-file".into(),
+                download_code: None,
+                name: "notes.txt".into(),
+                kind: "file".into(),
+            });
         let first_observation = service
             .observe_inbound(
                 &mut database,
-                &host_envelope(
-                    "observe-pending-first",
-                    observation_command(
-                        "cli_app_2",
-                        "om_pending_first",
-                        "oc_group_binding",
-                        "",
-                        "group",
-                        "先由二号确认项目",
-                        &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
-                        true,
-                    ),
-                ),
+                &host_envelope("observe-pending-first", file_message),
+            )
+            .unwrap();
+        let finalize = FinalizeChannelInboundCommand {
+            require_fresh_roster: true,
+            aggregate_id: first_observation.result.payload["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        };
+        let stale = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("check-pending-first", finalize.clone()),
+            )
+            .unwrap();
+        assert_eq!(stale.result.code, "channel.roster_sync_required");
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope("refresh-pending-first", roster),
             )
             .unwrap();
         let first_pending = service
             .finalize_inbound(
                 &mut database,
                 &quick_chat_path,
-                &host_envelope(
-                    "finalize-pending-first",
-                    FinalizeChannelInboundCommand {
-                        aggregate_id: first_observation.result.payload["aggregateId"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                    },
-                ),
+                &host_envelope("finalize-pending-first", finalize.clone()),
             )
             .unwrap();
         assert_eq!(first_pending.result.code, "channel.binding.pending");
+        let replayed = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("replay-pending-first", finalize),
+            )
+            .unwrap();
+        assert_eq!(replayed.result.code, "channel.inbound.already_finalized");
         assert_eq!(first_pending.result.payload["projectCardQueued"], true);
         assert_eq!(
             first_pending.result.payload["acknowledgementAppId"],
@@ -23655,7 +23902,7 @@ mod tests {
                         "oc_group_binding",
                         "",
                         "group",
-                        "第二条一起排队",
+                        "请总结上面的文件",
                         &[("agent_1", "cli_app_1")],
                         true,
                     ),
@@ -23669,6 +23916,7 @@ mod tests {
                 &host_envelope(
                     "finalize-pending-second",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: second_observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -23711,6 +23959,8 @@ mod tests {
                 &host_envelope(
                     "binding-roster-missing",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_group_binding".to_string(),
@@ -23757,6 +24007,7 @@ mod tests {
                 &host_envelope(
                     "resolve-stale-picker-message",
                     ResolvePendingThreadBindingCommand {
+                        check_roster: false,
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id.clone(),
                         external_picker_message_id: "om_not_authoritative".to_string(),
@@ -23779,6 +24030,7 @@ mod tests {
                 &host_envelope(
                     "resolve-picker-non-owner",
                     ResolvePendingThreadBindingCommand {
+                        check_roster: false,
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id.clone(),
                         external_picker_message_id: picker_message_id.clone(),
@@ -23821,6 +24073,7 @@ mod tests {
                 &host_envelope(
                     "resolve-picker-project-became-unavailable",
                     ResolvePendingThreadBindingCommand {
+                        check_roster: false,
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id.clone(),
                         external_picker_message_id: picker_message_id.clone(),
@@ -23870,6 +24123,8 @@ mod tests {
                 &host_envelope(
                     "binding-roster-restored",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_group_binding".to_string(),
@@ -23889,13 +24144,63 @@ mod tests {
         assert_eq!(resolved.result.code, "channel.binding.resolved");
         assert_eq!(resolved.result.payload["promotedMessageCount"], 2);
         let camp_id = resolved.result.payload["threadId"].as_str().unwrap();
-        // Binding resolution publishes external user messages internally; hints follow
-        // actual writes, independently of this non-send command's name, and coalesce.
+        assert_eq!(
+            database.connection().query_row(
+                "SELECT COUNT(*) FROM channel_turn_request WHERE camp_id = ?1 AND status = 'queued'",
+                [camp_id], |row| row.get::<_, i64>(0),
+            ).unwrap(),
+            2,
+            "binding must keep the summary request behind the pending file",
+        );
+        let actor = ActorRef::System {
+            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
+        };
+        let poll = ChannelHostTickRequest {
+            worker_id: "binding-worker".into(),
+            inbound_attachment_app_ids: vec!["cli_app_2".into()],
+            limit: 20,
+        };
+        let initial_tick = service.host_tick(&mut database, &actor, &poll).unwrap();
+        let [download] = initial_tick.inbound_attachments.as_slice() else {
+            panic!("the first message's attachment should be available to download");
+        };
+        assert_eq!(download.message_id, "om_pending_first");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1",
+                    [camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "the summary must wait even if the host polls before the file is ready",
+        );
+        let source = quick_chat_path.join("notes.txt");
+        std::fs::write(&source, "file contents").unwrap();
+        let completed = inbound_attachments::complete(
+            &mut database,
+            &host_envelope(
+                "group-file-complete",
+                inbound_attachments::CompleteAttachmentsCommand {
+                    request_id: download.request_id.clone(),
+                    app_id: download.app_id.clone(),
+                    attempt: download.attempt,
+                    files: vec![source.to_string_lossy().into_owned()],
+                    failure_code: None,
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(completed.result.payload["ready"], true);
+        service.host_tick(&mut database, &actor, &poll).unwrap();
         let change: Value = serde_json::from_str(&message_changes.try_recv().unwrap()).unwrap();
         assert_eq!(change["params"]["threadId"], camp_id);
         assert_eq!(change["params"]["indexChanged"], true);
         assert_eq!(change["params"]["unavailableMessageIds"], json!([]));
         assert!(message_changes.try_recv().is_err());
+        service.host_tick(&mut database, &actor, &poll).unwrap();
 
         assert_channel_camp_name(
             &mut database,
@@ -23923,6 +24228,23 @@ mod tests {
             );
         }
         assert_eq!(claim_waiting_runs(&mut database).len(), 2);
+        let inputs = query_rows(
+            database.connection(),
+            "SELECT m.body, json_array_length(m.source_attachments_json)
+             FROM agent_run_input i JOIN camp_message m ON m.id = i.message_id
+             JOIN camp_message_delivery d ON d.id = i.delivery_id
+             WHERE d.camp_id = ?1 AND d.recipient_agent_id = 'agent_1' ORDER BY i.ordinal",
+            [camp_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .unwrap();
+        let [(file, 1), (summary, 0)] = inputs.as_slice() else {
+            panic!(
+                "expected the file before the summary request in the agent's inputs: {inputs:?}"
+            );
+        };
+        assert!(file.ends_with("先由二号确认项目"));
+        assert!(summary.ends_with("请总结上面的文件"));
         assert_eq!(
             database
                 .connection()
@@ -23951,33 +24273,16 @@ mod tests {
         assert_eq!(author_type, "external_principal");
         assert_eq!(reply_to, None);
         assert_eq!(camp_path, project_path.to_string_lossy());
-        let outbox = serde_json::to_value(
-            service
-                .host_tick(
-                    &mut database,
-                    &ActorRef::System {
-                        component_id: (FEISHU_CHANNEL_HOST_COMPONENT).to_string(),
-                    },
-                    &ChannelHostTickRequest {
-                        worker_id: "binding-worker".to_string(),
-                        inbound_attachment_app_ids: Vec::new(),
-                        limit: 20,
-                    },
-                )
-                .unwrap(),
-        )
-        .unwrap();
+        let outbox = serde_json::to_value(initial_tick).unwrap();
         let queue_acknowledgements = outbox["deliveries"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|delivery| delivery["deliveryKind"] == "queue_ack")
             .collect::<Vec<_>>();
-        assert_eq!(
-            queue_acknowledgements.len(),
-            0,
-            "Channel receipt has no separate request queue acknowledgement"
-        );
+        assert_eq!(queue_acknowledgements.len(), 1);
+        assert_eq!(queue_acknowledgements[0]["targetAppId"], "cli_app_1");
+        assert_eq!(queue_acknowledgements[0]["payload"]["queuePosition"], 2);
         let picker_recalls = outbox["deliveries"]
             .as_array()
             .unwrap()
@@ -23998,6 +24303,7 @@ mod tests {
                 &host_envelope(
                     "resolve-picker-replay-after-commit",
                     ResolvePendingThreadBindingCommand {
+                        check_roster: false,
                         pending_binding_id: pending_binding_id.clone(),
                         app_id: picker_app_id,
                         external_picker_message_id: picker_message_id,
@@ -24019,9 +24325,6 @@ mod tests {
         // The same FIFO fixture owns poll-response loss: claims remain leased,
         // expiry is recoverable, and a later failure rolls the whole tick back.
         let recovered_delivery_id = picker_recalls[0]["deliveryId"].as_str().unwrap();
-        let actor = ActorRef::System {
-            component_id: FEISHU_CHANNEL_HOST_COMPONENT.to_string(),
-        };
         let poll = ChannelHostTickRequest {
             worker_id: "replacement-worker".to_string(),
             inbound_attachment_app_ids: Vec::new(),
@@ -24201,6 +24504,8 @@ mod tests {
                 &host_envelope(
                     "legacy-picker-roster",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_legacy_picker".to_string(),
@@ -24234,6 +24539,7 @@ mod tests {
                 &host_envelope(
                     "finalize-legacy-picker",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -24337,6 +24643,7 @@ mod tests {
                 &host_envelope(
                     "reject-legacy-private-picker",
                     ResolvePendingThreadBindingCommand {
+                        check_roster: false,
                         pending_binding_id: pending_binding_id.to_string(),
                         app_id: "cli_app_1".to_string(),
                         external_picker_message_id: "om_legacy_private".to_string(),
@@ -24370,6 +24677,8 @@ mod tests {
                 &host_envelope(
                     "picker-card-revision-roster",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_picker_card_revision".to_string(),
@@ -24403,6 +24712,7 @@ mod tests {
                 &host_envelope(
                     "finalize-picker-card-revision",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -24574,6 +24884,8 @@ mod tests {
                 &host_envelope(
                     "sent-picker-card-revision-roster",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_sent_picker_card_revision".to_string(),
@@ -24607,6 +24919,7 @@ mod tests {
                 &host_envelope(
                     "finalize-sent-picker-card-revision",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -24737,6 +25050,8 @@ mod tests {
                 &host_envelope(
                     "aggregate-roster",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_multi".to_string(),
@@ -24802,6 +25117,7 @@ mod tests {
                 &host_envelope(
                     "aggregate-finalize-without-canonical-order",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: second.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -24901,6 +25217,7 @@ mod tests {
                 &host_envelope(
                     "timeout-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: timeout_id.to_string(),
                     },
                 ),
@@ -24927,6 +25244,8 @@ mod tests {
                 &host_envelope(
                     "roster-both",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_group".to_string(),
@@ -24960,6 +25279,7 @@ mod tests {
                 &host_envelope(
                     "group-pending-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -24985,20 +25305,27 @@ mod tests {
             2,
             "normal group Camp starts from the full present Bot roster"
         );
-        service
+        let partial = service
             .reconcile_feishu_group_roster(
                 &mut database,
                 &host_envelope(
                     "roster-agent-two-left",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: Some(BTreeSet::from(["cli_app_2".to_string()])),
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_group".to_string(),
-                        present_app_ids: vec!["cli_app_1".to_string()],
+                        present_app_ids: vec![],
                     },
                 ),
             )
             .unwrap();
+        // Only Bot 2 answered. Its absence is authoritative and Bot 1 keeps its prior status.
+        assert_eq!(
+            partial.result.payload["presentAgentIds"],
+            json!(["agent_1"])
+        );
         let (status, source_generation): (String, i64) = database
             .connection()
             .query_row(
@@ -25014,6 +25341,63 @@ mod tests {
             .unwrap();
         assert_eq!(status, "left");
         assert_eq!(source_generation, 1);
+
+        // Simulate a bound group whose last platform snapshot lacks the receiving Bot.
+        database.connection().execute(
+            "DELETE FROM external_group_bot_roster WHERE chat_id='oc_group' AND app_id='cli_app_1'",
+            [],
+        ).unwrap();
+        let inbound = service
+            .observe_inbound(
+                &mut database,
+                &host_envelope(
+                    "receive-during-outage",
+                    observation_command(
+                        "cli_app_1",
+                        "om_while_offline",
+                        "oc_group",
+                        "",
+                        "group",
+                        "继续派发",
+                        &[("agent_2", "cli_app_2"), ("agent_1", "cli_app_1")],
+                        true,
+                    ),
+                ),
+            )
+            .unwrap();
+        let aggregate_id = inbound.result.payload["aggregateId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let submit = |fresh| FinalizeChannelInboundCommand {
+            aggregate_id: aggregate_id.clone(),
+            require_fresh_roster: fresh,
+        };
+        let first = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("try-fresh", submit(true)),
+            )
+            .unwrap();
+        assert_eq!(first.result.code, "channel.roster_sync_required");
+        let fallback = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("submit-local", submit(false)),
+            )
+            .unwrap();
+        assert_eq!(fallback.result.code, "channel.turn.admitted");
+        let (ack, targets): (String, String) = database.connection().query_row(
+            "SELECT ack_app_id, addressed_agent_ids_json FROM channel_turn_request WHERE aggregate_id=?1",
+            [&aggregate_id], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(ack, "cli_app_1");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&targets).unwrap(),
+            ["agent_1"]
+        );
     }
 
     #[test]
@@ -25031,6 +25415,8 @@ mod tests {
                 &host_envelope(
                     "topic-roster",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_topic_group".to_string(),
@@ -25064,6 +25450,7 @@ mod tests {
                 &host_envelope(
                     "topic-pending-finalize",
                     FinalizeChannelInboundCommand {
+                        require_fresh_roster: false,
                         aggregate_id: observation.result.payload["aggregateId"]
                             .as_str()
                             .unwrap()
@@ -25137,6 +25524,8 @@ mod tests {
                 &host_envelope(
                     "topic-roster-added-agent-three",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_topic_group".to_string(),
@@ -25216,6 +25605,8 @@ mod tests {
                 &host_envelope(
                     "topic-roster-removed-agent-two",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_topic_group".to_string(),
@@ -25283,6 +25674,8 @@ mod tests {
                 &host_envelope(
                     "topic-roster-running-agent-left",
                     ReconcileFeishuGroupRosterCommand {
+                        absent_app_ids: None,
+                        membership_event: None,
                         provider: FEISHU_PROVIDER.to_string(),
                         tenant_key: "tenant_1".to_string(),
                         chat_id: "oc_topic_group".to_string(),

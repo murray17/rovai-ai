@@ -3,10 +3,23 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-23
+last_updated: 2026-11-26
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d96"></a>
+## V1.72-D96：三个渠道的群名单查询优先保证消息可用
+
+- 状态：accepted
+- 日期：2026-11-26
+- 当前权威：[Channel Host Maintenance v6](../../contracts/channel-host-maintenance-v6.md)、[飞书](../../architecture/feishu-channel.md)、[Lark](../../architecture/lark-channel.md)、[钉钉](../../architecture/dingtalk-channel.md)。
+
+扫描历史群消耗开放平台配额，派发前等待完整名单还会让本地队员和健康机器人一起排队。普通群仅在群里 @ 或确认绑定时查目标群，进出群通知即时更新本地成员。桌面输入、转派、排队开工与重试直接派发。话题父群保留既有代次要求。
+
+实际收件证明机器人在群。飞书、Lark 只更新查询成功的机器人，钉钉优先用一个机器人读全群，遇到当前应用未安装或缺权限可换用下一个。入站整轮失败最多退避重试一次，随后按本地名单继续。确认绑定时读取失败保留原卡供用户重试。
+
+接受名单短时过期，以下一条 @ 或下一次进出群通知校正。若离线漏收退群事件或平台没有通知，下一条 @ 前的转派可能在本地执行一次，群回复按普通发送失败处理。
 
 <a id="v1-72-d95"></a>
 ## V1.72-D95：当前会话移出队员可在影响详情不可用时确认

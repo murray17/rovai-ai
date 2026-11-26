@@ -109,7 +109,9 @@ describe('DingTalk channel account connection', () => {
       else fixture.developerSession.inspect.mockRejectedValueOnce(new Error(code))
       try {
         await fixture.service.start()
-        await vi.waitFor(() => expect(fixture.commands).toContain('channels.dingtalk.account.expire'))
+        expect(fixture.developerSession.inspect).not.toHaveBeenCalled()
+        await expect(fixture.service.publish('agent-new')).rejects.toThrow()
+        expect(fixture.commands).toContain('channels.dingtalk.account.expire')
         expect((await fixture.service.get()).provider.connection.status).toBe('session_expired')
         expect(fixture.streamStart).toHaveBeenCalledTimes(1)
         expect(fixture.developerSession.beginLogin).not.toHaveBeenCalled()
@@ -126,7 +128,8 @@ describe('DingTalk channel account connection', () => {
     fixture.developerSession.beginLogin.mockRejectedValueOnce(new Error('dingtalk_operation_cancelled'))
     const starting = fixture.service.start()
     try {
-      await vi.waitFor(() => expect(fixture.developerSession.inspect).toHaveBeenCalled())
+      await starting
+      expect(fixture.developerSession.inspect).not.toHaveBeenCalled()
       await expect(fixture.service.connect()).resolves.toBeUndefined()
       inspection.resolve(null)
       await starting
@@ -191,10 +194,130 @@ describe('DingTalk channel account connection', () => {
     fixture.developerSession.inspect.mockRejectedValueOnce(new Error('dingtalk_legacy_session_requires_reconnect'))
     try {
       await fixture.service.start()
-      await vi.waitFor(async () => expect((await fixture.service.get()).provider.connection.status).toBe('session_expired'))
+      await expect(fixture.service.publish('agent-new')).rejects.toThrow('dingtalk_legacy_session_requires_reconnect')
+      expect((await fixture.service.get()).provider.connection.status).toBe('session_expired')
       expect(fixture.commands).not.toContain('channels.dingtalk.account.expire')
       expect(fixture.streamStart).toHaveBeenCalledOnce()
     } finally { await fixture.service.stop() }
+  })
+
+  it('recovers a merged group message, refreshes on Core demand and bounds the submit retry', async () => {
+    const fixture = completedBotFixture({
+      credentialPresent: true,
+      pendingAggregates: [{ aggregateId: 'incoming', tenantKey: 'corp-a', chatId: 'merged-group',
+        conversationKind: 'group', canonicalMentionsComplete: true, acknowledgementAppId: 'ding-app-a' }],
+      finalizeCodes: ['channel.roster_sync_required', 'channel.turn.admitted']
+    })
+    const read = vi.spyOn(fixture.api, 'groupRobotCodes').mockResolvedValue(['robot-a'])
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(fixture.commands.filter(c => c.endsWith('inbound.finalize'))).toHaveLength(2))
+      expect(read.mock.calls.map(([chat]) => chat)).toEqual(['merged-group'])
+      expect(fixture.commandPayloads.filter(c => c.method.endsWith('inbound.finalize')).map(c => c.command))
+        .toEqual(Array(2).fill({ aggregateId: 'incoming', requireFreshRoster: true }))
+      expect(fixture.verifyCard).not.toHaveBeenCalled()
+    } finally { await fixture.service.stop() }
+  })
+
+  it.each(['channel.turn.admitted', 'channel.inbound.already_finalized'])(
+    'recovers a group aggregate without reading the platform when Core returns %s', async code => {
+      const fixture = completedBotFixture({
+        credentialPresent: true, finalizeCodes: [code],
+        pendingAggregates: [{ aggregateId: 'recovered', tenantKey: 'corp-a', chatId: 'group',
+          conversationKind: 'group', canonicalMentionsComplete: true, acknowledgementAppId: 'ding-app-a' }]
+      })
+      const read = vi.spyOn(fixture.api, 'groupRobotCodes').mockResolvedValue([])
+      try {
+        await fixture.service.start()
+        await vi.waitFor(() => expect(fixture.commands).toContain('channels.dingtalk.inbound.finalize'))
+        expect(read).not.toHaveBeenCalled()
+      } finally { await fixture.service.stop() }
+    }
+  )
+
+  it.each([
+    { status: 429, body: { code: 'Throttling' } },
+    { status: 0, body: null },
+    { status: 503, body: { code: 'system.error' } },
+    { status: 400, body: { code: 'unauthorized' } },
+    { status: 403, body: { code: 'Forbidden.AccessDenied.QpsLimitForApi' } },
+    { status: 403, body: { code: 'Forbidden.AccessDenied.AccessTokenPermissionDenied' }, onlyBotAFails: true },
+    { status: 403, body: { Code: 'Forbidden.AccessDenied.AccessTokenPermissionDenied' }, onlyBotAFails: true },
+    { status: 400, body: { code: 'chatbotNotInstall' }, onlyBotAFails: true }
+  ])('chooses the next DingTalk roster reader or backs off on $status $body', async ({ status, body, onlyBotAFails }) => {
+    vi.useFakeTimers()
+    const fixture = completedBotFixture({
+      credentialPresent: true, extraBotIds: onlyBotAFails ? ['b'] : ['b', 'c', 'd', 'e', 'f'],
+      requireInboundRoster: true,
+      pendingAggregates: [{ aggregateId: 'incoming', tenantKey: 'corp-a', chatId: 'group-a',
+        conversationKind: 'group', canonicalMentionsComplete: true, acknowledgementAppId: 'ding-app-a' }]
+    })
+    let recovered = false
+    const readers: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: URL, init: RequestInit) => {
+      if (url.pathname === '/v1.0/oauth2/accessToken') {
+        return Response.json({ accessToken: JSON.parse(String(init.body)).appKey, expireIn: 7200 })
+      }
+      expect(url.pathname).toBe('/v1.0/robot/groups/robots/query')
+      expect(JSON.parse(String(init.body))).toEqual({ openConversationId: 'group-a' })
+      const appKey = new Headers(init.headers).get('x-acs-dingtalk-access-token')!
+      readers.push(appKey)
+      if (onlyBotAFails ? appKey === 'ding-app-a' : !recovered) {
+        if (!status) throw new TypeError('Network unavailable')
+        return Response.json(body, { status })
+      }
+      return Response.json({ chatbotInstanceVOList: [{ robotCode: 'robot-b' }] })
+    }))
+    try {
+      await fixture.service.start()
+      await vi.advanceTimersByTimeAsync(0)
+      if (onlyBotAFails) {
+        expect(readers).toEqual(['ding-app-a', 'ding-app-b'])
+      } else {
+        expect(readers).toEqual(['ding-app-a'])
+        expect(fixture.commands).not.toContain('channels.dingtalk.roster.reconcile')
+        fixture.service.handleCoreEvent({ method: 'automation.notification.available', params: {} })
+        await vi.advanceTimersByTimeAsync(4_999)
+        expect(readers).toEqual(['ding-app-a'])
+        recovered = true
+        await vi.advanceTimersByTimeAsync(1)
+        expect(readers).toEqual(['ding-app-a', 'ding-app-a'])
+      }
+      expect(fixture.commandPayloads.filter(item => item.method === 'channels.dingtalk.roster.reconcile'))
+        .toEqual([{ method: 'channels.dingtalk.roster.reconcile', command: expect.objectContaining({ presentAppIds: ['ding-app-b'] }) }])
+    } finally {
+      await fixture.service.stop()
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  })
+
+  it('admits a DingTalk group mention from the local roster after both reads fail', async () => {
+    vi.useFakeTimers()
+    const fixture = completedBotFixture({
+      credentialPresent: true, requireInboundRoster: true,
+      pendingAggregates: [{ aggregateId: 'incoming', tenantKey: 'corp-a', chatId: 'group', conversationKind: 'group',
+        canonicalMentionsComplete: true, acknowledgementAppId: 'ding-app-a' }]
+    })
+    const read = vi.spyOn(fixture.api, 'groupRobotCodes')
+      .mockRejectedValue(new DingTalkOpenApiError('Invalid credential', 400, 'invalidClientIdOrSecret'))
+    const localSubmissions = () => fixture.commandPayloads.filter(entry =>
+      entry.method.endsWith('inbound.finalize') && entry.command.requireFreshRoster === false)
+    try {
+      await fixture.service.start()
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(localSubmissions()).toHaveLength(0)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(localSubmissions()).toHaveLength(1)
+      expect((await fixture.service.get()).provider.memberBots[0].rosterIssue).toBe('credentials')
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000)
+      expect(read).toHaveBeenCalledTimes(2)
+      expect(fixture.commands).not.toContain('channels.dingtalk.roster.reconcile')
+    } finally {
+      await fixture.service.stop()
+      vi.useRealTimers()
+    }
   })
 
   it('does not commit a late browser login after the Owner cancels it', async () => {
@@ -440,7 +563,8 @@ describe('DingTalk channel account connection', () => {
     expect(fixture.provision).not.toHaveBeenCalled()
     expect(fixture.commands).not.toContain('channels.dingtalk.publicationIntent.storeCredential')
     expect(fixture.streamStart).toHaveBeenCalledTimes(1)
-    expect(fixture.verifyCard).toHaveBeenCalledTimes(1)
+    expect(fixture.verifyCard).not.toHaveBeenCalled()
+    expect(fixture.developerSession.inspect).not.toHaveBeenCalled()
   })
 
   it('sends one private welcome card after a new Bot publication completes', async () => {
@@ -978,6 +1102,66 @@ describe('DingTalk channel account connection', () => {
     })).toBeNull()
   })
 
+  it.each(['bind', 'quick_chat'])('keeps the project picker usable until the owner retries %s', async action => {
+    vi.useFakeTimers()
+    const StreamRegistry = streamTransport.DingTalkStreamRegistry
+    const constructor = vi.spyOn(streamTransport, 'DingTalkStreamRegistry').mockImplementation(function (options) {
+      const stream = new StreamRegistry(options)
+      vi.spyOn(stream, 'start').mockResolvedValue(undefined)
+      return stream
+    })
+    const fixture = completedBotFixture({ credentialPresent: true, useHostStream: true })
+    const [{ onCard }] = constructor.mock.lastCall!
+    const original = fixture.core.request.bind(fixture.core)
+    const resolveBinding = vi.fn((command: Record<string, unknown>) => {
+      if (command.operatorUserId !== 'owner-a') return { status: 'rejected', code: 'channel.owner_required', payload: {} }
+      if (command.checkRoster) return {
+        status: 'applied', code: 'channel.binding.roster_required', payload: { tenantKey: 'corp-a', chatId: 'group-a' }
+      }
+      return { status: 'applied', code: 'channel.binding.resolved', payload: {} }
+    })
+    vi.spyOn(fixture.core, 'request').mockImplementation((method, params) => method === 'channels.dingtalk.pendingBinding.resolve'
+      ? Promise.resolve(resolveBinding((params as { command: Record<string, unknown> }).command)) : original(method, params))
+    const read = vi.spyOn(fixture.api, 'groupRobotCodes')
+      .mockRejectedValueOnce(new DingTalkOpenApiError('dingtalk_open_api_network', 0))
+      .mockResolvedValue(['robot-a'])
+    const update = vi.spyOn(fixture.api, 'updateCard').mockResolvedValue(undefined)
+    const params = projectCardParams({ pendingBindingId: 'pending', expectedVersion: 2, nonce: 'nonce',
+      projectOptions: [{ projectId: 'project', displayName: '项目' }] }, false)
+    const buttons = JSON.parse(params.sys_full_json_obj).msgButtons as Array<{ text: string; id: string }>
+    const button = buttons.find(b => b.text === (action === 'bind' ? '项目' : '开始快速对话'))!
+    const click = (messageId: string, userId: string) => onCard({ appKey: 'ding-app-a', messageId, payload: {
+      userId, outTrackId: 'original-picker', content: { cardPrivateData: { actionIds: [button.id] } }
+    } })
+    try {
+      await fixture.service.start()
+      await click('other-user', 'someone-else')
+      expect(read).not.toHaveBeenCalled()
+      expect(update).not.toHaveBeenCalled()
+      resolveBinding.mockClear()
+
+      await click('first-click', 'owner-a')
+      expect(update).toHaveBeenCalledExactlyOnceWith('original-picker', {
+        staticMsgContent: '暂时无法读取群成员，请稍后再点。'
+      }, { cardUpdateOptions: { updateCardDataByKey: true } })
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(read).toHaveBeenCalledExactlyOnceWith('group-a')
+      expect(resolveBinding).toHaveBeenCalledTimes(1)
+
+      await click('second-click', 'owner-a')
+      expect(read).toHaveBeenCalledTimes(2)
+      expect(resolveBinding.mock.calls.map(([command]) => command.checkRoster)).toEqual([true, true, undefined])
+      expect(resolveBinding).toHaveBeenLastCalledWith(expect.objectContaining({
+        pendingBindingId: 'pending', expectedVersion: 2, nonce: 'nonce', action, externalPickerMessageId: 'original-picker'
+      }))
+      expect(update).toHaveBeenLastCalledWith('original-picker', expect.objectContaining({ flowStatus: '3' }))
+    } finally {
+      await fixture.service.stop()
+      constructor.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('offers Quick Chat even when the DingTalk project catalog is empty', () => {
     const params = projectCardParams({
       pendingBindingId: 'pending-1', expectedVersion: 1, nonce: 'nonce-1', projectOptions: []
@@ -1036,10 +1220,11 @@ describe('DingTalk channel account connection', () => {
       for (const conversationType of ['1', '2']) {
         const message = normalizeDingTalkRobotMessage({
           conversationType, conversationId: 'chat', msgId: `message-${conversationType}`,
-          senderStaffId: 'owner', senderCorpId: 'corp', msgtype: 'text', text: { content: '/new' },
+          senderStaffId: 'owner', senderCorpId: 'corp', msgtype: 'text', text: { content: conversationType === '1' ? '/new' : '归档群消息' },
           isInAtList: true
         }, { appKey: 'app', robotCode: 'bot' })
         await onMessage(message)
+        if (conversationType === '2') await onMessage({ ...message, body: '/new' })
       }
       expect(request.mock.calls.map(([method]) => method)).toEqual([
         'channels.dingtalk.owner.verify', 'channels.dingtalk.owner.verify'
@@ -1234,6 +1419,7 @@ describe('DingTalk channel account connection', () => {
 
 function completedBotFixture(options: {
   useHostStream?: boolean
+  extraBotIds?: string[]
   credentialPresent?: boolean
   rejectCredentialWrites?: number
   otherAccount?: boolean
@@ -1242,6 +1428,9 @@ function completedBotFixture(options: {
   avatarSource?: DingTalkChannelHostDependencies['avatarSource']
   memberAvatarRef?: () => string | null
   deliveries?: Array<Record<string, unknown>>
+  pendingAggregates?: Array<Record<string, unknown>>
+  requireInboundRoster?: boolean
+  finalizeCodes?: string[]
   attachments?: PendingChannelAttachments[]
   completeAttachments?: (command: Record<string, unknown>) => Promise<void>
   attachmentTarget?: { attachmentId: string; kind: 'file'; mediaType: string; path: string }
@@ -1258,6 +1447,10 @@ function completedBotFixture(options: {
     appKey: 'ding-app-a', robotCode: 'robot-a', botDisplayName: '芝士',
     credentialRef: 'dingtalk-credential-a', status: 'published', failureCode: null, version: 1
   }
+  const bots = [bot, ...(options.extraBotIds ?? []).map(id => ({
+    ...bot, agentId: `agent-${id}`, appKey: `ding-app-${id}`, robotCode: `robot-${id}`,
+    credentialRef: `dingtalk-credential-${id}`, unifiedAppId: `u-app-${id}`
+  }))]
   let intent: Record<string, unknown> = {
     publicationIntentId: 'intent-a', agentId: 'agent-a', accountId: owner.accountId,
     expectedUserIdDigest: owner.userIdDigest, expectedCorpId: owner.corpId,
@@ -1276,7 +1469,10 @@ function completedBotFixture(options: {
   let rejectedWrites = options.rejectCredentialWrites ?? 0
   const pendingDeliveries = [...(options.deliveries ?? [])]
   const pendingAttachments = [...(options.attachments ?? [])]
-  let apiAvailable = false
+  const pendingAggregates = [...(options.pendingAggregates ?? [])]
+  const freshChats = new Set<unknown>()
+  const finalizeCodes = [...(options.finalizeCodes ?? [])]
+  const connectedApps = new Set<string>()
   const commands: string[] = []
   const commandPayloads: Array<{ method: string; command: Record<string, unknown> }> = []
   const attachmentLookups: unknown[] = []
@@ -1287,9 +1483,9 @@ function completedBotFixture(options: {
         return options.attachmentTarget ?? null
       }
       if (method === 'channels.dingtalk.snapshot') return {
-        schemaVersion: 1, account, memberBots: options.beforeApp ? [] : [bot], publicationIntents: [intent],
+        schemaVersion: 1, account, memberBots: options.beforeApp ? [] : bots, publicationIntents: [intent],
         pendingBindingCount: 0, bindingIssueCount: 0,
-        transportConversations: [], pendingAggregates: []
+        transportConversations: [{ tenantKey: 'corp-a', chatId: 'old-group', conversationKind: 'group' }], pendingAggregates
       }
       if (method === 'members.get') return {
         agentId: 'agent-a', displayName: '芝士', avatarRef: options.memberAvatarRef?.() ?? null, teamRole: '鉴定士'
@@ -1299,9 +1495,22 @@ function completedBotFixture(options: {
       commandPayloads.push({ method, command })
       if (method === 'channels.dingtalk.host.tick') {
         expect(params).toEqual({ workerId: expect.any(String), limit: 20,
-          inboundAttachmentAppIds: !options.beforeApp && apiAvailable ? [bot.appKey] : [] })
+          inboundAttachmentAppIds: options.beforeApp ? [] : bots.map(bot => bot.appKey).filter(key => connectedApps.has(key)) })
         const delivery = pendingDeliveries.shift()
-        return { deliveries: delivery ? [delivery] : [], rosterRefreshes: [], inboundAttachments: pendingAttachments.splice(0) }
+        return {
+          deliveries: delivery ? [delivery] : [],
+          inboundAttachments: pendingAttachments.splice(0), hasOutstandingWork: pendingAggregates.length > 0
+        }
+      }
+      if (method === 'channels.dingtalk.roster.reconcile') freshChats.add(command.chatId)
+      if (method === 'channels.dingtalk.inbound.finalize') {
+        const index = pendingAggregates.findIndex(a => a.aggregateId === command.aggregateId)
+        const needsRoster = options.requireInboundRoster && command.requireFreshRoster
+          && !freshChats.has(pendingAggregates[index]?.chatId)
+        const code = needsRoster ? 'channel.roster_sync_required' : finalizeCodes.shift() ?? 'channel.turn.admitted'
+        if (code === 'channel.roster_sync_required') return { status: 'rejected', code, payload: {} }
+        if (index >= 0) pendingAggregates.splice(index, 1)
+        return { status: code === 'channel.turn.admitted' ? 'accepted' : 'applied', code, payload: {} }
       }
       if (method === 'channels.dingtalk.inbound.attachments.complete') await options.completeAttachments?.(command)
       if (method === 'channels.dingtalk.publicationIntent.storeCredential') {
@@ -1359,15 +1568,21 @@ function completedBotFixture(options: {
     credentialStore: {
       readDingTalk: vi.fn(async () => credential),
       deleteDingTalk: vi.fn(async () => undefined),
-      listPublished: vi.fn(async () => credential ? [{
-        agentId: bot.agentId, provider: 'dingtalk' as const,
-        credentialRef: bot.credentialRef, remoteAppId: bot.appKey, credential, revision: 1
-      }] : [])
+      listPublished: vi.fn(async () => {
+        const saved = credential
+        return saved ? bots.map(({ agentId, credentialRef, appKey, robotCode }) => ({
+          agentId, provider: 'dingtalk' as const, credentialRef, remoteAppId: appKey,
+          credential: { ...saved, appKey, robotCode }, revision: 1
+        })) : []
+      })
     },
     provisioner: { create: provision },
     avatarSource: options.avatarSource ?? { resolve: async () => ({ pngBytes: new Uint8Array([1, 2, 3]) }) },
     streamRegistry: options.useHostStream ? undefined : stream,
-    createApiClient: () => { apiAvailable = true; return api }
+    createApiClient: credential => {
+      connectedApps.add(credential.appKey)
+      return credential.appKey === bot.appKey ? api : new DingTalkOpenApiClient(credential)
+    }
   })
   return { service, core, commands, commandPayloads, attachmentLookups, api, provision, streamStart, verifyCard,
     welcomeCard, developerSession,

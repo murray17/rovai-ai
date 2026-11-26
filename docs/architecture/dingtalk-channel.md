@@ -105,10 +105,10 @@ sidecar。Stream 从始至终由 Main 内的 `dingtalk-stream` SDK 直接连接�
 `corpId/userId/userName/corpName`，再调用 `channels.dingtalk.account.commitConnection`，由单一 SQLite 事务同时替换当前
 Developer Session 与 connected account。Core 失败时只丢弃 staged jar，旧 SQLite/内存 Session 均不变。Cookie 轮换
 通过 Session revision CAS 保存；失败的轮换结果暂存在 Main，下次先回读 revision 并补存，不能覆盖新账号或复活断开状态。
-启动恢复同一 Cookie Snapshot；明确登录拒绝时先允许官方 SSO 在隐藏窗口续接，不承诺固定有效天数，也没有 Rovai refresh token。
+执行需要开发者身份的操作时，从 SQLite 恢复同一 Cookie Snapshot；明确登录拒绝时先允许官方 SSO 在隐藏窗口续接，不承诺固定有效天数，也没有 Rovai refresh token。
 断网、timeout、未知响应和 SQLite 失败保留 Session；本地加载失败必须可重试，不缓存成未登录。
 只有明确没有 Session、SSO 无法续接的登录失效或身份漂移时才按 account/version expire。断开/明确过期仍在 Core 同一事务
-删除当前 Provider Session 并更新账号状态，不关闭、迁移或删除已发布 Bot。显式连接/断开或 Host stop 使旧启动检查失效。
+删除当前 Provider Session 并更新账号状态，不关闭、迁移或删除已发布 Bot。显式连接/断开或 Host stop 使在途的开发者身份验证失效。
 
 ## 队员应用发布
 
@@ -221,8 +221,7 @@ Stream callback fast ACK
 → Core verify Owner from appKey + userId digest
 → p2p exact /new OR every receiving group App immediately observes into one durable incomplete aggregate
 → 3-second callback collection, then replay the ordered observed set as canonical complete
-→ group roster reconcile
-→ finalize
+→ finalize (on roster_sync_required, reconcile that group and retry finalize once)
 → PendingCampBinding or existing binding FIFO
 → shared attachment download/import readiness (when resources exist)
 → CollaborationService atomic external-channel admission
@@ -251,9 +250,7 @@ Main 正常存活时在 3 秒后提交完整集合；Main 重启错过定时器�
 不向存储地址传递 App token。多 Bot 的 grant 不进入共同内容摘要，原接收 Bot 与资源授权保持绑定。
 同一消息全部附件就绪前不发布 ThreadMessage 或 Agent Delivery；终止失败由正常 attention 路径提示用户重新发送。
 
-群 roster 以远端当前机器人列表与本机 published DingTalk Bot 的交集为 authority，使用既有 membership
-generation/source binding reconcile。加入/移出从下一次新 Run 生效，已运行 Run 与历史保持冻结。roster 不可读、出现未知
-App 或目标已移出时 fail closed。
+读取成功时，群名单使用远端机器人列表与本机已发布钉钉 Bot 的交集，通过既有 membership generation 和 source binding 同步。读取失败时保留本地名单，实际收到群消息的 Bot 视为在群。
 
 <a id="当前-feature-gate"></a>
 ## 当前管理入口与能力 Gate
@@ -275,17 +272,16 @@ Renderer 渠道设置已开放钉钉管理入口：Snapshot 中的飞书、钉�
 
 ## 恢复与秘密
 
-共享 Host tick 按 [Channel Host Maintenance v5](../contracts/channel-host-maintenance-v5.md) 使用无 commandId 的直接
+共享 Host tick 按 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 使用无 commandId 的直接
 维护请求，不写永久 poll 回执。原事务、FIFO、delivery lease/重试及真实结算命令的永久幂等保留，飞书与钉钉复用
 provider-scoped outstanding 判定和按需调度；钉钉不再永久每 800ms 扫描，事件/入站/settlement 走合并快路径，
 只有 Core 仍报告未收口工作时才保留十分钟 one-shot watchdog。
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 Cookie jar。启动恢复所有
-published Bot Stream，同时独立检查 Developer Session；Bot 不等待开发者页面或网络检查。暂时检查失败保留 Session，明确
-Session 失效只阻止新的发布，不停止已有 Bot。按需 worker 在启动恢复、渠道活动、Core 执行事件和 active watchdog
-唤醒时重取已知群 roster、finalize ready aggregate、领取 delivery 并结算；清空后不再周期运行。任何外部失败都不从
-Renderer 状态重建业务事实。
+published Bot Stream。纯重连使用已有凭据。普通群仅在有效 @ 入站和确认绑定时查目标群。恢复入站和多 Bot 聚合先提交 Core，收到刷新要求后用一个 Bot 读全群。有效空数组表示未发现群机器人，缺少名单字段表示读取失败。当前 Bot 未安装（`chatbotNotInstall`）或缺少接口权限（`Forbidden.AccessDenied.AccessTokenPermissionDenied`）时，同轮换下一个。限流、网络和服务端错误直接退避。全部失败时入站最多等一次重试，然后用本地名单继续。实际收件 Bot 直接记为在群。确认绑定读取失败时保留原卡，提示稍后再点。
+
+桌面输入、转派、排队开工与重试按本地成员派发。绑定群如有明确的进出群通知便即时更新对应成员。钉钉无法可靠提供这类通知，名单可能过期，以下一条 @ 消息或可用通知校正。若退群后、下一条 @ 前发生转派，机器人可能在本地执行一次，群回复按普通发送失败处理。
 
 DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card create/update/recall/failed 计数，用于判断链路阶段；
 不暴露正文、附件内容、tenant/chat/App/Agent/Owner identity、credential、URL、token 或远端响应。计数不参与 admission。

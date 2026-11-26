@@ -273,3 +273,5 @@ Run 卡头、状态图形、工具组、命令结果与 Markdown 正文沿用桌
 - [Lark 渠道架构](../../architecture/lark-channel.md)
 - [DingTalk Channel v14](../../contracts/dingtalk-channel-v14.md)
 - [钉钉渠道架构](../../architecture/dingtalk-channel.md)
+
+账号摘要显示上次成功验证网页身份的本地时间。打开设置读取已存账号与连接状态。若某一机器人读取群名单时遇到明确的权限或凭据错误，在该机器人的名称下显示原因。对应凭据成功读取后清除提示。

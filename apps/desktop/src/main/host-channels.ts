@@ -48,7 +48,7 @@ export function projectHostChannels(snapshot: ChannelSettingsSnapshot): ChannelS
       },
       memberBots: provider.memberBots.map(bot => ({
         agentId: bot.agentId, publicationStatus: bot.publicationStatus, published: bot.published,
-        connectionStatus: bot.connectionStatus ?? 'unknown',
+        connectionStatus: bot.connectionStatus ?? 'unknown', rosterIssue: bot.rosterIssue,
         connectionFailureCode: bot.connectionFailureCode, connectionNeedsAttention: bot.connectionNeedsAttention,
         canReconcile: bot.canReconcile, botDisplayName: bot.botDisplayName,
         appId: bot.appId, managementUrl: managementUrl(bot.managementUrl), failureCode: bot.failureCode
