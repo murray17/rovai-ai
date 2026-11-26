@@ -371,7 +371,7 @@ export class DingTalkOpenApiClient {
       throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status)
     }
     const value = body as Record<string, unknown>
-    const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode')
+    const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode') ?? optionalString(value, 'Code')
     if (!response.ok) {
       throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status, code)
     }
