@@ -308,6 +308,11 @@ pub struct CodexCapabilityProbe {
     pub raw_model_catalog: Option<Value>,
 }
 
+struct CodexModelCatalogRead {
+    catalog: Value,
+    degraded: Option<String>,
+}
+
 pub async fn codex_capability_probe_at(
     path: &Path,
     fingerprint: Option<&str>,
@@ -3299,10 +3304,17 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
-    codex_model_catalog_at(path, false).await
+    let catalog = codex_model_catalog_at(path, false).await?;
+    if let Some(reason) = catalog.degraded {
+        bail!("{reason}");
+    }
+    Ok(catalog.catalog)
 }
 
-async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Value> {
+async fn codex_model_catalog_at(
+    path: &Path,
+    require_account: bool,
+) -> Result<CodexModelCatalogRead> {
     let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
     let mut process =
@@ -3335,6 +3347,10 @@ async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Va
                     .is_some(),
                 "initialize result did not include userAgent"
             );
+            let codex_home = initialized
+                .get("codexHome")
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
             write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
 
             if require_account {
@@ -3353,9 +3369,45 @@ async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Va
                 );
             }
 
+            // The native app-server owns profile and provider selection. Read the
+            // same effective configuration instead of merging TOML files a second time.
+            let config_read = async {
+                write_json_line(
+                    stdin,
+                    &json!({"method": "config/read", "id": 3,
+                        "params": {"includeLayers": false}}),
+                )
+                .await?;
+                read_rpc_result(lines, 3).await
+            }
+            .await;
+            if let Ok(config) = config_read {
+                match crate::codex_provider::model_catalog(&config, codex_home.as_deref()).await {
+                    Ok(Some(catalog)) => {
+                        return Ok(CodexModelCatalogRead {
+                            catalog,
+                            degraded: None,
+                        });
+                    }
+                    Ok(None) => {}
+                    // Catalog discovery is advisory. A full probe must still
+                    // establish Ready when a custom provider cannot be queried;
+                    // the catalog-only path reports the same reason as an error.
+                    Err(error) => {
+                        return Ok(CodexModelCatalogRead {
+                            catalog: crate::codex_provider::runtime_default_catalog(),
+                            degraded: Some(format!(
+                                "Codex custom provider model discovery failed: {error:#}"
+                            )),
+                        });
+                    }
+                }
+            }
+
             let mut models = Vec::new();
             let mut cursor: Option<String> = None;
-            let mut request_id = 3_u64;
+            // `config/read` already used id 3 in this session.
+            let mut request_id = 4_u64;
             loop {
                 write_json_line(
                     stdin,
@@ -3384,11 +3436,14 @@ async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Va
                     break;
                 }
                 request_id += 1;
-                if request_id > 102 {
+                if request_id > 103 {
                     bail!("model/list exceeded the pagination safety limit");
                 }
             }
-            Ok::<_, anyhow::Error>(json!({"data": models}))
+            Ok::<_, anyhow::Error>(CodexModelCatalogRead {
+                catalog: json!({"data": models}),
+                degraded: None,
+            })
         };
         timeout(Duration::from_secs(30), query)
             .await
@@ -3554,7 +3609,12 @@ async fn codex_runtime_probe_uncached(
     };
 
     let raw_model_catalog = match codex_model_catalog_at(&path, true).await {
-        Ok(catalog) => catalog,
+        Ok(catalog) => {
+            if let Some(reason) = catalog.degraded {
+                eprintln!("[model-catalog] {reason}");
+            }
+            catalog.catalog
+        }
         Err(error) => {
             let detail = format!("Codex app-server check failed: {error:#}");
             let status = if detail.contains("Codex authentication is required") {
@@ -4095,9 +4155,47 @@ mod tests {
                         .or_default()
                         .push(token.trim_matches('"'));
                 }
+                // The same native probe owner also checks the custom-provider
+                // branch, so an HTTP-only unit cannot hide a broken RPC seam.
+                let custom_provider = schema_has_fast
+                    && expected == AgentRuntimeProbeStatus::Ready
+                    && account["result"]["requiresOpenaiAuth"] == false;
+                let mut config = json!({});
+                let provider_server = if custom_provider {
+                    use tokio::{
+                        io::{AsyncReadExt, AsyncWriteExt},
+                        net::TcpListener,
+                    };
+                    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                    config = json!({"model_provider":"relay", "model_providers":{"relay":{
+                        "base_url":format!("http://{}/v1", listener.local_addr().unwrap()),
+                        "experimental_bearer_token":"inline-key"}}});
+                    let expected_authorization = "authorization: bearer inline-key\r\n".to_owned();
+                    Some(tokio::spawn(async move {
+                        // The owner probes twice to verify cached static evidence.
+                        for _ in 0..2 {
+                            let (mut stream, _) = listener.accept().await.unwrap();
+                            let mut bytes = Vec::new();
+                            while !bytes.ends_with(b"\r\n\r\n") {
+                                bytes.push(stream.read_u8().await.unwrap());
+                            }
+                            let request = String::from_utf8(bytes).unwrap();
+                            assert!(request.starts_with("GET /v1/models "));
+                            assert!(
+                                request
+                                    .to_lowercase()
+                                    .contains(expected_authorization.as_str())
+                            );
+                            let body = r#"{"data":[{"id":"first"},{"id":"second"}]}"#;
+                            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                        }
+                    }))
+                } else {
+                    None
+                };
                 fs::write(
                     root.join("case.json"),
-                    json!({"account":account,"schemas":schemas,"schema_has_fast":schema_has_fast})
+                    json!({"account":account,"schemas":schemas,"schema_has_fast":schema_has_fast,"config":config})
                         .to_string(),
                 )
                 .unwrap();
@@ -4128,13 +4226,15 @@ for line in sys.stdin:
     with (root / 'methods').open('a') as log: log.write(method + '\n')
     if method == 'initialize':
         assert request['params']['capabilities']['experimentalApi'] is True
-        print(json.dumps({'id':request['id'], 'result':{'userAgent':'fixture'}}), flush=True)
+        print(json.dumps({'id':request['id'], 'result':{'userAgent':'fixture','codexHome':str(root)}}), flush=True)
     elif method == 'initialized':
         assert 'id' not in request
         initialized = True # Notification: deliberately no response.
     elif method == 'account/read':
         assert initialized and request['params'] == {'refreshToken':False}
         print(json.dumps({'id':request['id'], **case['account']}), flush=True)
+    elif method == 'config/read':
+        print(json.dumps({'id':request['id'], 'result':{'config':case['config']}}), flush=True)
     elif method == 'model/list':
         assert initialized and request['params']['includeHidden'] is True
         cursor = request['params']['cursor']
@@ -4149,13 +4249,16 @@ for line in sys.stdin:
                 );
                 let mut methods = vec!["initialize", "initialized", "account/read"];
                 if expected == AgentRuntimeProbeStatus::Ready {
-                    methods.extend(["model/list", "model/list"]);
+                    methods.push("config/read");
+                    if !custom_provider {
+                        methods.extend(["model/list", "model/list"]);
+                    }
                     assert_eq!(
                         checked.raw_model_catalog.unwrap()["data"]
                             .as_array()
                             .unwrap()
                             .len(),
-                        2
+                        if custom_provider { 3 } else { 2 }
                     );
                 } else {
                     assert!(checked.raw_model_catalog.is_none());
@@ -4202,6 +4305,12 @@ for line in sys.stdin:
                 )
                 .await;
                 assert_eq!(repeated.result.status, expected);
+                if let Some(server) = provider_server {
+                    tokio::time::timeout(Duration::from_secs(5), server)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                }
                 let launches = fs::read_to_string(root.join("launches")).unwrap();
                 assert!(!launches.contains("--version"));
                 assert!(!launches.contains("generate-json-schema"));
@@ -4222,6 +4331,136 @@ for line in sys.stdin:
                 }
             }
         }
+    }
+
+    // Catalog discovery is advisory: a custom provider's HTTP failure must not
+    // turn a fresh managed installation into AuthenticationRequired/ProbeFailed.
+    #[tokio::test]
+    async fn codex_custom_provider_catalog_failure_keeps_probe_ready() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let python = std::process::Command::new("python3")
+            .args(["-c", "import sys; print(sys.executable)"])
+            .output()
+            .unwrap();
+        assert!(python.status.success());
+        let python = String::from_utf8(python.stdout).unwrap();
+        let root = env::temp_dir().join(format!("rovai-codex-catalog-{}", uuid::Uuid::new_v4()));
+        let _cleanup = ProbeRootCleanup(root.clone());
+        fs::create_dir_all(&root).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let provider = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(stream.read_u8().await.unwrap());
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with("GET /v1/models "));
+                assert!(request.to_lowercase().contains("authorization: bearer "));
+                let body = "DO-NOT-PERSIST";
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 500 Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let config = json!({"model_provider":"relay", "model_providers":{"relay":{
+            "base_url":format!("http://{address}/v1"),
+            "experimental_bearer_token":"inline-key"}}});
+        fs::write(root.join("case.json"), json!({"config":config}).to_string()).unwrap();
+        let binary = root.join("codex");
+        fs::write(
+            &binary,
+            format!(
+                "#!{}\n{}",
+                python.trim(),
+                r#"
+import json, os, pathlib, sys
+root = pathlib.Path(__file__).parent
+case = json.loads((root / 'case.json').read_text())
+with (root / 'launches').open('a') as log: log.write(json.dumps(sys.argv[1:]) + '\n')
+assert sys.argv[1] == 'app-server', 'no standalone login status'
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    with (root / 'methods').open('a') as log: log.write(method + '\n')
+    if method == 'initialize':
+        print(json.dumps({'id':request['id'], 'result':{'userAgent':'fixture','codexHome':str(root)}}), flush=True)
+    elif method == 'initialized':
+        pass
+    elif method == 'account/read':
+        print(json.dumps({'id':request['id'], 'result':{'account':None,'requiresOpenaiAuth':False}}), flush=True)
+    elif method == 'config/read':
+        print(json.dumps({'id':request['id'], 'result':{'config':case['config']}}), flush=True)
+    elif method == 'model/list':
+        raise AssertionError('custom provider must not fall through to model/list')
+"#
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let known_capabilities = REQUIRED_CODEX_CAPABILITIES
+            .iter()
+            .map(|(capability, _, _)| (*capability).to_string())
+            .chain(std::iter::once("correlation.thread_turn_item".into()))
+            .collect::<Vec<_>>();
+        let checked = codex_capability_probe_at(
+            &binary,
+            None,
+            Some("codex-cli fixture"),
+            &known_capabilities,
+        )
+        .await;
+        assert_eq!(
+            checked.result.status,
+            AgentRuntimeProbeStatus::Ready,
+            "{:?}",
+            checked.result
+        );
+        let catalog = checked.raw_model_catalog.unwrap();
+        assert_eq!(
+            catalog["data"][0]["id"],
+            crate::codex_provider::CODEX_RUNTIME_DEFAULT_MODEL_ID
+        );
+        assert_eq!(catalog["data"].as_array().unwrap().len(), 1);
+        assert!(
+            !rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
+                &rovai_core::agent_runtime_adapter::codex_models(&catalog).unwrap()
+            )
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("methods"))
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["initialize", "initialized", "account/read", "config/read"]
+        );
+
+        // The catalog-only refresh remains strict so the Picker can preserve its
+        // last known good list and report a real failure instead of claiming success.
+        let error = codex_model_catalog(&binary).await.unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("HTTP 500"));
+        assert!(!detail.contains("DO-NOT-PERSIST"));
+        assert!(!detail.contains("inline-key"));
+        tokio::time::timeout(Duration::from_secs(5), provider)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     // Owns command/process omission, not the model-row parser. The retained

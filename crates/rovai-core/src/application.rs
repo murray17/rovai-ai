@@ -32677,6 +32677,7 @@ while IFS= read -r line; do
   printf '%s\n' "$line" >> "$root/requests"
   case "$line" in
     *'"method":"initialize"'*) echo '{"id":1,"result":{"userAgent":"catalog-fixture"}}' ;;
+    *'"method":"config/read"'*) echo '{"id":3,"result":{"config":{}}}' ;;
     *'"method":"account/read"'*)
       if [ -f "$root/no-account" ]; then echo '{"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}'
       else echo '{"id":2,"result":{"account":{"type":"chatgpt"}}}'; fi ;;

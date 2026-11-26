@@ -9,6 +9,7 @@ mod claude;
 mod claude_control;
 pub(crate) mod cline;
 mod codex;
+mod codex_provider;
 pub mod command_code_acp;
 mod goose;
 mod health;

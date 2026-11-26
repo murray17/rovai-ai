@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-23
+last_updated: 2026-11-26
 ---
 
 # Runtime Catalog Boundaries
@@ -414,6 +414,24 @@ Core 原子保存显式模型和选项的精确意图及静态权限配置；过
 Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并按 AgentRun execution epoch、default-only、
 write-once 持久化；catalog default、请求模型、冻结 sentinel、Usage 或自由文本都不能补推。无观测时 Read
 Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime failure；该事实也不反向改写配置或 catalog。
+
+### Codex 自定义 Provider 模型目录
+
+Codex `config/read` 的有效配置决定选中的 Provider 与 Profile。内置 Provider（含 OpenAI、Ollama、
+LM Studio、Amazon Bedrock），以及显式设置 `model_catalog_json` 或 `model_catalog_url` 的配置，
+继续使用原生 `model/list`；其他显式声明的自定义 Provider 通过其 `base_url` 的 `GET /models`
+提供候选。路径保留 base URL 前缀、已有查询参数、静态 Header 与环境 Header。认证按选中 Provider
+读取启动环境中的 `env_key`、静态 Bearer、`OPENAI_API_KEY` 或原生 file API-key auth；不执行
+Codex helper、不读取 AWS/Gateway OAuth，也不借用 ChatGPT 账号 Token。
+
+`initialize` 返回的 `codexHome` 是 auth.json 的首选位置，环境变量仅作兼容回退。响应上限 4 MiB、
+10 秒总超时、不跟随重定向；失败只报告阶段和 HTTP 状态，不回显 URL、Header 或响应正文。
+目录只保留模型 ID、显示名和配置默认项，不推断 reasoning 参数；逐条校验并忽略无效条目，
+重复 ID 合并。没有可枚举默认项时复用既有 `codex-cli://runtime-default` sentinel，不伪造具体模型。
+
+该发现是 advisory：完整 Probe 在自定义 Provider 的 HTTP 失败时仍建立 Ready，目录为空或使用既有
+缓存；独立目录刷新仍返回脱敏错误，不推进目录成功时间，手动模型 ID 与默认执行不依赖此路径。
+它不重新引入已删除的自定义 API 编辑器，也不改变显式模型、目录不设执行门禁的原生规则。
 
 ### MiniMax 按目标参数发现
 

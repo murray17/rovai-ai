@@ -6,10 +6,17 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-23
+last_updated: 2026-11-26
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Codex 自定义 Provider 模型目录（2026-11-26）
+
+Codex 选中显式声明的 OpenAI 兼容 Provider 时，模型菜单可从该 Provider 的 `GET /models`
+读取实际模型；内置 Provider 与显式原生目录保持原有路径。目录仍只服务选择与诊断，
+HTTP 失败不阻断完整 Probe、保存或执行。边界见
+[目录边界](../../architecture/runtime-catalog-boundaries.md#codex-自定义-provider-模型目录)。
 
 ## macOS 应用内 ZIP 增量更新（2026-11-23）
 
