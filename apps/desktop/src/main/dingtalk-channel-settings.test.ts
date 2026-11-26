@@ -237,16 +237,18 @@ describe('DingTalk channel account connection', () => {
   )
 
   it.each([
-    { status: 429, code: 'Throttling' },
-    { status: 0, code: 'network failure' },
-    { status: 503, code: 'system.error' },
-    { status: 400, code: 'unauthorized' },
-    { status: 403, code: 'Forbidden.AccessDenied.AccessTokenPermissionDenied' },
-    { status: 400, code: 'chatbotNotInstall' }
-  ])('chooses the next DingTalk roster reader or backs off on $code', async ({ status, code }) => {
+    { status: 429, body: { code: 'Throttling' } },
+    { status: 0, body: null },
+    { status: 503, body: { code: 'system.error' } },
+    { status: 400, body: { code: 'unauthorized' } },
+    { status: 403, body: { code: 'Forbidden.AccessDenied.QpsLimitForApi' } },
+    { status: 403, body: { code: 'Forbidden.AccessDenied.AccessTokenPermissionDenied' }, onlyBotAFails: true },
+    { status: 403, body: { Code: 'Forbidden.AccessDenied.AccessTokenPermissionDenied' }, onlyBotAFails: true },
+    { status: 400, body: { code: 'chatbotNotInstall' }, onlyBotAFails: true }
+  ])('chooses the next DingTalk roster reader or backs off on $status $body', async ({ status, body, onlyBotAFails }) => {
     vi.useFakeTimers()
     const fixture = completedBotFixture({
-      credentialPresent: true, extraBotIds: ['b', 'c', 'd', 'e', 'f'],
+      credentialPresent: true, extraBotIds: onlyBotAFails ? ['b'] : ['b', 'c', 'd', 'e', 'f'],
       rosterRefreshes: [{ provider: 'dingtalk', tenantKey: 'corp-a', chatId: 'group-a' }]
     })
     let recovered = false
@@ -259,16 +261,16 @@ describe('DingTalk channel account connection', () => {
       expect(JSON.parse(String(init.body))).toEqual({ openConversationId: 'group-a' })
       const appKey = new Headers(init.headers).get('x-acs-dingtalk-access-token')!
       readers.push(appKey)
-      if (!recovered && (code !== 'chatbotNotInstall' || appKey === 'ding-app-a')) {
+      if (onlyBotAFails ? appKey === 'ding-app-a' : !recovered) {
         if (!status) throw new TypeError('Network unavailable')
-        return Response.json({ code }, { status })
+        return Response.json(body, { status })
       }
       return Response.json({ chatbotInstanceVOList: [{ robotCode: 'robot-b' }] })
     }))
     try {
       await fixture.service.start()
       await vi.advanceTimersByTimeAsync(0)
-      if (code === 'chatbotNotInstall') {
+      if (onlyBotAFails) {
         expect(readers).toEqual(['ding-app-a', 'ding-app-b'])
       } else {
         expect(readers).toEqual(['ding-app-a'])

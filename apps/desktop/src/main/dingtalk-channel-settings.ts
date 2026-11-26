@@ -1893,7 +1893,11 @@ export class DingTalkChannelSettingsService {
           robotCodes = await api.groupRobotCodes(chatId)
         } catch (error) {
           // A generic 'unauthorized' can also mean the group belongs to another tenant.
-          if (error instanceof DingTalkOpenApiError && !error.retryable && error.remoteCode === 'chatbotNotInstall') continue
+          if (error instanceof DingTalkOpenApiError && !error.retryable
+            && (error.remoteCode === 'chatbotNotInstall'
+              || error.remoteCode === 'Forbidden.AccessDenied.AccessTokenPermissionDenied')) {
+            continue
+          }
           throw error
         }
         if (signal.aborted) return false
