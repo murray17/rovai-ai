@@ -1,7 +1,7 @@
 import { BusyLabel } from './BusyLabel'
 import type { NavigationFindIntent, NavigationSearchRow } from './camp-navigation-search'
 import { ArchiveSettings } from './ArchiveSettings'
-import { isArchiveChangeEvent, writeArchive } from './thread-archive'
+import { deleteChat, isArchiveChangeEvent, requestArchiveCommand, writeArchive } from './thread-archive'
 import { useMemoryCapability } from './MemoryCapabilityProvider'
 import { reportProjectFileReferenceRejection } from './useProjectFileAvailability'
 import { prepareFileEditsForQuit } from './file-edit-store'
@@ -3877,6 +3877,18 @@ export function BusinessApp({
     })
   }
 
+  const showArchivedToast = (threadId: string, kind: ArchiveKind, undo: () => Promise<void>): void => {
+    setToast({
+      message: uiAttribute('已归档'), tone: 'neutral', icon: 'archive',
+      actions: [
+        { label: uiAttribute('撤销'), onSelect: () => { void undo().catch(error => notifyError(errorMessage(error))) } },
+        { label: uiAttribute('查看'), onSelect: () => {
+          void desktopNavigation.push({ kind: 'settings', section: 'archive', archive: { kind, threadId } })
+        } }
+      ]
+    })
+  }
+
   const changeArchive = async (
     threadId: string, archived: boolean, kind: ArchiveKind
   ): Promise<void> => {
@@ -3897,17 +3909,7 @@ export function BusinessApp({
         return
       }
       leaveArchivedWorkspace(threadId, kind === 'mission')
-      if (changed) setToast({
-        message: uiAttribute('已归档'), tone: 'neutral', icon: 'archive',
-        actions: [
-          { label: uiAttribute('撤销'), onSelect: () => {
-            void changeArchive(threadId, false, kind).catch(error => notifyError(errorMessage(error)))
-          } },
-          { label: uiAttribute('查看'), onSelect: () => {
-            void desktopNavigation.push({ kind: 'settings', section: 'archive', archive: { kind, threadId } })
-          } }
-        ]
-      })
+      if (changed) showArchivedToast(threadId, kind, () => changeArchive(threadId, false, kind))
     }
     try {
       if (archived && viewRef.current === 'camp' && activeThreadIdRef.current === threadId) await leaveActiveThread(apply)
@@ -4788,11 +4790,20 @@ export function BusinessApp({
       open: chatId => { setMobileConversationDrawerOpen(false); void desktopNavigation.push({kind: 'chat',chatId}) },
       mark: (item, unread) => markChat(item.chatId, item.lastReplySequence, unread),
       archive: async item => {
+        const chatId = item.chatId
         try {
-          const result=await client.request<StoredCommandResult>('chats.setArchived',{commandId:newCommandId(),command:{chatId:item.chatId,archived:true}})
-          if(result.status==='rejected') throw new OperationFailure(normalizeFailure(result))
-          if(activeChatId===item.chatId) await desktopNavigation.push({kind:'chat',chatId:null})
-        } catch(error) {showOperationError('navigation.action',error)}
+          await requestArchiveCommand(client, 'chats.setArchived', { chatId, archived: true })
+          if (activeChatId === chatId) await desktopNavigation.push({ kind: 'chat', chatId: null })
+          showArchivedToast(chatId, 'chat', async () => {
+            await requestArchiveCommand(client, 'chats.setArchived', { chatId, archived: false })
+            notify(uiAttribute('已恢复聊天'))
+          })
+        } catch (error) { showOperationError('navigation.action', error) }
+      },
+      remove: async item => {
+        await deleteChat(client, item.chatId)
+        if (activeChatId === item.chatId) await desktopNavigation.push({ kind: 'chat', chatId: null })
+        notify(uiAttribute('已提交删除'))
       },
       rename: async (item, title) => {
         const result = await client.request<StoredCommandResult>('chats.rename', {

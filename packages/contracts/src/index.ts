@@ -3895,6 +3895,7 @@ export interface ChatOpenResult {
     body: string
     revision: number
     convertedFromSteer: boolean
+    state: 'queued' | 'needs_repair'
     attachmentNames?: string[]
     quotePreview?: string
   }[]

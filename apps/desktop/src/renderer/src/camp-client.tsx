@@ -22,6 +22,7 @@ export type ThreadClient = Pick<RovaiApi,
       preview: import('@contracts').AttachmentPreview | { blob: Blob } | null
     }>
   }
+  chatDraftRecovery?: typeof import('./chat-draft-recovery').chatDraftRecovery
   editingRecovery?: EditingRecovery
   /** Reuse the global connection state; native-answer actions cannot run while disconnected. */
   connection?: { subscribe(listener: () => void): () => void; getSnapshot(): boolean }

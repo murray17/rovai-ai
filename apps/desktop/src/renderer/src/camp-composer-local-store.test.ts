@@ -1,5 +1,7 @@
 import type { ThreadComposerDraftView, ThreadSnapshot } from '@contracts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { applyReturnedChatInput, chatDraftRecovery as chatRecovery, requestChatDraftCommand } from './chat-draft-recovery'
+import { chatExtrasFromInput, readChatDraft, recoverChatEdit, saveChatDraft, saveChatExtras } from './chat-draft'
 import {
   clearLocalThreadComposerDraft,
   emptyLocalThreadComposerDraft,
@@ -12,6 +14,8 @@ import { localDraftMatchesSubmission, onLocalThreadSendRecovered, recoverLocalTh
 
 class MemoryStorage implements Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
   readonly values = new Map<string, string>()
+  get length(): number { return this.values.size }
+  key(index: number): string | null { return Array.from(this.values.keys())[index] ?? null }
   getItem(key: string): string | null { return this.values.get(key) ?? null }
   setItem(key: string, value: string): void { this.values.set(key, value) }
   removeItem(key: string): void { this.values.delete(key) }
@@ -221,4 +225,100 @@ describe('local Thread Composer drafts', () => {
     expect(materializeLocalContinuation(typed, pendingMembers)).toEqual(typed)
     expect(materializeLocalContinuation(typed, members).body).toBe('@审查员 继续')
   })
+})
+
+it('recovers Desktop chat sends and returned queue entries by the original receipt after restart', async () => {
+  const storage = new MemoryStorage()
+  vi.stubGlobal('window', { localStorage: storage })
+  vi.stubGlobal('localStorage', storage)
+  const text = (value: string): import('@contracts').ComposerDocument => ({ version: 2, segments: [{ kind: 'text', text: value }] })
+  const input = { body: '原文', skills: [], quotes: [], sourceAttachments: [] }
+  const params = { commandId: 'first', command: { chatId: 'A', mode: 'start', ...input } }
+  try {
+    saveChatDraft('chat:A', text('原文'))
+    chatRecovery.remember('A', 'chats.send', params)
+    chatRecovery.remember('B', 'chats.send', { commandId: 'other', command: { ...params.command, chatId: 'B' } })
+    const request = vi.fn().mockResolvedValue({ state: 'unknown' })
+    await chatRecovery.restore('A', request)
+    expect(request).toHaveBeenCalledExactlyOnceWith('commands.reconcile', { operation: 'chats.send', params })
+    expect(readChatDraft('chat:A')).toEqual(text('原文'))
+    expect(chatRecovery.remember('A', 'chats.send', { ...params, commandId: 'after-reload' })).toEqual({ id: 'first', reused: true })
+    request.mockResolvedValue({ state: 'recorded', result: { kind: 'queued', chatId: 'A' } })
+    await chatRecovery.restore('A', request)
+    expect(loadLocalThreadComposerDraft('chat:A')).toBeNull()
+    expect(storage.length).toBe(1)
+
+    const edit = { commandId: 'edit', command: { chatId: 'A', inputId: 'queued', expectedRevision: 1, operation: 'return_to_composer' } }
+    chatRecovery.remember('A', 'chats.pendingInputs.edit', edit)
+    saveChatDraft('chat:A', text('另一窗口的草稿'))
+    request.mockResolvedValue({ state: 'recorded', result: input })
+    // A second crash between saving the returned draft and removing the local command.
+    recoverChatEdit('A', input, 'queued')
+    await chatRecovery.restore('A', request)
+    expect(loadLocalThreadComposerDraft('chat:A')?.body).toBe('原文\n另一窗口的草稿')
+    request.mockClear()
+    await chatRecovery.restore('A', request)
+    expect(request).not.toHaveBeenCalled()
+    chatRecovery.clear('B')
+    expect(storage.length).toBe(1)
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+it('leaves both drafts recoverable when the other window already holds five of ten attachments', async () => {
+  const storage = new MemoryStorage()
+  vi.stubGlobal('window', { localStorage: storage })
+  vi.stubGlobal('localStorage', storage)
+  const files = Array.from({ length: 11 }, (_, index) => ({
+    id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
+    displayName: `file-${index}.txt`, sourcePath: `/tmp/file-${index}.txt`,
+    kind: 'file' as const, mediaType: 'text/plain', observedByteSize: 1
+  }))
+  const input = { body: '排队的六个文件', quotes: [], skills: [], sourceAttachments: files.slice(5) }
+  const params = { commandId: 'edit', command: { chatId: 'A', inputId: 'queued', expectedRevision: 1, operation: 'return_to_composer' } }
+  const request = vi.fn().mockResolvedValue({ state: 'recorded', result: input })
+  try {
+    saveChatDraft('chat:A', { version: 2, segments: [{ kind: 'text', text: '另一窗口的五个文件' }] })
+    saveChatExtras('chat:A', chatExtrasFromInput({ ...input, sourceAttachments: files.slice(0, 5) }))
+    const current = loadLocalThreadComposerDraft('chat:A')
+    expect(applyReturnedChatInput(params, input)).toBe(false)
+    expect(await chatRecovery.restore('A', request)).toMatchObject({ deferred: true })
+    expect(loadLocalThreadComposerDraft('chat:A')).toEqual(current)
+    expect(chatRecovery.has('A')).toBe(true)
+    clearLocalThreadComposerDraft('chat:A')
+    expect(await chatRecovery.restore('A', request)).toEqual({ changed: true, deferred: false })
+    expect(request).toHaveBeenLastCalledWith('commands.reconcile', { operation: 'chats.pendingInputs.edit', params })
+    expect(loadLocalThreadComposerDraft('chat:A')).toMatchObject({ body: input.body, attachments: files.slice(5).map(({ id }) => ({ id })) })
+    expect(chatRecovery.has('A')).toBe(false)
+  } finally { vi.unstubAllGlobals() }
+})
+
+it('drops definitive rejected submissions and preserves the original receipt across an offline retry', async () => {
+  const storage = new MemoryStorage()
+  vi.stubGlobal('window', { localStorage: storage })
+  vi.stubGlobal('localStorage', storage)
+  const request = vi.fn()
+  const client = { request, chatDraftRecovery: chatRecovery }
+  const params = { commandId: 'original', command: { chatId: 'A', body: '你好', skills: [], quotes: [], sourceAttachments: [] } }
+  const offline = { kind: 'full_core_unavailable', code: 'full_core_unavailable' }
+  const rejected = { kind: 'domain_rejection', code: 'stale_version' }
+  const generic = { kind: 'infrastructure_failure', code: 'CORE_REQUEST_FAILED' }
+  const lost = { kind: 'infrastructure_failure', code: 'core_process_error' }
+  try {
+    for (const failure of [offline, rejected, generic]) {
+      request.mockRejectedValueOnce(failure).mockImplementation(async () => ({ state: 'unknown' }))
+      await expect(requestChatDraftCommand(client, 'chats.send', params)).rejects.toEqual(failure)
+      expect(chatRecovery.has('A')).toBe(false)
+    }
+    request.mockRejectedValueOnce(lost)
+    await expect(requestChatDraftCommand(client, 'chats.send', params)).rejects.toEqual(lost)
+    request.mockRejectedValueOnce(offline).mockRejectedValueOnce(offline)
+    await expect(requestChatDraftCommand(client, 'chats.send', { ...params, commandId: 'retry' })).rejects.toEqual(offline)
+    expect(request).toHaveBeenLastCalledWith('commands.reconcile', { operation: 'chats.send', params })
+    expect(chatRecovery.has('A')).toBe(true)
+    request.mockResolvedValue({ state: 'recorded', result: { chatId: 'A', kind: 'queued' } })
+    expect(await chatRecovery.restore('A', request)).toEqual({ changed: true, deferred: false })
+    expect(chatRecovery.has('A')).toBe(false)
+  } finally { vi.unstubAllGlobals() }
 })

@@ -2,6 +2,7 @@ import type { ChatListItem, ChatReadState, ChatReplyPosition } from '@contracts'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useRef, useState, type FormEvent, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import { ArchiveDeleteDialog } from './ArchiveSettings'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { normalizeThreadTitle, THREAD_TITLE_MAX_SCALARS } from './camp-title'
 import type { AppUpdateBadgePresentation } from './app-update-presentation'
@@ -23,6 +24,7 @@ export interface ChatNavigationProps extends ChatPickerProps {
   open(id: string | null): void
   mark(item: ChatReplyPosition, unread: boolean): void
   archive?(item: ChatListItem): Promise<void>
+  remove?(item: ChatListItem): Promise<void>
   rename(item: ChatListItem, title: string): Promise<void>
 }
 
@@ -55,6 +57,8 @@ export function ChatSectionRail({ chat, view, projects, missions, automations, m
 export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNavigationProps; headerAction?: ReactNode }): React.JSX.Element {
   const { list, states, activeId, open, mark } = navigation
   const [editing, setEditing] = useState<ChatListItem | null>(null)
+  const [deleting, setDeleting] = useState<ChatListItem | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   function row(item: ChatListItem) {
     const unread = chatHasUnread(item, states[item.chatId])
     return <div key={item.chatId} className={'camp-nav-row chat-list-row' + (item.chatId === activeId ? ' selected' : '')}>
@@ -75,6 +79,7 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => mark(item, !unread)}>{uiAttribute(unread ? '标为已读' : '标为未读')}</DropdownMenu.Item>
           <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => setEditing(item)}>{uiAttribute('重命名')}</DropdownMenu.Item>
           {navigation.archive && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => void navigation.archive?.(item)}>{uiAttribute('归档')}</DropdownMenu.Item>}
+          {navigation.remove && <DropdownMenu.Item className="sidebar-action-menu-item danger" onSelect={() => setDeleting(item)}>{uiAttribute('删除')}</DropdownMenu.Item>}
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root>
     </div>
@@ -91,6 +96,13 @@ export function ChatListPanel({ navigation, headerAction }: { navigation: ChatNa
       {list.hasPrevious && <button type="button" disabled={list.loading} onClick={list.previous}>{uiAttribute('上一页')}</button>}
       {list.page?.nextCursor && <button type="button" disabled={list.loading} onClick={list.next}>{uiAttribute('下一页')}</button>}
     </div>}
+    {deleting && <ArchiveDeleteDialog item={{ title: deleting.title, chatId: deleting.chatId, missionId: null }}
+      busy={deleteBusy} onClose={() => setDeleting(null)} onDelete={async () => {
+        if (!navigation.remove || deleteBusy) return
+        setDeleteBusy(true)
+        try { await navigation.remove(deleting); setDeleting(null) }
+        finally { setDeleteBusy(false) }
+      }} />}
     {editing && <RenameDialog item={editing} save={navigation.rename} close={() => setEditing(null)} />}
   </section>
 }

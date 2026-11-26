@@ -3567,6 +3567,27 @@ impl Core {
         if let Err(error) = self.process_camp_deletions_locked().await {
             eprintln!("Thread deletion coordinator scan failed: {error:#}");
         }
+        if let Err(error) = self.finish_chat_deletions().await {
+            eprintln!("Chat directory cleanup deferred: {error:#}");
+        }
+    }
+
+    async fn finish_chat_deletions(&self) -> Result<()> {
+        let pending = {
+            let mut database = self.database.lock().await;
+            rovai_core::chat::prepare_deletions(&mut database)?
+        };
+        for cleanup in pending {
+            let operation = cleanup.operation_id.clone();
+            match tokio::task::spawn_blocking(move || cleanup.remove_directory()).await? {
+                Ok(()) => {
+                    let database = self.database.lock().await;
+                    rovai_core::chat::complete_directory_cleanup(&database, &operation)?;
+                }
+                Err(error) => eprintln!("Chat directory cleanup {operation} deferred: {error:#}"),
+            }
+        }
+        Ok(())
     }
 
     async fn process_camp_deletions_locked(self: &Arc<Self>) -> Result<()> {
@@ -11792,6 +11813,9 @@ impl Core {
                     )?
                 };
                 drop(database);
+                if request.method == "chats.delete" {
+                    self.camp_deletion_notify.notify_one();
+                }
                 self.agent_run_cancellation_notify.notify_one();
                 self.execution_wake.runs.notify_one();
                 emit(
@@ -28698,7 +28722,6 @@ async fn process_agent_run_exit(
 async fn dispatch_pending_single_chat_inputs(core: &Core) -> Result<()> {
     let chats = {
         let mut db = core.database.lock().await;
-        rovai_core::chat::finish_deletions(&mut db)?;
         rovai_core::chat::publish_ready(&mut db)?
     };
     for chat_id in chats {

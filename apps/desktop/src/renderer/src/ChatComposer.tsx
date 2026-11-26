@@ -23,6 +23,10 @@ import { StructuredMentionComposer, type StructuredMentionComposerHandle } from 
 import { ComposerDeliveryAction } from './ComposerDeliveryAction'
 import { useChatSkills } from './useChatSkills'
 import { uiAttribute } from './interface-language'
+import { chatDraftRecovery, requestChatDraftCommand } from './chat-draft-recovery'
+import { reportOperationFailure } from './operation-failure'
+import { attachmentErrorMessage } from './ThreadWorkspace'
+import { useComposerSendShortcut } from './ShortcutProvider'
 
 export function ChatComposer({
   client,
@@ -57,12 +61,15 @@ export function ChatComposer({
     setExtras(next)
   }
   async function attach(files: File[]) {
-    if (busy || preparing || editingQueue || !files.length) return
+    if (locked || !files.length) return
     setPreparing(true)
     const attachments = [...extras.attachments]
     try {
       for (const file of files) {
-        if (attachments.length >= 10) throw new Error(uiAttribute('最多可添加 10 个附件'))
+        if (attachments.length >= 10) {
+          setError(uiAttribute('最多可添加 10 个附件'))
+          break
+        }
         const source = await client.composerAttachments.prepare(
           key,
           loadLocalThreadComposerDraft(key)?.revision ?? 1,
@@ -72,7 +79,7 @@ export function ChatComposer({
         changeExtras({ ...extras, attachments: [...attachments] })
       }
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure))
+      setError(attachmentErrorMessage(failure))
     } finally {
       setPreparing(false)
     }
@@ -94,9 +101,17 @@ export function ChatComposer({
       mounted.current = false
     }
   }, [chatId])
+  const shortcut = useComposerSendShortcut()
+  function syncLocalDraft() {
+    const draft = loadLocalThreadComposerDraft(key)
+    const value = draft?.content ?? emptyComposerDocument()
+    setExtras({ attachments: draft?.attachments ?? [], quotes: draft?.quotes ?? [] })
+    handle.current?.replaceDocument(value)
+    setContent(value)
+  }
   const body = composerDocumentToPlainText(content)
   async function submit() {
-    if (sending.current || editingQueue || preparing || !handle.current) return
+    if (sending.current || editingQueue || preparing || checking || !handle.current) return
     sending.current = true
     setBusy(true)
     setError('')
@@ -124,16 +139,13 @@ export function ChatComposer({
       }
       const signature = JSON.stringify(command)
       if (attempt.current?.signature !== signature) attempt.current = { signature, commandId: newCommandId() }
-      const result = await client.request<ChatSendResult>('chats.send', {
-        commandId: attempt.current.commandId,
-        command
-      })
+      const params = { commandId: attempt.current.commandId, command }
+      const result = await requestChatDraftCommand<ChatSendResult>(client, 'chats.send', params)
       consumeChatDraft(key, document, agentId, draftId, !chatId, extras)
+      if (chatId) client.chatDraftRecovery?.finish(chatId, params.commandId)
       attempt.current = null
       if (mounted.current) {
-        setExtras({ attachments: [], quotes: [] })
-        handle.current?.replaceDocument(emptyComposerDocument())
-        setContent(emptyComposerDocument())
+        syncLocalDraft()
         onSent(result)
       }
     } catch (failure) {
@@ -151,7 +163,7 @@ export function ChatComposer({
         }
         setError(uiAttribute('这份草稿已在其他窗口发送。当前输入已保留，可另开话题发送。'))
       } else {
-        setError(failure instanceof Error ? failure.message : String(failure))
+        setError(reportOperationFailure('chat.send', failure).message)
       }
     } finally {
       sending.current = false
@@ -159,7 +171,26 @@ export function ChatComposer({
     }
   }
   const empty = !body.trim() && !extras.attachments.length && !extras.quotes.length
-  const locked = busy || preparing || editingQueue
+  const [checking, setChecking] = useState(() => Boolean(chatId && chatDraftRecovery.has(chatId)))
+  const [recoveryNotice, setRecoveryNotice] = useState(false)
+  const [recheck, setRecheck] = useState(0)
+  useEffect(() => {
+    if (!chatId || !chatDraftRecovery.has(chatId)) {
+      setChecking(false)
+      setRecoveryNotice(false)
+      return
+    }
+    let current = true
+    setChecking(true)
+    void chatDraftRecovery.restore(chatId, client.request).then(({ changed, deferred }) => {
+      if (!current) return
+      if (changed || deferred) syncLocalDraft()
+      setRecoveryNotice(deferred)
+    }).catch(() => { if (current) setRecoveryNotice(true) })
+      .finally(() => { if (current) setChecking(false) })
+    return () => { current = false }
+  }, [chatId, client, empty, recheck])
+  const locked = busy || preparing || editingQueue || checking
   async function stop() {
     if (!chatId || !active || locked) return
     setBusy(true)
@@ -174,7 +205,7 @@ export function ChatComposer({
         }
       })
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure))
+      setError(reportOperationFailure('run.stop', failure).message)
     } finally {
       setBusy(false)
     }
@@ -211,6 +242,14 @@ export function ChatComposer({
           }}
         />
       )}
+      {recoveryNotice && (
+        <div className="chat-draft-restore" role="status">
+          <span>{uiAttribute('当前草稿已保留。处理后可取回待恢复的输入。')}</span>
+          <button className="quiet-button" type="button" disabled={checking} onClick={() => setRecheck(value => value + 1)}>
+            {uiAttribute('取回')}
+          </button>
+        </div>
+      )}
       {chatId && detail && (
         <ChatQueue
           items={detail.pendingInputs}
@@ -218,11 +257,9 @@ export function ChatComposer({
           chatId={chatId}
           canEdit={!locked && empty}
           onEditing={setEditingQueue}
-          onRestore={(value, restored) => {
-            changeExtras(restored)
-            saveChatDraft(key, value)
-            handle.current?.replaceDocument(value)
-            setContent(value)
+          onRestore={(applied) => {
+            setRecoveryNotice(!applied)
+            syncLocalDraft()
             handle.current?.focus('end')
           }}
           onError={setError}
@@ -345,6 +382,14 @@ export function ChatComposer({
               </button>
             </div>
             <div className="composer-actions">
+              {!(active && empty) && <span className="composer-hint">
+                <span className="sr-only">{uiAttribute('{0} 发送，Shift+Enter 换行', shortcut?.label ?? 'Enter')}</span>
+                <span className="composer-hint-visual" aria-hidden="true">
+                  <kbd>{shortcut?.aria && shortcut.aria !== 'Enter' ? shortcut.label : '↵'}</kbd>
+                  <span>{uiAttribute('发送')}</span><span className="composer-hint-separator">·</span>
+                  <kbd>⇧↵</kbd><span>{uiAttribute('换行')}</span>
+                </span>
+              </span>}
               {active && empty ? (
                 <ComposerPrimaryAction
                   action="stop"

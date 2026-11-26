@@ -2211,12 +2211,8 @@ impl CollaborationService {
 
             let changed = task_business_fields_changed(&original, &projected);
             if !changed {
-                let mut public=original;
-                hide_private_task_sources(transaction,&mut public)?;
-                let detail = public_task_detail(
-                    public,
-                    task_available_actions(&envelope.actor, &projected, can_update_any),
-                );
+                let detail = load_task_detail(transaction, &original.id, &envelope.actor, can_update_any)?
+                    .context("Task is missing")?;
                 let mut value = serde_json::to_value(detail)?;
                 value["changed"] = json!(false);
                 return Ok(CommandHandlerResult::applied(
@@ -2321,18 +2317,9 @@ impl CollaborationService {
     ) -> Result<Vec<TaskRecord>> {
         crate::task_capability::require_enabled(database.connection())?;
         let scope = task_read_scope(database.connection(), camp_id, actor, execution_epoch)?;
-        let mut statement = database.connection().prepare(
-            r#"
-            SELECT id, camp_id, title, description, acceptance_criteria_json, status,
-                   assignee_agent_id, blocked_reason, completion_summary, cancel_reason,
-                   created_by_type, created_by_id, source_agent_run_id,
-                   closed_by_type, closed_by_id, closed_by_agent_run_id,
-                   created_at, updated_at, closed_at
-            FROM task
-            WHERE camp_id = ?1
-            ORDER BY created_at DESC, id DESC
-            "#,
-        )?;
+        let mut statement = database.connection().prepare_cached(&format!(
+            "{PUBLIC_TASK_SELECT} WHERE t.camp_id=?1 ORDER BY t.created_at DESC, t.id DESC"
+        ))?;
         let rows = statement.query_map([camp_id], task_record_from_row)?;
         let mut tasks = Vec::new();
         for row in rows {
@@ -2340,7 +2327,6 @@ impl CollaborationService {
             if scope.can_read(&task) {
                 task.description =
                     synthesize_task_description(&task.description, &task.acceptance_criteria);
-                hide_private_task_sources(database.connection(), &mut task)?;
                 tasks.push(task);
             }
         }
@@ -2453,23 +2439,11 @@ impl CollaborationService {
         let task = database
             .connection()
             .query_row(
-                r#"
-                SELECT id, camp_id, title, description, acceptance_criteria_json, status,
-                       assignee_agent_id, blocked_reason, completion_summary, cancel_reason,
-                       created_by_type, created_by_id, source_agent_run_id,
-                       closed_by_type, closed_by_id, closed_by_agent_run_id,
-                       created_at, updated_at, closed_at
-                FROM task
-                WHERE id = ?1 AND camp_id = ?2
-                "#,
+                &format!("{PUBLIC_TASK_SELECT} WHERE t.id=?1 AND t.camp_id=?2"),
                 params![task_id, camp_id],
                 task_record_from_row,
             )
             .optional()?;
-        let mut task = task;
-        if let Some(detail) = task.as_mut() {
-            hide_private_task_sources(database.connection(), detail)?;
-        }
         Ok(task
             .filter(|candidate| scope.can_read(candidate))
             .map(|task| {
@@ -4744,7 +4718,18 @@ fn task_read_scope(
     }
 }
 
-fn task_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
+// Both Thread snapshots and task tools use this projection. Authority and quotas read the original task.
+pub(crate) const PUBLIC_TASK_SELECT: &str = "SELECT t.id, t.camp_id, t.title, t.description,
+    t.acceptance_criteria_json, t.status, t.assignee_agent_id, t.blocked_reason, t.completion_summary,
+    t.cancel_reason, t.created_by_type, t.created_by_id,
+    CASE WHEN source.invocation_kind='chat' THEN NULL ELSE t.source_agent_run_id END,
+    t.closed_by_type, t.closed_by_id,
+    CASE WHEN closer.invocation_kind='chat' THEN NULL ELSE t.closed_by_agent_run_id END,
+    t.created_at, t.updated_at, t.closed_at
+    FROM task t LEFT JOIN agent_run source ON source.id=t.source_agent_run_id
+    LEFT JOIN agent_run closer ON closer.id=t.closed_by_agent_run_id";
+
+pub(crate) fn task_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
     let status = match row.get::<_, String>(5)?.as_str() {
         "pending" => TaskStatus::Pending,
         "in_progress" => TaskStatus::InProgress,
@@ -4810,35 +4795,23 @@ fn load_task_detail(
     actor: &ActorRef,
     can_update_any: bool,
 ) -> Result<Option<TaskDetail>> {
-    let mut task = load_task_record(transaction, task_id)?;
-    if let Some(detail) = task.as_mut() {
-        hide_private_task_sources(transaction, detail)?;
-    }
+    let task = transaction
+        .query_row(
+            &format!("{PUBLIC_TASK_SELECT} WHERE t.id=?1"),
+            [task_id],
+            task_record_from_row,
+        )
+        .optional()?;
     Ok(task.map(|task| {
         let available_actions = task_available_actions(actor, &task, can_update_any);
         public_task_detail(task, available_actions)
     }))
 }
 
-fn hide_private_task_sources(connection: &Connection, task: &mut TaskRecord) -> Result<()> {
-    for id in [
-        &mut task.source_agent_run_id,
-        &mut task.closed_by_agent_run_id,
-    ] {
-        if let Some(run) = id.as_deref()
-            && connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND invocation_kind='chat')",
-                [run],
-                |row| row.get::<_, bool>(0),
-            )?
-        {
-            *id = None;
-        }
-    }
-    Ok(())
-}
-
-fn public_task_detail(mut task: TaskRecord, available_actions: Vec<String>) -> TaskDetail {
+pub(crate) fn public_task_detail(
+    mut task: TaskRecord,
+    available_actions: Vec<String>,
+) -> TaskDetail {
     task.description = synthesize_task_description(&task.description, &task.acceptance_criteria);
     TaskDetail {
         task,
@@ -10068,9 +10041,14 @@ mod slow_tests {
                 &mut database,
                 &camp_id,
                 0,
-                composer_document(vec![Segment::MemberMention {
-                    agent_id: "agent_1".to_string(),
-                }]),
+                composer_document(vec![
+                    Segment::MemberMention {
+                        agent_id: "agent_1".to_string(),
+                    },
+                    Segment::Text {
+                        text: " 请检查草稿".into(),
+                    },
+                ]),
             )
             .unwrap();
         let invalid_send = user_envelope(
@@ -10153,7 +10131,7 @@ mod slow_tests {
         assert_eq!(rejected_empty.result.code, "camp_message.empty_body");
         assert_eq!(
             rejected_empty.result.payload["message"],
-            "Thread message must contain text or at least one ready attachment"
+            "请填写这次的问题后再发送"
         );
         let empty = store.load_draft(&database, &camp_id).unwrap();
 

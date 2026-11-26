@@ -1,3 +1,5 @@
+import { chatDraftRecovery } from './chat-draft-recovery'
+import { clearLocalThreadComposerDraft } from './camp-composer-local-store'
 import type { ArchiveCommand, ArchiveCommandPayload, ArchiveItem, ArchiveKind, CoreEvent, DeleteThreadCommand, StoredCommandResult } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import type { ThreadClient } from './camp-client'
@@ -83,6 +85,12 @@ export async function requestArchiveCommand(
   const result = await client.request<StoredCommandResult>(method, { commandId: newCommandId(), command })
   if (result.status === 'rejected') throw new ArchiveCommandRejected(result.code)
   return result
+}
+
+export async function deleteChat(client: Pick<ThreadClient, 'request'>, chatId: string): Promise<void> {
+  await requestArchiveCommand(client, 'chats.delete', { chatId })
+  chatDraftRecovery.clear(chatId)
+  clearLocalThreadComposerDraft('chat:' + chatId)
 }
 
 export async function writeArchive(

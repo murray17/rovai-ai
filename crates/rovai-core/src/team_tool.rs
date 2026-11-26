@@ -3328,11 +3328,14 @@ mod tests {
             )
             .unwrap();
         let creation_key = Uuid::new_v4().to_string();
+        let pattern = "😀\n\"中";
+        let repetitions = crate::agent_profile::PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS
+            / pattern.chars().count();
         let input = crate::member_studio::MemberCreateInput {
             creation_key: creation_key.clone(),
             display_name: "Nova Test Member".to_string(),
             team_role: "Researcher".to_string(),
-            professional_responsibilities: "😀\n\"中".repeat(2_500),
+            professional_responsibilities: pattern.repeat(repetitions),
             personality_traits: vec!["Precise".to_string()],
             working_principles: "State evidence and uncertainty.".to_string(),
             growth_topic: "Shorten feedback loops.".to_string(),
@@ -8063,6 +8066,7 @@ mod tests {
                 crate::memory_capability::DISABLED_CODE
             );
             let input = MemoryViewInput {
+                thread_id: None,
                 scope,
                 counterparty_agent_id: (scope == MemoryScopeKind::Relationship)
                     .then(|| "agent_2".into()),

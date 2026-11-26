@@ -93,6 +93,26 @@ pub(crate) fn stop(
     })
 }
 
+fn cancel_active_run(
+    tx: &Transaction<'_>,
+    chat_id: &str,
+    actor: &ActorRef,
+    now: &str,
+) -> Result<()> {
+    let run: Option<String> = tx
+        .query_row(
+            "SELECT id FROM agent_run WHERE conversation_id = ?1
+             AND status IN ('queued','running','waiting')",
+            [chat_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(run) = run {
+        settle_abortive_agent_run_in_tx(tx, &run, "chat_archived", actor, now)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn set_archived(
     db: &mut Database,
     envelope: &CommandEnvelope<SetArchived>,
@@ -104,13 +124,7 @@ pub(crate) fn set_archived(
         if archived != command.archived {
             let now = chrono::Utc::now().to_rfc3339();
             if command.archived {
-                let run: Option<String> = tx.query_row(
-                    "SELECT id FROM agent_run WHERE conversation_id = ?1 AND status IN ('queued','running','waiting')",
-                    [&command.chat_id], |row| row.get(0),
-                ).optional()?;
-                if let Some(run) = run {
-                    settle_abortive_agent_run_in_tx(tx, &run, "chat_archived", &envelope.actor, &now)?;
-                }
+                cancel_active_run(tx, &command.chat_id, &envelope.actor, &now)?;
             }
             tx.execute(
                 "UPDATE chat_topic SET archived_at = ?2, version = version+1 WHERE conversation_id = ?1",
@@ -128,11 +142,15 @@ pub(crate) fn request_delete(
     DomainCommandGateway.execute(db, e, |tx| {
         let c = &e.payload;
         let (archived, existing) = topic(tx, &c.chat_id, &e.actor)?;
-        ensure!(archived, "chat.archive_required");
+        let now = chrono::Utc::now().to_rfc3339();
+        if !archived {
+            cancel_active_run(tx, &c.chat_id, &e.actor, &now)?;
+        }
         let op = existing.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         tx.execute(
-            "UPDATE chat_topic SET deletion_operation_id=?2 WHERE conversation_id=?1",
-            params![c.chat_id, op],
+            "UPDATE chat_topic SET deletion_operation_id=?2, archived_at=coalesce(archived_at,?3),
+                version=version+1 WHERE conversation_id=?1 AND deletion_operation_id IS NULL",
+            params![c.chat_id, op, now],
         )?;
         Ok(CommandHandlerResult::applied(
             "chat.deletion_accepted",
@@ -142,7 +160,15 @@ pub(crate) fn request_delete(
     })
 }
 
-pub(crate) fn finish_deletions(db: &mut Database) -> Result<()> {
+pub(crate) struct ChatDirectoryCleanup {
+    pub operation_id: String,
+    root: std::path::PathBuf,
+    chat_id: String,
+    relative: String,
+    identity: Option<String>,
+}
+
+pub(crate) fn prepare_deletions(db: &mut Database) -> Result<Vec<ChatDirectoryCleanup>> {
     let root = db.runtime_camp_files_root().to_owned();
     let ready = db.connection().prepare_cached(
         "SELECT conversation_id, deletion_operation_id FROM chat_topic
@@ -157,18 +183,21 @@ pub(crate) fn finish_deletions(db: &mut Database) -> Result<()> {
             eprintln!("chat deletion {op} remains pending: {error:#}");
         }
     }
-    let cleanup = db.connection().prepare_cached(
+    let mut statement = db.connection().prepare_cached(
         "SELECT id, chat_id, cleanup_root_relative_path, cleanup_root_identity_digest
          FROM camp_attachment_view_operation WHERE kind = 'chat_delete_cleanup' AND status = 'committed'"
-    )?.query_map([], |row| Ok((
-        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?,
-    )))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for (op, chat, relative, identity) in cleanup {
-        if let Err(error) = clean_directory(db, &root, &op, &chat, &relative, identity.as_deref()) {
-            eprintln!("chat directory cleanup {op} remains pending: {error:#}");
-        }
-    }
-    Ok(())
+    )?;
+    Ok(statement
+        .query_map([], |row| {
+            Ok(ChatDirectoryCleanup {
+                operation_id: row.get(0)?,
+                root: root.clone(),
+                chat_id: row.get(1)?,
+                relative: row.get(2)?,
+                identity: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 fn delete_rows(db: &mut Database, root: &std::path::Path, chat: &str, op: &str) -> Result<()> {
@@ -245,28 +274,27 @@ fn delete_rows(db: &mut Database, root: &std::path::Path, chat: &str, op: &str) 
     Ok(())
 }
 
-fn clean_directory(
-    db: &Database,
-    root: &std::path::Path,
-    op: &str,
-    chat: &str,
-    relative: &str,
-    identity: Option<&str>,
-) -> Result<()> {
-    ensure!(relative == chat, "chat.directory_changed");
-    let path = chat_directory(root, chat)?;
-    reject_existing_symlink_components(&path)?;
-    match std::fs::symlink_metadata(&path) {
-        Ok(_) => {
-            ensure!(
-                identity == Some(directory_identity_digest(&path)?.as_str()),
-                "chat.directory_changed"
-            );
-            std::fs::remove_dir_all(&path)?;
+impl ChatDirectoryCleanup {
+    pub(crate) fn remove_directory(&self) -> Result<()> {
+        ensure!(self.relative == self.chat_id, "chat.directory_changed");
+        let path = chat_directory(&self.root, &self.chat_id)?;
+        reject_existing_symlink_components(&path)?;
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => {
+                ensure!(
+                    self.identity.as_deref() == Some(directory_identity_digest(&path)?.as_str()),
+                    "chat.directory_changed"
+                );
+                std::fs::remove_dir_all(&path)?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
+        Ok(())
     }
-    db.connection().execute("UPDATE camp_attachment_view_operation SET status='completed',completed_at=datetime('now'),updated_at=datetime('now') WHERE id=?1 AND status='committed'",[op])?;
+}
+
+pub(crate) fn complete_directory_cleanup(db: &Database, operation_id: &str) -> Result<()> {
+    db.connection().execute("UPDATE camp_attachment_view_operation SET status='completed',completed_at=datetime('now'),updated_at=datetime('now') WHERE id=?1 AND kind='chat_delete_cleanup' AND status='committed'",[operation_id])?;
     Ok(())
 }

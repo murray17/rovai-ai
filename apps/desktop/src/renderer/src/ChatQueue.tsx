@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react'
-import type { ChatOpenResult, ComposerDocument } from '@contracts'
+import type { ChatOpenResult } from '@contracts'
 import type { ThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { uiAttribute } from './interface-language'
-import { chatDocumentFromInput, chatExtrasFromInput, type ReturnedChatInput, type ChatDraftExtras } from './chat-draft'
+import { applyReturnedChatInput, requestChatDraftCommand } from './chat-draft-recovery'
+import { reportOperationFailure } from './operation-failure'
+import { type ReturnedChatInput } from './chat-draft'
 
 export function ChatQueue({
   client,
@@ -18,7 +20,7 @@ export function ChatQueue({
   chatId: string
   items: ChatOpenResult['pendingInputs']
   canEdit: boolean
-  onRestore(value: ComposerDocument, extras: ChatDraftExtras): void
+  onRestore(applied: boolean): void
   onEditing(value: boolean): void
   onError(message: string): void
 }) {
@@ -31,19 +33,20 @@ export function ChatQueue({
     setBusy(true)
     if (edit) onEditing(true)
     try {
-      const result = await client.request<ReturnedChatInput>('chats.pendingInputs.edit', {
+      const params = {
         commandId: attempt.current.id,
-        command: {
-          chatId,
-          inputId: item.inputId,
-          expectedRevision: item.revision,
-          operation: edit ? 'return_to_composer' : 'remove'
-        }
-      })
-      if (edit) onRestore(chatDocumentFromInput(result.body, result.skills), chatExtrasFromInput(result))
+        command: { chatId, inputId: item.inputId, expectedRevision: item.revision,
+          operation: edit ? 'return_to_composer' : 'remove' }
+      }
+      if (edit) {
+        const result = await requestChatDraftCommand<ReturnedChatInput>(client, 'chats.pendingInputs.edit', params)
+        onRestore(applyReturnedChatInput(params, result))
+      } else {
+        await client.request('chats.pendingInputs.edit', params)
+      }
       attempt.current = null
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error))
+      onError(reportOperationFailure('chat.queue', error).message)
     } finally {
       setBusy(false)
       if (edit) onEditing(false)
@@ -54,7 +57,9 @@ export function ChatQueue({
     <section className="chat-queue-tray" aria-label={uiAttribute('排队中的消息')}>
       {items.map((item) => (
         <div className="chat-queue-row" key={item.inputId}>
-          <span className="chat-queue-label">{uiAttribute(item.convertedFromSteer ? '已转为排队' : '排队中')}</span>
+          <span className="chat-queue-label" data-needs-repair={item.state === 'needs_repair' || undefined}>
+            {uiAttribute(item.state === 'needs_repair' ? '发送受阻，请编辑或移除' : item.convertedFromSteer ? '已转为排队' : '排队中')}
+          </span>
           <span className="chat-queue-text" title={item.body}>
             {item.body || item.attachmentNames?.join('、') || item.quotePreview}
           </span>

@@ -856,7 +856,45 @@ mod tests {
             serde_json::from_str::<Value>(&frozen).unwrap()[0]["skillId"],
             "rovai:review-duo"
         );
-        archive(&mut db, "archive-again", true);
+        let queued_file = db.directory().join("queue.txt");
+        std::fs::write(&queued_file, "queued file").unwrap();
+        let files = crate::local_attachment_source::observe_agent_source_attachments(
+            &[queued_file.to_string_lossy().into_owned()],
+            db.directory(),
+        )
+        .unwrap();
+        let broken = submit(
+            &mut db,
+            "file-at-head",
+            json!({"chatId":chat,"mode":"start","body":"核对文件","sourceAttachments":files}),
+        )
+        .unwrap();
+        submit(
+            &mut db,
+            "behind",
+            json!({"chatId":chat,"mode":"start","body":"下一件事"}),
+        )
+        .unwrap();
+        std::fs::remove_file(queued_file).unwrap();
+        archive(&mut db, "pause-file", true);
+        archive(&mut db, "resume-file", false);
+        assert_eq!(publish_ready(&mut db).unwrap(), [chat]);
+        assert!(publish_ready(&mut db).unwrap().is_empty());
+        let pending = snapshot(&mut db).pending_inputs;
+        assert_eq!(
+            pending.iter().map(|p| p.state.as_str()).collect::<Vec<_>>(),
+            ["needs_repair", "queued"]
+        );
+        let edit = user_command("edit-file", serde_json::from_value::<EditPending>(json!({
+            "chatId":chat,"inputId":broken["inputId"],"expectedRevision":pending[0].revision,"operation":"return_to_composer"
+        })).unwrap());
+        assert_eq!(
+            edit_pending(&mut db, &edit).unwrap().result.payload["body"],
+            "核对文件"
+        );
+        assert!(edit_pending(&mut db, &edit).unwrap().replayed);
+        assert_eq!(publish_ready(&mut db).unwrap(), [chat]);
+        // The sidebar can confirm permanent deletion while its next Run is still queued.
         super::super::request_delete(
             &mut db,
             &user_command(
@@ -874,7 +912,15 @@ mod tests {
         let outside = db.directory().join("external.txt");
         std::fs::write(&outside, "external").unwrap();
         db.reopen_production().unwrap();
-        super::super::finish_deletions(&mut db).unwrap();
+        let pending = super::super::prepare_deletions(&mut db).unwrap();
+        assert_eq!(pending.len(), 1);
+        db.reopen_production().unwrap();
+        let pending = super::super::prepare_deletions(&mut db).unwrap();
+        for cleanup in pending {
+            cleanup.remove_directory().unwrap();
+            cleanup.remove_directory().unwrap();
+            super::super::complete_directory_cleanup(&db, &cleanup.operation_id).unwrap();
+        }
         assert_eq!(count(&db, "chat_topic"), 0);
         assert!(!directory.exists());
         assert!(outside.is_file());
@@ -939,6 +985,42 @@ mod tests {
             )
             .unwrap();
         let root = db.directory().to_owned();
+        let card = serde_json::json!({"creationKey":Uuid::new_v4().to_string(),"displayName":"发布助手","teamRole":"发布"});
+        let create_member = |db: &mut Database, value: Value| {
+            crate::member_studio::create_member(
+                db,
+                &root,
+                &auth,
+                serde_json::from_value(value).unwrap(),
+            )
+        };
+        let first = create_member(&mut db, card.clone()).unwrap();
+        assert!(!first.execution.replayed);
+        assert!(
+            create_member(&mut db, card.clone())
+                .unwrap()
+                .execution
+                .replayed
+        );
+        let mut changed_card = card.clone();
+        changed_card["workingPrinciples"] = json!("修改过的确认卡");
+        let conflict = create_member(&mut db, changed_card.clone()).unwrap_err();
+        assert_eq!(
+            conflict
+                .downcast_ref::<crate::member_studio::MemberOperationError>()
+                .unwrap()
+                .code,
+            "member.creation_key_conflict"
+        );
+        // A receipt from an older build can be verified against the original, untouched profile.
+        let old_receipt = format!("member-create:{}", card["creationKey"].as_str().unwrap());
+        assert_eq!(1, db.connection().execute(
+            "UPDATE event_log SET result_payload_json=json_remove(result_payload_json,'$.cardDigest')
+             WHERE command_id=?1 AND event_type='command.result'",
+            [&old_receipt],
+        ).unwrap());
+        assert!(create_member(&mut db, card).unwrap().execution.replayed);
+        assert!(create_member(&mut db, changed_card).is_err());
         let created = super::super::create_thread(
             &mut db,
             &auth,
@@ -956,7 +1038,7 @@ mod tests {
             .unwrap_or_else(|| panic!("{:?}", created.result));
         let task=TeamTaskToolInvocation{
             native_binding_id:binding.native_binding_id.clone(),binding_credential:binding.binding_credential.clone(),runtime_tool_call_id:"create-task".into(),
-            input:serde_json::from_value(json!({"threadId":target,"title":"检查发布说明","description":"核对时间","assigneeAgentId":"agent_2"})).unwrap()
+            input:serde_json::from_value(json!({"threadId":target,"title":"检查发布说明","description":"核对时间","assigneeAgentId":"agent_1"})).unwrap()
         };
         let result = tools.create_task(&mut db, &task).unwrap();
         assert_eq!(
@@ -968,6 +1050,38 @@ mod tests {
         assert_eq!(result.result.payload["createdById"], "agent_1");
         assert!(result.result.payload["sourceAgentRunId"].is_null());
         assert!(tools.create_task(&mut db, &task).unwrap().replayed);
+        let task_id = result.result.payload["taskId"].as_str().unwrap();
+        tools.update_task(&mut db, &TeamTaskToolInvocation {
+            native_binding_id: binding.native_binding_id.clone(),
+            binding_credential: binding.binding_credential.clone(),
+            runtime_tool_call_id: "close-task".into(),
+            input: serde_json::from_value(json!({"threadId":target,"taskId":task_id,"status":"completed","completionSummary":"已检查"})).unwrap(),
+        }).unwrap();
+        let sources: (String, String) = db
+            .connection()
+            .query_row(
+                "SELECT source_agent_run_id,closed_by_agent_run_id FROM task WHERE id=?1",
+                [task_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(sources, (run.to_owned(), run.to_owned()));
+        let read = crate::read_model::ReadModelService;
+        for tasks in [
+            read.camp_open_projection(&mut db, target).unwrap().tasks,
+            read.camp_snapshot(&mut db, target).unwrap().tasks,
+        ] {
+            let public = tasks
+                .unwrap()
+                .into_iter()
+                .find(|entry| entry.task.id == task_id)
+                .unwrap()
+                .task;
+            assert_eq!(public.created_by_id, "agent_1");
+            assert!(
+                public.source_agent_run_id.is_none() && public.closed_by_agent_run_id.is_none()
+            );
+        }
         let directory =
             crate::storage_layout::chat_directory(db.runtime_camp_files_root(), chat).unwrap();
         std::fs::create_dir_all(&directory).unwrap();
@@ -1113,7 +1227,10 @@ mod tests {
         )
         .unwrap();
         db.reopen_production().unwrap();
-        super::super::finish_deletions(&mut db).unwrap();
+        for cleanup in super::super::prepare_deletions(&mut db).unwrap() {
+            cleanup.remove_directory().unwrap();
+            super::super::complete_directory_cleanup(&db, &cleanup.operation_id).unwrap();
+        }
         assert!(!report.exists());
         assert!(external.is_file());
         let stored: String = db

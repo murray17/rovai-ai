@@ -272,30 +272,7 @@ pub struct ThreadMembershipReconciliationView {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskView {
-    pub task_id: String,
-    #[serde(rename = "threadId", alias = "campId")]
-    pub camp_id: String,
-    pub title: String,
-    pub description: String,
-    pub status: String,
-    pub assignee_agent_id: Option<String>,
-    pub blocked_reason: Option<String>,
-    pub completion_summary: Option<String>,
-    pub cancel_reason: Option<String>,
-    pub created_by_type: String,
-    pub created_by_id: String,
-    pub source_agent_run_id: Option<String>,
-    pub closed_by_type: Option<String>,
-    pub closed_by_id: Option<String>,
-    pub closed_by_agent_run_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub closed_at: Option<String>,
-    pub available_actions: Vec<String>,
-}
+pub type TaskView = crate::collaboration::TaskDetail;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2148,103 +2125,24 @@ fn load_tasks(
     camp_id: &str,
     limit: Option<i64>,
 ) -> Result<Vec<TaskView>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT id, camp_id, title, description, acceptance_criteria_json,
-               status, assignee_agent_id, blocked_reason, completion_summary, cancel_reason,
-               created_by_type, created_by_id, source_agent_run_id,
-               closed_by_type, closed_by_id, closed_by_agent_run_id,
-               created_at, updated_at, closed_at
-        FROM task
-        WHERE camp_id = ?1
-        ORDER BY
-          CASE
-            WHEN ?2 IS NOT NULL AND status IN ('pending', 'in_progress', 'blocked') THEN 0
-            WHEN ?2 IS NOT NULL THEN 1
-            ELSE 0
-          END,
-          created_at DESC, id
-        LIMIT COALESCE(?2, -1)
-        "#,
+    let mut statement = transaction.prepare_cached(&format!(
+        "{} WHERE t.camp_id = ?1
+         ORDER BY CASE WHEN ?2 IS NULL OR t.status IN ('pending','in_progress','blocked') THEN 0 ELSE 1 END,
+                  t.created_at DESC, t.id
+         LIMIT coalesce(?2, -1)", crate::collaboration::PUBLIC_TASK_SELECT))?;
+    let rows = statement.query_map(
+        params![camp_id, limit],
+        crate::collaboration::task_record_from_row,
     )?;
-    let rows = statement.query_map(params![camp_id, limit], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, Option<String>>(6)?,
-            row.get::<_, Option<String>>(7)?,
-            row.get::<_, Option<String>>(8)?,
-            row.get::<_, Option<String>>(9)?,
-            row.get::<_, String>(10)?,
-            row.get::<_, String>(11)?,
-            row.get::<_, Option<String>>(12)?,
-            row.get::<_, Option<String>>(13)?,
-            row.get::<_, Option<String>>(14)?,
-            row.get::<_, Option<String>>(15)?,
-            row.get::<_, String>(16)?,
-            row.get::<_, String>(17)?,
-            row.get::<_, Option<String>>(18)?,
-        ))
-    })?;
     let mut result = Vec::new();
     for row in rows {
-        let (
-            id,
-            task_camp_id,
-            title,
-            description,
-            acceptance_criteria_json,
-            status,
-            assignee,
-            blocked_reason,
-            completion_summary,
-            cancel_reason,
-            created_by_type,
-            created_by_id,
-            source_agent_run_id,
-            closed_by_type,
-            closed_by_id,
-            closed_by_agent_run_id,
-            created_at,
-            updated_at,
-            closed_at,
-        ) = row?;
-        let available_actions = if matches!(status.as_str(), "completed" | "cancelled") {
-            Vec::new()
-        } else {
-            vec!["update".to_string()]
+        let task = row?;
+        let actions = match task.status {
+            crate::collaboration::TaskStatus::Completed
+            | crate::collaboration::TaskStatus::Cancelled => Vec::new(),
+            _ => vec!["update".to_owned()],
         };
-        let legacy_acceptance_criteria =
-            serde_json::from_str::<Vec<String>>(&acceptance_criteria_json)
-                .context("Task acceptance criteria are invalid")?;
-        result.push(TaskView {
-            task_id: id,
-            camp_id: task_camp_id,
-            title,
-            description: crate::collaboration::synthesize_task_description(
-                &description,
-                &legacy_acceptance_criteria,
-            ),
-            status,
-            assignee_agent_id: assignee,
-            blocked_reason,
-            completion_summary,
-            cancel_reason,
-            created_by_type,
-            created_by_id,
-            source_agent_run_id,
-            closed_by_type,
-            closed_by_id,
-            closed_by_agent_run_id,
-            created_at,
-            updated_at,
-            closed_at,
-            available_actions,
-        });
+        result.push(crate::collaboration::public_task_detail(task, actions));
     }
     Ok(result)
 }

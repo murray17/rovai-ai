@@ -1,4 +1,3 @@
-import { clearLocalThreadComposerDraft } from './camp-composer-local-store'
 import { BusyLabel } from './BusyLabel'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ArchiveItem, ArchiveKind, DeleteThreadCommand, MissionRecord } from '@contracts'
@@ -12,7 +11,7 @@ import { MissionDelete } from './MissionBoard'
 import { CompactDialog, MissionFilter } from './MissionControls'
 import { MissionIcon } from './MissionIcon'
 import { NavigationIcon } from './NavigationIcon'
-import { archiveTargetIsRemoved, archiveView, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
+import { deleteChat, archiveTargetIsRemoved, archiveView, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
 import { useArchiveRecords } from './useArchiveRecords'
 import './archive-settings.css'
 
@@ -169,8 +168,7 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
       }
       try {
         if(item.chatId) {
-          await requestArchiveCommand(client,'chats.delete',{chatId:item.chatId})
-          clearLocalThreadComposerDraft('chat:' + item.chatId)
+          await deleteChat(client, item.chatId)
           discardStaleItem(item)
         } else {
           await requestArchiveCommand(client, 'threads.delete', command)
@@ -294,8 +292,8 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
   </section>
 }
 
-function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
-  item: ArchiveItem
+export function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
+  item: Pick<ArchiveItem, 'missionId' | 'chatId' | 'title'>
   busy: boolean
   onClose(): void
   onDelete(disposition?: 'retain' | 'cleanup'): Promise<void>

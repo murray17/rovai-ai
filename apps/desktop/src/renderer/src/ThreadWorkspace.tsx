@@ -11178,7 +11178,7 @@ export function MessageAttachmentGroups({
 }
 
 
-function attachmentErrorMessage(error: unknown): string {
+export function attachmentErrorMessage(error: unknown): string {
   const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return uiAttribute("文件超过 25 MiB")
   if (message.includes('attachment_unreadable')) return uiAttribute("文件当前无法读取")

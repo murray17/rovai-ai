@@ -18,6 +18,7 @@ import { useOptionalFilePreview } from './file-preview-context'
 import { newCommandId } from '../../shared/command-id'
 import { ApprovalDock } from './ThreadWorkspace'
 import { ChatReply } from './ChatReply'
+import { createRuntimeRefresh } from './runtime-check'
 import { AttachmentCard } from './AttachmentCard'
 import { SingleChatRunHistory } from './SingleChatPanel'
 import { chatDocumentFromInput } from './chat-draft'
@@ -268,7 +269,7 @@ export function ChatWorkspace({
 }) {
   const [detail, setDetail] = useState<ChatOpenResult | null>(null)
   const [failed, setFailed] = useState(false)
-  const [revision, refresh] = useState(0)
+  const refresh = useRef<() => void>(() => {})
   const [before, setBefore] = useState<number | null>(null)
   const preview = useOptionalFilePreview()
   const root = useRef<HTMLDivElement>(null)
@@ -280,7 +281,21 @@ export function ChatWorkspace({
   onReadRef.current = onRead
   useEffect(() => {
     if (!chatId) return
-    const update = () => refresh((value) => value + 1)
+    let current = true
+    const read = createRuntimeRefresh(async () => {
+      if (!current) return
+      try {
+        const next = await client.request<ChatOpenResult>('chats.open', { chatId, beforeSequence: before })
+        if (current) {
+          setDetail(next)
+          setFailed(false)
+        }
+      } catch {
+        if (current) setFailed(true)
+      }
+    })
+    const update = () => { void read() }
+    refresh.current = update
     const stop = client.onEvent?.((event) => {
       const changed = (event.params as { chatId?: string })?.chatId
       if (event.method === 'chats.listChanged' && (!changed || changed === chatId)) update()
@@ -288,29 +303,13 @@ export function ChatWorkspace({
     const web = client.onInvalidated?.((change) => {
       if (!change || change.resync || change.chatsChanged) update()
     })
+    update()
     return () => {
+      current = false
       stop?.()
       web?.()
     }
-  }, [client, chatId])
-  useEffect(() => {
-    if (!chatId) return
-    let current = true
-    void client
-      .request<ChatOpenResult>('chats.open', { chatId, beforeSequence: before })
-      .then((next) => {
-        if (current) {
-          setDetail(next)
-          setFailed(false)
-        }
-      })
-      .catch(() => {
-        if (current) setFailed(true)
-      })
-    return () => {
-      current = false
-    }
-  }, [client, chatId, before, revision])
+  }, [client, chatId, before])
   useEffect(() => {
     if (!chatId || !detail || !root.current) return
     const visible = new Set<Element>()
@@ -355,7 +354,7 @@ export function ChatWorkspace({
   useEffect(() => {
     if (!activeRunId) return
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') refresh((value) => value + 1)
+      if (document.visibilityState === 'visible') refresh.current()
     }, 1500)
     return () => window.clearInterval(timer)
   }, [activeRunId])
@@ -382,7 +381,7 @@ export function ChatWorkspace({
     else {
       followsLatest.current = true
       setBefore(null)
-      refresh((value) => value + 1)
+      refresh.current()
     }
   }
   return (
@@ -409,7 +408,7 @@ export function ChatWorkspace({
         }}
       >
         {failed && (
-          <button type="button" className="quiet-button" onClick={() => refresh((value) => value + 1)}>
+          <button type="button" className="quiet-button" onClick={() => refresh.current()}>
             {uiAttribute('重新读取聊天')}
           </button>
         )}
@@ -542,7 +541,7 @@ export function ChatWorkspace({
               expectedVersion: approval.version,
               optionId
             })
-            refresh((value) => value + 1)
+            refresh.current()
             if (result.status === 'rejected') throw new Error(result.code)
           }}
           onRespond={async (interaction, answer) => {
@@ -557,7 +556,7 @@ export function ChatWorkspace({
                 answer
               }
             )
-            refresh((value) => value + 1)
+            refresh.current()
             return result
           }}
         />

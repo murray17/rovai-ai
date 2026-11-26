@@ -97,7 +97,9 @@ html[data-rovai-platform="win32"] .navigation-shell.icon-rail-only > .topbar { p
 .chat-queue-tray { display: grid; width: min(calc(var(--conversation-composer-width) - 24px), calc(100% - 24px)); margin: 0 auto; padding: 1px 4px 1px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--conversation-user-message-surface); }
 .chat-queue-row { display: flex; min-width: 0; min-height: 32px; align-items: center; gap: 8px; color: var(--ink); font-size: 12px; }
 .chat-queue-row + .chat-queue-row { border-top: 1px solid var(--line); }
+.chat-draft-restore { display: flex; align-items: center; gap: 8px; margin: 4px 12px; color: var(--muted); font-size: 12px; }
 .chat-queue-label { flex: none; color: var(--faint); font-size: 11px; }
+.chat-queue-label[data-needs-repair] { color: var(--attention); }
 .chat-queue-text { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-queue-row button { display: grid; width: 24px; height: 24px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; }
 .chat-queue-row button:hover { color: var(--ink); background: var(--surface-hover); }
@@ -110,7 +112,12 @@ html[data-rovai-platform="win32"] .navigation-shell.icon-rail-only > .topbar { p
 .navigation-shell > .content.independent-chat-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0; background: var(--conversation-surface); }
 .icon-rail-shell:not(.navigation-collapsed) > .independent-chat-content { border-left: 1px solid var(--line); }
 .chat-timeline { min-height: 0; overflow: auto; flex: 1; padding-inline: 16px; }
-.chat-timeline:has(> .first-run-camp-welcome) { display: grid; align-items: center; }
+.chat-timeline:has(> .first-run-camp-welcome) {
+  display: grid;
+  grid-template-rows: minmax(0, 3fr) auto minmax(0, 1fr);
+  padding-bottom: 36px;
+}
+.chat-timeline > .first-run-camp-welcome { grid-row: 2; }
 .chat-timeline > .independent-chat-transcript { width: min(100%, var(--conversation-composer-width)); margin-inline: auto; overflow: visible; }
 .content.independent-chat-content > .chat-composer-dock { flex: none; width: min(calc(100% - 32px), var(--conversation-composer-width)); margin: 0 auto 16px; }
 .chat-composer-dock .composer { width: 100%; margin: 0; padding: 0; }

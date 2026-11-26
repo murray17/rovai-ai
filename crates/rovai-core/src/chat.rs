@@ -1,7 +1,8 @@
 #[path = "chat_lifecycle.rs"]
 mod lifecycle;
 pub(crate) use lifecycle::{
-    DeleteChat, SetArchived, StopChat, finish_deletions, request_delete, set_archived, stop,
+    DeleteChat, SetArchived, StopChat, complete_directory_cleanup, prepare_deletions,
+    request_delete, set_archived, stop,
 };
 #[path = "chat_steer.rs"]
 mod steer;
@@ -492,6 +493,7 @@ pub struct PendingInput {
     pub body: String,
     pub revision: i64,
     pub converted_from_steer: bool,
+    pub state: String,
     pub attachment_names: Vec<String>,
     pub quote_preview: Option<String>,
 }
@@ -610,7 +612,7 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let pending_inputs = {
-        let mut stmt = tx.prepare("SELECT id,body,revision,target_run_id IS NOT NULL,(SELECT json_group_array(json_extract(value,'$.displayName')) FROM json_each(source_attachments_json)),json_extract(quotes_json,'$[0].text') FROM single_chat_pending_input
+        let mut stmt = tx.prepare("SELECT id,body,revision,target_run_id IS NOT NULL,(SELECT json_group_array(json_extract(value,'$.displayName')) FROM json_each(source_attachments_json)),json_extract(quotes_json,'$[0].text'),state FROM single_chat_pending_input
             WHERE conversation_id=?1 AND requested_mode='start' AND state IN ('queued','needs_repair') ORDER BY enqueue_sequence")?;
         stmt.query_map([&chat.chat_id], |row| {
             Ok(PendingInput {
@@ -621,6 +623,7 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
                 attachment_names: serde_json::from_str(&row.get::<_, String>(4)?)
                     .unwrap_or_default(),
                 quote_preview: row.get(5)?,
+                state: row.get(6)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?

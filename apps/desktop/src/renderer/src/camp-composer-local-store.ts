@@ -167,14 +167,16 @@ export function localThreadComposerDraftIsEmpty(draft: ThreadComposerDraftView):
 
 export function saveLocalThreadComposerDraft(
   draft: ThreadComposerDraftView,
-  storage: DraftStorage | null = browserStorage()
-): void {
-  if (!storage) return
+  storage: DraftStorage | null = browserStorage(),
+  deferIfFull = false
+): boolean {
+  if (!storage) return false
+  if (deferIfFull && !isStoredDraft(draft, draft.threadId)) return false
   loadLocalThreadComposerDraft(draft.threadId, storage)
   if (!validateComposerDocument(draft.content)) throw new Error('当前草稿格式无效，原始内容已保留')
   if (localThreadComposerDraftIsEmpty(draft)) {
     storage.removeItem(storageKey(draft.threadId))
-    return
+    return true
   }
   const { threadId, replyIntent, continuationIntent, ...rest } = draft
   const encoded = JSON.stringify({
@@ -190,9 +192,16 @@ export function saveLocalThreadComposerDraft(
     })()
   })
   if (encoded.length > MAX_STORED_DRAFT_BYTES) {
+    if (deferIfFull) return false
     throw new Error('当前输入超过本机草稿保存上限。')
   }
-  storage.setItem(storageKey(draft.threadId), encoded)
+  try {
+    storage.setItem(storageKey(draft.threadId), encoded)
+  } catch (error) {
+    if (deferIfFull && error instanceof DOMException && error.name === 'QuotaExceededError') return false
+    throw error
+  }
+  return true
 }
 
 export function clearLocalThreadComposerDraft(

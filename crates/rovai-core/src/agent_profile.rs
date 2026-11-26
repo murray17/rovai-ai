@@ -895,9 +895,30 @@ pub struct CreateAgentProfileCommand {
     pub growth_topic: String,
 }
 
+impl CreateAgentProfileCommand {
+    fn normalized_identity(&self) -> Result<NormalizedMemberIdentity> {
+        normalize_member_identity(
+            &self.display_name,
+            &self.team_role,
+            &self.professional_responsibilities,
+            &self.personality_traits,
+            &self.working_principles,
+            &self.growth_topic,
+        )
+    }
+}
+
 impl sealed::Sealed for CreateAgentProfileCommand {}
 impl DomainCommand for CreateAgentProfileCommand {
     const TYPE: &'static str = "agent_profile.create";
+
+    fn matches_replay(&self, stored: &Value) -> Result<bool> {
+        match stored.get("cardDigest") {
+            Some(digest) => Ok(digest
+                == &canonical_json_digest(&json!([self.normalized_identity()?, self.avatar_ref]))?),
+            None => Ok(true),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2805,14 +2826,22 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<CreateAgentProfileCommand>,
         source: Option<&crate::team_tool::AuthenticatedTeamToolRun>,
     ) -> Result<CommandExecution> {
-        let identity = normalize_member_identity(
-            &envelope.payload.display_name,
-            &envelope.payload.team_role,
-            &envelope.payload.professional_responsibilities,
-            &envelope.payload.personality_traits,
-            &envelope.payload.working_principles,
-            &envelope.payload.growth_topic,
-        )?;
+        let identity = envelope.payload.normalized_identity()?;
+        let card_digest =
+            if source.is_some_and(|run| crate::runtime::run_thread_id(&run.camp_id).is_none()) {
+                Some(canonical_json_digest(&json!([
+                    identity,
+                    envelope.payload.avatar_ref
+                ]))?)
+            } else {
+                None
+            };
+        let with_card = |mut payload: Value| {
+            if let Some(digest) = &card_digest {
+                payload["cardDigest"] = json!(digest);
+            }
+            payload
+        };
         crate::member_avatar::validate_new_member_avatar_ref(
             envelope.payload.avatar_ref.as_deref(),
         )?;
@@ -2820,7 +2849,7 @@ impl AgentProfileService {
             if profile_display_name_exists(transaction, &identity.display_name, None)? {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.display_name_conflict",
-                    json!({ "displayName": identity.display_name }),
+                    with_card(json!({ "displayName": identity.display_name })),
                 ));
             }
             let id = allocate_agent_id(transaction)?;
@@ -2886,7 +2915,7 @@ impl AgentProfileService {
             }
             Ok(CommandHandlerResult::applied(
                 "agent_profile.created",
-                json!({ "agentId": id, "version": 1 }),
+                with_card(json!({ "agentId": id, "version": 1 })),
                 Some(EntityReference {
                     entity_type: "agent_profile".to_string(),
                     entity_id: id,
@@ -5362,7 +5391,7 @@ fn probe_diagnostic_code(probe_status: &str, failure_class: &str) -> Option<&'st
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct NormalizedMemberIdentity {
     pub(crate) display_name: String,
     pub(crate) team_role: String,
@@ -5399,25 +5428,6 @@ pub(crate) fn validate_stored_member_identity(
     {
         anyhow::bail!("stored AgentProfile Member Identity is not normalized");
     }
-    Ok(())
-}
-
-pub(crate) fn validate_member_identity_input(
-    display_name: &str,
-    team_role: &str,
-    professional_responsibilities: &str,
-    personality_traits: &[String],
-    working_principles: &str,
-    growth_topic: &str,
-) -> Result<()> {
-    normalize_member_identity(
-        display_name,
-        team_role,
-        professional_responsibilities,
-        personality_traits,
-        working_principles,
-        growth_topic,
-    )?;
     Ok(())
 }
 

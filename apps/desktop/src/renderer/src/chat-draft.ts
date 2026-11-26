@@ -195,9 +195,12 @@ export function chatExtrasFromInput(input: ReturnedChatInput): ChatDraftExtras {
   }
 }
 
-export function recoverChatEdit(chatId: string, input: ReturnedChatInput) {
+export function recoverChatEdit(chatId: string, input: ReturnedChatInput, inputId: string) {
   const key = 'chat:' + chatId
   const draft = loadLocalThreadComposerDraft(key) ?? emptyLocalThreadComposerDraft(key)
+  // Kept in the local draft so merging text and consuming this input survive the same crash.
+  const returnedIds = (draft as typeof draft & { returnedChatInputs?: string[] }).returnedChatInputs ?? []
+  if (returnedIds.includes(inputId)) return true
   const returned = chatDocumentFromInput(input.body, input.skills)
   const content =
     draft.body && !composerDocumentsEqualDirect(draft.content, returned)
@@ -207,15 +210,17 @@ export function recoverChatEdit(chatId: string, input: ReturnedChatInput) {
         }
       : returned
   const restored = chatExtrasFromInput(input)
-  saveLocalThreadComposerDraft({
+  const merged = {
     ...draft,
+    returnedChatInputs: [...returnedIds, inputId],
     content,
     body: composerDocumentToPlainText(content),
     revision: draft.revision + 1,
     updatedAt: new Date().toISOString(),
     attachments: [...new Map([...restored.attachments, ...draft.attachments].map((item) => [item.id, item])).values()],
     quotes: [...new Map([...restored.quotes, ...draft.quotes].map((item) => [item.quoteId, item])).values()]
-  })
+  }
+  return saveLocalThreadComposerDraft(merged, undefined, true)
 }
 
 export function recoverChatSend(

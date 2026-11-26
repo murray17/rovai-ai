@@ -4,7 +4,8 @@ import { RECOVERY_KEY, type RecoveryStorage } from './tab-recovery'
 import { fileDigest } from './file-digest'
 import { uploadRequest } from './upload-request'
 import { newCommandId } from '../../desktop/src/shared/command-id'
-import { recoverChatSend, recoverChatEdit, type ReturnedChatInput } from '../../desktop/src/renderer/src/chat-draft'
+import { applyReturnedChatInput } from '../../desktop/src/renderer/src/chat-draft-recovery'
+import { recoverChatSend, type ReturnedChatInput } from '../../desktop/src/renderer/src/chat-draft'
 import { recoverLocalThreadSend } from '../../desktop/src/renderer/src/camp-composer-send-recovery'
 import type { ThreadReadInvalidation, ChannelKind, ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
 
@@ -555,10 +556,17 @@ export class ConsoleClient {
   }
 
   #settleRecovered(operation: WebOperation, params: unknown, result: unknown): void {
-    const chatCommand=(params as {command?:ReturnedChatInput & {chatId?:string;agentId?:string;draftId?:string;operation?:string}})?.command
-    if (operation==='chats.send' && chatCommand) recoverChatSend(chatCommand,result as {chatId?:string})
-    if (operation==='chats.pendingInputs.edit' && chatCommand?.chatId && chatCommand.operation==='return_to_composer'
-      && typeof (result as ReturnedChatInput)?.body==='string') recoverChatEdit(chatCommand.chatId,result as ReturnedChatInput)
+    const { commandId, command } = (params ?? {}) as {
+      commandId?: string
+      command?: ReturnedChatInput & { chatId?: string; agentId?: string; draftId?: string; inputId?: string; operation?: string }
+    }
+    if (operation === 'chats.send' && command) recoverChatSend(command, result as { chatId?: string })
+    if (operation === 'chats.pendingInputs.edit' && command?.operation === 'return_to_composer'
+      && commandId && command.chatId && command.inputId && typeof (result as ReturnedChatInput)?.body === 'string') {
+      applyReturnedChatInput({
+        commandId, command: { ...command, chatId: command.chatId, inputId: command.inputId }
+      }, result as ReturnedChatInput)
+    }
     if (operation === 'thread.messages.send') recoverLocalThreadSend(params, result)
     if (operation === 'singleChat.send' && this.#storage && this.editingScope && (result as { status?: string })?.status !== 'rejected') {
       const command = (params as { command?: { threadId?: string; conversationId?: string; body?: string } })?.command
