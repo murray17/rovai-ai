@@ -196,16 +196,7 @@ fn schema(tx: &Transaction<'_>, up: bool) -> Result<()> {
     }
     if up {
         tx.execute_batch("CREATE TRIGGER chat_task_source_insert BEFORE INSERT ON task WHEN NEW.chat_source_deleted<>0 OR NEW.chat_closer_deleted<>0 BEGIN SELECT RAISE(ABORT,'a new task requires a live source'); END;")?;
-        for (table, actor, applies) in [
-            ("memory_revision", "actor_id", "NEW.actor_kind='agent'"),
-            ("hearth_review_item", "source_agent_id", "1"),
-        ] {
-            tx.execute_batch(&format!("CREATE TRIGGER chat_{table}_source BEFORE INSERT ON {table}
-                WHEN {applies} AND NEW.source_camp_id IS NULL AND NOT EXISTS(
-                    SELECT 1 FROM agent_run WHERE id=NEW.source_agent_run_id AND agent_id=NEW.{actor}
-                      AND invocation_kind='chat' AND execution_epoch=NEW.source_execution_epoch)
-                BEGIN SELECT RAISE(ABORT,'private memory requires the acting chat run'); END;"))?;
-        }
+        install_memory_source_guards(tx)?;
         tx.execute_batch("CREATE TRIGGER chat_memory_access_source BEFORE INSERT ON memory_access_evidence
             WHEN NEW.camp_id IS NULL AND NOT EXISTS(SELECT 1 FROM conversation c JOIN chat_topic t ON t.conversation_id=c.id
                 WHERE c.agent_id=NEW.agent_id AND c.native_binding_id=NEW.native_binding_id AND c.native_binding_generation=NEW.native_binding_generation)
@@ -223,6 +214,46 @@ fn schema(tx: &Transaction<'_>, up: bool) -> Result<()> {
     if !up {
         tx.execute_batch("DROP INDEX context_manifest_chat_input; ALTER TABLE context_manifest DROP COLUMN source_chat_input_id;")?;
     }
+    Ok(())
+}
+
+fn install_memory_source_guards(tx: &Transaction<'_>) -> Result<()> {
+    for (table, actor, applies) in [
+        ("memory_revision", "actor_id", "NEW.actor_kind='agent'"),
+        ("hearth_review_item", "source_agent_id", "1"),
+    ] {
+        tx.execute_batch(&format!(
+            "DROP TRIGGER IF EXISTS chat_{table}_source;
+            CREATE TRIGGER chat_{table}_source BEFORE INSERT ON {table}
+            WHEN {applies} AND NEW.source_camp_id IS NULL AND NOT EXISTS(
+                SELECT 1 FROM agent_run r JOIN conversation c ON c.id=r.conversation_id
+                WHERE r.id=NEW.source_agent_run_id AND c.agent_id=NEW.{actor}
+                  AND r.invocation_kind='chat' AND r.execution_epoch=NEW.source_execution_epoch)
+            BEGIN SELECT RAISE(ABORT,'private memory requires the acting chat run'); END;"
+        ))?;
+    }
+    Ok(())
+}
+
+pub(super) fn repair_chat_runtime(db: &mut Database) -> Result<()> {
+    let tx = db
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    install_memory_source_guards(&tx)?;
+    // 235 could cancel a still-unsent supplement on restart or leave it attached to a finished turn.
+    tx.execute("UPDATE single_chat_pending_input SET state='queued' WHERE requested_mode='steer' AND state='cancelled'
+        AND target_run_id IN (SELECT r.id FROM agent_run r JOIN chat_topic t ON t.conversation_id=r.conversation_id
+            WHERE r.status='cancelled' AND r.cancel_reason_code='core_restarted' AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)", [])?;
+    let runs = tx.prepare("SELECT DISTINCT r.id,r.status FROM single_chat_pending_input p JOIN agent_run r ON r.id=p.target_run_id
+        WHERE p.requested_mode='steer' AND p.state='queued' AND (r.status='succeeded' OR (r.status='cancelled' AND r.cancel_reason_code='core_restarted'))")?
+        .query_map([], |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for (run, status) in runs {
+        crate::steer::settle_execution(&tx, &run, &status, &now)?;
+    }
+    tx.execute_batch("INSERT INTO schema_migration VALUES(236,datetime('now'));
+        UPDATE rovai_data_contract SET projection_schema_version=186,updated_at=datetime('now') WHERE singleton=1;")?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -268,7 +299,7 @@ pub(super) fn downgrade_for_test(c: &Connection) {
     c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     let tx = c.unchecked_transaction().unwrap();
     schema(&tx, false).unwrap();
-    tx.execute_batch("DELETE FROM schema_migration WHERE version=235; UPDATE rovai_data_contract SET projection_schema_version=184 WHERE projection_schema_version=185;").unwrap();
+    tx.execute_batch("DELETE FROM schema_migration WHERE version IN (235,236); UPDATE rovai_data_contract SET projection_schema_version=184 WHERE projection_schema_version IN (185,186);").unwrap();
     tx.commit().unwrap();
     c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
 }

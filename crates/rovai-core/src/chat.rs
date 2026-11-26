@@ -525,7 +525,7 @@ pub struct OpenChat {
     pub next_before_sequence: Option<i64>,
 }
 
-pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
+pub fn open(database: &mut Database, input: OpenParams) -> Result<Option<OpenChat>> {
     use crate::message_quote::{QuoteStorage, load_quotes};
     use crate::single_chat::{SingleChatMessageView, source_attachment_views};
 
@@ -536,14 +536,14 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
         "Invalid chat message cursor"
     );
     let tx = database.connection_mut().transaction()?;
-    let chat = tx.query_row(
+    let Some(chat) = tx.query_row(
         "SELECT c.id, c.agent_id, p.display_name, p.avatar_ref, t.title, t.archived_at, t.version
          FROM chat_topic t JOIN conversation c ON c.id=t.conversation_id JOIN agent_profile p ON p.id=c.agent_id
          WHERE t.conversation_id=?1 AND t.owner_user_id=?2 AND c.kind='chat' AND t.deletion_operation_id IS NULL",
         params![input.chat_id,CURRENT_USER_ID],
         |r| Ok(ChatHeader {chat_id:r.get(0)?,agent_id:r.get(1)?,display_name:r.get(2)?,
             avatar_ref:r.get(3)?,title:r.get(4)?,archived_at:r.get(5)?,version:r.get(6)?}),
-    )?;
+    ).optional()? else { return Ok(None) };
     let mut messages = Vec::with_capacity(limit);
     let has_more = {
         let mut stmt = tx.prepare(
@@ -663,7 +663,7 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
     let approvals =
         crate::read_model::load_conversation_approvals(&tx, None, Some(&chat.chat_id), true, None)?;
     tx.commit()?;
-    Ok(OpenChat {
+    Ok(Some(OpenChat {
         approvals,
         native_interactions: Vec::new(),
         supplements,
@@ -673,7 +673,7 @@ pub fn open(database: &mut Database, input: OpenParams) -> Result<OpenChat> {
         messages,
         runs,
         next_before_sequence,
-    })
+    }))
 }
 
 #[cfg(test)]

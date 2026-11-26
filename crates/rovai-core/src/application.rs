@@ -7082,10 +7082,47 @@ impl Core {
                 "Built-in Tool IPC protocol version is unsupported",
             );
         }
+        let private_send = match &body {
+            BuiltinToolIpcRequestBody::Invoke {
+                request_id,
+                operation,
+                input,
+                ..
+            } if rovai_core::thread_compat::canonical_operation(operation)
+                == CAMP_MESSAGE_SEND_TOOL_NAME =>
+            {
+                input["threadId"].as_str().and_then(|target| {
+                    canonical_json_digest(&json!(["rovai.chat-cli-receipt.v1", &auth, &body]))
+                        .ok()
+                        .map(|proof| (request_id.clone(), target.to_owned(), proof))
+                })
+            }
+            _ => None,
+        };
         let mut invocation_guard = Some(self.builtin_tool_leases.invocation_guard().await);
         let authorized = match self.builtin_tool_leases.authenticate(&auth).await {
             Ok(authorized) => authorized,
-            Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
+            Err(error) => {
+                if let Some((request_id, target, proof)) = &private_send {
+                    let db = self.database.lock().await;
+                    if let Ok(Some(execution)) =
+                        TeamToolService::default().recorded_cli_chat_send(&db, target, proof)
+                    {
+                        return match builtin_result_envelope(
+                            CAMP_MESSAGE_SEND_TOOL_NAME,
+                            request_id,
+                            &command_execution_payload(execution),
+                        ) {
+                            Ok(envelope) => BuiltinToolIpcResponse::Envelope { envelope },
+                            Err(_) => BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.internal_error",
+                                "Invalid recorded send receipt",
+                            ),
+                        };
+                    }
+                }
+                return BuiltinToolIpcResponse::ipc_error(error.code, error.message);
+            }
         };
         match body {
             BuiltinToolIpcRequestBody::Capabilities => {
@@ -7394,6 +7431,7 @@ impl Core {
                         },
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
                         Some(request_id.clone()),
+                        private_send.map(|(_, _, proof)| proof),
                         source_files,
                         send_input_file_path,
                         &authorized.run_tmp,
@@ -7704,6 +7742,7 @@ impl Core {
         mut request: TeamToolIpcRequest,
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
+        cli_receipt_proof: Option<String>,
         source_files: Vec<rovai_core::local_attachment_source::LocalAttachmentSourceRef>,
         send_input_file_path: Option<String>,
         run_tmp: &Path,
@@ -7729,17 +7768,23 @@ impl Core {
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
             let authenticated_run = if request.tool_name == CAMP_MESSAGE_SEND_TOOL_NAME {
-                service.authenticate_public_message_binding_or_recorded_scope(
-                    &database,
-                    &request.native_binding_id,
-                    &request.binding_credential,
-                    &request.runtime_tool_call_id,
-                    attested_run
-                        .as_ref()
-                        .map(|(agent_run_id, execution_epoch)| {
-                            (agent_run_id.as_str(), *execution_epoch)
-                        }),
-                )?
+                match service.authenticate_public_message_binding_or_recorded_scope(
+                    &database, &request.native_binding_id, &request.binding_credential, &request.runtime_tool_call_id,
+                    attested_run.as_ref().map(|(run, epoch)| (run.as_str(), *epoch)),
+                ) {
+                    Ok(run) => run,
+                    Err(error) => {
+                        if let Some((run, epoch)) = attested_run.as_ref()
+                            && error.downcast_ref::<TeamToolInvocationError>().is_some_and(|e| e.code=="team_tool.binding_fenced")
+                            && request.input.get("threadId").is_some() {
+                            let call = scoped_runtime_tool_call_id(run, &request.runtime_tool_call_id);
+                            if let Some(result) = service.recorded_chat_send(&database, run, *epoch, &call, &request.input)? {
+                                return command_execution_payload(result);
+                            }
+                        }
+                        return Err(error);
+                    }
+                }
             } else if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
                 service.authenticate_attested_binding(
                     &database,
@@ -7841,6 +7886,7 @@ impl Core {
                     let input = serde_json::from_value::<ThreadMessageSendInput>(request.input)
                         .context("camp.message.send input is invalid")?;
                     let invocation = ThreadMessageSendInvocation {
+                        cli_receipt_proof,
                         native_binding_id: request.native_binding_id,
                         binding_credential: request.binding_credential,
                         runtime_tool_call_id: request.runtime_tool_call_id,
@@ -8651,31 +8697,9 @@ impl Core {
                     }
                 }
             });
-            let core_envelope = evidence_request_id
-                .as_deref()
-                .and_then(|request_id| match result.as_ref() {
-                    Ok(output) => BuiltinToolInvocationEnvelope::success(
-                        &evidence_tool_name,
-                        request_id,
-                        output.clone(),
-                    )
-                    .ok(),
-                    Err(error) => {
-                        let (code, message, details) = classify_builtin_operation_error(error);
-                        let code = canonical_builtin_error_code(&code);
-                        BuiltinToolInvocationEnvelope::rejected(
-                            &evidence_tool_name,
-                            request_id,
-                            BuiltinToolError {
-                                recovery: recovery_for_operation_error(&evidence_tool_name, &code),
-                                code,
-                                message,
-                                details,
-                            },
-                        )
-                        .ok()
-                    }
-                });
+            let core_envelope = evidence_request_id.as_deref().and_then(|request_id| {
+                builtin_result_envelope(&evidence_tool_name, request_id, &result).ok()
+            });
             let evidence = json!({
                 "toolCallId": tool_call_id,
                 "status": if result.is_ok() { "completed" } else { "failed" },
@@ -11852,7 +11876,9 @@ impl Core {
             "chats.open" => {
                 let input = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let mut chat = rovai_core::chat::open(&mut database, input)?;
+                let Some(mut chat) = rovai_core::chat::open(&mut database, input)? else {
+                    return Ok(Value::Null);
+                };
                 drop(database);
                 if let Some(run) = chat.runs.iter().find(|r| {
                     matches!(r.status.as_str(), "running" | "waiting")
@@ -30195,6 +30221,30 @@ fn canonical_builtin_error_code(code: &str) -> String {
         "team_tool.invalid_input" => "builtin_tool.invalid_input".to_string(),
         "team_tool.internal_error" => "builtin_tool.internal_error".to_string(),
         _ => code.to_string(),
+    }
+}
+
+fn builtin_result_envelope(
+    operation: &str,
+    request_id: &str,
+    result: &Result<Value>,
+) -> Result<BuiltinToolInvocationEnvelope> {
+    match result {
+        Ok(output) => BuiltinToolInvocationEnvelope::success(operation, request_id, output.clone()),
+        Err(error) => {
+            let (code, message, details) = classify_builtin_operation_error(error);
+            let code = canonical_builtin_error_code(&code);
+            BuiltinToolInvocationEnvelope::rejected(
+                operation,
+                request_id,
+                BuiltinToolError {
+                    recovery: recovery_for_operation_error(operation, &code),
+                    code,
+                    message,
+                    details,
+                },
+            )
+        }
     }
 }
 

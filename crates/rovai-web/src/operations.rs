@@ -210,6 +210,8 @@ pub enum Operation {
     ChatsRename,
     #[serde(rename = "chats.open")]
     ChatsOpen,
+    #[serde(rename = "runtimeInputs.reconcile")]
+    RuntimeInputsReconcile,
     #[serde(rename = "chats.canPreviewFile")]
     ChatsCanPreviewFile,
     #[serde(rename = "chats.list")]
@@ -589,6 +591,7 @@ impl Operation {
             Self::ChatsDelete => "chats.delete",
             Self::ChatsRename => "chats.rename",
             Self::ChatsOpen => "chats.open",
+            Self::RuntimeInputsReconcile => "runtimeInputs.reconcile",
             Self::ChatsCanPreviewFile => "chats.canPreviewFile",
             Self::ChatsList => "chats.list",
             Self::NavigationSearch => "navigation.search",

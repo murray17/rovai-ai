@@ -10263,6 +10263,7 @@ mod slow_tests {
             .send_public_message_attested(
                 &mut fixture.database,
                 &ThreadMessageSendInvocation {
+                    cli_receipt_proof: None,
                     native_binding_id: fixture.native_binding_id.clone(),
                     binding_credential: fixture.binding_credential.clone(),
                     runtime_tool_call_id: call_id.to_string(),

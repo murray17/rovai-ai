@@ -488,7 +488,7 @@ where
     .into())
 }
 
-fn load_stored_result(
+pub(crate) fn load_stored_result(
     connection: &rusqlite::Connection,
     command_id: &str,
 ) -> Result<Option<StoredCommandResult>> {
@@ -590,10 +590,16 @@ pub(crate) fn project_persisted_command_result_event_payload(
         result_status.context("stored command result is missing result_status")?,
     )?;
     let code = result_code.context("stored command result is missing result_code")?;
-    let result: Value = serde_json::from_str(
+    let mut result: Value = serde_json::from_str(
         result_payload_json.context("stored command result is missing result_payload_json")?,
     )
     .context("failed to decode persisted command result result_payload_json")?;
+    if crate::thread_compat::canonical_operation(command_type)
+        == crate::message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME
+        && let Some(fields) = result.as_object_mut()
+    {
+        fields.remove("chatSendKey");
+    }
     let result_entity = match (result_entity_type, result_entity_id) {
         (None, None) => None,
         (Some(entity_type), Some(entity_id)) => Some(EntityReference {

@@ -5419,8 +5419,16 @@ fn persist_single_chat_success(
             now: &target.now,
         },
     )?;
-    if target.invocation_kind == "chat" && has_final_output {
-        transaction.execute("UPDATE chat_topic SET last_activity_global_sequence=(SELECT max(global_sequence) FROM event_log) WHERE conversation_id=?1", [&target.conversation_id])?;
+    if target.invocation_kind == "chat" {
+        if has_final_output {
+            transaction.execute("UPDATE chat_topic SET last_activity_global_sequence=(SELECT max(global_sequence) FROM event_log) WHERE conversation_id=?1", [&target.conversation_id])?;
+        }
+        crate::steer::settle_execution(
+            transaction,
+            &target.agent_run_id,
+            "succeeded",
+            &target.now,
+        )?;
     }
     let camp_turn_status = if target.camp_turn_id.is_empty() {
         None

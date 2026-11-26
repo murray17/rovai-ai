@@ -5097,7 +5097,7 @@ export function BusinessApp({
         {!startupGateVisible && view === 'chat' && <ChatWorkspace key={activeChatId ?? chatDraftAgentId ?? 'index'}
           client={client} chatId={activeChatId} draftAgentId={chatDraftAgentId} profiles={agents} header={chatHeadingHost} theme={appearance.resolvedTheme}
           onRead={(id, sequence) => markChat(id, sequence, false)}
-          onFirst={id => { desktopNavigation.captureCurrentEntry().update({kind:'chat',chatId:id}); setChatDraftAgentId(null); setActiveChatId(id); void chatList.refresh() }}/>}
+          onNavigate={id => { desktopNavigation.captureCurrentEntry().update({kind:'chat',chatId:id}); setChatDraftAgentId(null); setActiveChatId(id); void chatList.refresh() }}/>}
         {!startupGateVisible && view === 'compose' && (
           <QuickChatWorkspace
             agents={agents}

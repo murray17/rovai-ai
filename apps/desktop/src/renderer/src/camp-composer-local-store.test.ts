@@ -7,6 +7,7 @@ import {
   emptyLocalThreadComposerDraft,
   loadLocalThreadComposerDraft,
   materializeLocalContinuation,
+  MAX_LOCAL_COMPOSER_QUOTES,
   nextLocalThreadComposerDraftAfterSend,
   saveLocalThreadComposerDraft
 } from './camp-composer-local-store'
@@ -33,6 +34,19 @@ const members = [
 ] as ThreadSnapshot['members']
 
 describe('local Thread Composer drafts', () => {
+  it('keeps the saved chat draft when another short quotation exceeds its count limit', () => {
+    const storage = new MemoryStorage()
+    const draft = emptyLocalThreadComposerDraft('chat:quotes')
+    draft.body = 'Keep my question'
+    draft.content = { version: 2, segments: [{kind:'text',text:draft.body}] }
+    const quote = {version:1, text:'short', capturedAt:'2026-11-25', format:'plain_text'} as const
+    draft.quotes = Array.from({length: MAX_LOCAL_COMPOSER_QUOTES}, (_, n) => ({...quote, quoteId:String(n)}))
+    expect(saveLocalThreadComposerDraft(draft, storage)).toBe(true)
+    const over = {...draft, quotes:[...draft.quotes, {...quote, quoteId:'extra'}]}
+    expect(() => saveLocalThreadComposerDraft(over, storage)).toThrow('quote.too_many')
+    expect(loadLocalThreadComposerDraft(draft.threadId, storage)).toEqual(draft)
+  })
+
   it('settles only the accepted matching public submission and preserves later edits and other Threads', () => {
     const storage = new MemoryStorage()
     const original: ThreadComposerDraftView = { ...emptyLocalThreadComposerDraft('thread-a', 4), body: '已发送',

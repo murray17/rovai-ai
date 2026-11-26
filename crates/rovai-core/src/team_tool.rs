@@ -174,6 +174,8 @@ pub struct TeamListTasksInput {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadMessageSendCommand {
+    #[serde(skip)]
+    chat_send_key: Option<String>,
     native_binding_id: String,
     credential_digest: String,
     runtime_tool_call_id: String,
@@ -187,14 +189,25 @@ pub struct ThreadMessageSendCommand {
     files: Vec<String>,
 }
 
+impl ThreadMessageSendInput {
+    fn receipt_key(&self, runtime_tool_call_id: &str) -> Result<String> {
+        canonical_json_digest(&json!([runtime_tool_call_id, self]))
+    }
+}
+
 impl sealed::Sealed for ThreadMessageSendCommand {}
 impl DomainCommand for ThreadMessageSendCommand {
     const TYPE: &'static str = CAMP_MESSAGE_SEND_TOOL_NAME;
+
+    fn matches_replay(&self, stored: &Value) -> Result<bool> {
+        Ok(stored["chatSendKey"]["request"].as_str() == self.chat_send_key.as_deref())
+    }
 }
 
 /// The raw credential is deliberately separate from the durable domain command.
 /// Command records contain only its digest, so the credential never reaches SQLite.
 pub struct ThreadMessageSendInvocation {
+    pub cli_receipt_proof: Option<String>,
     pub native_binding_id: String,
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
@@ -258,6 +271,7 @@ struct RecordedTeamCommandIdentity {
     agent_id: String,
     source_agent_run_id: String,
     execution_epoch: i64,
+    chat_source: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,6 +389,59 @@ impl TeamToolService {
             agent_run_id: identity.agent_run_id,
             execution_epoch: identity.execution_epoch,
         })
+    }
+
+    pub fn recorded_chat_send(
+        &self,
+        database: &Database,
+        run: &str,
+        epoch: i64,
+        scoped_call_id: &str,
+        input: &Value,
+    ) -> Result<Option<CommandExecution>> {
+        let send: ThreadMessageSendInput = serde_json::from_value(input.clone())?;
+        let key = send.receipt_key(scoped_call_id)?;
+        let target = send.thread_id.as_deref();
+        let current = recorded_chat_send_by_key(
+            database,
+            target,
+            Some((run, epoch)),
+            "$.chatSendKey.request",
+            &key,
+        )?;
+        if current.is_some() {
+            return Ok(current);
+        }
+
+        // Before 236 a completed CLI step already bound the exact request to its public message.
+        // An unfinished step carries no such proof.
+        let tool_call_id = canonical_json_digest(
+            &json!({"runtimeToolCallId":scoped_call_id,"tool":CAMP_MESSAGE_SEND_TOOL_NAME}),
+        )?;
+        let operation = crate::canonical_activity::stable_operation_id(run, epoch, &tool_call_id);
+        let db = database.connection();
+        let command = db.query_row(
+            "SELECT e.command_id FROM agent_run_execution_evidence a JOIN agent_run r ON r.id=a.agent_run_id
+             JOIN chat_topic t ON t.conversation_id=r.conversation_id JOIN event_log e ON e.source_agent_run_id=r.id
+             WHERE a.agent_run_id=?1 AND a.execution_epoch=?2 AND a.operation_id=?3 AND e.execution_epoch=?2
+               AND json_extract(a.input_preview_json,'$.sourceAuthority')='core'
+               AND json_extract(a.input_preview_json,'$.rawInputDigest')=?4 AND json_extract(a.result_preview_json,'$.coreEnvelope.ok')=1
+               AND e.result_entity_type='camp_message' AND e.result_entity_id=json_extract(a.input_preview_json,'$.receiptId')
+               AND e.camp_id=?5 AND e.event_type='command.result' AND e.command_type=?6 AND json_type(e.result_payload_json,'$.chatSendKey') IS NULL
+               AND t.owner_user_id=?7 AND t.deletion_operation_id IS NULL",
+            params![run,epoch,operation,canonical_json_digest(input)?,target,CAMP_MESSAGE_SEND_TOOL_NAME,crate::current_user::CURRENT_USER_ID],|row|row.get(0),
+        ).optional()?;
+        projected_chat_send_receipt(db, command)
+    }
+
+    /// The original CLI request may only read its own durable receipt once the lease expires.
+    pub fn recorded_cli_chat_send(
+        &self,
+        database: &Database,
+        target: &str,
+        proof: &str,
+    ) -> Result<Option<CommandExecution>> {
+        recorded_chat_send_by_key(database, Some(target), None, "$.chatSendKey.cli", proof)
     }
 
     pub fn authenticate_public_message_binding_or_recorded_scope(
@@ -1096,13 +1163,22 @@ impl TeamToolService {
                 .thread_id
                 .as_ref()
                 .is_some_and(|id| id != &recorded.camp_id)
+                || (recorded.chat_source && invocation.input.thread_id.is_none())
             {
                 return Err(invocation_error(
                     "chat.thread_mismatch",
-                    "Recorded message belongs to another destination",
+                    "The recorded destination Thread must match",
                 ));
             }
             let command = ThreadMessageSendCommand {
+                chat_send_key: recorded
+                    .chat_source
+                    .then(|| {
+                        invocation
+                            .input
+                            .receipt_key(&invocation.runtime_tool_call_id)
+                    })
+                    .transpose()?,
                 native_binding_id: invocation.native_binding_id.clone(),
                 credential_digest: supplied_credential_digest.clone(),
                 runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
@@ -1160,6 +1236,15 @@ impl TeamToolService {
             )?;
         }
         let command = ThreadMessageSendCommand {
+            chat_send_key: sender
+                .camp_id
+                .is_empty()
+                .then(|| {
+                    invocation
+                        .input
+                        .receipt_key(&invocation.runtime_tool_call_id)
+                })
+                .transpose()?,
             native_binding_id: invocation.native_binding_id.clone(),
             credential_digest: supplied_credential_digest.clone(),
             runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
@@ -1225,7 +1310,7 @@ impl TeamToolService {
                     "internal Thread identity invariant violated for public message send"
                 ));
             }
-            persist_queued_agent_message(
+            let mut result = persist_queued_agent_message(
                 transaction,
                 &SendQueuedAgentMessage {
                     command_id: &envelope.command_id,
@@ -1240,7 +1325,12 @@ impl TeamToolService {
                     task_id: envelope.payload.task_id.as_deref(),
                     source_files: &invocation.source_files,
                 },
-            )
+            )?;
+            if let Some(key) = &envelope.payload.chat_send_key {
+                result.payload["chatSendKey"] =
+                    json!({"request":key, "cli":invocation.cli_receipt_proof});
+            }
+            Ok(result)
         })?;
         Ok(execution)
     }
@@ -1777,6 +1867,52 @@ fn team_command_id(
     Ok(format!("builtin-tool-{digest}"))
 }
 
+fn recorded_chat_send_by_key(
+    database: &Database,
+    target: Option<&str>,
+    source: Option<(&str, i64)>,
+    key_path: &str,
+    key: &str,
+) -> Result<Option<CommandExecution>> {
+    let db = database.connection();
+    let command: Option<String> = db
+        .query_row(
+            "SELECT e.command_id FROM event_log e JOIN agent_run r ON r.id=e.source_agent_run_id
+         JOIN chat_topic t ON t.conversation_id=r.conversation_id
+         WHERE e.camp_id=?1 AND e.command_type=?2 AND e.event_type='command.result'
+           AND r.invocation_kind='chat' AND e.execution_epoch=r.execution_epoch
+           AND (?3 IS NULL OR (r.id=?3 AND e.execution_epoch=?4))
+           AND json_extract(e.result_payload_json,?5)=?6
+           AND t.owner_user_id=?7 AND t.deletion_operation_id IS NULL",
+            params![
+                target,
+                CAMP_MESSAGE_SEND_TOOL_NAME,
+                source.map(|s| s.0),
+                source.map(|s| s.1),
+                key_path,
+                key,
+                crate::current_user::CURRENT_USER_ID
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+    projected_chat_send_receipt(db, command)
+}
+
+fn projected_chat_send_receipt(
+    db: &Connection,
+    command: Option<String>,
+) -> Result<Option<CommandExecution>> {
+    let Some(id) = command else { return Ok(None) };
+    let mut result =
+        crate::command::load_stored_result(db, &id)?.context("Chat send receipt disappeared")?;
+    crate::thread_compat::project_command_result(&result.command_type, &mut result.payload)?;
+    Ok(Some(CommandExecution {
+        result,
+        replayed: true,
+    }))
+}
+
 fn load_recorded_team_command_identity(
     connection: &Connection,
     command_id: &str,
@@ -1784,7 +1920,9 @@ fn load_recorded_team_command_identity(
     let recorded = connection
         .query_row(
             r#"
-            SELECT camp_id, actor_type, actor_id, source_agent_run_id, execution_epoch
+            SELECT camp_id, actor_type, actor_id, source_agent_run_id, execution_epoch,
+                   json_type(result_payload_json,'$.chatSendKey') IS 'object' OR
+                   EXISTS(SELECT 1 FROM agent_run r WHERE r.id=event_log.source_agent_run_id AND r.invocation_kind='chat')
             FROM event_log
             WHERE event_type = 'command.result' AND command_id = ?1
             "#,
@@ -1796,11 +1934,13 @@ fn load_recorded_team_command_identity(
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((camp_id, actor_type, agent_id, source_agent_run_id, execution_epoch)) = recorded
+    let Some((camp_id, actor_type, agent_id, source_agent_run_id, execution_epoch, chat_source)) =
+        recorded
     else {
         return Ok(None);
     };
@@ -1808,6 +1948,7 @@ fn load_recorded_team_command_identity(
         anyhow::bail!("recorded Team Tool command actor is not an Agent");
     }
     Ok(Some(RecordedTeamCommandIdentity {
+        chat_source,
         camp_id: camp_id.context("recorded Team Tool command has no Thread")?,
         agent_id,
         source_agent_run_id: source_agent_run_id
@@ -2203,6 +2344,7 @@ mod tests {
             to: &[&str],
         ) -> ThreadMessageSendInvocation {
             ThreadMessageSendInvocation {
+                cli_receipt_proof: None,
                 native_binding_id: credential.native_binding_id.clone(),
                 binding_credential: credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),

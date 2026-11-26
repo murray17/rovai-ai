@@ -127,6 +127,7 @@ export const WEB_OPERATIONS = [
   'navigation.findThread',
   'chats.list',
   'chats.open',
+  'runtimeInputs.reconcile',
   'chats.canPreviewFile',
   'chats.send',
   'chats.pendingInputs.edit',

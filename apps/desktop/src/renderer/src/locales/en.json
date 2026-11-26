@@ -468,6 +468,7 @@
   "审核项已失效": "The review item has expired",
   "已停止沿用": "Stopped being used",
   "未知队员": "Unknown teammate",
+  "最多可引用 {0} 段，请先移除一段。": "You can quote up to {0} passages. Remove one to add another.",
   "引用选文合计最多 12,000 字，请缩小选区或移除已有引用。": "Total reference text up to 12,000 characters. Please reduce the selection or remove existing references.",
   "原消息内容已变化，请重新选择要引用的文字。": "Original message content has changed. Please select a new portion to reference.",
   "选文位置未能确认，请重新选择要引用的文字。": "Reference position could not be confirmed. Please select a new portion to reference.",

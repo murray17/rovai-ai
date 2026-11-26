@@ -256,7 +256,7 @@ export function ChatWorkspace({
   header,
   theme,
   onRead,
-  onFirst
+  onNavigate
 }: {
   client: ThreadClient
   chatId: string | null
@@ -265,7 +265,7 @@ export function ChatWorkspace({
   header: HTMLElement | null
   theme: ResolvedTheme
   onRead(chatId: string, sequence: number): void
-  onFirst(chatId: string): void
+  onNavigate(chatId: string | null): void
 }) {
   const [detail, setDetail] = useState<ChatOpenResult | null>(null)
   const [failed, setFailed] = useState(false)
@@ -277,18 +277,33 @@ export function ChatWorkspace({
   const transcript = useRef<HTMLDivElement>(null)
   const approvalDock = useRef<HTMLElement>(null)
   const lastSeen = useRef(0)
+  const navigate = useRef(onNavigate)
+  navigate.current = onNavigate
   const onReadRef = useRef(onRead)
   onReadRef.current = onRead
   useEffect(() => {
     if (!chatId) return
     let current = true
+    const checkedInputs = new Set<string>()
     const read = createRuntimeRefresh(async () => {
       if (!current) return
       try {
-        const next = await client.request<ChatOpenResult>('chats.open', { chatId, beforeSequence: before })
-        if (current) {
-          setDetail(next)
-          setFailed(false)
+        const next = await client.request<ChatOpenResult | null>('chats.open', { chatId, beforeSequence: before })
+        if (!current) return
+        setDetail(next)
+        setFailed(false)
+        if (!next) {
+          navigate.current(null)
+          return
+        }
+        for (const input of next.supplements ?? []) {
+          if (!input.unconfirmed) continue
+          const run = next.runs.find((item) => item.runId === input.runId)
+          const check = input.inputId + (run && processing(run.status) ? ':active' : ':finished')
+          if (checkedInputs.has(check)) continue
+          checkedInputs.add(check)
+          // Recheck on the existing refresh when the turn ends or a read failed.
+          void client.request('runtimeInputs.reconcile', { deliveryId: input.inputId }).catch(() => checkedInputs.delete(check))
         }
       } catch {
         if (current) setFailed(true)
@@ -377,7 +392,7 @@ export function ChatWorkspace({
   }
   const renderedRounds = new Set<string>()
   function sent(result: ChatSendResult) {
-    if (!chatId) onFirst(result.chatId)
+    if (!chatId) onNavigate(result.chatId)
     else {
       followsLatest.current = true
       setBefore(null)

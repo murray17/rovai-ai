@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AdapterKind, ChatOpenResult, ChatSendResult, ComposerDocument } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import type { ThreadClient } from './camp-client'
@@ -47,7 +47,7 @@ export function ChatComposer({
 }) {
   const [draftId, setDraftId] = useState(() => (chatId ? '' : newChatDraftId(agentId)))
   const key = chatDraftKey(agentId, chatId, draftId)
-  const [initial] = useState(() => readChatDraft(key))
+  const initial = useMemo(() => readChatDraft(key), [key])
   const [content, setContent] = useState(initial)
   const [extras, setExtras] = useState<ChatDraftExtras>(() => {
     const draft = loadLocalThreadComposerDraft(key)
@@ -115,8 +115,10 @@ export function ChatComposer({
     sending.current = true
     setBusy(true)
     setError('')
+    let submitted = content
     try {
       const { document } = await handle.current.flush({ forSubmission: true })
+      submitted = document
       const input = chatInputFromDocument(document)
       if (!input.body.trim() && !extras.attachments.length && !extras.quotes.length) return
       const steer = Boolean(active && detail?.activeInput?.canSteer && mode === 'steer')
@@ -157,7 +159,7 @@ export function ChatComposer({
       ) {
         const next = forkConflictedChat(agentId, draftId)
         if (next !== draftId) {
-          saveChatDraft(chatDraftKey(agentId, null, next), content)
+          saveChatDraft(chatDraftKey(agentId, null, next), submitted)
           saveChatExtras(chatDraftKey(agentId, null, next), extras)
           setDraftId(next)
         }
@@ -236,7 +238,7 @@ export function ChatComposer({
                 : {})
             }
             if ([...extras.quotes, quote].reduce((n, q) => n + Array.from(q.text).length, 0) > 12000)
-              throw new Error(uiAttribute('引用内容过长'))
+              throw new Error('quote.limit_exceeded')
             changeExtras({ ...extras, quotes: [...extras.quotes, quote] })
             handle.current?.focus('end')
           }}

@@ -127,6 +127,11 @@ pub(crate) fn project_builtin_result(operation: &str, result: &mut Value) -> Res
         alias(row, "campTurnId", "threadTurnId")
     }
     scope(result)?;
+    if operation == "thread.message.send"
+        && let Some(fields) = result.as_object_mut()
+    {
+        fields.remove("chatSendKey");
+    }
     let messages = match operation {
         "thread.read" => Some("items"),
         "thread.search" | "history.search" => Some("results"),

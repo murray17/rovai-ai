@@ -29,7 +29,11 @@ pub(crate) fn ready_steers(c: &Connection) -> Result<Vec<RuntimeInput>> {
 pub(crate) fn return_steer_to_queue(tx: &Transaction<'_>, id: &str, now: &str) -> Result<()> {
     let changed=tx.execute("UPDATE single_chat_pending_input SET requested_mode='start',revision=revision+1,updated_at=?2
         WHERE id=?1 AND requested_mode='steer' AND state='queued'
-        AND EXISTS(SELECT 1 FROM agent_run r WHERE r.id=target_run_id AND r.status IN ('running','waiting','succeeded') AND r.cancel_requested_at IS NULL)
+        AND EXISTS(SELECT 1 FROM agent_run r JOIN chat_topic t ON t.conversation_id=r.conversation_id
+            WHERE r.id=target_run_id AND r.execution_epoch=target_execution_epoch
+              AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL
+              AND ((r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL)
+                   OR r.status='succeeded' OR (r.status='cancelled' AND r.cancel_reason_code='core_restarted')))
         AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id WHERE m.source_chat_input_id=?1 AND (i.status IN ('accepted','delivery_unknown') OR (i.status='prepared' AND i.dispatch_started_at IS NOT NULL)))",params![id,now])?;
     if changed > 0 {
         crate::execution_input::changed(tx, id)?;
@@ -46,12 +50,13 @@ pub(crate) fn settle_steers(
     let inputs = tx.prepare_cached("SELECT id FROM single_chat_pending_input WHERE target_run_id=?1 AND requested_mode='steer' AND state='queued'")?
         .query_map([run],|r|r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
     for input in inputs {
-        if status == "succeeded" {
-            return_steer_to_queue(tx, &input, now)?;
-        } else {
-            tx.execute("UPDATE single_chat_pending_input SET state='cancelled',revision=revision+1,updated_at=?2
-                WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id WHERE m.source_chat_input_id=?1 AND (i.status IN ('accepted','delivery_unknown') OR i.dispatch_started_at IS NOT NULL))",params![input,now])?;
-            crate::execution_input::changed(tx, &input)?;
+        return_steer_to_queue(tx, &input, now)?;
+        if status != "succeeded" {
+            let cancelled = tx.execute("UPDATE single_chat_pending_input SET state='cancelled',revision=revision+1,updated_at=?2
+                WHERE id=?1 AND requested_mode='steer' AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id WHERE m.source_chat_input_id=?1 AND (i.status IN ('accepted','delivery_unknown') OR (i.status='prepared' AND i.dispatch_started_at IS NOT NULL)))",params![input,now])?;
+            if cancelled > 0 {
+                crate::execution_input::changed(tx, &input)?;
+            }
         }
     }
     Ok(())

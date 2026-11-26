@@ -4348,6 +4348,11 @@ fn load_events(
     } else {
         "AND COALESCE(event_log.entity_type, '') <> 'task'"
     };
+    let event_thread = if tasks_enabled {
+        "COALESCE(NULLIF(event_log.camp_id,''), task.camp_id)"
+    } else {
+        "NULLIF(event_log.camp_id,'')"
+    };
     let order = if newest_first_window { "DESC" } else { "ASC" };
     let sql = format!(
         r#"
@@ -4359,7 +4364,11 @@ fn load_events(
                event_log.payload_json, event_log.command_type,
                event_log.result_status, event_log.result_code,
                event_log.result_payload_json, event_log.result_entity_type,
-               event_log.result_entity_id, event_log.created_at
+               event_log.result_entity_id, event_log.created_at,
+               CASE WHEN event_log.source_agent_run_id IS NOT NULL AND {event_thread} IS NOT NULL THEN
+                   NOT EXISTS (SELECT 1 FROM agent_run r LEFT JOIN camp_turn t ON t.id=r.camp_turn_id
+                               WHERE r.id=event_log.source_agent_run_id AND COALESCE(r.camp_id,t.camp_id)={event_thread})
+               ELSE 0 END AS hide_source
         FROM event_log
         {task_join}
         WHERE event_log.global_sequence > ?1
@@ -4380,6 +4389,7 @@ fn load_events(
         .query_map(
             params![after, through, camp_id, limit, presentation_only],
             |row| {
+                let hide_source: bool = row.get(18)?;
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -4389,8 +4399,16 @@ fn load_events(
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
+                    if hide_source {
+                        None
+                    } else {
+                        row.get::<_, Option<String>>(8)?
+                    },
+                    if hide_source {
+                        None
+                    } else {
+                        row.get::<_, Option<i64>>(9)?
+                    },
                     row.get::<_, String>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,

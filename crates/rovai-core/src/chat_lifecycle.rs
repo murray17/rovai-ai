@@ -226,6 +226,14 @@ fn delete_rows(db: &mut Database, root: &std::path::Path, chat: &str, op: &str) 
             &now,
         )?;
     }
+    // A draft upload may be reused when a conflicting first send opens a second topic.
+    tx.execute("DELETE FROM event_log
+        WHERE command_type='camp.source_attachment.upload.bind' AND camp_id IS NULL
+          AND json_extract(result_payload_json,'$.chatComposer') LIKE 'chat-draft:%'
+          AND command_id IN (SELECT a.value->>'$.id' FROM conversation_message m, json_each(m.source_attachments_json) a
+                             WHERE m.conversation_id=?1)
+          AND command_id NOT IN (SELECT a.value->>'$.id' FROM conversation_message m, json_each(m.source_attachments_json) a
+                                 WHERE m.conversation_id<>?1 AND m.source_attachments_json<>'[]' AND a.value->>'$.id' IS NOT NULL)", [chat])?;
     // Keep only the replay key and digest of consumed sends. A delayed retry cannot resurrect a deleted draft.
     tx.execute("UPDATE event_log SET result_status='rejected',result_code='chat.deleted',
             result_payload_json=json_object('inputDigest',json_extract(result_payload_json,'$.inputDigest'),'deleted',json('true')),

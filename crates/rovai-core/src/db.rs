@@ -536,7 +536,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 185;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 186;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1047,6 +1047,7 @@ struct CurrentMigrationState {
     v233: bool,
     v234: bool,
     v235: bool,
+    v236: bool,
 }
 
 impl CurrentMigrationState {
@@ -1068,6 +1069,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v236 {
+            let mut previous = *self;
+            previous.v236 = false;
+            return schema == 186 && previous.admits(contract, 185, classifier);
+        }
         if self.v235 {
             let mut previous = *self;
             previous.v235 = false;
@@ -6353,7 +6359,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=232),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=233),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=234),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=235)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=235),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=236)
         "#,
         [],
         |row| {
@@ -6524,6 +6531,7 @@ fn load_current_migration_state(
                 v233: row.get(163)?,
                 v234: row.get(164)?,
                 v235: row.get(165)?,
+                v236: row.get(166)?,
             })
         },
     )
@@ -8962,6 +8970,11 @@ impl Database {
         }
         if !self.schema_migration_applied(235)? {
             observe_migration_step(progress, "migration_235", || chat_runtime::migrate(self))?;
+        }
+        if !self.schema_migration_applied(236)? {
+            observe_migration_step(progress, "migration_236", || {
+                chat_runtime::repair_chat_runtime(self)
+            })?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -40725,7 +40738,8 @@ mod tests {
             "migration_232".into(),
             "migration_233".into(),
             "migration_234".into(),
-            "migration_235".into()
+            "migration_235".into(),
+            "migration_236".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40808,7 +40822,8 @@ mod tests {
                 "migration_232",
                 "migration_233",
                 "migration_234",
-                "migration_235"
+                "migration_235",
+                "migration_236"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
@@ -42904,6 +42919,7 @@ mod tests {
             v233: version >= 233,
             v234: version >= 234,
             v235: version >= 235,
+            v236: version >= 236,
         }
     }
 

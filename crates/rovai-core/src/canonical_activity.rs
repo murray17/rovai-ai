@@ -430,7 +430,11 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-fn stable_operation_id(agent_run_id: &str, execution_epoch: i64, identity: &str) -> String {
+pub(crate) fn stable_operation_id(
+    agent_run_id: &str,
+    execution_epoch: i64,
+    identity: &str,
+) -> String {
     let digest = Sha256::digest(format!("{agent_run_id}|{execution_epoch}|{identity}").as_bytes());
     format!("operation:sha256:{digest:x}")
 }

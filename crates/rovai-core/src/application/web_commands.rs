@@ -200,6 +200,38 @@ pub(super) fn reconcile(
             )
         }
 
+        "camp.message.send" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct ChatSendReceipt {
+                agent_run_id: String,
+                execution_epoch: i64,
+                request_id: uuid::Uuid,
+                input: Value,
+            }
+            let q: ChatSendReceipt = serde_json::from_value(query.params)?;
+            let call = scoped_runtime_tool_call_id(
+                &q.agent_run_id,
+                &format!("builtin-cli:{}", q.request_id),
+            );
+            let found = TeamToolService::default().recorded_chat_send(
+                database,
+                &q.agent_run_id,
+                q.execution_epoch,
+                &call,
+                &q.input,
+            )?;
+            Ok(match found {
+                Some(execution) => match command_execution_payload(execution) {
+                    Ok(result) => json!({"state":"recorded","result":result}),
+                    Err(error) => {
+                        let (code, message, details) = classify_builtin_operation_error(&error);
+                        json!({"state":"recorded","error":{"code":code,"message":message,"details":details}})
+                    }
+                },
+                None => json!({"state":"unknown"}),
+            })
+        }
         "chats.send" | "chats.pendingInputs.edit" => {
             let mut recorded = if query.operation == "chats.send" {
                 let params: UserCommandParams<rovai_core::chat::SendInput> =

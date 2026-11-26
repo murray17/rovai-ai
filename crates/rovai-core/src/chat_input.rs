@@ -577,12 +577,17 @@ mod tests {
                 .rendered_payload
                 .contains("[ROVAI_ADDITIONAL_SKILLS]")
         );
-        assert!(
-            prepared
-                .rendered_payload
-                .contains(&json!({"message":body}).to_string()),
-            "{}",
-            prepared.rendered_payload
+        let current_input = prepared
+            .rendered_payload
+            .rsplit_once("[CURRENT_INPUT]\n")
+            .unwrap()
+            .1
+            .split_once("\n[/CURRENT_INPUT]")
+            .unwrap()
+            .0;
+        assert_eq!(
+            serde_json::from_str::<Value>(current_input).unwrap()["message"],
+            body
         );
         assert!(!prepared.rendered_payload.contains("[RUN_FACTS]"));
         let binding = service
@@ -658,8 +663,34 @@ mod tests {
                 .unwrap()
         };
         let public_counts = ["camp", "camp_member", "camp_turn"].map(|name| count(&db, name));
-        let first =
-            json!({"draftId":"shared","agentId":"agent_1","mode":"start","body":"讨论发布计划"});
+        let external_upload = db.directory().join("first-upload.txt");
+        std::fs::write(&external_upload, "release notes").unwrap();
+        let upload = crate::local_attachment_source::observe_agent_source_attachments(
+            &[external_upload.to_string_lossy().into_owned()],
+            db.directory(),
+        )
+        .unwrap()
+        .remove(0);
+        let client = crate::draft_client::DraftClient::verified_web(&"a".repeat(64)).unwrap();
+        let intent = crate::web_upload::UploadIntent {
+            target: crate::web_upload::UploadTarget::Chat,
+            command_id: upload.id.clone(),
+            camp_id: "chat-draft:shared".into(),
+            expected_revision: 1,
+            display_name: upload.display_name.clone(),
+            byte_size: upload.observed_byte_size.unwrap(),
+            sha256: "a".repeat(64),
+        };
+        let upload_dir = db.directory().to_owned();
+        crate::web_upload::bind(
+            &mut db,
+            &upload_dir,
+            &client,
+            intent.clone(),
+            upload.clone(),
+        )
+        .unwrap();
+        let first = json!({"draftId":"shared","agentId":"agent_1","mode":"start","body":"讨论发布计划","sourceAttachments":[upload]});
         let result = submit(&mut db, "first", first.clone()).unwrap();
         assert_eq!(result["kind"], "started");
         assert_eq!(
@@ -705,6 +736,7 @@ mod tests {
                     limit: None,
                 },
             )
+            .unwrap()
             .unwrap()
         };
         assert_eq!(snapshot(&mut db).supplements.len(), 1);
@@ -771,6 +803,7 @@ mod tests {
                 limit: Some(1),
             },
         )
+        .unwrap()
         .unwrap();
         assert_eq!(supplement_only.messages[0].body, "用中文");
         assert_eq!(supplement_only.runs[0].run_id, run_id);
@@ -787,6 +820,9 @@ mod tests {
             .load_agent_run_execution(&db, run_id, epoch)
             .unwrap()
             .unwrap();
+        let at_completion = submit(&mut db, "at-completion", json!({
+            "chatId":chat,"mode":"steer","body":"also check the date","runId":run_id,"executionEpoch":epoch
+        })).unwrap();
         let completed = service
             .succeed_agent_run(
                 &mut db,
@@ -827,6 +863,21 @@ mod tests {
                 payload,
             }
         }
+        let queue_after_success = snapshot(&mut db).pending_inputs;
+        assert_eq!(queue_after_success.len(), 2);
+        assert_eq!(
+            queue_after_success[0].input_id,
+            accepted["inputId"].as_str().unwrap()
+        );
+        let converted = &queue_after_success[1];
+        assert_eq!(
+            converted.input_id,
+            at_completion["inputId"].as_str().unwrap()
+        );
+        assert!(converted.converted_from_steer);
+        edit_pending(&mut db, &user_command("remove-converted", serde_json::from_value(json!({
+            "chatId":chat,"inputId":converted.input_id,"expectedRevision":converted.revision,"operation":"remove"
+        })).unwrap())).unwrap();
         let archive = |db: &mut Database, id: &str, value| {
             super::super::set_archived(
                 db,
@@ -921,6 +972,12 @@ mod tests {
             cleanup.remove_directory().unwrap();
             super::super::complete_directory_cleanup(&db, &cleanup.operation_id).unwrap();
         }
+        assert!(
+            crate::web_upload::reconcile(&db, &client, intent)
+                .unwrap()
+                .is_none()
+        );
+        assert!(external_upload.is_file());
         assert_eq!(count(&db, "chat_topic"), 0);
         assert!(!directory.exists());
         assert!(outside.is_file());
@@ -929,6 +986,65 @@ mod tests {
             public_counts,
             ["camp", "camp_member", "camp_turn"].map(|name| count(&db, name))
         );
+
+        let restarted = submit(&mut db, "restart-draft", json!({"draftId":"restart-draft","agentId":"agent_1","mode":"start","body":"original turn"})).unwrap();
+        let chat = restarted["chatId"].as_str().unwrap();
+        let run = restarted["runId"].as_str().unwrap();
+        let (epoch, _) = claim_chat(&mut db, chat, run, "original turn");
+        let ordinary = submit(
+            &mut db,
+            "restart-queue",
+            json!({"chatId":chat,"mode":"start","body":"next"}),
+        )
+        .unwrap();
+        let unsent = submit(&mut db, "restart-steer", json!({"chatId":chat,"mode":"steer","body":"keep me","runId":run,"executionEpoch":epoch})).unwrap();
+        db.reopen_production().unwrap();
+        service
+            .cancel_interrupted_single_chat_runs(&mut db)
+            .unwrap();
+        service
+            .cancel_interrupted_single_chat_runs(&mut db)
+            .unwrap();
+        let reopened = super::super::open(
+            &mut db,
+            super::super::OpenParams {
+                chat_id: chat.into(),
+                before_sequence: None,
+                limit: None,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert!(reopened.supplements.is_empty());
+        assert_eq!(
+            reopened
+                .pending_inputs
+                .iter()
+                .map(|p| p.input_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                ordinary["inputId"].as_str().unwrap(),
+                unsent["inputId"].as_str().unwrap()
+            ]
+        );
+        assert!(reopened.pending_inputs[1].converted_from_steer);
+        assert_eq!(reopened.pending_inputs[1].body, "keep me");
+        // An upgrade also restores the exact interrupted input left by a 235 restart.
+        db.connection().execute("UPDATE single_chat_pending_input SET requested_mode='steer',state='cancelled' WHERE id=?1",[unsent["inputId"].as_str().unwrap()]).unwrap();
+        db.connection().execute_batch("DELETE FROM schema_migration WHERE version=236; UPDATE rovai_data_contract SET projection_schema_version=185;").unwrap();
+        db.reopen_production().unwrap();
+        let restored = super::super::open(
+            &mut db,
+            super::super::OpenParams {
+                chat_id: chat.into(),
+                before_sequence: None,
+                limit: None,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(restored.pending_inputs[1].input_id, unsent["inputId"]);
+        assert!(restored.pending_inputs[1].converted_from_steer);
     }
     #[test]
     fn private_history_and_public_writes_stay_with_their_respective_owners() {
@@ -936,6 +1052,14 @@ mod tests {
             TeamTaskToolInvocation, TeamToolService, ThreadMessageSendInvocation,
         };
         let mut db = crate::test_support::seeded_runtime_database_owned();
+        // A previous preview already committed 235 with guards referencing the wrong table.
+        db.connection().execute_batch("DELETE FROM schema_migration WHERE version=236;
+            UPDATE rovai_data_contract SET projection_schema_version=185;
+            DROP TRIGGER chat_memory_revision_source;
+            CREATE TRIGGER chat_memory_revision_source BEFORE INSERT ON memory_revision
+            WHEN NEW.source_camp_id IS NULL AND EXISTS(SELECT 1 FROM agent_run WHERE agent_id=NEW.actor_id)
+            BEGIN SELECT RAISE(ABORT,'old guard'); END;").unwrap();
+        db.reopen_production().unwrap();
         let tools = TeamToolService::default();
         crate::task_capability::set(db.connection(), true).unwrap();
         let open = |db: &mut Database, key: &str, body: &str| {
@@ -984,6 +1108,25 @@ mod tests {
                 "create-public",
             )
             .unwrap();
+        for (scope, table) in [
+            ("companion", "memory_revision"),
+            ("hearth", "hearth_review_item"),
+        ] {
+            let write = crate::memory_tool::MemoryToolService.write_attested(&mut db, &crate::memory_tool::MemoryWriteToolInvocation {
+                native_binding_id: binding.native_binding_id.clone(), binding_credential: binding.binding_credential.clone(),
+                runtime_tool_call_id: format!("remember-{scope}"), input:serde_json::from_value(json!({
+                    "action":"add", "scope":scope, "kind":"agreement", "body":format!("Review the {scope} release notes together."),
+                    "retrievalKeys":["release notes"]
+                })).unwrap(),
+            }, run, epoch).unwrap();
+            assert_ne!(
+                write.result.status,
+                crate::command::CommandResultStatus::Rejected,
+                "{:?}",
+                write.result
+            );
+            assert_eq!(db.connection().query_row(&format!("SELECT COUNT(*) FROM {table} WHERE source_agent_run_id=?1 AND source_camp_id IS NULL"),[run],|r|r.get::<_,i64>(0)).unwrap(),1);
+        }
         let root = db.directory().to_owned();
         let card = serde_json::json!({"creationKey":Uuid::new_v4().to_string(),"displayName":"发布助手","teamRole":"发布"});
         let create_member = |db: &mut Database, value: Value| {
@@ -1097,9 +1240,10 @@ mod tests {
             crate::local_attachment_source::observe_agent_source_attachments(&files, &directory)
                 .unwrap();
         let notice = ThreadMessageSendInvocation {
+            cli_receipt_proof: Some("original-transport-proof".into()),
             native_binding_id: binding.native_binding_id,
             binding_credential: binding.binding_credential,
-            runtime_tool_call_id: "notify".into(),
+            runtime_tool_call_id: format!("agent-run:{run}:builtin-cli:{}", Uuid::new_v4()),
             input: serde_json::from_value(
                 json!({"threadId":target,"body":"请检查发布说明","to":["agent_2"],"files":files}),
             )
@@ -1120,6 +1264,21 @@ mod tests {
                 [target],
             )
             .unwrap();
+        let mut refused = ThreadMessageSendInvocation {
+            cli_receipt_proof: Some("refused-transport-proof".into()),
+            native_binding_id: notice.native_binding_id.clone(),
+            binding_credential: notice.binding_credential.clone(),
+            runtime_tool_call_id: format!("agent-run:{run}:builtin-cli:{}", Uuid::new_v4()),
+            input: notice.input.clone(),
+            source_files: vec![],
+        };
+        refused.input.files.clear();
+        refused.input.to = vec!["not-a-participant".into()];
+        let refusal = tools.send_public_message(&mut db, &refused).unwrap();
+        assert_eq!(
+            refusal.result.status,
+            crate::command::CommandResultStatus::Rejected
+        );
         let sent = tools.send_public_message(&mut db, &notice).unwrap();
         assert_ne!(
             sent.result.status,
@@ -1133,6 +1292,23 @@ mod tests {
                 .unwrap()
                 .replayed
         );
+        let assert_public_receipt = |db: &mut Database| {
+            let events = crate::read_model::ReadModelService
+                .events_since(db, Some(target), 0, 2000)
+                .unwrap()
+                .events;
+            let receipt = events
+                .iter()
+                .find(|e| {
+                    e.event_type == "command.result"
+                        && e.payload["result"]["messageId"] == sent.result.payload["messageId"]
+                })
+                .unwrap();
+            assert!(receipt.source_agent_run_id.is_none() && receipt.execution_epoch.is_none());
+            assert!(receipt.payload["result"].get("chatSendKey").is_none());
+            assert!(!serde_json::to_string(&events).unwrap().contains(run));
+        };
+        assert_public_receipt(&mut db);
         let counts:(i64,i64)=db.connection().query_row("SELECT (SELECT COUNT(*) FROM task WHERE camp_id=?1 AND source_agent_run_id=?2),
             (SELECT COUNT(*) FROM camp_message WHERE camp_id=?1 AND author_id='agent_1' AND body='请检查发布说明' AND agent_run_id IS NULL AND source_agent_run_id IS NULL)",params![target,run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
         assert_eq!(counts, (1, 1));
@@ -1171,6 +1347,72 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        db.reopen_production().unwrap();
+        let read_receipt = |input: &crate::team_tool::ThreadMessageSendInput| {
+            tools
+                .recorded_chat_send(&db, run, epoch, &notice.runtime_tool_call_id, &json!(input))
+                .unwrap()
+        };
+        assert_eq!(read_receipt(&notice.input).unwrap().result, sent.result);
+        assert_eq!(
+            tools
+                .recorded_cli_chat_send(&db, target, "original-transport-proof")
+                .unwrap()
+                .unwrap()
+                .result,
+            sent.result
+        );
+        assert!(
+            tools
+                .recorded_cli_chat_send(&db, target, "other-proof")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            tools
+                .recorded_chat_send(
+                    &db,
+                    run,
+                    epoch,
+                    &refused.runtime_tool_call_id,
+                    &json!(refused.input)
+                )
+                .unwrap()
+                .unwrap()
+                .result,
+            refusal.result
+        );
+        assert_eq!(
+            tools
+                .recorded_cli_chat_send(&db, target, "refused-transport-proof")
+                .unwrap()
+                .unwrap()
+                .result,
+            refusal.result
+        );
+        let mut changed_input = notice.input.clone();
+        changed_input.body.push('!');
+        assert!(read_receipt(&changed_input).is_none());
+        changed_input.thread_id = Some(chat.into());
+        assert!(read_receipt(&changed_input).is_none());
+        assert!(
+            tools
+                .recorded_chat_send(
+                    &db,
+                    run,
+                    epoch + 1,
+                    &notice.runtime_tool_call_id,
+                    &json!(notice.input)
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            tools
+                .send_public_message_attested(&mut db, &notice, run, epoch)
+                .unwrap()
+                .replayed
+        );
         let can_preview = |chat_id: &str, reference: &str| {
             crate::file_preview_authority::can_preview_chat_reference(
                 &db,
@@ -1231,6 +1473,7 @@ mod tests {
             cleanup.remove_directory().unwrap();
             super::super::complete_directory_cleanup(&db, &cleanup.operation_id).unwrap();
         }
+        assert_public_receipt(&mut db);
         assert!(!report.exists());
         assert!(external.is_file());
         let stored: String = db

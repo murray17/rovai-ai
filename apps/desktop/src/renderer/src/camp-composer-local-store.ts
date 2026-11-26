@@ -12,7 +12,7 @@ import type {
 const STORAGE_PREFIX = 'rovai.camp-composer-draft.v1:'
 const MAX_STORED_DRAFT_BYTES = 4 * 1024 * 1024
 export const MAX_LOCAL_COMPOSER_ATTACHMENTS = 10
-const MAX_QUOTES = 32
+export const MAX_LOCAL_COMPOSER_QUOTES = 32
 
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
@@ -97,7 +97,7 @@ function isStoredDraft(value: unknown, threadId: string): value is ThreadCompose
     && Number.isInteger(value.revision)
     && Number(value.revision) >= 1
     && Array.isArray(value.quotes)
-    && value.quotes.length <= MAX_QUOTES
+    && value.quotes.length <= MAX_LOCAL_COMPOSER_QUOTES
     && value.quotes.every(isQuote)
     && Array.isArray(value.attachments)
     && value.attachments.length <= MAX_LOCAL_COMPOSER_ATTACHMENTS
@@ -172,6 +172,7 @@ export function saveLocalThreadComposerDraft(
 ): boolean {
   if (!storage) return false
   if (deferIfFull && !isStoredDraft(draft, draft.threadId)) return false
+  if (draft.quotes.length > MAX_LOCAL_COMPOSER_QUOTES) throw new Error('quote.too_many')
   loadLocalThreadComposerDraft(draft.threadId, storage)
   if (!validateComposerDocument(draft.content)) throw new Error('当前草稿格式无效，原始内容已保留')
   if (localThreadComposerDraftIsEmpty(draft)) {
