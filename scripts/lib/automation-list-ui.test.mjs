@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { serveAutomationFixture } from '../fixtures/automation-workspace/serve.mjs'
-import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
+import { launchAcceptanceBrowser } from './host-web-browser.mjs'
 
 const chrome = process.env.ROVAI_TEST_CHROME ?? ({
   darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -179,12 +179,18 @@ test('scheduled task interactions use the production Renderer on desktop and mob
     await tab('开启')
     await matches([issue])
     await tab('关闭')
-    const touch = await evaluate(`(()=>{const r=${row(ended)}.querySelector('.automation-task-open').getBoundingClientRect();return {x:r.left+32,y:r.top+20}})()`)
+    const endedButton = `${row(ended)}.querySelector('.automation-task-open')`
+    await evaluate(`${endedButton}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
+    await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    const touch = await evaluate(`(() => {
+      const rect = ${endedButton}.getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    })()`)
+    assert.ok(await evaluate(`${endedButton}.contains(document.elementFromPoint(${touch.x}, ${touch.y}))`))
     await browser.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch] })
-    await pause(550)
+    await wait(`${select('[role=menu]')}?.getAttribute('aria-label') === ${JSON.stringify(ended + '的操作')}`)
     await browser.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await wait(`!!${select('[role=menu]')} && !!${select('.automation-workspace.overview')}`)
-    assert.equal(await evaluate(`${select('[role=menu]')}.getAttribute('aria-label')`), ended + '的操作')
     assert.deepEqual(await evaluate(menuItems), ['运行一次', '删除'])
     await browser.key('Escape')
     await open(ended)
