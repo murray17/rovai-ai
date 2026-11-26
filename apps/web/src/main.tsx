@@ -15,6 +15,7 @@ import type { InterfaceLanguageApi, WorkspaceSelection } from '@contracts'
 import { createRoot } from 'react-dom/client'
 import { AppToast, type AppToastValue } from '../../desktop/src/renderer/src/AppToast'
 import { BusinessApp } from '../../desktop/src/renderer/src/BusinessApp'
+import { releaseClientImageCache } from '../../desktop/src/renderer/src/ImageGallery'
 import { ThreadClientProvider } from '../../desktop/src/renderer/src/camp-client'
 import { CurrentUserProfileProvider } from '../../desktop/src/renderer/src/CurrentUserProfile'
 import { ConsoleClient, type ConnectionState } from './client'
@@ -105,7 +106,10 @@ function WebEntry() {
   useEffect(() => transport.onAuthenticationChanged(() => {
     const isAuthenticated = transport.authenticated
     setAuthenticated(isAuthenticated)
-    if (!isAuthenticated) setRecoveryNotice(null)
+    if (!isAuthenticated) {
+      if (adapterRef.current) releaseClientImageCache(adapterRef.current.environment.client)
+      setRecoveryNotice(null)
+    }
     setAuthGeneration(value => value + 1)
   }), [])
   useEffect(() => {
@@ -203,7 +207,7 @@ function WebEntry() {
   return <>
     <LanguagePreferenceReadNotice />
     <WebConnectionRecovery transport={transport} enabled={authenticated} onNotice={setRecoveryNotice}>
-      {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client}>
+      {current && <div className="web-authenticated-shell" hidden={!authenticated} inert={!authenticated}><ThreadClientProvider client={current.environment.client} imagePreviewSession={authenticated ? authGeneration : null}>
         <CurrentUserProfileProvider api={current.profile}>
           <BusinessApp environment={current.environment} remoteConnection={<RemoteConnectionStatus origin={transport.origin} state={authenticated ? connection : 'expired'} onLogout={() => { setError(null); void transport.logout().catch(e => setError(e instanceof Error ? e.message : '退出未完成，请重试。')) }} />} />
         </CurrentUserProfileProvider>

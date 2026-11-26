@@ -3,15 +3,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ThreadMessageAttachmentView } from '@contracts'
+import { ImagePreviewUrl } from './image-preview-url'
 import {
   ImageGallery,
   ImagePayloadCache,
+  acquireExportImage,
+  imageCacheKey,
   cacheDecodedImagePayload,
-  clearImagePayloadState,
+  releaseClientImageCache,
   decodeImageUrl,
   fetchImagePayload,
   getOrLoadImagePayload,
+  loadUserImagePreview,
   partitionMessageAttachments,
+  prepareImagePublication,
   type GalleryImage
 } from './ImageGallery'
 
@@ -28,7 +33,7 @@ const attachmentSource = (id: string): GalleryImage => ({
 })
 
 afterEach(() => {
-  clearImagePayloadState()
+  releaseClientImageCache(desktopThreadClient)
   vi.unstubAllGlobals()
 })
 
@@ -117,6 +122,77 @@ describe('shared image presentation', () => {
     expect(revokeObjectURL).not.toHaveBeenCalled()
   })
 
+  it('keeps an adopted URL alive through draft cleanup and eviction until its last viewer closes', () => {
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:decoded', revokeObjectURL })
+    const cache = new ImagePayloadCache(3)
+    const blob = new Blob(['123'])
+    const draft = new ImagePreviewUrl(blob)
+    cache.put('sent', { blob, byteSize: blob.size, displayed: draft })
+    draft.release()
+    const viewer = cache.get('sent')!.displayed!.retain()
+    cache.put('different', { blob: new Blob(['x']), byteSize: 1 })
+    expect(cache.get('sent')).toBeUndefined()
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    viewer.release()
+    expect(revokeObjectURL.mock.calls).toEqual([['blob:decoded']])
+  })
+
+  it('hands off every displayed image even when one submission exceeds the cache budget', async () => {
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValueOnce('blob:first').mockReturnValueOnce('blob:second'), revokeObjectURL })
+    const cache = new ImagePayloadCache(1)
+    const first = new ImagePreviewUrl(new Blob(['a']))
+    const second = new ImagePreviewUrl(new Blob(['b']))
+    cache.publish('camp', 'message-1', new Map([['first', first], ['second', second]]), true)
+    first.release()
+    second.release()
+    const firstKey = imageCacheKey(attachmentSource('first'))
+    expect(cache.byteSize).toBe(1)
+    expect(cache.get(firstKey)).toBeUndefined()
+    const tile = cache.forDisplay(firstKey)!.displayed!.retain()
+    const closeTimeline = cache.registerViewer(firstKey, tile)
+    await Promise.resolve()
+    const reply = cache.forDisplay(firstKey)!.displayed!.retain()
+    const closeReply = cache.registerViewer(firstKey, reply)
+    expect(reply).toBe(tile)
+    closeTimeline()
+    tile.release()
+    expect(cache.forDisplay(firstKey)?.displayed).toBe(reply)
+    closeReply()
+    expect(cache.forDisplay(firstKey)).toBeUndefined()
+    cache.clear()
+    expect(revokeObjectURL.mock.calls).toEqual([['blob:second']])
+    reply.release()
+    expect(revokeObjectURL.mock.calls).toEqual([['blob:second'], ['blob:first']])
+  })
+
+  it('publishes only submitted previews under the confirmed message and client, even for reused attachment IDs', async () => {
+    const preview = vi.fn().mockResolvedValue({ preview: null, availability: 'missing' })
+    vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
+    const blob = new Blob(['123'])
+    const displayed = new ImagePreviewUrl(blob)
+    const draft = { threadId: 'camp', attachments: [{ ...attachment('same'), sourcePath: '/image.png' }] }
+    const send = prepareImagePublication(desktopThreadClient, draft, 2, new Map([['same', displayed]]))!
+    const message = { authorType: 'user' as const, sequence: 2, attachments: draft.attachments }
+    expect(send.awaitingReceipt('camp', message)).toBe(true)
+    expect(send.awaitingReceipt('camp', { ...message, sequence: 1 })).toBe(false)
+    expect(send.awaitingReceipt('camp', { ...message, attachments: [...message.attachments, attachment('other')] })).toBe(false)
+    send.publish('message-1', true)
+    send.release()
+    displayed.release()
+
+    const confirmed = attachmentSource('same')
+    if (confirmed.kind !== 'attachment') throw new Error('expected attachment')
+    expect((await getOrLoadImagePayload(confirmed, desktopThreadClient))?.blob).toBe(blob)
+    expect(preview).not.toHaveBeenCalled()
+    const otherMessage: GalleryImage = { ...confirmed, locator: {
+      owner: 'message', threadId: 'camp', messageId: 'other', attachmentRefId: 'same'
+    } }
+    expect(await getOrLoadImagePayload(otherMessage, desktopThreadClient)).toBeNull()
+    expect(await getOrLoadImagePayload(confirmed, { ...desktopThreadClient })).toBeNull()
+    expect(preview).toHaveBeenCalledTimes(2)
+  })
   it('shares an active Runtime read, uses completed payloads, and forces a later real refresh', async () => {
     let resolveRead!: (value: { mediaType: string; data: string }) => void
     const response = new Promise<{ mediaType: string; data: string }>((resolve) => { resolveRead = resolve })
@@ -165,6 +241,93 @@ describe('shared image presentation', () => {
     expect(cached?.blob).toBe(payload.blob)
     expect(cached?.byteSize).toBe(3)
     expect(preview).not.toHaveBeenCalled()
+  })
+
+  it.each(['timeline', 'export'])('shares the %s reader with the other view even while decoding', async firstViewer => {
+    const preview = vi.fn().mockResolvedValue({ availability: 'available', preview: { blob: new Blob(['pixels']) } })
+    vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
+    let finishDecode!: () => void
+    const decode = vi.fn(() => new Promise<void>(resolve => { finishDecode = resolve }))
+    vi.stubGlobal('Image', class { naturalWidth = 3840; naturalHeight = 2160; decode = decode })
+    const source = attachmentSource('cold')
+    const timeline = () => loadUserImagePreview(source, desktopThreadClient)
+    const openExport = () => acquireExportImage(source, desktopThreadClient, true)
+    let gallery, exported
+    if (firstViewer === 'timeline') gallery = timeline()
+    else exported = openExport()
+    await vi.waitFor(() => expect(decode).toHaveBeenCalledOnce())
+    gallery ??= timeline()
+    exported ??= openExport()
+    finishDecode()
+    const [result, exportView] = await Promise.all([gallery, exported])
+    expect(exportView).not.toBeNull()
+    expect(exportView!.url).toBe(result!.displayed!.url)
+    exportView!.release()
+    expect(await timeline()).toBe(result)
+    expect(preview).toHaveBeenCalledOnce()
+    expect(decode).toHaveBeenCalledOnce()
+  })
+
+  it('discards pending reads and composer transfers when the same client authenticates again', async () => {
+    const old = new Blob(['blue'])
+    const fresh = new Blob(['orange'])
+    let returnOld!: (value: { availability: string; preview: { blob: Blob } }) => void
+    const preview = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { returnOld = resolve }))
+      .mockResolvedValue({ availability: 'available', preview: { blob: fresh } })
+    vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: (blob: Blob) => blob === old ? 'blob:old' : 'blob:new', revokeObjectURL })
+    const decode = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('Image', class { naturalWidth = 32; naturalHeight = 32; decode = decode })
+    const source = attachmentSource('photo')
+    const oldExport = acquireExportImage(source, desktopThreadClient, true)
+    const draft = new ImagePreviewUrl(old)
+    const publication = prepareImagePublication(desktopThreadClient, { threadId: 'camp', attachments: [attachment('photo')] },
+      1, new Map([['photo', draft]]))!
+    draft.release()
+    releaseClientImageCache(desktopThreadClient)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:old')
+    expect(await oldExport).toBeNull()
+
+    publication.publish('message-1', true)
+    publication.release()
+    expect((await loadUserImagePreview(source, desktopThreadClient))?.blob).toBe(fresh)
+    returnOld({ availability: 'available', preview: { blob: old } })
+    const view = await acquireExportImage(source, desktopThreadClient, true)
+    expect(view?.url).toBe('blob:new')
+    view?.release()
+    expect(preview).toHaveBeenCalledTimes(2)
+    expect(decode).toHaveBeenCalledOnce()
+  })
+
+  it.each(['success', 'failure'])('hands an in-flight reader the published preview before a late decode %s', async outcome => {
+    const old = new Blob(['disk'])
+    const preview = vi.fn().mockResolvedValue({ availability: 'available', preview: { blob: old } })
+    vi.stubGlobal('window', { rovai: { composerAttachments: { preview } } })
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: (blob: Blob) => blob === old ? 'blob:disk' : 'blob:composer', revokeObjectURL })
+    let complete!: () => void
+    let fail!: (error: Error) => void
+    const decode = vi.fn(() => new Promise<void>((resolve, reject) => { complete = resolve; fail = reject }))
+    vi.stubGlobal('Image', class { naturalWidth = 32; naturalHeight = 32; decode = decode })
+
+    const source = attachmentSource('photo')
+    const earlier = loadUserImagePreview(source, desktopThreadClient)
+    await vi.waitFor(() => expect(decode).toHaveBeenCalledOnce())
+    const displayed = new ImagePreviewUrl(new Blob(['composer']))
+    const publication = prepareImagePublication(desktopThreadClient, { threadId: 'camp', attachments: [attachment('photo')] },
+      1, new Map([['photo', displayed]]))!
+    publication.publish('message-1', true)
+    publication.release()
+    displayed.release()
+    expect((await earlier)?.displayed).toBe(displayed)
+
+    if (outcome === 'success') complete()
+    else fail(new Error('disk decode failed'))
+    await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:disk'))
+    expect((await loadUserImagePreview(source, desktopThreadClient))?.displayed).toBe(displayed)
+    expect(preview).toHaveBeenCalledOnce()
   })
 
   it('distinguishes a normal unavailable Runtime result from a thrown Core request', async () => {
