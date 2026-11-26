@@ -332,6 +332,12 @@ test('Web shares image reads with export and releases previews at the authentica
     const exported = `[data-export-message-id="${messageId}"] .message-export-image`
     const pixel = selector => `imageProbe.pixel(${JSON.stringify(selector)})`
     const counts = () => browser.evaluate('[imageProbe.opens, imageProbe.reads]')
+    // The Host permits blob: image loads under img-src. Test the same address with a fresh image each time.
+    const oldPreviewDecodes = () => browser.evaluate(`(async () => {
+      const image = new Image()
+      image.src = imageProbe.oldUrl
+      try { await image.decode(); return image.naturalWidth > 0 } catch { return false }
+    })()`)
     const openExport = async () => {
       await click(`[data-message-id="${messageId}"] .message-more-button`)
       const select = `[...document.querySelectorAll('.message-action-menu [role=menuitem]')].find(e => e.textContent.trim() === '多选')`
@@ -359,9 +365,10 @@ test('Web shares image reads with export and releases previews at the authentica
     const remote = `[...document.querySelectorAll('.settings-sidebar-menu button')].find(e => e.textContent.trim() === '远程连接')`
     await browser.wait(`!!(${remote})`)
     await browser.click(remote)
+    assert.equal(await oldPreviewDecodes(), true, 'the preview URL decodes before logout')
     await click('.remote-connection-page .quiet-button')
     await browser.wait(`!!${element('#administrator-token')}`)
-    assert.equal(await browser.evaluate('fetch(imageProbe.oldUrl).then(() => false, () => true)'), true, 'logout revokes the old preview URL')
+    assert.equal(await oldPreviewDecodes(), false, 'logout revokes the old preview URL')
     await login(service.administratorToken)
     await click('.settings-sidebar-back')
     await browser.wait(`!!${element(openThread)}`)
@@ -380,9 +387,10 @@ test('Web shares image reads with export and releases previews at the authentica
     await click(exported)
     await browser.wait(`${pixel('.message-export-zoom img')} === '255,120,0'`)
     assert.deepEqual(await counts(), [2, 2])
+    assert.equal(await oldPreviewDecodes(), true, 'the preview URL decodes before session expiry')
     const rotated = await host.request('host.web.rotate')
     await browser.wait(`!!${element('#administrator-token')} && !${element(timeline)} && !${element('.message-export-dialog, .message-export-zoom')}`)
-    assert.equal(await browser.evaluate('fetch(imageProbe.oldUrl).then(() => false, () => true)'), true)
+    assert.equal(await oldPreviewDecodes(), false, 'session expiry revokes the old preview URL')
     await writeFile(sourcePath, blue)
     await login(rotated.administratorToken)
     await browser.wait(`${pixel(timeline)} === '0,80,240' && ${pixel(exported)} === '0,80,240'`)
