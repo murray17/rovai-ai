@@ -534,7 +534,7 @@ html[data-mobile-web="true"] .automation-run-switch { min-width: 48px; min-heigh
 html[data-mobile-web="true"] .automation-switch-track { width: 40px; height: 24px; }
 html[data-mobile-web="true"] .automation-switch-track::after { width: 18px; height: 18px; }
 html[data-mobile-web="true"] .automation-run-switch[aria-checked=true] .automation-switch-track::after { transform: translateX(16px); }
-html[data-mobile-web="true"] :is(.automation-menu-item, .automation-plan-actions button, .automation-run-once) { min-height: 44px; }
+html[data-mobile-web="true"] :is(.automation-menu-item, .automation-run-once) { min-height: 44px; }
 html[data-mobile-web="true"] .automation-context .automation-picker { min-height: 52px; padding: 6px 8px; }
 html[data-mobile-web="true"] .automation-context .automation-picker-copy :is(small, em) { display: none; }
 html[data-mobile-web="true"] .automation-context .automation-picker-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

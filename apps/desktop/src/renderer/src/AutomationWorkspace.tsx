@@ -11,7 +11,6 @@ import type {
 import { readErrorMessage } from './error-message'
 import { useAutomationAction } from './useAutomationAction'
 import { AutomationListRow } from './AutomationListRow'
-import { AutomationEndedPlan } from './AutomationEndedPlan'
 import { changeAutomationList, emptyAutomationList, type AutomationListChange } from './automation-list'
 import { AutomationEditor } from './AutomationEditor'
 import { automationScheduleError } from './automation-schedule-validation'
@@ -19,7 +18,7 @@ import { AutomationGlyph, AutomationRunOnce, AutomationRunSwitch, AutomationTemp
 import {
   AUTOMATION_DEFAULT_LIST_WIDTH, AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
   describeAutomationPlan, draftFingerprint, draftFromAutomation, localizedAutomationTemplate,
-  type AutomationDetailMode, type AutomationDraft, type AutomationIssue, type OnceSchedule, type SaveState, type TemplateId
+  type AutomationDraft, type AutomationIssue, type SaveState, type TemplateId
 } from './automation-workspace-model'
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
@@ -69,7 +68,6 @@ export function AutomationWorkspace({
     setIssue({ kind: 'action', message: readErrorMessage(nextError) })
   })
   const busy = action?.kind ?? null
-  const [reschedulingId, setReschedulingId] = useState<string | null>(null)
   const [listWidth, setListWidth] = useState(AUTOMATION_DEFAULT_LIST_WIDTH)
   const [editorClosed, setEditorClosed] = useState(false)
   const [heldFold, setHeldFold] = useState(false)
@@ -315,16 +313,14 @@ export function AutomationWorkspace({
     return () => window.clearTimeout(timer)
   }, [draft, queueSave, saveState, selected])
 
-  const openTask = async (automationId: string, mode: AutomationDetailMode): Promise<void> => {
+  const openTask = async (automationId: string): Promise<void> => {
     if (!(await flushBeforeLeave())) return
-    setReschedulingId(mode === 'reschedule' ? automationId : null)
     setSelectedId(automationId)
     setEditorClosed(false)
   }
 
   const showOverview = async (): Promise<void> => {
     if (!(await flushBeforeLeave())) return
-    setReschedulingId(null)
     setSelectedId(null)
     setEditorClosed(false)
   }
@@ -332,7 +328,6 @@ export function AutomationWorkspace({
   const beginNew = async (templateId?: TemplateId): Promise<void> => {
     if (!(await flushBeforeLeave())) return
     setCreateChooserOpen(false)
-    setReschedulingId(null)
     const context = selectedIdRef.current === 'new' ? draftRef.current : defaultDraft(defaultMemberId)
     const template = templateId ? localizedAutomationTemplate(templateId) : null
     const next = { ...context, name: template?.name ?? '', prompt: template?.prompt ?? '', schedule: template?.schedule ?? context.schedule }
@@ -400,22 +395,18 @@ export function AutomationWorkspace({
     await refresh(true)
   })
 
-  const setEnabled = (automationId: string, enabled: boolean, schedule?: OnceSchedule) => runAction({ kind: 'enabled', id: automationId }, async () => {
+  const setEnabled = (automationId: string, enabled: boolean) => runAction({ kind: 'enabled', id: automationId }, async () => {
     const current = await prepareAction(automationId)
     if (!current) return
     setIssue(null)
     const method = enabled ? 'automations.update' : 'automations.close'
     const command = enabled
-      ? { automationId, expectedVersion: current.version, enabled: true, ...(schedule ? { schedule } : {}) }
+      ? { automationId, expectedVersion: current.version, enabled: true }
       : { automationId, expectedVersion: current.version }
     const result = await client.request<StoredCommandResult>(method, {
       commandId: newCommandId(), command
     })
-    const updated = recordTaskReceipt('saved', automationFromResult(result))
-    if (schedule && selectedIdRef.current === automationId) {
-      syncSavedDraft(updated)
-      setReschedulingId(null)
-    }
+    recordTaskReceipt('saved', automationFromResult(result))
   })
 
   const remove = (automationId: string) => runAction({ kind: 'delete', id: automationId }, async () => {
@@ -542,7 +533,7 @@ export function AutomationWorkspace({
               const task = list.records.get(id)!
               return <AutomationListRow key={id} task={task} member={agents.find(agent => agent.agentId === task.memberId)}
                 selected={selectedId === id} overview={overview} disabled={busy !== null} switching={action?.kind === 'enabled' && action.id === id}
-                onOpen={mode => void openTask(id, mode)} onToggle={() => void setEnabled(id, !task.enabled)}
+                onOpen={() => void openTask(id)} onToggle={() => void setEnabled(id, !task.enabled)}
                 onRun={() => void runNow(id)} onDelete={() => void remove(id)} />
             })}
           </div>
@@ -569,15 +560,10 @@ export function AutomationWorkspace({
               {selected && selectedPlan?.toolbar === 'switch' && <AutomationRunSwitch enabled={selected.enabled} disabled={busy !== null} switching={selectedSwitching}
                 onChange={() => void setEnabled(selected.automationId, !selected.enabled)} />}
               {selected && selectedPlan?.toolbar === 'run-once' && <AutomationRunOnce disabled={busy !== null} running={selectedRunning} onRun={() => void runNow(selected.automationId)} />}
-              {selectedPlan?.toolbar && <span className="automation-toolbar-divider" aria-hidden="true" />}
+              {selected && <span className="automation-toolbar-divider" aria-hidden="true" />}
               <button type="button" className="automation-icon-button" aria-label={uiAttribute('返回定时任务总览')} onClick={() => void showOverview()}><AutomationGlyph name="close" /></button>
             </header>
-            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenThread={onOpenThread} onCreate={() => void create()}>
-              {selected && selectedPlan?.endedSchedule && <AutomationEndedPlan
-                schedule={selectedPlan.endedSchedule} disabled={busy !== null} running={selectedRunning} saving={selectedSwitching} editing={reschedulingId === selected.automationId}
-                onEdit={editing => setReschedulingId(editing ? selected.automationId : null)}
-                onRun={() => void runNow(selected.automationId)} onConfirm={next => void setEnabled(selected.automationId, true, next)} />}
-            </AutomationEditor>
+            <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenThread={onOpenThread} onCreate={() => void create()} />
           </section>
         </>}
       </div>
