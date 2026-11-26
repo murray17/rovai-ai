@@ -9,6 +9,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import { readErrorMessage } from './error-message'
+import { useAutomationAction } from './useAutomationAction'
 import { AutomationListRow } from './AutomationListRow'
 import { AutomationEndedPlan } from './AutomationEndedPlan'
 import { changeAutomationList, emptyAutomationList, type AutomationListChange } from './automation-list'
@@ -17,8 +18,8 @@ import { automationScheduleError } from './automation-schedule-validation'
 import { AutomationGlyph, AutomationRunOnce, AutomationRunSwitch, AutomationTemplates } from './AutomationControls'
 import {
   AUTOMATION_DEFAULT_LIST_WIDTH, AUTOMATION_MIN_LIST_WIDTH, AutomationCommandError, automationFromResult, automationListWidth, defaultDraft,
-  automationPlanState, draftFingerprint, draftFromAutomation, localizedAutomationTemplate,
-  type AutomationDraft, type AutomationIssue, type OnceSchedule, type SaveState, type TemplateId
+  describeAutomationPlan, draftFingerprint, draftFromAutomation, localizedAutomationTemplate,
+  type AutomationDetailMode, type AutomationDraft, type AutomationIssue, type OnceSchedule, type SaveState, type TemplateId
 } from './automation-workspace-model'
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter } from './useCollapsibleSplitter'
@@ -26,7 +27,6 @@ import { SplitterFeedback } from './SplitterFeedback'
 
 
 export type AutomationLeaveGuard = () => Promise<boolean>
-type TaskAction = { kind: 'create' | 'run' | 'enabled' | 'delete'; id?: string }
 
 export function AutomationWorkspace({
   agents,
@@ -65,9 +65,10 @@ export function AutomationWorkspace({
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [issue, setIssue] = useState<AutomationIssue | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
-  const [action, setAction] = useState<TaskAction | null>(null)
+  const { action, runAction } = useAutomationAction(nextError => {
+    setIssue({ kind: 'action', message: readErrorMessage(nextError) })
+  })
   const busy = action?.kind ?? null
-  const actionPending = useRef(false)
   const [reschedulingId, setReschedulingId] = useState<string | null>(null)
   const [listWidth, setListWidth] = useState(AUTOMATION_DEFAULT_LIST_WIDTH)
   const [editorClosed, setEditorClosed] = useState(false)
@@ -121,6 +122,18 @@ export function AutomationWorkspace({
     ? list.records.get(selectedId) ?? null
     : null
 
+  const syncSavedDraft = useCallback((task: AutomationView, submittedFingerprint?: string): void => {
+    const next = draftFromAutomation(task)
+    savedVersions.current.set(task.automationId, task.version)
+    savedFingerprints.current.set(task.automationId, draftFingerprint(next))
+    // An autosave can finish after the user switches tasks or continues typing.
+    if (submittedFingerprint !== undefined && (selectedIdRef.current !== task.automationId ||
+        draftFingerprint(draftRef.current) !== submittedFingerprint)) return
+    draftRef.current = next
+    setDraft(next)
+    setSaveState('saved')
+  }, [])
+
   const refresh = useCallback(async (quiet = false): Promise<boolean> => {
     const request = ++refreshGeneration.current
     if (!quiet) setLoadState('loading')
@@ -158,11 +171,7 @@ export function AutomationWorkspace({
               message:uiAttribute("任务已在其他位置更新。请重新载入，或确认用当前草稿覆盖最新内容。")
             })
           } else if (!localDirty) {
-            const latestDraft = draftFromAutomation(latest)
-            savedFingerprints.current.set(activeId, draftFingerprint(latestDraft))
-            savedVersions.current.set(activeId, latest.version)
-            setDraft(latestDraft)
-            setSaveState('saved')
+            syncSavedDraft(latest)
           }
         }
       }
@@ -181,7 +190,7 @@ export function AutomationWorkspace({
       }
       return false
     }
-  }, [client, changeList])
+  }, [client, changeList, syncSavedDraft])
 
   useEffect(() => {
     void refresh()
@@ -205,13 +214,9 @@ export function AutomationWorkspace({
     }
     const automation = selectedId ? listRef.current.records.get(selectedId) : null
     if (!automation) return
-    const next = draftFromAutomation(automation)
-    savedFingerprints.current.set(automation.automationId, draftFingerprint(next))
-    savedVersions.current.set(automation.automationId, automation.version)
-    setDraft(next)
-    setSaveState('saved')
+    syncSavedDraft(automation)
     setIssue((current) => current?.kind === 'save' || current?.kind === 'conflict' ? null : current)
-  }, [selectedId])
+  }, [selectedId, syncSavedDraft])
 
   const applyReceipt = useCallback((change: AutomationListChange) => {
     // A list read started before this command can still contain its old definition or a deleted row.
@@ -221,10 +226,10 @@ export function AutomationWorkspace({
     return next
   }, [changeList, refresh])
 
-  const replaceAutomation = useCallback((next: AutomationView, created = false): AutomationView => {
-    const current = applyReceipt({ type: created ? 'created' : 'saved', task: next }).records.get(next.automationId)
+  const recordTaskReceipt = useCallback((type: 'created' | 'saved', next: AutomationView): AutomationView => {
+    const current = applyReceipt({ type, task: next }).records.get(next.automationId)
     if (!current) throw new AutomationCommandError('automation.not_found', uiAttribute('「{0}」已不存在。', next.name))
-    if (current.version > next.version) {
+    if (type === 'saved' && current.version > next.version) {
       throw new AutomationCommandError('command.version_conflict', uiAttribute('任务已在其他位置更新。请选择重新载入，或确认保留当前草稿后重试。'))
     }
     savedVersions.current.set(current.automationId, current.version)
@@ -258,14 +263,7 @@ export function AutomationWorkspace({
             notifyChannels: snapshot.notifyChannels
           }
         })
-        const updated = replaceAutomation(automationFromResult(result))
-        const normalizedDraft = draftFromAutomation(updated)
-        savedFingerprints.current.set(automationId, draftFingerprint(normalizedDraft))
-        if (selectedIdRef.current === automationId && draftFingerprint(draftRef.current) === fingerprint) {
-          draftRef.current = normalizedDraft
-          setDraft(normalizedDraft)
-          setSaveState('saved')
-        }
+        syncSavedDraft(recordTaskReceipt('saved', automationFromResult(result)), fingerprint)
       } catch (nextError) {
         if (selectedIdRef.current === automationId) {
           const conflict = nextError instanceof AutomationCommandError
@@ -280,7 +278,7 @@ export function AutomationWorkspace({
       }
     })
     return saveQueue.current
-  }, [client, replaceAutomation])
+  }, [client, recordTaskReceipt, syncSavedDraft])
 
   const flushBeforeLeave = useCallback(async (): Promise<boolean> => {
     const automationId = selectedIdRef.current
@@ -317,9 +315,9 @@ export function AutomationWorkspace({
     return () => window.clearTimeout(timer)
   }, [draft, queueSave, saveState, selected])
 
-  const choose = async (automationId: string, reschedule = false): Promise<void> => {
+  const openTask = async (automationId: string, mode: AutomationDetailMode): Promise<void> => {
     if (!(await flushBeforeLeave())) return
-    setReschedulingId(reschedule ? automationId : null)
+    setReschedulingId(mode === 'reschedule' ? automationId : null)
     setSelectedId(automationId)
     setEditorClosed(false)
   }
@@ -357,7 +355,7 @@ export function AutomationWorkspace({
       const loaded = await refresh()
       if (!loaded) return
       const latest = listRef.current.records.get(selected.automationId)
-      if (!latest) return
+      if (!latest || selectedIdRef.current !== selected.automationId) return
       savedVersions.current.set(selected.automationId, latest.version)
     }
     try {
@@ -373,115 +371,66 @@ export function AutomationWorkspace({
     const loaded = await refresh()
     if (!loaded) return
     const latest = listRef.current.records.get(automationId)
-    if (!latest) return
-    const latestDraft = draftFromAutomation(latest)
-    savedFingerprints.current.set(automationId, draftFingerprint(latestDraft))
-    savedVersions.current.set(automationId, latest.version)
-    setDraft(latestDraft)
-    setSaveState('saved')
+    if (!latest || selectedIdRef.current !== automationId) return
+    syncSavedDraft(latest)
     setIssue(null)
-  }
-
-  const beginAction = (kind: TaskAction['kind'], id?: string): boolean => {
-    if (actionPending.current) return false
-    actionPending.current = true
-    setAction({ kind, id })
-    return true
-  }
-
-  const endAction = (): void => {
-    actionPending.current = false
-    setAction(null)
   }
 
   const create = async (): Promise<void> => {
     if (!draft.prompt.trim() || !draft.memberId || automationScheduleError(draft.schedule)) return
-    if (!beginAction('create')) return
-    setIssue(null)
-    try {
+    await runAction({ kind: 'create' }, async () => {
+      setIssue(null)
       const result = await client.request<StoredCommandResult>('automations.create', {
         commandId: newCommandId(), command: draft
       })
-      const created = replaceAutomation(automationFromResult(result), true)
-      const normalizedDraft = draftFromAutomation(created)
-      savedFingerprints.current.set(created.automationId, draftFingerprint(normalizedDraft))
+      const created = recordTaskReceipt('created', automationFromResult(result))
       setSelectedId(created.automationId)
-      setDraft(normalizedDraft)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      endAction()
-    }
+      syncSavedDraft(created)
+    })
   }
 
-  const runNow = async (automationId: string): Promise<void> => {
-    if (!beginAction('run', automationId)) return
-    try {
-      const current = await prepareAction(automationId)
-      if (!current) return
-      setIssue(null)
-      const result = await client.request<StoredCommandResult>('automations.run', {
-        commandId: newCommandId(), command: { automationId: current.automationId }
-      })
-      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务未能开始。')))
-      await refresh(true)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      endAction()
-    }
-  }
+  const runNow = (automationId: string) => runAction({ kind: 'run', id: automationId }, async () => {
+    const current = await prepareAction(automationId)
+    if (!current) return
+    setIssue(null)
+    const result = await client.request<StoredCommandResult>('automations.run', {
+      commandId: newCommandId(), command: { automationId: current.automationId }
+    })
+    if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务未能开始。')))
+    await refresh(true)
+  })
 
-  const setEnabled = async (automationId: string, enabled: boolean, schedule?: OnceSchedule): Promise<void> => {
-    if (!beginAction('enabled', automationId)) return
-    try {
-      const current = await prepareAction(automationId)
-      if (!current) return
-      setIssue(null)
-      const method = enabled ? 'automations.update' : 'automations.close'
-      const command = enabled
-        ? { automationId: current.automationId, expectedVersion: current.version, enabled: true, ...(schedule ? { schedule } : {}) }
-        : { automationId: current.automationId, expectedVersion: current.version }
-      const result = await client.request<StoredCommandResult>(method, {
-        commandId: newCommandId(), command
-      })
-      const updated = replaceAutomation(automationFromResult(result))
-      if (schedule && selectedIdRef.current === automationId) {
-        const next = draftFromAutomation(updated)
-        savedFingerprints.current.set(automationId, draftFingerprint(next))
-        draftRef.current = next
-        setDraft(next)
-        setSaveState('saved')
-        setReschedulingId(null)
-      }
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      endAction()
+  const setEnabled = (automationId: string, enabled: boolean, schedule?: OnceSchedule) => runAction({ kind: 'enabled', id: automationId }, async () => {
+    const current = await prepareAction(automationId)
+    if (!current) return
+    setIssue(null)
+    const method = enabled ? 'automations.update' : 'automations.close'
+    const command = enabled
+      ? { automationId, expectedVersion: current.version, enabled: true, ...(schedule ? { schedule } : {}) }
+      : { automationId, expectedVersion: current.version }
+    const result = await client.request<StoredCommandResult>(method, {
+      commandId: newCommandId(), command
+    })
+    const updated = recordTaskReceipt('saved', automationFromResult(result))
+    if (schedule && selectedIdRef.current === automationId) {
+      syncSavedDraft(updated)
+      setReschedulingId(null)
     }
-  }
+  })
 
-  const remove = async (automationId: string): Promise<void> => {
-    if (!beginAction('delete', automationId)) return
-    try {
-      const current = await prepareAction(automationId)
-      if (!current) return
-      setIssue(null)
-      const result = await client.request<StoredCommandResult>('automations.delete', {
-        commandId: newCommandId(),
-        command: { automationId: current.automationId, expectedVersion: current.version }
-      })
-      if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务删除失败。')))
-      savedFingerprints.current.delete(automationId)
-      savedVersions.current.delete(automationId)
-      applyReceipt({ type: 'deleted', id: automationId })
-      if (selectedIdRef.current === automationId) setSelectedId(null)
-    } catch (nextError) {
-      setIssue({ kind: 'action', message: readErrorMessage(nextError) })
-    } finally {
-      endAction()
-    }
-  }
+  const remove = (automationId: string) => runAction({ kind: 'delete', id: automationId }, async () => {
+    const current = await prepareAction(automationId)
+    if (!current) return
+    setIssue(null)
+    const result = await client.request<StoredCommandResult>('automations.delete', {
+      commandId: newCommandId(), command: { automationId, expectedVersion: current.version }
+    })
+    if (result.status === 'rejected') throw new Error(String(result.payload.message ?? uiAttribute('任务删除失败。')))
+    savedFingerprints.current.delete(automationId)
+    savedVersions.current.delete(automationId)
+    applyReceipt({ type: 'deleted', id: automationId })
+    if (selectedIdRef.current === automationId) setSelectedId(null)
+  })
 
   const selectedDirty = selected
     ? savedFingerprints.current.get(selected.automationId) !== draftFingerprint(draft)
@@ -498,7 +447,7 @@ export function AutomationWorkspace({
 
   const overview = selectedId === null
   const width = automationListWidth(listWidth, availableWidth)
-  const selectedPlan = selected && automationPlanState(selected)
+  const selectedPlan = selected && describeAutomationPlan(selected)
   const selectedRunning = action?.kind === 'run' && action.id === selectedId
   const selectedSwitching = action?.kind === 'enabled' && action.id === selectedId
   const closeEditor = async (): Promise<void> => {
@@ -593,7 +542,7 @@ export function AutomationWorkspace({
               const task = list.records.get(id)!
               return <AutomationListRow key={id} task={task} member={agents.find(agent => agent.agentId === task.memberId)}
                 selected={selectedId === id} overview={overview} disabled={busy !== null} switching={action?.kind === 'enabled' && action.id === id}
-                onChoose={reschedule => void choose(id, reschedule)} onToggle={() => void setEnabled(id, !task.enabled)}
+                onOpen={mode => void openTask(id, mode)} onToggle={() => void setEnabled(id, !task.enabled)}
                 onRun={() => void runNow(id)} onDelete={() => void remove(id)} />
             })}
           </div>
@@ -617,15 +566,15 @@ export function AutomationWorkspace({
             <header className="automation-editor-toolbar">
               <span>{selectedId === 'new' ? uiAttribute('新建') : uiAttribute('详情')}</span>
               <small role="status" data-state={saveState}>{selected ? saveLabel : ''}</small>
-              {selected && selectedPlan === 'scheduled' && <AutomationRunSwitch enabled={selected.enabled} disabled={busy !== null} switching={selectedSwitching}
+              {selected && selectedPlan?.toolbar === 'switch' && <AutomationRunSwitch enabled={selected.enabled} disabled={busy !== null} switching={selectedSwitching}
                 onChange={() => void setEnabled(selected.automationId, !selected.enabled)} />}
-              {selected && selectedPlan === 'manual' && <AutomationRunOnce disabled={busy !== null} running={selectedRunning} onRun={() => void runNow(selected.automationId)} />}
-              {selected && selectedPlan !== 'ended' && <span className="automation-toolbar-divider" aria-hidden="true" />}
+              {selected && selectedPlan?.toolbar === 'run-once' && <AutomationRunOnce disabled={busy !== null} running={selectedRunning} onRun={() => void runNow(selected.automationId)} />}
+              {selectedPlan?.toolbar && <span className="automation-toolbar-divider" aria-hidden="true" />}
               <button type="button" className="automation-icon-button" aria-label={uiAttribute('返回定时任务总览')} onClick={() => void showOverview()}><AutomationGlyph name="close" /></button>
             </header>
             <AutomationEditor key={selectedId} draft={draft} onChange={setDraft} agents={agents} projects={projects} automation={selected} busy={busy !== null} onOpenThread={onOpenThread} onCreate={() => void create()}>
-              {selected && selectedPlan === 'ended' && selected.schedule.kind === 'once' && <AutomationEndedPlan
-                schedule={selected.schedule} disabled={busy !== null} running={selectedRunning} saving={selectedSwitching} editing={reschedulingId === selected.automationId}
+              {selected && selectedPlan?.endedSchedule && <AutomationEndedPlan
+                schedule={selectedPlan.endedSchedule} disabled={busy !== null} running={selectedRunning} saving={selectedSwitching} editing={reschedulingId === selected.automationId}
                 onEdit={editing => setReschedulingId(editing ? selected.automationId : null)}
                 onRun={() => void runNow(selected.automationId)} onConfirm={next => void setEnabled(selected.automationId, true, next)} />}
             </AutomationEditor>

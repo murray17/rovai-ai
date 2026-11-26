@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { AutomationGlyph, AutomationRunOnce } from './AutomationControls'
 import { AutomationDatePicker, AutomationTimePicker, automationDateKey } from './AutomationSchedulePickers'
-import { futureOnceSchedule, type OnceSchedule } from './automation-workspace-model'
+import { isOnceScheduleInFuture, type OnceSchedule } from './automation-workspace-model'
 import { BusyLabel } from './BusyLabel'
 import { UiText, uiAttribute } from './interface-language'
 
@@ -40,10 +40,10 @@ function RescheduleForm({ at, disabled, saving, onCancel, onConfirm }: {
     tomorrow.setDate(tomorrow.getDate() + 1)
     return { kind: 'once', date: automationDateKey(tomorrow), at }
   })
-  const valid = futureOnceSchedule(next)
+  const valid = isOnceScheduleInFuture(next)
   return <form className="automation-reschedule" aria-label={uiAttribute('重新安排')} onSubmit={event => {
     event.preventDefault()
-    if (!disabled && futureOnceSchedule(next)) onConfirm(next)
+    if (!disabled && isOnceScheduleInFuture(next)) onConfirm(next)
   }}>
     <span><UiText zh="新的运行时间" /></span>
     <div className="automation-reschedule-fields">

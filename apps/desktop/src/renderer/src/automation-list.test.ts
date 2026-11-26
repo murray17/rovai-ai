@@ -33,7 +33,7 @@ describe('scheduled task list membership', () => {
     expect(initial.visibleIds).toEqual(['work', 'paused', 'manual'])
   })
 
-  it('prepends new definitions outside the search once and removes deleted definitions immediately', () => {
+  it('pins a local creation outside the current criteria and removes deleted definitions immediately', () => {
     const search = changeAutomationList(initial, { type: 'criteria', filter: 'enabled', query: 'work' })
     const created = task('other', { schedule: { kind: 'manual' }, updatedAt: later })
     const receipt = changeAutomationList(search, { type: 'created', task: created })
@@ -46,12 +46,38 @@ describe('scheduled task list membership', () => {
     expect(changeAutomationList(removed, { type: 'criteria', filter: 'enabled', query: '' }).visibleIds).toEqual([])
   })
 
-  it('handles external creation before its receipt and a creation during the initial read', () => {
+  it('prepends only external creations matching both the filter and search', () => {
+    const scoped = changeAutomationList(initial, { type: 'criteria', filter: 'enabled', query: 'work' })
+    const matching = task('external', { name: 'work report' })
+    const wrongFilter = task('closed', { name: 'work digest', enabled: false })
+    const wrongQuery = task('notes')
+    const manualWork = { ...manual, automationId: 'manual-work', name: 'work notes' }
+    const tasks = [matching, wrongFilter, wrongQuery, manualWork, ...initial.records.values()]
+    const refreshed = changeAutomationList(scoped, { type: 'loaded', tasks })
+    expect(refreshed.visibleIds).toEqual(['external', 'work'])
+    expect(changeAutomationList(refreshed, { type: 'loaded', tasks }).visibleIds).toEqual(refreshed.visibleIds)
+    const all = changeAutomationList(refreshed, { type: 'criteria', filter: 'all', query: '' })
+    expect(all.visibleIds).toHaveLength(tasks.length)
+    const closed = changeAutomationList(refreshed, { type: 'criteria', filter: 'closed', query: 'work' })
+    expect(closed.visibleIds).toEqual(['closed'])
+  })
+
+  it('pins the local creation even when a refresh has already seen a newer version', () => {
     const closed = changeAutomationList(initial, { type: 'criteria', filter: 'closed', query: '' })
+    const created = task('other', { schedule: { kind: 'manual' } })
+    const latest = { ...created, version: 2, name: 'new name' }
+    const loaded = changeAutomationList(closed, { type: 'loaded', tasks: [latest, work, paused, manual] })
+    expect(loaded.visibleIds).toEqual(['paused'])
+    const receipt = changeAutomationList(loaded, { type: 'created', task: created })
+    expect(receipt.visibleIds).toEqual(['other', 'paused'])
+    expect(receipt.records.get('other')).toEqual(latest)
+    expect(changeAutomationList(receipt, { type: 'created', task: created }).visibleIds).toEqual(receipt.visibleIds)
+    const enabled = changeAutomationList(receipt, { type: 'criteria', filter: 'enabled', query: '' })
+    expect(enabled.visibleIds).toEqual(['work'])
+  })
+
+  it('keeps a local creation above initial matches when the initial read finishes', () => {
     const created = task('other')
-    const external = changeAutomationList(closed, { type: 'loaded', tasks: [created, work, manual] })
-    expect(external.visibleIds).toEqual(['other'])
-    expect(changeAutomationList(external, { type: 'created', task: created }).visibleIds).toEqual(['other'])
     const starting = changeAutomationList(emptyAutomationList(), { type: 'criteria', filter: 'closed', query: '' })
     const beforeRead = changeAutomationList(starting, { type: 'created', task: created })
     expect(changeAutomationList(beforeRead, { type: 'loaded', tasks: [created, work, paused] }).visibleIds).toEqual(['other', 'paused'])

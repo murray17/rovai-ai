@@ -151,7 +151,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb dbus-x11 openbox scrot xdotool x11-utils
 
-      - name: Run attachment download UI acceptance
+      - name: Run Chrome acceptance for attachment downloads and scheduled tasks
         if: steps.changes.outputs.node == 'true'
         env:
           ROVAI_TEST_HEADED: '1'
@@ -160,6 +160,7 @@ jobs:
           export ROVAI_TEST_CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           test -n "$ROVAI_TEST_CHROME"
           xvfb-run -a pnpm test:attachment-download-ui
+          pnpm test:automation-list
 
       - name: Exercise native Linux overwrite confirmations
         if: (success() || failure()) && steps.changes.outputs.node == 'true'

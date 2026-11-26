@@ -6,16 +6,19 @@ import test from 'node:test'
 import { serveAutomationFixture } from '../fixtures/automation-workspace/serve.mjs'
 import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 
-const chrome = process.env.ROVAI_REVIEW_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const chrome = process.env.ROVAI_TEST_CHROME ?? ({
+  darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  win32: join(process.env.PROGRAMFILES ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe')
+}[process.platform] ?? '/usr/bin/google-chrome')
 const select = css => `document.querySelector(${JSON.stringify(css)})`
 const label = name => select(`[aria-label="${name}"]`)
 const byText = (css, text) => `[...document.querySelectorAll(${JSON.stringify(css)})].find(el => el.textContent === ${JSON.stringify(text)})`
 const row = name => `${byText('.automation-list-copy strong', name)}.closest('.automation-list-item')`
 const rows = "[...document.querySelectorAll('.automation-list-copy strong')].map(el => el.textContent)"
-const api = 'window.automationSplitterTest'
+const api = 'window.automationWorkspaceFixture'
 
 test('scheduled task interactions use the production Renderer on desktop and mobile', { timeout: 120_000 }, async t => {
-  try { await access(chrome) } catch { return t.skip('Set ROVAI_REVIEW_CHROME to a local Chrome binary') }
+  try { await access(chrome) } catch { return t.skip(`定时任务 Chrome 验收未运行。请通过 ROVAI_TEST_CHROME 指定可执行文件（当前路径 ${chrome}）。`) }
   const profile = await realpath(await mkdtemp(join(tmpdir(), 'rovai-scheduled-list-chrome-')))
   let server, browser
   t.after(async () => {
@@ -27,7 +30,8 @@ test('scheduled task interactions use the production Renderer on desktop and mob
   const url = new URL('/scripts/fixtures/automation-workspace/?list-cases', server.resolvedUrls.local[0])
   console.log(`Automatic acceptance: Chrome profile ${profile}, in-memory RPC`)
   browser = await launchAcceptanceBrowser({ executable: chrome, args: ['--headless=new', '--no-first-run',
-    '--no-default-browser-check', '--disable-background-networking', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'] })
+    '--no-default-browser-check', '--disable-background-networking', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
+    ...(process.platform === 'linux' ? ['--no-sandbox'] : []), 'about:blank'] })
   const { click, wait, evaluate } = browser
   const tab = name => click(byText('.automation-filter-tabs button', name))
   const open = name => click(`${row(name)}.querySelector('.automation-task-open')`)
@@ -122,6 +126,36 @@ test('scheduled task interactions use the production Renderer on desktop and mob
     assert.equal(updates[1].enabled, true)
     assert.equal(updates[1].schedule.at, '10:30')
     assert.ok(await evaluate(`Date.parse(${record}.nextRunAt) > Date.now()`))
+  })
+
+  await t.test('external creates respect both criteria while a local manual task stays visible until the next filter', async () => {
+    await load(false)
+    await tab('开启')
+    await edit('搜索定时任务', '巡检')
+    await matches([issue])
+    // Issue the same RPC from outside the workspace. Only its update event reaches the list.
+    await evaluate(`(async () => {
+      const { memberId, projectRef, threadNaming, notifyChannels } = ${api}.definitions()[0]
+      for (const [name, schedule] of [
+        ['外部手动巡检', { kind: 'manual' }],
+        ['外部日报', { kind: 'daily', at: '09:00' }],
+        ['外部定时巡检', { kind: 'daily', at: '09:00' }]
+      ]) {
+        await window.rovai.request('automations.create', { commandId: crypto.randomUUID(),
+          command: { name, prompt: '检查', schedule, memberId, projectRef, threadNaming, notifyChannels } })
+      }
+    })()`)
+    await matches(['外部定时巡检', issue])
+    await click(select('.automation-template-library .automation-template-card.release-notes'))
+    await edit('定时任务名称', '本窗口的手动任务')
+    await click(select('.automation-create-actions button'))
+    await matches(['本窗口的手动任务', '外部定时巡检', issue])
+    await tab('关闭')
+    await tab('开启')
+    await matches(['外部定时巡检', issue])
+    await tab('全部')
+    await edit('搜索定时任务', '本窗口')
+    await matches(['本窗口的手动任务'])
   })
 
   await t.test('desktop pointer and keyboard menus and phone long press act on the intended row', async () => {

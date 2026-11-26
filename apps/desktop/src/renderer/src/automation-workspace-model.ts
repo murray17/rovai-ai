@@ -198,17 +198,49 @@ export function runStatus(run: AutomationRunSummary | null): { label: string; to
 }
 
 export type AutomationFilter = 'all' | 'enabled' | 'closed'
+export type AutomationDetailMode = 'details' | 'reschedule'
 
 export type OnceSchedule = Extract<AutomationSchedule, { kind: 'once' }>
 
-export function futureOnceSchedule(schedule: OnceSchedule, now = Date.now()): boolean {
+export function isOnceScheduleInFuture(schedule: OnceSchedule, now = Date.now()): boolean {
   return new Date(`${schedule.date}T${schedule.at}:00`).getTime() > now
 }
 
 export function automationPlanState(task: AutomationView): 'manual' | 'ended' | 'scheduled' {
   if (task.schedule.kind === 'manual') return 'manual'
-  if (!task.enabled && task.schedule.kind === 'once' && !futureOnceSchedule(task.schedule)) return 'ended'
+  if (!task.enabled && task.schedule.kind === 'once' && !isOnceScheduleInFuture(task.schedule)) return 'ended'
   return 'scheduled'
+}
+
+const planPresentation = {
+  scheduled: {
+    row: 'switch', toolbar: 'switch',
+    label: (task: AutomationView) => task.enabled ? uiAttribute('已开启') : uiAttribute('已关闭'),
+    timing: (task: AutomationView) => {
+      if (!task.enabled) return uiAttribute('不会自动运行')
+      return task.nextRunAt ? uiAttribute('下次 {0}', dateTimeLabel(task.nextRunAt)) : null
+    }
+  },
+  manual: {
+    row: 'label', toolbar: 'run-once',
+    label: () => uiAttribute('手动触发'),
+    timing: (task: AutomationView) => task.lastRun ? uiAttribute('上次 {0}', dateTimeLabel(task.lastRun.createdAt)) : uiAttribute('尚未运行')
+  },
+  ended: {
+    row: 'label', toolbar: null,
+    label: () => uiAttribute('计划已结束'),
+    timing: () => null
+  }
+} as const
+
+export function describeAutomationPlan(task: AutomationView) {
+  const kind = automationPlanState(task)
+  const { row, toolbar, label, timing } = planPresentation[kind]
+  return {
+    kind, row, toolbar, label: label(task), timing: timing(task),
+    summary: kind === 'manual' ? null : scheduleLabel(task.schedule),
+    endedSchedule: kind === 'ended' && task.schedule.kind === 'once' ? task.schedule : null
+  }
 }
 
 export function filterAutomations(automations: AutomationView[], filter: AutomationFilter, query: string): AutomationView[] {

@@ -58,7 +58,7 @@ let heldSave: Promise<void> | null = null
 let releaseSave: (() => void) | null = null
 let heldList: Promise<void> | null = null
 let releaseList: (() => void) | null = null
-Object.assign(window, { automationSplitterTest: {
+Object.assign(window, { automationWorkspaceFixture: {
   theme: (resolvedTheme: 'day' | 'night') => applyAppearanceSnapshot(document.documentElement, { ...DEFAULT_APPEARANCE, preference: resolvedTheme, resolvedTheme }),
   palette: (preference: ThemeId) => applyAppearanceSnapshot(document.documentElement, { ...DEFAULT_APPEARANCE, preference, resolvedTheme: THEME_MODES[preference] }),
   failSave: () => { failNextSave = true },
