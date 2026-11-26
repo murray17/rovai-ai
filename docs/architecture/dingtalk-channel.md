@@ -221,8 +221,7 @@ Stream callback fast ACK
 → Core verify Owner from appKey + userId digest
 → p2p exact /new OR every receiving group App immediately observes into one durable incomplete aggregate
 → 3-second callback collection, then replay the ordered observed set as canonical complete
-→ group roster reconcile
-→ finalize
+→ finalize (on roster_sync_required, reconcile that group and retry finalize once)
 → PendingCampBinding or existing binding FIFO
 → shared attachment download/import readiness (when resources exist)
 → CollaborationService atomic external-channel admission
@@ -282,7 +281,7 @@ provider-scoped outstanding 判定和按需调度；钉钉不再永久每 800ms 
 
 Core 在同一个 SQLite 保存 account、Developer Session、Bot credential、publication intent、Bot identity、conversation/
 binding、roster、request、console 和 Outbox；Main 只保留运行期 `appKey/appSecret/robotCode` 与 Cookie jar。启动恢复所有
-published Bot Stream。纯重连使用已有 Bot 凭据，网页身份在管理操作需要时核验。恢复入站和多 Bot 聚合均按父群验证完整名单，再提交原记录。有效空数组代表全员缺席，响应无法解析时按未知退避。待开工名单查询与回复发送独立执行。
+published Bot Stream。纯重连使用已有 Bot 凭据，网页身份在管理操作需要时核验。恢复入站和多 Bot 聚合均先向 Core 提交原记录。只有缺少合格名单时才读取父群并重提一次。有效空数组代表全员缺席。网络故障、限流、服务端错误、无法解析或原因不明的拒绝均按未知退避。只有平台明确指出当前机器人未安装时才换用下一个机器人。项目选择读取名单失败时更新原卡提示，原按钮可再次点击。待开工名单查询与回复发送独立执行。
 
 DingTalk Snapshot 另外只投影 inbound collecting/ready/overdue 与 Card create/update/recall/failed 计数，用于判断链路阶段；
 不暴露正文、附件内容、tenant/chat/App/Agent/Owner identity、credential、URL、token 或远端响应。计数不参与 admission。

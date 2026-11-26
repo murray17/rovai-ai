@@ -92,4 +92,4 @@ Provider 身份、存储、隔离和请求面由自动化测试验收。登录�
 
 ## 群名单按需读取
 
-Lark 使用独立租户与应用凭据，启用与飞书相同的开工检查。有效入站、项目绑定和 Core 点名的父群按需执行每个已发布 Bot 的 `isInChat`。群列表与网页身份在空闲时均无需远端读取。顺序、恢复和重试以 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 为准。
+Lark 使用独立租户与应用凭据，启用与飞书相同的开工检查。入站提交由 Core 检查已有名单，缺少合格名单时才读取父群并重提一次。每轮查询对已发布 Bot 逐个调用 `isInChat`。有效项目绑定和待开工投递也按需读取父群。群列表与网页身份在空闲时均无需远端读取。顺序、恢复和重试以 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 为准。

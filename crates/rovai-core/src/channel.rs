@@ -23895,21 +23895,19 @@ mod tests {
         publish_bot(&service, &mut database, "agent_2", "cli_app_2");
         let project_path = seed_project(&database, "binding");
         let quick_chat_path = quick_chat_path(&database);
+        let roster = ReconcileFeishuGroupRosterCommand {
+            started_at: None,
+            observed_app_ids: None,
+            membership_event: None,
+            provider: FEISHU_PROVIDER.to_string(),
+            tenant_key: "tenant_1".to_string(),
+            chat_id: "oc_group_binding".to_string(),
+            present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
+        };
         service
             .reconcile_feishu_group_roster(
                 &mut database,
-                &host_envelope(
-                    "binding-roster",
-                    ReconcileFeishuGroupRosterCommand {
-                        started_at: None,
-                        observed_app_ids: None,
-                        membership_event: None,
-                        provider: FEISHU_PROVIDER.to_string(),
-                        tenant_key: "tenant_1".to_string(),
-                        chat_id: "oc_group_binding".to_string(),
-                        present_app_ids: vec!["cli_app_1".to_string(), "cli_app_2".to_string()],
-                    },
-                ),
+                &host_envelope("binding-roster", roster.clone()),
             )
             .unwrap();
 
@@ -23931,23 +23929,43 @@ mod tests {
                 ),
             )
             .unwrap();
+        let finalize = FinalizeChannelInboundCommand {
+            require_fresh_roster: true,
+            aggregate_id: first_observation.result.payload["aggregateId"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        };
+        let stale = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("check-pending-first", finalize.clone()),
+            )
+            .unwrap();
+        assert_eq!(stale.result.code, "channel.roster_sync_required");
+        service
+            .reconcile_feishu_group_roster(
+                &mut database,
+                &host_envelope("refresh-pending-first", roster),
+            )
+            .unwrap();
         let first_pending = service
             .finalize_inbound(
                 &mut database,
                 &quick_chat_path,
-                &host_envelope(
-                    "finalize-pending-first",
-                    FinalizeChannelInboundCommand {
-                        require_fresh_roster: false,
-                        aggregate_id: first_observation.result.payload["aggregateId"]
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                    },
-                ),
+                &host_envelope("finalize-pending-first", finalize.clone()),
             )
             .unwrap();
         assert_eq!(first_pending.result.code, "channel.binding.pending");
+        let replayed = service
+            .finalize_inbound(
+                &mut database,
+                &quick_chat_path,
+                &host_envelope("replay-pending-first", finalize),
+            )
+            .unwrap();
+        assert_eq!(replayed.result.code, "channel.inbound.already_finalized");
         assert_eq!(first_pending.result.payload["projectCardQueued"], true);
         assert_eq!(
             first_pending.result.payload["acknowledgementAppId"],

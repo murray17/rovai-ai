@@ -1300,11 +1300,12 @@ export class DingTalkChannelSettingsService {
   }
 
   async #finalize(aggregateId: string, group: { conversationKind: string; tenantKey: string; chatId: string }, preferredAppId: string): Promise<void> {
-    if (group.conversationKind !== 'p2p' && !await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)) return
     const submit = () => this.#command('channels.dingtalk.inbound.finalize', { aggregateId, requireFreshRoster: true }, false)
     let result = await submit()
-    if (result.code === 'channel.roster_sync_required' && group.conversationKind !== 'p2p'
-      && await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)) result = await submit()
+    if (result.code === 'channel.roster_sync_required' && group.conversationKind !== 'p2p') {
+      if (!await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)) return
+      result = await submit()
+    }
     if (result.code === 'channel.membership_sync_required') {
       let membership = Number(result.payload.expectedMembershipGeneration)
       let reconciliation = Number(result.payload.nextReconciliationGeneration)
@@ -1366,11 +1367,16 @@ export class DingTalkChannelSettingsService {
       let result = await this.#command('channels.dingtalk.pendingBinding.resolve', {
         ...command, checkRoster: ['bind','quick_chat'].includes(command.action)
       }, false)
+      const api = this.#apis.get(callback.appKey)
       if (result.code === 'channel.binding.roster_required') {
-        if (!await this.#reconcileGroup(String(result.payload.tenantKey), String(result.payload.chatId))) return
+        if (!await this.#reconcileGroup(String(result.payload.tenantKey), String(result.payload.chatId), callback.appKey)) {
+          await api?.updateCard(outTrackId, { staticMsgContent: '暂时无法读取群成员，请稍后再点。' }, {
+            cardUpdateOptions: { updateCardDataByKey: true }
+          })
+          return
+        }
         result = await this.#command('channels.dingtalk.pendingBinding.resolve', command, false)
       }
-      const api = this.#apis.get(callback.appKey)
       if (api && result.status !== 'rejected' && value.action !== 'refresh') {
         await api.updateCard(outTrackId, dingtalkCardParams({
           title: 'Rovai 项目',
@@ -1883,7 +1889,13 @@ export class DingTalkChannelSettingsService {
         const api = this.#apis.get(bot.appKey)
         if (!api) continue
         let robotCodes: string[]
-        try { robotCodes = await api.groupRobotCodes(chatId) } catch { continue }
+        try {
+          robotCodes = await api.groupRobotCodes(chatId)
+        } catch (error) {
+          // A generic 'unauthorized' can also mean the group belongs to another tenant.
+          if (error instanceof DingTalkOpenApiError && !error.retryable && error.remoteCode === 'chatbotNotInstall') continue
+          throw error
+        }
         if (signal.aborted) return false
         const result = await this.#command('channels.dingtalk.roster.reconcile', {
           provider: 'dingtalk', tenantKey, chatId, startedAt,
