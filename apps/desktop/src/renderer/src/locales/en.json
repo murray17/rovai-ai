@@ -1,7 +1,5 @@
 {
   "上次验证时间": "Last verified",
-  "未派发，机器人已离群": "Not dispatched · bot left the group",
-  "未派发，机器人已离群 {0}": "Not dispatched · {0} bots left the group",
   "已收到": "Received",
   "待发送": "Pending dispatch",
   "{0}已收到": "{0} received it",
@@ -1390,6 +1388,8 @@
   "先在队员页创建或恢复一名队员。": "Create or restore a teammate first on the teammate page.",
   "身份": "Role",
   "操作": "Actions",
+  "缺少群名单读取权限": "Missing permission to read group members",
+  "群名单读取凭据无效": "Invalid credentials for reading group members",
   "独立 Bot 身份": "Independent Bot Role",
   "发布后沿用队员身份": "Retain teammate role after publishing",
   "管理": "Management",

@@ -1,5 +1,5 @@
 diff --git a/es/index.js b/es/index.js
-index c5d5c57488d414e3078f19a235e4db7afebeda80..61540bf1738c3f8731705ad32e29492bec2395b1 100644
+index c5d5c57488d414e3078f19a235e4db7afebeda80..903d829e3a04db5768ba9babfb48ea002c077c28 100644
 --- a/es/index.js
 +++ b/es/index.js
 @@ -100193,6 +100193,7 @@ function buildTokenError(field, response) {
@@ -849,15 +849,6 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..61540bf1738c3f8731705ad32e29492b
          });
      }
      registerDispatcherHandlers() {
-@@ -106807,7 +106838,7 @@ class LarkChannel {
-             botIdentity: this.botIdentity,
-             stripBotMentions: true,
-             includeRaw,
--            fetchSubMessages,
-+            fetchSubMessages: this.opts.deferMergeForward ? undefined : fetchSubMessages,
-         };
-         this.dispatcher.register({
-             // IM message — full safety pipeline
 @@ -106829,11 +106860,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
@@ -900,7 +891,7 @@ index c5d5c57488d414e3078f19a235e4db7afebeda80..61540bf1738c3f8731705ad32e29492b
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/lib/index.js b/lib/index.js
-index 0728b1d97ddac688b17642924e359c152dd52fd5..0455f7eed27b1e60fc78769aecd063c7e430600a 100644
+index 0728b1d97ddac688b17642924e359c152dd52fd5..ba21688c1bf0d95297977cbbe17f4cc4e798ff08 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -100211,6 +100211,7 @@ function buildTokenError(field, response) {
@@ -1750,15 +1741,6 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..0455f7eed27b1e60fc78769aecd063c7
          });
      }
      registerDispatcherHandlers() {
-@@ -106825,7 +106856,7 @@ class LarkChannel {
-             botIdentity: this.botIdentity,
-             stripBotMentions: true,
-             includeRaw,
--            fetchSubMessages,
-+            fetchSubMessages: this.opts.deferMergeForward ? undefined : fetchSubMessages,
-         };
-         this.dispatcher.register({
-             // IM message — full safety pipeline
 @@ -106847,11 +106878,15 @@ class LarkChannel {
                  const evt = normalizeCardAction(raw, { includeRaw });
                  if (!evt)
@@ -1801,7 +1783,7 @@ index 0728b1d97ddac688b17642924e359c152dd52fd5..0455f7eed27b1e60fc78769aecd063c7
              // The dedup key folds in replyId so thread replies on the same
              // top-level comment don't collide with each other (or with the
 diff --git a/types/index.d.ts b/types/index.d.ts
-index 1741e0c90073ec038590131c09952a23c222575d..4066a53e15118bcfe0daf7c25359aa839defb2cf 100644
+index 1741e0c90073ec038590131c09952a23c222575d..89dc01a05e634195138db9907c63750b39fda139 100644
 --- a/types/index.d.ts
 +++ b/types/index.d.ts
 @@ -321609,6 +321609,9 @@ interface IConstructorParams {
@@ -1842,16 +1824,7 @@ index 1741e0c90073ec038590131c09952a23c222575d..4066a53e15118bcfe0daf7c25359aa83
  declare class LarkChannelError extends Error {
      code: LarkChannelErrorCode;
      cause?: unknown;
-@@ -322171,6 +322182,8 @@ declare class LarkChannelError extends Error {
-     });
- }
- interface LarkChannelOptions {
-+    /** Leave merged-forward expansion to the authenticated message handler. */
-+    deferMergeForward?: boolean;
-     appId: string;
-     appSecret: string;
-     transport?: 'websocket' | 'webhook';
-@@ -322199,6 +322212,8 @@ interface LarkChannelOptions {
+@@ -322199,6 +322210,8 @@ interface LarkChannelOptions {
       * indefinitely on stuck DNS / proxy / NAT paths.
       */
      handshakeTimeoutMs?: number;
@@ -1860,7 +1833,7 @@ index 1741e0c90073ec038590131c09952a23c222575d..4066a53e15118bcfe0daf7c25359aa83
      /**
       * Optional Node http(s) agent forwarded to the underlying WSClient for
       * the WebSocket transport. Useful for routing the WS through an HTTP(S)
-@@ -322322,6 +322337,7 @@ declare class LarkChannel {
+@@ -322322,6 +322335,7 @@ declare class LarkChannel {
       * corresponding public events.
       */
      private connectWebSocket;
@@ -1868,7 +1841,7 @@ index 1741e0c90073ec038590131c09952a23c222575d..4066a53e15118bcfe0daf7c25359aa83
      disconnect(): Promise<void>;
      /**
       * Snapshot of the WebSocket lifecycle (state, last/next connect times,
-@@ -322589,4 +322605,4 @@ declare class LoggerProxy {
+@@ -322589,4 +322603,4 @@ declare class LoggerProxy {
 
  declare const defaultLogger: Logger;
 

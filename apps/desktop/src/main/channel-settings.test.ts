@@ -42,7 +42,6 @@ function channelCore(
   const intents = new Map<string, Record<string, unknown>>()
   return {
     request: async (method: string, params: unknown) => {
-      if (method.endsWith('roster.begin')) return { startedAt: new Date().toISOString() }
       const result = await handler(method, params)
       const command = (params as { command?: Record<string, unknown> } | undefined)?.command
       if (command && (result as { status?: string })?.status === 'applied') {
@@ -1203,34 +1202,6 @@ describe('channel settings service', () => {
     expect(transport).toHaveBeenCalledTimes(1)
     expect(await manager('rotated', new DefaultCache()).getCustomTenantAccessToken()).toBe('rotated-token')
     expect(transport).toHaveBeenCalledTimes(2)
-  })
-
-  it('deduplicates raw merge forwards in the installed SDK before any expansion', async () => {
-    const channel = createLarkChannel({
-      appId: 'cli_merge_dedup', appSecret: 'fixture', transport: 'websocket', includeRawEvent: true,
-      deferMergeForward: true, safety: { chatQueue: { enabled: false } }, loggerLevel: LoggerLevel.error
-    })
-    const internals = channel as unknown as {
-      botIdentity: { openId: string; name: string }
-      registerDispatcherHandlers(): void
-      dispatcher: { invoke(event: unknown, opts: { needCheck: false }): Promise<unknown> }
-    }
-    internals.botIdentity = { openId: 'ou_bot', name: 'Bot' }
-    internals.registerDispatcherHandlers()
-    const fetch = vi.spyOn(channel.rawClient.im.v1.message, 'get').mockResolvedValue({ code: 0, data: { items: [] } })
-    const received = vi.fn()
-    channel.on('message', received)
-    const event = { schema: '2.0', header: { event_type: 'im.message.receive_v1' }, event: {
-      sender: { sender_id: { open_id: 'ou_user' }, tenant_key: 'tenant' },
-      message: { message_id: 'om_merge_dedup', chat_id: 'chat', chat_type: 'p2p', message_type: 'merge_forward',
-        content: '{}', create_time: String(Date.now()) }
-    } }
-    try {
-      await internals.dispatcher.invoke(event, { needCheck: false })
-      await internals.dispatcher.invoke(event, { needCheck: false })
-      expect(received).toHaveBeenCalledOnce()
-      expect(fetch).not.toHaveBeenCalled()
-    } finally { await channel.disconnect() }
   })
 
   it('surfaces Feishu Bot removal events through the installed Lark SDK', async () => {
@@ -3372,6 +3343,72 @@ describe('channel settings service', () => {
     }
   )
 
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])(
+    '$kind admits group mentions with partial results or after one failed retry', async profile => {
+      vi.useFakeTimers()
+      const ids = ['a', 'b', 'c', 'd', 'e']
+      const harness = controlledChannels(Object.fromEntries(ids.map(id => [id, { openId: 'ou_' + id, name: id }])))
+      let pending = ''
+      let fresh = false
+      const writes: unknown[] = []
+      const admissions: Array<[string, boolean]> = []
+      const service = new ChannelSettingsService({
+        profile, createChannel: harness.createChannel,
+        credentialStore: memoryCredentialStore(Object.fromEntries(ids.map(id => [id, { appId: id, appSecret: 'fixture' }])), () => profile.kind),
+        core: channelCore((method, raw) => {
+          if (method.endsWith('.snapshot')) return coreSnapshot({
+            memberBots: ids.map(id => ({ agentId: id, accountId: 'account-1', brand: profile.kind, appId: id,
+              botDisplayName: id, credentialRef: id, status: 'published', failureCode: null, ownerIdentityStatus: 'verified', version: 1 })),
+            pendingAggregates: pending ? [{ aggregateId: pending, tenantKey: 'tenant-1', chatId: 'group', conversationKind: 'group' }] : []
+          })
+          if (method.endsWith('host.tick')) return { deliveries: [], hasOutstandingWork: Boolean(pending) }
+          const { command } = raw as { command: { aggregateId: string; requireFreshRoster: boolean } }
+          if (method.endsWith('roster.reconcile')) {
+            fresh = true
+            writes.push(command)
+          }
+          if (method.endsWith('inbound.finalize')) {
+            if (command.requireFreshRoster && !fresh) return { status: 'rejected', code: 'channel.roster_sync_required', payload: {} }
+            admissions.push([command.aggregateId, command.requireFreshRoster])
+            pending = ''
+            return { status: 'accepted', code: 'channel.turn.admitted', payload: {} }
+          }
+          return { status: 'applied', payload: {} }
+        })
+      })
+      try {
+        await service.start()
+        await vi.advanceTimersByTimeAsync(0)
+        harness.isInChat.get('a')!.mockResolvedValue({ code: 99991672 })
+        harness.isInChat.get('b')!.mockResolvedValue({ code: 0, data: { is_in_chat: false } })
+        pending = 'partial'
+        service.handleCoreEvent({ method: 'automation.notification.available', params: {} })
+        await vi.advanceTimersByTimeAsync(0)
+        expect(writes).toEqual([expect.objectContaining({ presentAppIds: ['c', 'd', 'e'], absentAppIds: ['b'] })])
+        expect(admissions).toEqual([['partial', true]])
+        expect((await service.get()).channels[0].memberBots.find(bot => bot.agentId === 'a')?.rosterIssue).toBe('permission')
+        for (const read of harness.isInChat.values()) {
+          expect(read).toHaveBeenCalledTimes(1)
+          read.mockRejectedValue(new Error('offline'))
+        }
+        fresh = false
+        pending = 'all-failed'
+        service.handleCoreEvent({ method: 'automation.notification.available', params: {} })
+        await vi.advanceTimersByTimeAsync(4_999)
+        expect(admissions).toHaveLength(1)
+        for (const read of harness.isInChat.values()) expect(read).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(admissions).toEqual([['partial', true], ['all-failed', false]])
+        await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000)
+        for (const read of harness.isInChat.values()) expect(read).toHaveBeenCalledTimes(3)
+        expect(writes).toHaveLength(1)
+      } finally {
+        await service.stop()
+        vi.useRealTimers()
+      }
+    }
+  )
+
   it('accepts topics only from a standalone topic-group chat mode', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     harness.getChatMode.mockImplementation(async (chatId: string) => (
@@ -3622,7 +3659,7 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
-  it('filters discarded forwards locally and retains only successful group-name reads for 24 hours', async () => {
+  it('filters ineligible group messages locally and retains only successful group-name reads for 24 hours', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     let now = Date.now()
     let owner = false
@@ -3638,7 +3675,6 @@ describe('channel settings service', () => {
           agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a', botDisplayName: '审阅员',
           brand: 'feishu', status: 'published', credentialRef: 'credential-a', ownerIdentityStatus: 'verified', failureCode: null
         }] })
-        if (method.endsWith('inbound.observed')) return { observed: true }
         if (method.endsWith('owner.verify')) return { code: 'verified', payload: { classification: owner ? 'owner' : 'non_owner' } }
         if (method.endsWith('inbound.observe')) {
           observations.push((raw as { command: Record<string, unknown> }).command)
@@ -3651,8 +3687,8 @@ describe('channel settings service', () => {
     })
     await service.start()
     const forward = harness.handlers.get('cli_a:message')!
-    const groupMessage = (messageId: string, content: string, mentioned: boolean, rawContentType = 'text') =>
-      normalizedMessage({ messageId, content, rawContentType, chatId: 'oc_cached', chatType: 'group', senderUserId: 'owner',
+    const groupMessage = (messageId: string, content: string, mentioned: boolean) =>
+      normalizedMessage({ messageId, content, chatId: 'oc_cached', chatType: 'group', senderUserId: 'owner',
         mentions: mentioned ? [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }] : [] })
     try {
       for (const chatId of ['unused-group', 'known-group']) {
@@ -3662,10 +3698,9 @@ describe('channel settings service', () => {
       expect(changes.map(c => [c.chatId, c.membershipEvent])).toEqual([
         ['known-group', { appId: 'cli_a', present: true }], ['known-group', { appId: 'cli_a', present: false }]
       ])
-      await forward(groupMessage('missing-mention', '合并转发', false, 'merge_forward'))
-      await forward(groupMessage('wrong-owner', '合并转发', true, 'merge_forward'))
+      await forward(groupMessage('missing-mention', '消息', false))
+      await forward(groupMessage('wrong-owner', '消息', true))
       owner = true
-      await forward(groupMessage('replayed-after-restart', '合并转发', true, 'merge_forward'))
       await forward(groupMessage('group-new', '/new', true))
       expect(harness.getMessage).not.toHaveBeenCalled()
       expect(harness.getChatMode).not.toHaveBeenCalled()
@@ -3767,74 +3802,6 @@ describe('channel settings service', () => {
     await wake()
     expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(2)
     await service.stop()
-  })
-
-  it.each([
-    ['feishu', FEISHU_PROVIDER_PROFILE],
-    ['lark', LARK_PROVIDER_PROFILE]
-  ] as const)('delivers %s replies while only the requested group roster is pending', async (provider, profile) => {
-    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
-    const settlements: Array<Record<string, unknown>> = []
-    let now = 100_000
-    let delivered = false
-    let ticks = 0
-    const hostPrefix = provider === 'feishu' ? 'channels.' : 'channels.lark.'
-    const service = new ChannelSettingsService({
-      profile,
-      credentialStore: memoryCredentialStore({
-        'member-a': { appId: 'cli_a', appSecret: 'secret-a' }
-      }, () => provider),
-      createChannel: harness.createChannel,
-      ...inertInterval(),
-      now: () => now,
-      core: channelCore((method, rawParams) => {
-        if (method === `channels.${provider}.snapshot`) {
-          return coreSnapshot({
-            memberBots: [{
-              agentId: 'agent-a', accountId: 'account-1', brand: provider, appId: 'cli_a',
-              botDisplayName: '审阅员', credentialRef: 'member-a', status: 'published',
-              failureCode: null, version: 1, ownerIdentityStatus: 'verified'
-            }],
-            transportConversations: [{ tenantKey: 'tenant-1', chatId: 'oc_group' }]
-          })
-        }
-        if (method === `${hostPrefix}host.tick`) {
-          ticks += 1
-          if (delivered) return { deliveries: [], rosterRefreshes: [], hasOutstandingWork: true }
-          if (now < 130_000) return { deliveries: [], rosterRefreshes: [], hasOutstandingWork: true }
-          delivered = true
-          return { deliveries: [{
-            deliveryId: 'delivery-output', requestId: null, deliveryKind: 'agent_output',
-            targetAppId: 'cli_a', credentialRef: 'member-a', chatId: 'oc_private',
-            topicKey: '', conversationKind: 'p2p', attemptCount: 1,
-            updateMessageId: null, recipientOpenId: null,
-            payload: { kind: 'agent_output', presentationVersion: 1, body: '回复已生成。',
-              mentionPrincipal: false, memberRecipients: [] }
-          }], rosterRefreshes: [{ provider,tenantKey:'tenant-1',chatId:'oc_demand' }], hasOutstandingWork: true }
-        }
-        if (method === `${hostPrefix}deliveries.settle`) {
-          settlements.push((rawParams as { command: Record<string, unknown> }).command)
-        }
-        return { status: 'applied', payload: {} }
-      })
-    })
-
-    await service.start()
-    await vi.waitFor(() => expect(ticks).toBe(1))
-    let releaseRoster!: () => void
-    const delayedRoster = new Promise((resolve) => {
-      releaseRoster = () => resolve({ code: 0, data: { is_in_chat: true } })
-    })
-    harness.isInChat.get('cli_a')!.mockImplementation(() => delayedRoster)
-    now = 140_000
-    service.handleCoreEvent({ method: 'channel.roster_refresh.requested', params: {} })
-    await vi.waitFor(() => expect(settlements).toHaveLength(1))
-
-    expect(harness.createMessage).toHaveBeenCalledOnce()
-    expect(settlements[0]).toMatchObject({ outcome: 'sent', deliveryId: 'delivery-output' })
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledExactlyOnceWith({path:{chat_id:'oc_demand'}})
-    await service.stop()
-    releaseRoster()
   })
 
   it.each([true, false])('delivers group/topic workspace pickers and recalls them durably (projects: %s)', async (hasProjects) => {

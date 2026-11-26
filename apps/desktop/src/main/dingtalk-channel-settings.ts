@@ -363,7 +363,6 @@ export class DingTalkChannelSettingsService {
   constructor(dependencies: DingTalkChannelHostDependencies) {
     this.#dependencies = dependencies
     this.#hostPump = new AdaptiveChannelHostPump({
-      provider: 'dingtalk',
       run: () => this.#pumpOnce(),
       onError: (error) => {
         console.warn(`[rovai] DingTalk outbox pump failed: ${failureCode(error)}`)
@@ -478,6 +477,7 @@ export class DingTalkChannelSettingsService {
             agentId: bot.agentId,
             published: bot.status === 'published',
             connectionStatus: this.#stream.has(bot.appKey) ? 'online' : 'offline',
+            rosterIssue: this.#rosters.issues.get(bot.agentId),
             publicationStatus: failureCode
               ? 'failed'
               : bot.status === 'published' && this.#stream.has(bot.appKey)
@@ -1300,10 +1300,13 @@ export class DingTalkChannelSettingsService {
   }
 
   async #finalize(aggregateId: string, group: { conversationKind: string; tenantKey: string; chatId: string }, preferredAppId: string): Promise<void> {
-    const submit = () => this.#command('channels.dingtalk.inbound.finalize', { aggregateId, requireFreshRoster: true }, false)
+    let requireFreshRoster = true
+    const signal = this.#inboundAbort.signal
+    const submit = () => this.#command('channels.dingtalk.inbound.finalize', { aggregateId, requireFreshRoster }, false)
     let result = await submit()
     if (result.code === 'channel.roster_sync_required' && group.conversationKind !== 'p2p') {
-      if (!await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)) return
+      requireFreshRoster = await this.#reconcileGroup(group.tenantKey, group.chatId, preferredAppId)
+      if (signal.aborted || (!requireFreshRoster && this.#rosters.waitForInboundRetry(group.tenantKey, group.chatId))) return
       result = await submit()
     }
     if (result.code === 'channel.membership_sync_required') {
@@ -1519,7 +1522,6 @@ export class DingTalkChannelSettingsService {
     }
     const tick = await this.#dependencies.core.request<{
       deliveries: ClaimedDelivery[]
-      rosterRefreshes?: Array<{ provider: string; tenantKey: string; chatId: string }>
       hasOutstandingWork: boolean
       inboundAttachments?: PendingChannelAttachments[]
     }>('channels.dingtalk.host.tick', {
@@ -1529,12 +1531,6 @@ export class DingTalkChannelSettingsService {
         .filter(bot => bot.status === 'published' && this.#apis.has(bot.appKey))
         .map(bot => bot.appKey)
     })
-    for (const group of tick.rosterRefreshes ?? []) {
-      if (group.provider !== 'dingtalk' || !group.tenantKey || !group.chatId) continue
-      void this.#reconcileGroup(group.tenantKey, group.chatId).then(updated => {
-        if (updated) this.#hostPump.wake()
-      })
-    }
     const deliveries = Array.isArray(tick.deliveries)
       ? tick.deliveries
       : []
@@ -1877,33 +1873,36 @@ export class DingTalkChannelSettingsService {
   #reconcileGroup(tenantKey: string, chatId: string, preferredAppId?: string): Promise<boolean> {
     const signal = this.#inboundAbort.signal
     return this.#rosters.run(tenantKey, chatId, async () => {
-      const { startedAt } = await this.#dependencies.core.request<{ startedAt: string }>(
-        'channels.dingtalk.roster.begin', {}
-      )
-      if (!startedAt) return false
       const snapshot = await this.#snapshot()
       const bots = snapshot.memberBots.filter(bot => bot.status === 'published')
       // The receiving Bot can normally read this group in one API call.
       if (preferredAppId) bots.sort((a, b) => Number(b.appKey === preferredAppId) - Number(a.appKey === preferredAppId))
       for (const bot of bots) {
         const api = this.#apis.get(bot.appKey)
-        if (!api) continue
+        if (!api) {
+          if (this.#failures.get(bot.agentId) === 'published_bot_credential_missing'
+            && this.#rosters.setIssue('dingtalk', bot.agentId, 'credentials')) this.#notify()
+          continue
+        }
         let robotCodes: string[]
         try {
           robotCodes = await api.groupRobotCodes(chatId)
+          if (!signal.aborted && this.#rosters.setIssue('dingtalk', bot.agentId)) this.#notify()
         } catch (error) {
-          // A generic 'unauthorized' can also mean the group belongs to another tenant.
-          if (error instanceof DingTalkOpenApiError && !error.retryable
-            && (error.remoteCode === 'chatbotNotInstall'
-              || error.remoteCode === 'Forbidden.AccessDenied.AccessTokenPermissionDenied')) {
-            continue
+          if (signal.aborted) return false
+          if (!(error instanceof DingTalkOpenApiError) || error.retryable) throw error
+          const missingPermission = error.remoteCode === 'Forbidden.AccessDenied.AccessTokenPermissionDenied'
+          const invalidCredentials = error.status === 401 || error.remoteCode === 'invalidClientIdOrSecret'
+          if (missingPermission || invalidCredentials) {
+            const issue = missingPermission ? 'permission' : 'credentials'
+            if (this.#rosters.setIssue('dingtalk', bot.agentId, issue)) this.#notify()
           }
+          if (missingPermission || error.remoteCode === 'chatbotNotInstall') continue
           throw error
         }
         if (signal.aborted) return false
         const result = await this.#command('channels.dingtalk.roster.reconcile', {
-          provider: 'dingtalk', tenantKey, chatId, startedAt,
-          observedAppIds: bots.map(candidate => candidate.appKey),
+          provider: 'dingtalk', tenantKey, chatId,
           presentAppIds: presentDingTalkAppIds(bots, new Set(robotCodes))
         }, false)
         return result.status !== 'rejected'

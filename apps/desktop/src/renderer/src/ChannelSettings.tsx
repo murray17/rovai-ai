@@ -786,6 +786,8 @@ function ChannelMemberBotTable({
           const disabled = status === 'disabled'
           const provisioning = status === 'provisioning'
           const action = failed ? onRetryPublish : onPublish
+          const rosterIssue = bot?.rosterIssue === 'permission' ? uiAttribute('缺少群名单读取权限')
+            : bot?.rosterIssue === 'credentials' ? uiAttribute('群名单读取凭据无效') : undefined
           const actionBusy = busy === `publish:${channel.kind}:${agent.agentId}`
             || busy === `retry:${channel.kind}:${agent.agentId}`
           return (
@@ -796,8 +798,11 @@ function ChannelMemberBotTable({
               </div>
               <div className="channel-bot-identity" role="cell">
                 {bot?.botDisplayName
-                  ? <><strong>{bot.botDisplayName}</strong><small><UiText zh={"独立 Bot 身份"} /></small></>
+                  ? <strong>{bot.botDisplayName}</strong>
                   : <span><UiText zh={"发布后沿用队员身份"} /></span>}
+                {rosterIssue
+                  ? <small title={rosterIssue}>{rosterIssue}</small>
+                  : bot?.botDisplayName && <small><UiText zh={"独立 Bot 身份"} /></small>}
               </div>
               <span className={`channel-publication-status is-${status}`} role="cell">
                 <span className="channel-publication-label">{bot?.published && status !== 'published' ? uiAttribute("已发布 · {0}", String(publicationLabel(status))) : publicationLabel(status)}</span>

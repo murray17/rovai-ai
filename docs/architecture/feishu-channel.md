@@ -302,16 +302,16 @@ union ID、tenant key、chat ID 或 external message ID。
 
 ## Bot roster 与 Thread membership
 
-Host 对父群中每个已发布 Bot 调用 `isInChat`，只有完整快照才提交 Core roster generation。普通群 Thread 首次创建
-使用当前全部 present Bot；以后完整快照通过 v1.29 已有 `camp.member.add/remove`、`feishu` source binding 和 exact
-reconciliation generation 同步。Bot 移出群走同一原子 cutover/reconciliation。
+普通群 Thread 首次创建使用本地已知在群的全部已发布 Bot。成功的名单结果与进出群通知通过现有 `camp.member.add/remove`、`feishu` source binding 和 reconciliation generation 同步线程成员。
 
 独立话题群的父群 roster 是其全部 Topic Thread 的动态默认协作队员池。新 Topic Thread 首次创建时使用当前全部
 present/published Rovai Bot 建立 membership，但首条消息仍只为明确 mention 的 targets 创建 waiting Delivery；因此“本轮
-初始目标”和“Thread 可协作队员”是两个独立集合。父群新增 Bot 后，完整快照通过同一 membership source 把它加入新旧
+初始目标”和“Thread 可协作队员”是两个独立集合。父群新增 Bot 后，进群通知或成功的名单结果通过同一 membership source 把它加入新旧
 Topic Thread；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Thread 和冻结项目不变。
 
-有效群消息通过本地过滤并持久记录后，Host 先提交给 Core。Core 缺少晚于该消息的父群名单时，Host 才逐个对已发布 Bot 调用 `isInChat`，成功后重提一次。普通群和话题的开工资格由 [Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md) 统一规定。群名和类型共用群资料读取，设置页只显示本地状态。
+普通群只有有效 @ 入站和确认项目绑定或快速对话会查父群名单。Host 先提交原消息，Core 要求刷新时再逐个对已发布 Bot 调用 `isInChat`，同群共用在途读取。成功结果写入，失败项保留上次状态。收到消息的 Bot 直接记为在群。整轮失败最多退避重试一次，然后用本地名单继续。绑定群的进出通知即时更新该 Bot 和线程成员。
+
+桌面输入、转派、排队开工和重试直接使用本地成员。话题父群仍按既有代次投影。名单允许短时过期，下一条 @ 或进出通知会校正。离线漏收退群时，此前的转派可能在本地执行一次，群回复按普通发送失败处理。群名与群类型共用一次查询，设置页仅显示本地状态。[Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md)
 
 
 ## 输出、恢复与秘密
@@ -322,7 +322,7 @@ Topic Thread；移出 Bot 后，从下一次 AgentRun 起不得再以它为目�
 当前 `opening | active | terminal_pending` 执行卡对应的 live Runtime event 进入事件快路径，其他 Run 和事件忽略。
 Core 返回 provider-scoped `hasOutstandingWork`，只有为真时才保留十分钟 one-shot watchdog，为假立即休眠。终态另有
 跨过 900ms quiet window 的 one-shot，短重试按 `availableAt` 唤醒。启动恢复先执行 Core tick，不先扫描全部历史群；
-只有 Core 点名的父群才触发 roster refresh。事件丢失仍依靠持久领域事实和 watchdog 恢复，真实入站、绑定、
+普通群从待恢复的 @ 入站按需读取名单，话题群的投递可依照既有代次要求读取父群。事件丢失仍依靠持久领域事实和 watchdog 恢复，真实入站、绑定、
 admission 与 delivery settlement 的防重不变；历史 tick 回执不清理。
 
 `project_selection` 是唯一不依赖普通 inbound receipt 的 delivery：它关联 exact PendingCampBinding，使用冻结的
@@ -405,7 +405,7 @@ Bot 长连接、过期 lease、collecting finalize 与 Outbox。Renderer snapsho
 Main 的 `ChannelHostLifecycle` 等待 Supervisor 的 Core authority 与请求能力同时就绪后启动 Host；同 generation
 不重复启动，authority 丢失后停止，新的 ready generation 再恢复同一 SQLite 绑定和凭据，shutdown 后不再重启。
 Host 为连接阶段、SDK policy reject、归一化 message 和 Rovai handler 接受/拒绝记录结构化诊断；所有 App/message/chat
-identity 都先摘要，消息正文与外部用户 ID 不进入日志。当前 SDK 不提供归一化前 raw-event hook，Host 不虚构该观测层。
+identity 都先摘要，消息正文与外部用户 ID 不进入日志。当前 SDK 在执行 mention 策略前归一化消息，且没有归一化前的 raw-event hook。如果平台投递未 @ 的合并转发，SDK 原生展开可能先读取一次消息详情。该回调不触发群资料或名单查询。
 每个 App Secret 只以稳定 credential ref 关联 Bot。Developer Session Cookie jar 和 App Secret 明文存于同一个
 `rovai.sqlite`，只允许 Core/Main 读取；Renderer、日志、Agent Context 和诊断输出仍不得获得 raw payload。Main 启动时通过
 一次 `channels.credentials.listPublished` 批量加载所有 Provider 的 published Bot credential，并把运行期对象分发给各 Host；

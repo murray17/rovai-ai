@@ -21,7 +21,6 @@ export function trackedExecutionCoreEventWake(
 }
 
 export type AdaptiveChannelHostPumpDependencies = {
-  provider?: string
   run(): Promise<boolean>
   onError(error: unknown): void
   classifyCoreEvent?(event: CoreEvent): ChannelHostCoreEventWake
@@ -86,11 +85,7 @@ export class AdaptiveChannelHostPump {
 
   handleCoreEvent(event: CoreEvent): void {
     if (this.#stopped) return
-    if (event.method === 'channel.roster_refresh.requested' && this.#dependencies.provider) {
-      const groups = (event.params as { groups?: Array<{ provider: string }> } | undefined)?.groups
-      if (Array.isArray(groups) && !groups.some(group => group.provider === this.#dependencies.provider)) return
-    }
-    if (event.method === 'automation.notification.available' || event.method === 'channel.roster_refresh.requested') {
+    if (event.method === 'automation.notification.available') {
       this.wake()
       return
     }

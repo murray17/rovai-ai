@@ -325,11 +325,9 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
     if !(1..=100).contains(&limit) {
         anyhow::bail!("Delivery claim limit must be between 1 and 100");
     }
-    let message_output = database.message_changes.clone();
     let transaction = database
         .connection_mut()
         .transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let changes = crate::message_changes::MessageChanges::begin(&transaction, message_output);
     reconcile_waiting_delivery_conversations(&transaction)?;
     let mut claimed_run_ids = Vec::new();
     let mut cursor: Option<(String, i64, String, String, String)> = None;
@@ -495,26 +493,7 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
                 [&conversation_id],
                 |row| row.get(0),
             )?;
-            let mut waiting = load_waiting_prefix(&transaction, &camp_id, &agent_id)?;
-            if let Some(roster) = crate::channel::roster::RecipientRoster::load(
-                &transaction,
-                &camp_id,
-                &agent_id,
-                &conversation_id,
-            )? {
-                use crate::channel::roster::ClaimDecision;
-                let mut ready = Vec::with_capacity(waiting.len());
-                for item in waiting {
-                    match roster.check(&transaction, &item.id)? {
-                        ClaimDecision::Ready => ready.push(item),
-                        ClaimDecision::Wait => break,
-                        ClaimDecision::Cancelled => {
-                            crate::message_changes::record(&transaction, &camp_id, false, &[]);
-                        }
-                    }
-                }
-                waiting = ready;
-            }
+            let waiting = load_waiting_prefix(&transaction, &camp_id, &agent_id)?;
             if waiting.is_empty() {
                 continue;
             }
@@ -667,7 +646,7 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
             }
         }
     }
-    changes.commit(transaction)?;
+    transaction.commit()?;
     Ok(claimed_run_ids)
 }
 

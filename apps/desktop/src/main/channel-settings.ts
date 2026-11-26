@@ -176,7 +176,7 @@ type ClaimedChannelDelivery = {
   recipientOpenId?: string | null
 }
 
-type GroupRosterRefreshRequest = {
+type TopicRosterRefreshRequest = {
   provider: string
   tenantKey: string
   chatId: string
@@ -350,7 +350,6 @@ export class ChannelSettingsService {
     this.#createChannel = dependencies?.createChannel ?? createLarkChannel
     this.#now = dependencies?.now ?? Date.now
     this.#hostPump = dependencies ? new AdaptiveChannelHostPump({
-      provider: this.#profile.kind,
       run: () => this.#pumpOnce(),
       onError: (error) => {
         console.warn(`[rovai] ${this.#profile.logLabel} outbox pump failed: ${channelFailureCode(error)}`)
@@ -1459,7 +1458,6 @@ export class ChannelSettingsService {
       transport: 'websocket',
       source: 'rovai-ai',
       includeRawEvent: true,
-      deferMergeForward: true,
       cache: new DefaultCache(),
       handshakeTimeoutMs: 20_000,
       identityTimeoutMs: 15_000,
@@ -1682,12 +1680,6 @@ export class ChannelSettingsService {
       await this.#emit()
       return
     }
-    if (raw.message?.message_type === 'merge_forward') {
-      const previous = await this.#dependencies!.core.request<{ observed: boolean }>(this.#hostMethod('inbound.observed'), {
-        tenantKey, externalMessageId: message.messageId, appId: managed.appId
-      })
-      if (previous.observed) return
-    }
     if (managed.observationPending) {
       // Join any in-flight confirmation before requesting another. A trusted
       // message can arrive while the first observation is still settling.
@@ -1758,19 +1750,6 @@ export class ChannelSettingsService {
         .map((bot) => bot.botDisplayName)
     )
     if (managed.channel.botIdentity?.name) expectedBotNames.add(managed.channel.botIdentity.name)
-    if (raw.message?.message_type === 'merge_forward' && managed.channel.botIdentity) {
-      message = await normalize(message.raw as RawMessageEvent, {
-        botIdentity: managed.channel.botIdentity, stripBotMentions: true, includeRaw: true,
-        fetchSubMessages: async mid => {
-          const response = await managed.channel.rawClient.im.v1.message.get({ path: { message_id: mid } })
-          return (response.data?.items ?? []).map(item => ({
-            ...item, mentions: item.mentions?.map(mention => ({
-              ...mention, id: { [mention.id_type]: mention.id }
-            }))
-          }))
-        }
-      })
-    }
     const body = canonicalInboundBody(message, expectedBotNames)
     const name = chatInfo?.name
     const conversationDisplayName = !isGroup ? message.senderName || '飞书私聊'
@@ -2081,12 +2060,15 @@ export class ChannelSettingsService {
     const existing = this.#finalizing.get(aggregateId)
     if (existing) return existing
     const finish = async () => {
+      let requireFreshRoster = true
+      const signal = this.#inboundAbort.signal
       const submit = () => this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
-        aggregateId, requireFreshRoster: true
+        aggregateId, requireFreshRoster
       }, false)
       let finalized = await submit()
       if (finalized.code === 'channel.roster_sync_required' && conversationKind !== 'p2p') {
-        if (!await this.#reconcileChatRoster(chatId, tenantKey)) return false
+        requireFreshRoster = await this.#reconcileChatRoster(chatId, tenantKey)
+        if (signal.aborted || (!requireFreshRoster && this.#rosters.waitForInboundRetry(tenantKey, chatId))) return false
         finalized = await submit()
       }
       if (finalized.code === 'channel.membership_sync_required') {
@@ -2141,23 +2123,35 @@ export class ChannelSettingsService {
   #reconcileChatRoster(chatId: string, tenantKey: string): Promise<boolean> {
     const signal = this.#inboundAbort.signal
     return this.#rosters.run(tenantKey, chatId, async () => {
-      const { startedAt } = await this.#dependencies!.core.request<{ startedAt: string }>(
-        this.#hostMethod('roster.begin'), {}
-      )
-      if (!startedAt) return false
       const snapshot = await this.#coreSnapshot()
-      const apps = snapshot.memberBots.filter(bot => bot.status === 'published').map(bot => bot.appId)
-      const observations = await Promise.allSettled(apps.map(async appId => {
-        const managed = this.#managedChannels.get(appId)
-        if (!managed) throw new Error('roster_bot_unavailable')
-        const response = await managed.channel.rawClient.im.v1.chatMembers.isInChat({ path: { chat_id: chatId } })
-        if (response.code !== 0 || typeof response.data?.is_in_chat !== 'boolean') throw new Error('roster_observation_incomplete')
-        return response.data.is_in_chat ? appId : null
+      const bots = snapshot.memberBots.filter(bot => bot.status === 'published')
+      const presentAppIds: string[] = []
+      const absentAppIds: string[] = []
+      let issueChanged = false
+      await Promise.all(bots.map(async bot => {
+        const managed = this.#managedChannels.get(bot.appId)
+        if (!managed) {
+          if (this.#connectionFailures.get(bot.agentId) === 'published_bot_credential_missing'
+            && this.#rosters.setIssue(this.#profile.kind, bot.agentId, 'credentials')) issueChanged = true
+          return
+        }
+        try {
+          const response = await managed.channel.rawClient.im.v1.chatMembers.isInChat({ path: { chat_id: chatId } })
+          if (response.code !== 0 || typeof response.data?.is_in_chat !== 'boolean') throw response
+          if (signal.aborted) return
+          if (response.data.is_in_chat) presentAppIds.push(bot.appId)
+          else absentAppIds.push(bot.appId)
+          if (this.#rosters.setIssue(this.#profile.kind, bot.agentId)) issueChanged = true
+        } catch (error) {
+          const issue = feishuRosterAccessIssue(error)
+          if (!signal.aborted && issue && this.#rosters.setIssue(this.#profile.kind, bot.agentId, issue)) issueChanged = true
+        }
       }))
-      if (signal.aborted || observations.some(result => result.status === 'rejected')) return false
-      const presentAppIds = observations.flatMap(r => r.status === 'fulfilled' && r.value ? [r.value] : [])
+      if (signal.aborted) return false
+      if (issueChanged && this.#listeners.size) void this.#emit().catch(() => undefined)
+      if (!presentAppIds.length && !absentAppIds.length) return false
       const result = await this.#commandWithId(this.#hostMethod('roster.reconcile'), randomUUID(), {
-        provider: this.#profile.kind, tenantKey, chatId, startedAt, observedAppIds: apps, presentAppIds
+        provider: this.#profile.kind, tenantKey, chatId, presentAppIds, absentAppIds
       }, false)
       return result.status !== 'rejected'
     })
@@ -2243,7 +2237,7 @@ export class ChannelSettingsService {
     if (!this.#dependencies || this.#stopped) return false
     const tick = await this.#dependencies.core.request<{
       deliveries: ClaimedChannelDelivery[]
-      rosterRefreshes: GroupRosterRefreshRequest[]
+      rosterRefreshes: TopicRosterRefreshRequest[]
       hasOutstandingWork: boolean
       inboundAttachments?: PendingFeishuAttachments[]
     }>(this.#hostMethod('host.tick'), {
@@ -2254,12 +2248,17 @@ export class ChannelSettingsService {
     const rosterRefreshes = Array.isArray(tick.rosterRefreshes)
       ? tick.rosterRefreshes
       : []
-    for (const group of rosterRefreshes) {
-      if (group.provider === this.#profile.kind && group.tenantKey && group.chatId) {
-        void this.#reconcileChatRoster(group.chatId, group.tenantKey).then(updated => {
-          if (updated) this.#hostPump?.wake()
-        })
+    const rosterResults = await Promise.allSettled(rosterRefreshes.map((refresh) => {
+      if (refresh.provider !== this.#profile.kind
+        || !refresh.tenantKey
+        || !refresh.chatId
+        || !Number.isSafeInteger(refresh.requiredRosterGeneration)) {
+        return Promise.resolve(false)
       }
+      return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey)
+    }))
+    if (rosterResults.some((result) => result.status === 'fulfilled' && result.value)) {
+      this.#hostPump?.wake()
     }
     const deliveries = Array.isArray(tick.deliveries)
       ? tick.deliveries
@@ -2663,7 +2662,7 @@ export class ChannelSettingsService {
           const publicationNeedsAction = intent?.state === 'failed_unknown_remote_state'
             || (intent?.state === 'failed_recoverable'
               && !['version_published', 'connection_verified'].includes(intent.lastCompletedStep ?? ''))
-          return { ...bot, publicationStatus: published.has(bot.agentId)
+          return { ...bot, rosterIssue: this.#rosters.issues.get(bot.agentId), publicationStatus: published.has(bot.agentId)
               ? publicationNeedsAction ? 'failed' as const : 'published' as const : bot.publicationStatus,
             failureCode: publicationNeedsAction ? intent?.failureCode ?? bot.failureCode : bot.failureCode,
             published: published.has(bot.agentId),
@@ -2917,6 +2916,15 @@ function latestPublicationIntent(
 function stableCommandId(...parts: string[]): string {
   const hex = createHash('sha256').update(parts.join('\0')).digest('hex')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+function feishuRosterAccessIssue(error: unknown): 'credentials' | 'permission' | undefined {
+  const failure = error as { code?: unknown; response?: { status?: number; data?: { code?: unknown } } } | null
+  const status = failure?.response?.status
+  const tokenCode = error instanceof Error ? /failed to get (?:tenant|app)_access_token, code: (\d+)/u.exec(error.message)?.[1] : undefined
+  const code = Number(failure?.response?.data?.code ?? tokenCode ?? failure?.code)
+  if (status === 401 || [10005, 10015, 20013, 99991663, 99991664, 99991665, 99991668].includes(code)) return 'credentials'
+  if (status === 403 || code === 99991672) return 'permission'
 }
 
 function channelFailureCode(error: unknown): string {

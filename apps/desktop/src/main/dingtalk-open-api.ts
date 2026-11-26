@@ -419,7 +419,10 @@ export class DingTalkOpenApiClient {
       throw new DingTalkOpenApiError('dingtalk_app_access_token_network', 0)
     }
     const body = await response.json().catch(() => null) as Record<string, unknown> | null
-    if (!response.ok || !body) throw new DingTalkOpenApiError('dingtalk_app_access_token_failed', response.status)
+    if (!response.ok || !body) {
+      const code = body ? optionalString(body, 'code') ?? optionalString(body, 'Code') : null
+      throw new DingTalkOpenApiError('dingtalk_app_access_token_failed', response.status, code)
+    }
     const value = requiredString(body, 'accessToken')
     const expiresIn = typeof body.expireIn === 'number' ? body.expireIn : 7_200
     signal.throwIfAborted()
