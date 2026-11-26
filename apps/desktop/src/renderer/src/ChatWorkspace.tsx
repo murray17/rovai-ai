@@ -165,6 +165,7 @@ function ChatRound({
       current = false
     }
   }, [client, chatId, run.runId, run.throughChangeSequence, visible, before, retry])
+  let anchorMessageId = run.triggerMessageId
   return (
     <>
       {visible && failed && (
@@ -180,8 +181,9 @@ function ChatRound({
       {Array.from({ length: supplements.length + 1 }, (_, index) => {
         const previous = supplements[index - 1]
         const next = supplements[index]
+        if (previous?.messageId) anchorMessageId = previous.messageId
         const supplement = previous?.messageId === null
-          ? (latestPage ? previous : undefined)
+          ? (messages.has(anchorMessageId) ? previous : undefined)
           : previous && messages.get(previous.messageId)
         const showSegment =
           supplement ||

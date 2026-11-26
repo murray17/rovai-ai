@@ -236,24 +236,60 @@ pub(crate) fn send(
     Ok(execution)
 }
 
-fn initial_text_title(tx: &Transaction<'_>, line: &str) -> Result<String> {
-    if let Some(link) = line.strip_prefix('[').and_then(|s| s.strip_suffix(')'))
-        && let Some((_, target)) = link.rsplit_once("](rovai://")
-    {
-        if let Some(id) = target.strip_prefix("thread/") {
-            return Ok(tx.query_row("SELECT title FROM camp WHERE id=?1 AND deletion_operation_id IS NULL AND archived_at IS NULL",[id],|r|r.get(0)).optional()?.context("chat.reference_unavailable")?);
-        }
-        if let Some(id) = target.strip_prefix("mission/") {
-            return Ok(tx
-                .query_row("SELECT title FROM mission WHERE id=?1", [id], |r| r.get(0))
-                .optional()?
-                .context("chat.reference_unavailable")?);
+// A composer reference is [escaped label](rovai://kind/id). Other Markdown stays as typed.
+fn title_reference(after_open: &str) -> Option<(String, &str, &str)> {
+    let mut chars = after_open.chars();
+    let mut label = String::new();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => label.push(chars.next()?),
+            '[' => return None,
+            ']' => {
+                let (target, rest) = chars.as_str().strip_prefix("(rovai://")?.split_once(')')?;
+                return (target.starts_with("thread/") || target.starts_with("mission/"))
+                    .then_some((label, target, rest));
+            }
+            _ => label.push(ch),
         }
     }
-    Ok(line
+    None
+}
+
+fn initial_text_title(tx: &Transaction<'_>, line: &str) -> Result<String> {
+    let mut text = String::new();
+    let mut rest = line;
+    while let Some((prefix, after_open)) = rest.split_once('[') {
+        text.push_str(prefix);
+        let Some((label, target, tail)) = title_reference(after_open) else {
+            text.push('[');
+            rest = after_open;
+            continue;
+        };
+        if text.is_empty() && tail.is_empty() {
+            let (query, id) = if let Some(id) = target.strip_prefix("thread/") {
+                (
+                    "SELECT title FROM camp WHERE id=?1 AND deletion_operation_id IS NULL AND archived_at IS NULL",
+                    id,
+                )
+            } else {
+                (
+                    "SELECT title FROM mission WHERE id=?1",
+                    &target["mission/".len()..],
+                )
+            };
+            return tx
+                .query_row(query, [id], |r| r.get(0))
+                .optional()?
+                .context("chat.reference_unavailable");
+        }
+        text.push_str(&label);
+        rest = tail;
+    }
+    text.push_str(rest);
+    Ok(text
         .split_sentence_bounds()
         .next()
-        .unwrap_or(line)
+        .unwrap_or(&text)
         .trim_end()
         .to_owned())
 }
@@ -683,6 +719,21 @@ mod tests {
                 .unwrap()
         };
         let public_counts = ["camp", "camp_member", "camp_turn"].map(|name| count(&db, name));
+        {
+            let tx = db.connection_mut().transaction().unwrap();
+            assert_eq!(
+                initial_text_title(
+                    &tx,
+                    "[A](rovai://thread/a) 已发版。再看 [B](rovai://thread/b)"
+                )
+                .unwrap(),
+                "A 已发版。"
+            );
+            assert_eq!(
+                initial_text_title(&tx, r"核对 [预算\[Q4\]](rovai://thread/a)。下一步").unwrap(),
+                "核对 预算[Q4]。"
+            );
+        }
         let external_upload = db.directory().join("first-upload.txt");
         std::fs::write(&external_upload, "release notes").unwrap();
         let upload = crate::local_attachment_source::observe_agent_source_attachments(
