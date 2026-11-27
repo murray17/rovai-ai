@@ -679,6 +679,7 @@ async fn events(
                         if rovai_core::thread_reference::invalidates_directory(change["method"].as_str().unwrap_or_default(), &change["params"]) {
                             payload["referencesChanged"] = json!(true);
                         }
+                        if change["method"] == "chats.listChanged" { payload["chatsChanged"] = json!(true); }
                         if change["method"] == "teams.changed" { payload["teamsChanged"] = json!(true); }
                         if matches!(change["method"].as_str(), Some("notification_episode.changed" | "notification_episode.preference_changed")) {
                             payload["notificationsChanged"] = json!(true);

@@ -1,12 +1,13 @@
 import { filePreviewRetentionLimits } from '../../file-preview-retention'
 import {
   isThreadId,
+  isChatId,
   type FilePreviewRetentionState,
   type LocalAttachmentOwnerLocator,
   type OpenFilePreviewRequest,
   type RestoreFilePreviewRequest
 } from '@contracts'
-import { isAttachmentId } from '../attachment-desktop'
+import { isAttachmentId, isAttachmentOwnerScope } from '../attachment-desktop'
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -30,6 +31,10 @@ function threadId(value: unknown): string {
   return value
 }
 
+function chatOrThread(value: unknown): string {
+  return isChatId(value) ? value : threadId(value)
+}
+
 function positiveInteger(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) {
     throw new Error('Unsupported file preview number')
@@ -39,7 +44,8 @@ function positiveInteger(value: unknown): number {
 
 function attachmentLocator(value: unknown, expectedThreadId: string): LocalAttachmentOwnerLocator {
   const input = record(value)
-  const ownerThreadId = threadId(input.threadId)
+  if (!isAttachmentOwnerScope(input.owner, input.threadId, input.conversationId)) throw new Error('Unsupported attachment owner')
+  const ownerThreadId = input.threadId
   const attachmentRefId = string(input.attachmentRefId, 128)
   if (ownerThreadId !== expectedThreadId || !isAttachmentId(attachmentRefId)) {
     throw new Error('Unsupported Attachment')
@@ -120,7 +126,7 @@ function attachmentLocator(value: unknown, expectedThreadId: string): LocalAttac
 }
 
 export function parseFilePreviewThread(value: unknown): string | null {
-  return value === null ? null : threadId(value)
+  return value === null ? null : chatOrThread(value)
 }
 
 export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequest {
@@ -137,7 +143,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
     case 'message_reference':
       return {
         kind: input.kind,
-        threadId: threadId(input.threadId),
+        threadId: chatOrThread(input.threadId),
         messageId: string(input.messageId, 128),
         rawReference: string(input.rawReference)
       }
@@ -154,7 +160,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
         rawReference: string(input.rawReference)
       }
     case 'attachment': {
-      const attachmentThreadId = threadId(input.threadId)
+      const attachmentThreadId = string(input.threadId, 540)
       return {
         kind: input.kind,
         threadId: attachmentThreadId,
@@ -167,7 +173,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
       }
       return {
         kind: input.kind,
-        threadId: threadId(input.threadId),
+        threadId: chatOrThread(input.threadId),
         agentRunId: string(input.agentRunId, 128),
         executionEpoch: positiveInteger(input.executionEpoch),
         evidenceFileId: string(input.evidenceFileId, 256),
@@ -176,7 +182,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
     case 'run_activity_file':
       return {
         kind: input.kind,
-        threadId: threadId(input.threadId),
+        threadId: chatOrThread(input.threadId),
         agentRunId: string(input.agentRunId, 128),
         executionEpoch: positiveInteger(input.executionEpoch),
         evidenceId: string(input.evidenceId, 256),
@@ -195,7 +201,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
     case 'authorized_root':
       return {
         kind: input.kind,
-        threadId: threadId(input.threadId),
+        threadId: chatOrThread(input.threadId),
         rootGrantId: string(input.rootGrantId, 128),
         rawReference: string(input.rawReference)
       }
@@ -268,12 +274,12 @@ export function parseReloadRequest(value: unknown): {
 
 export function parseReopenRequest(value: unknown): { threadId: string; reopenToken: string } {
   const input = record(value)
-  return { threadId: threadId(input.threadId), reopenToken: string(input.reopenToken, 128) }
+  return { threadId: chatOrThread(input.threadId), reopenToken: string(input.reopenToken, 128) }
 }
 
 export function parseChooseRootRequest(value: unknown): { threadId: string; pendingOpenId: string } {
   const input = record(value)
-  return { threadId: threadId(input.threadId), pendingOpenId: string(input.pendingOpenId, 128) }
+  return { threadId: chatOrThread(input.threadId), pendingOpenId: string(input.pendingOpenId, 128) }
 }
 
 export function parseCopyPathRequest(value: unknown): {
@@ -293,7 +299,7 @@ export function parseRetentionState(value: unknown): FilePreviewRetentionState {
     || !Array.isArray(input.handles) || input.handles.length > filePreviewRetentionLimits.handles * 2) throw new Error('Unsupported preview retention')
   return {
     sessions: input.sessions.map(value => { const item = record(value); return {
-      threadId: threadId(item.threadId), previewSessionId: string(item.previewSessionId, 128)
+      threadId: chatOrThread(item.threadId), previewSessionId: string(item.previewSessionId, 128)
     } }),
     handles: input.handles.map(value => {
       const item = record(value)

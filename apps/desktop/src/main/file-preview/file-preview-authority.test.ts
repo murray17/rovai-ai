@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { parseCoreFilePreviewAuthorityResult } from './file-preview-authority'
 
 describe('parseCoreFilePreviewAuthorityResult', () => {
+  it('opens only the exact file referenced by a private reply', () => {
+    const threadId = '00a10001-1111-4111-8111-111111111111'
+    const request = { kind: 'message_reference' as const, threadId, messageId: 'reply-1', rawReference: 'chart.png' }
+    const receipt = {
+      kind: 'file_target', threadId, sourceKind: request.kind, sourceIdentity: 'chat-message:reply-1',
+      rootPath: '/chat', basePath: '/chat', rawReference: request.rawReference, allowChildren: false
+    }
+    expect(parseCoreFilePreviewAuthorityResult(receipt, request)).toMatchObject({ allowChildren: false })
+    expect(parseCoreFilePreviewAuthorityResult({ ...receipt, allowChildren: true }, request)).toBeNull()
+    expect(parseCoreFilePreviewAuthorityResult({ ...receipt, sourceIdentity: 'chat-message:other' }, request)).toBeNull()
+  })
+
   it('accepts a matching authority receipt', () => {
     const request = {
       kind: 'camp_workspace' as const,

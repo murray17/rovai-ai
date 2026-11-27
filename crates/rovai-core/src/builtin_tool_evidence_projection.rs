@@ -93,6 +93,14 @@ pub fn project_builtin_tool_invocation(
 fn project_input(operation: &str, input: &Value) -> Result<Value> {
     let mut projected = Map::new();
     match operation {
+        "thread.create" => {
+            insert_semantic_text(&mut projected, "title", input.get("title"));
+            insert_identifier(
+                &mut projected,
+                "defaultLeadAgentId",
+                input.get("defaultLeadAgentId"),
+            );
+        }
         "thread.runs" => {
             for field in ["threadId", "agentId"] {
                 insert_identifier(&mut projected, field, input.get(field));
@@ -269,7 +277,7 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
                 insert_i64(&mut projected, field, input.get(field));
             }
         }
-        SINGLE_CHAT_HISTORY_TOOL_NAME => {
+        SINGLE_CHAT_HISTORY_TOOL_NAME | crate::chat::HISTORY_TOOL => {
             insert_i64(
                 &mut projected,
                 "beforeSequence",
@@ -354,6 +362,10 @@ fn project_memory_mutation_input(projected: &mut Map<String, Value>, input: &Val
 fn project_result(operation: &str, result: &Value) -> Result<Value> {
     let mut projected = Map::new();
     match operation {
+        "thread.create" => {
+            insert_identifier(&mut projected, "threadId", result.get("threadId"));
+        }
+
         "thread.runs" => {
             insert_identifier(&mut projected, "threadId", result.get("threadId"));
             insert_bounded_string(&mut projected, "observedAt", result.get("observedAt"), 64);
@@ -498,7 +510,7 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             }
             insert_i64(&mut projected, "nextCursor", result.get("nextCursor"));
         }
-        SINGLE_CHAT_HISTORY_TOOL_NAME => {
+        SINGLE_CHAT_HISTORY_TOOL_NAME | crate::chat::HISTORY_TOOL => {
             let messages = project_object_array(result.get("messages"), |item| {
                 let mut value = Map::new();
                 insert_i64(&mut value, "sequence", item.get("sequence"));

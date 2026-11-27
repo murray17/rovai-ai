@@ -1,0 +1,560 @@
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type {
+  AgentProfile,
+  AgentRunExecutionWindowPage,
+  AgentRunExecutionWindowChanges,
+  AgentRunExecutionEvidenceView,
+  ChatOpenResult,
+  ChatSendResult,
+  ChatSupplement,
+  ResolvedTheme,
+  SingleChatMessageView
+} from '@contracts'
+import type { ThreadClient } from './camp-client'
+import { MemberAvatar } from './MemberAvatar'
+import { FilePreviewPane } from './FilePreviewPane'
+import { useOptionalFilePreview } from './file-preview-context'
+import { newCommandId } from '../../shared/command-id'
+import { ApprovalDock } from './ThreadWorkspace'
+import { ChatReply } from './ChatReply'
+import { MessageQuotes } from './MessageQuotes'
+import { revealPrivateQuote } from './message-quote-reveal'
+import { createRuntimeRefresh } from './runtime-check'
+import { AttachmentCard } from './AttachmentCard'
+import { SingleChatRunHistory } from './SingleChatPanel'
+import { chatDocumentFromInput } from './chat-draft'
+import { InlineThreadReference } from './ThreadReferencePreview'
+import { ChatComposer } from './ChatComposer'
+import { uiAttribute } from './interface-language'
+
+type Run = ChatOpenResult['runs'][number]
+type WindowPage = Omit<AgentRunExecutionWindowPage, 'threadId'> & { chatId: string }
+const processing = (status: Run['status']) => ['queued', 'running', 'waiting'].includes(status)
+
+function ChatUserText({ body }: { body: string }) {
+  return chatDocumentFromInput(body, []).segments.map((item, i) => {
+    if (item.kind === 'text') return item.text
+    const atom = item.atom
+    if (atom.type === 'thread_reference')
+      return (
+        <InlineThreadReference
+          key={i}
+          segment={{
+            kind: 'thread_reference',
+            threadId: atom.threadId,
+            titleAtSend: atom.labelFallback ?? atom.threadId
+          }}
+        />
+      )
+    if (atom.type === 'mission_reference')
+      return (
+        <InlineThreadReference
+          key={i}
+          segment={{
+            kind: 'mission_reference',
+            missionId: atom.missionId,
+            titleAtSend: atom.labelFallback ?? atom.missionId
+          }}
+        />
+      )
+    return null
+  })
+}
+
+function ChatUserMessage({ chatId, message, source, unconfirmed }: {
+  chatId: string
+  message: Pick<SingleChatMessageView, 'body' | 'quotes' | 'attachments'>
+  source: { messageId: string } | { inputId: string }
+  unconfirmed?: boolean
+}) {
+  const messageId = 'messageId' in source ? source.messageId : undefined
+  return (
+    <div className="single-chat-user-message">
+      <div className="single-chat-user-content">
+        <MessageQuotes history quotes={message.quotes} onReveal={revealPrivateQuote} />
+        {(message.body || message.attachments.length > 0) && <div className="single-chat-user-bubble">
+          <span data-message-quote-body={messageId} data-quote-owner={messageId ? 'single_chat:' + chatId : undefined}>
+            <ChatUserText body={message.body} />
+          </span>
+          {message.attachments.map(file => (
+            <AttachmentCard key={file.id} attachment={file} locator={'messageId' in source
+              ? { owner: 'single_chat_message', threadId: chatId, conversationId: chatId,
+                  conversationMessageId: source.messageId, attachmentRefId: file.id }
+              : { owner: 'single_chat_pending', threadId: chatId, conversationId: chatId,
+                  pendingInputId: source.inputId, attachmentRefId: file.id }} />
+          ))}
+        </div>}
+        {unconfirmed && <small>{uiAttribute('未确认送达')}</small>}
+      </div>
+    </div>
+  )
+}
+
+function ChatRound({
+  client,
+  chatId,
+  run,
+  final,
+  supplements,
+  theme,
+  messages,
+  latestPage
+}: {
+  messages: ReadonlyMap<string, SingleChatMessageView>
+  latestPage: boolean
+  theme: ResolvedTheme
+  supplements: ChatSupplement[]
+  client: ThreadClient
+  chatId: string
+  run: Run
+  final: SingleChatMessageView | null
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [page, setPage] = useState<WindowPage | null>(null)
+  const latest = useRef<WindowPage | null>(null)
+  const [before, setBefore] = useState<number | null>(null)
+  const [retry, setRetry] = useState(0)
+  const [failed, setFailed] = useState(false)
+  const visible = expanded || processing(run.status)
+  useEffect(() => {
+    if (!visible || !run.throughChangeSequence) return
+    let current = true
+    const merge = (existing: AgentRunExecutionEvidenceView[], updates: AgentRunExecutionEvidenceView[]) => {
+      const items = new Map(existing.map((item) => [item.id, item]))
+      for (const item of updates) items.set(item.id, item)
+      return [...items.values()].sort((a, b) => a.sequence - b.sequence)
+    }
+    const update = async () => {
+      let result = latest.current
+      if (!result || (before !== null && before === result.nextBeforeSequence)) {
+        const next = await client.request<WindowPage>('agentRunExecution.page', {
+          chatId,
+          agentRunId: run.runId,
+          beforeSequence: before
+        })
+        if (!current) return
+        result = {
+          ...next,
+          throughChangeSequence: result?.throughChangeSequence ?? next.throughChangeSequence,
+          evidence: merge(result?.evidence ?? [], [...next.evidence, ...(next.activeEvidence ?? [])])
+        }
+      }
+      while (result.throughChangeSequence < run.throughChangeSequence) {
+        const after: number = result.throughChangeSequence
+        const changes: AgentRunExecutionWindowChanges = await client.request<AgentRunExecutionWindowChanges>(
+          'agentRunExecution.changes',
+          { chatId, agentRunId: run.runId, afterChangeSequence: after }
+        )
+        if (!current) return
+        if (changes.nextAfterChangeSequence <= after) break
+        result = {
+          ...result,
+          throughChangeSequence: changes.nextAfterChangeSequence,
+          evidence: merge(result.evidence, [...changes.evidence, ...changes.refreshedEvidence])
+        }
+      }
+      latest.current = result
+      setPage(result)
+      setFailed(false)
+    }
+    void update().catch(() => {
+      if (current) setFailed(true)
+    })
+    return () => {
+      current = false
+    }
+  }, [client, chatId, run.runId, run.throughChangeSequence, visible, before, retry])
+  let anchorMessageId = run.triggerMessageId
+  return (
+    <>
+      {visible && failed && (
+        <button type="button" className="quiet-button" onClick={() => setRetry((value) => value + 1)}>
+          {uiAttribute('重新读取执行记录')}
+        </button>
+      )}
+      {visible && page?.hasMore && page.nextBeforeSequence && (
+        <button type="button" className="quiet-button" onClick={() => setBefore(page.nextBeforeSequence)}>
+          {uiAttribute('更早的步骤')}
+        </button>
+      )}
+      {Array.from({ length: supplements.length + 1 }, (_, index) => {
+        const previous = supplements[index - 1]
+        const next = supplements[index]
+        if (previous?.messageId) anchorMessageId = previous.messageId
+        const supplement = previous?.messageId === null
+          ? (messages.has(anchorMessageId) ? previous : undefined)
+          : previous && messages.get(previous.messageId)
+        const showSegment =
+          supplement ||
+          (!previous && messages.has(run.triggerMessageId)) ||
+          (!next && (final || (latestPage && processing(run.status))))
+        if (!showSegment) return null
+        const evidence = (page?.evidence ?? []).filter(
+          (step) =>
+            step.eventType !== 'agent_run.input' &&
+            (!previous || step.sequence > previous.evidenceSequence) &&
+            (!next || step.sequence < next.evidenceSequence)
+        )
+        const segmentActive = processing(run.status) && (!next ||
+          evidence.some(step => step.phase === 'started' || step.phase === 'updated'))
+        return (
+          <Fragment key={previous?.inputId ?? 'initial'}>
+            {supplement && previous && (
+              <ChatUserMessage chatId={chatId} message={supplement} unconfirmed={previous.unconfirmed}
+                source={previous.messageId === null ? { inputId: previous.inputId } : { messageId: previous.messageId }} />
+            )}
+            {(!next || evidence.length > 0 || !page) && (
+              <SingleChatRunHistory
+                chatId={chatId}
+                threadId={chatId}
+                conversationId={chatId}
+                onExpand={setExpanded}
+                privateFinal={
+                  !next && final ? (
+                    <ChatReply
+                      chatId={chatId}
+                      messageId={final.id}
+                      body={final.body}
+                      theme={theme}
+                    />
+                  ) : undefined
+                }
+                run={{
+                  ...run,
+                  id: run.runId,
+                  status: next && !segmentActive ? 'succeeded' : run.status,
+                  startedAt: previous?.occurredAt ?? run.startedAt,
+                  endedAt: segmentActive ? null : next?.occurredAt ?? run.endedAt,
+                  triggerConversationMessageId: run.triggerMessageId,
+                  finalConversationMessageId: next ? null : run.finalMessageId,
+                  executionEvidenceCount: evidence.length,
+                  executionEvidenceChangeSequence: run.throughChangeSequence
+                }}
+                evidence={evidence}
+                finalMessage={next ? null : final}
+                now={new Date().toISOString()}
+              />
+            )}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+export function ChatWorkspace({
+  client,
+  chatId,
+  draftAgentId,
+  profiles,
+  header,
+  theme,
+  onRead,
+  onNavigate
+}: {
+  client: ThreadClient
+  chatId: string | null
+  draftAgentId: string | null
+  profiles: AgentProfile[]
+  header: HTMLElement | null
+  theme: ResolvedTheme
+  onRead(chatId: string, sequence: number): void
+  onNavigate(chatId: string | null): void
+}) {
+  const [detail, setDetail] = useState<ChatOpenResult | null>(null)
+  const [failed, setFailed] = useState(false)
+  const refresh = useRef<() => void>(() => {})
+  const [before, setBefore] = useState<number | null>(null)
+  const preview = useOptionalFilePreview()
+  const root = useRef<HTMLDivElement>(null)
+  const followsLatest = useRef(true)
+  const transcript = useRef<HTMLDivElement>(null)
+  const approvalDock = useRef<HTMLElement>(null)
+  const lastSeen = useRef(0)
+  const navigate = useRef(onNavigate)
+  navigate.current = onNavigate
+  const onReadRef = useRef(onRead)
+  onReadRef.current = onRead
+  useEffect(() => {
+    if (!chatId) return
+    let current = true
+    const checkedInputs = new Set<string>()
+    const read = createRuntimeRefresh(async () => {
+      if (!current) return
+      try {
+        const next = await client.request<ChatOpenResult | null>('chats.open', { chatId, beforeSequence: before })
+        if (!current) return
+        setDetail(next)
+        setFailed(false)
+        if (!next) {
+          navigate.current(null)
+          return
+        }
+        for (const input of next.supplements ?? []) {
+          if (!input.unconfirmed) continue
+          const run = next.runs.find((item) => item.runId === input.runId)
+          const check = input.inputId + (run && processing(run.status) ? ':active' : ':finished')
+          if (checkedInputs.has(check)) continue
+          checkedInputs.add(check)
+          // Recheck on the existing refresh when the turn ends or a read failed.
+          void client.request('runtimeInputs.reconcile', { deliveryId: input.inputId }).catch(() => checkedInputs.delete(check))
+        }
+      } catch {
+        if (current) setFailed(true)
+      }
+    })
+    const update = () => { void read() }
+    refresh.current = update
+    const stop = client.onEvent?.((event) => {
+      const changed = (event.params as { chatId?: string })?.chatId
+      if (event.method === 'chats.listChanged' && (!changed || changed === chatId)) update()
+    })
+    const web = client.onInvalidated?.((change) => {
+      if (!change || change.resync || change.chatsChanged) update()
+    })
+    update()
+    return () => {
+      current = false
+      stop?.()
+      web?.()
+    }
+  }, [client, chatId, before])
+  useEffect(() => {
+    if (!chatId || !detail || !root.current) return
+    const visible = new Set<Element>()
+    const record = () => {
+      if (document.visibilityState !== 'visible') return
+      const latest = Math.max(
+        lastSeen.current,
+        ...[...visible].map((el) => Number(el.getAttribute('data-reply-sequence')))
+      )
+      if (latest > lastSeen.current) {
+        lastSeen.current = latest
+        onReadRef.current(chatId, latest)
+      }
+    }
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) visible.add(entry.target)
+        else visible.delete(entry.target)
+      }
+      record()
+    })
+    root.current.querySelectorAll('[data-reply-sequence]').forEach((item) => observer.observe(item))
+    document.addEventListener('visibilitychange', record)
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('visibilitychange', record)
+    }
+  }, [detail, chatId])
+  useLayoutEffect(() => {
+    const scroll = root.current
+    const content = transcript.current
+    if (!scroll || !content || !detail) return
+    const follow = () => {
+      if (before === null && followsLatest.current) scroll.scrollTop = scroll.scrollHeight
+    }
+    follow()
+    const observer = new ResizeObserver(follow)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [detail, before])
+  const activeRunId = detail?.runs.find((run) => processing(run.status))?.runId
+  useEffect(() => {
+    if (!activeRunId) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh.current()
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [activeRunId])
+  const id = detail?.chat.agentId ?? draftAgentId
+  const profile = profiles.find((item) => item.agentId === id)
+  const name = profile?.displayName ?? detail?.chat.displayName
+  const avatar = profile?.avatarRef ?? detail?.chat.avatarRef ?? null
+  const title = detail?.chat.title ?? uiAttribute(chatId || !id ? '聊天' : '新聊天')
+  const byId = new Map(detail?.messages.map((message) => [message.id, message]))
+  const roundsByMessage = new Map<string, Run>()
+  const roundsById = new Map(detail?.runs.map((run) => [run.runId, run]))
+  for (const run of roundsById.values()) {
+    roundsByMessage.set(run.triggerMessageId, run)
+    if (run.finalMessageId) roundsByMessage.set(run.finalMessageId, run)
+  }
+  for (const input of detail?.supplements ?? []) {
+    const run = roundsById.get(input.runId)
+    if (run && input.messageId) roundsByMessage.set(input.messageId, run)
+  }
+  const renderedRounds = new Set<string>()
+  function sent(result: ChatSendResult) {
+    if (!chatId) onNavigate(result.chatId)
+    else {
+      followsLatest.current = true
+      setBefore(null)
+      refresh.current()
+    }
+  }
+  return (
+    <>
+      {header &&
+        createPortal(
+          <div className="context-breadcrumb workspace-title">
+            {id && name && (
+              <span className="workspace-title-icon is-avatar" title={name}>
+                <MemberAvatar agentId={id} displayName={name} avatarRef={avatar} size="execution" decorative />
+              </span>
+            )}
+            <h1 title={title}>{title}</h1>
+          </div>,
+          header
+        )}
+      {preview?.paneVisible && <FilePreviewPane tabsInPane />}
+      <div
+        className="chat-timeline"
+        ref={root}
+        data-single-chat-owner={chatId ?? undefined}
+        onScroll={(event) => {
+          const el = event.currentTarget
+          followsLatest.current = before === null && el.scrollHeight - el.scrollTop - el.clientHeight < 48
+        }}
+      >
+        {failed && (
+          <button type="button" className="quiet-button" onClick={() => refresh.current()}>
+            {uiAttribute('重新读取聊天')}
+          </button>
+        )}
+        {!chatId && id && name && (
+          <section className="empty-camp-welcome first-run-camp-welcome">
+            <div className="first-run-camp-intro">
+              <MemberAvatar
+                agentId={id}
+                displayName={name}
+                avatarRef={avatar}
+                size="profile"
+                className="first-run-camp-avatar"
+                decorative
+              />
+              <div>
+                <h2>{uiAttribute('你好，我是{0}。', name)}</h2>
+                <p>{uiAttribute('可以直接聊，也可以请我查阅其他对话、建任务或发通知。')}</p>
+              </div>
+            </div>
+          </section>
+        )}
+        {detail && (
+          <div ref={transcript} className="single-chat-transcript independent-chat-transcript">
+            {detail.nextBeforeSequence !== null && (
+              <button
+                className="quiet-button"
+                type="button"
+                onClick={() => {
+                  followsLatest.current = false
+                  setBefore(detail.nextBeforeSequence)
+                  if (root.current) root.current.scrollTop = 0
+                }}
+              >
+                {uiAttribute('更早的消息')}
+              </button>
+            )}
+            {before !== null && (
+              <button
+                className="quiet-button"
+                type="button"
+                onClick={() => {
+                  followsLatest.current = true
+                  setBefore(null)
+                }}
+              >
+                {uiAttribute('最新消息')}
+              </button>
+            )}
+            {detail.messages.map((message) => {
+              const run = roundsByMessage.get(message.id)
+              if (run && renderedRounds.has(run.runId)) return null
+              if (run) renderedRounds.add(run.runId)
+              if (!run && message.authorType !== 'user')
+                return (
+                  <div key={message.id} className="single-chat-final" data-reply-sequence={message.sequence}>
+                    <ChatReply
+                      theme={theme}
+                      chatId={detail.chat.chatId}
+                      messageId={message.id}
+                      body={message.body}
+                    />
+                  </div>
+                )
+              return (
+                <div className="single-chat-turn" key={run?.runId ?? message.id}>
+                  {(!run || run.triggerMessageId === message.id) && (
+                    <ChatUserMessage chatId={detail.chat.chatId} message={message} source={{ messageId: message.id }} />
+                  )}
+                  {run && chatId && (
+                    <ChatRound
+                      latestPage={before === null}
+                      messages={byId}
+                      theme={theme}
+                      client={client}
+                      chatId={chatId}
+                      run={run}
+                      supplements={(detail.supplements ?? []).filter((input) => input.runId === run.runId)}
+                      final={byId.get(run.finalMessageId ?? '') ?? null}
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      {chatId && detail && !detail.chat.archivedAt && (
+        <ApprovalDock
+          approvals={detail.approvals ?? []}
+          interactions={detail.nativeInteractions}
+          profileById={new Map(profiles.map((profile) => [profile.agentId, profile]))}
+          agentRuns={detail.runs.map((r) => ({ id: r.runId, agentId: detail.chat.agentId }))}
+          conversationId={chatId}
+          busy={false}
+          containerRef={approvalDock}
+          focusRequest={null}
+          focusApprovalId={null}
+          onResolve={async (approval, optionId) => {
+            const result = await client.request<import('@contracts').StoredCommandResult>('action.approvals.resolve', {
+              commandId: newCommandId(),
+              chatId,
+              approvalId: approval.id,
+              expectedVersion: approval.version,
+              optionId
+            })
+            refresh.current()
+            if (result.status === 'rejected') throw new Error(result.code)
+          }}
+          onRespond={async (interaction, answer) => {
+            const result = await client.request<import('@contracts').NativeInteractionResult>(
+              'nativeInteractions.respond',
+              {
+                commandId: newCommandId(),
+                chatId,
+                agentRunId: interaction.agentRunId,
+                executionEpoch: interaction.executionEpoch,
+                interactionId: interaction.id,
+                answer
+              }
+            )
+            refresh.current()
+            return result
+          }}
+        />
+      )}
+      {id && name && !detail?.chat.archivedAt && (
+        <ChatComposer
+          client={client}
+          chatId={chatId}
+          agentId={id}
+          name={name}
+          runtime={profile?.runtimeConfiguration?.adapterKind ?? null}
+          detail={detail}
+          onSent={sent}
+        />
+      )}
+    </>
+  )
+}

@@ -17910,7 +17910,7 @@ while IFS= read -r ignored; do :; done
         let attachments = root.join("attachments");
         std::fs::create_dir_all(&attachments).unwrap();
         let attachment_authorization = ThreadOutputDirectory {
-            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
+            owner_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             output_root: attachments,
         };
         let executable = root.join("traecli");

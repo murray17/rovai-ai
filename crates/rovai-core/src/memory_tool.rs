@@ -14,6 +14,8 @@ pub const MEMORY_WRITE_TOOL_NAME: &str = "memory.write";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MemoryWriteToolInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub action: String,
     pub scope: Option<crate::memory::MemoryScopeKind>,
     pub kind: Option<crate::memory::MemoryKind>,
@@ -140,6 +142,11 @@ impl MemoryToolService {
             attested_run,
         )?;
         let input = &invocation.input;
+        let identity = crate::memory_retrieval::memory_target(
+            database.connection(),
+            &identity,
+            input.thread_id.as_deref(),
+        )?;
         MemoryService::default()
             .write(
                 database,
@@ -149,7 +156,7 @@ impl MemoryToolService {
                         agent_id: identity.agent_id,
                         source_agent_run_id: identity.agent_run_id,
                     },
-                    camp_id: Some(identity.camp_id),
+                    camp_id: crate::runtime::run_thread_id(&identity.camp_id).map(str::to_owned),
                     expected_versions: Vec::new(),
                     execution_epoch: Some(identity.execution_epoch),
                     payload: AgentMemoryWriteCommand {

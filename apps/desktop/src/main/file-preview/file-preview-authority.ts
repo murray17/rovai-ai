@@ -1,5 +1,5 @@
 import { dirname, isAbsolute } from 'node:path'
-import type { CoreMethod, FileEditResult, OpenFilePreviewRequest } from '@contracts'
+import { isChatId, type CoreMethod, type FileEditResult, type OpenFilePreviewRequest } from '@contracts'
 import {
   parseDesktopAttachmentTarget,
   type DesktopAttachmentTarget
@@ -57,6 +57,8 @@ export function parseCoreFilePreviewAuthorityResult(
       evidenceFileId: request.evidenceFileId
     }
   }
+  const chatMessage = request.kind === 'message_reference' && isChatId(request.threadId)
+  const allowChildren = !chatMessage
   if (
     value.kind !== 'file_target'
     || value.sourceKind !== request.kind
@@ -65,7 +67,8 @@ export function parseCoreFilePreviewAuthorityResult(
     || !boundedString(value.basePath)
     || !isAbsolute(value.rootPath)
     || !isAbsolute(value.basePath)
-    || value.allowChildren !== true
+    || value.allowChildren !== allowChildren
+    || (chatMessage && value.sourceIdentity !== `chat-message:${request.messageId}`)
   ) return null
   if (request.kind === 'run_evidence' || request.kind === 'project_file') {
     if (!boundedString(value.rawReference)) return null
@@ -78,7 +81,7 @@ export function parseCoreFilePreviewAuthorityResult(
     rootPath: value.rootPath,
     basePath: value.basePath,
     rawReference: value.rawReference,
-    allowChildren: true
+    allowChildren
   }
 }
 

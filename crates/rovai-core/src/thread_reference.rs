@@ -145,6 +145,9 @@ fn target(
 }
 
 fn validate_scope(connection: &Connection, current: &str) -> Result<()> {
+    if current.is_empty() {
+        return Ok(());
+    } // The local user can choose a public reference before a Chat exists.
     ThreadId::parse(current)?;
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM camp WHERE id=?1 AND deletion_operation_id IS NULL)",

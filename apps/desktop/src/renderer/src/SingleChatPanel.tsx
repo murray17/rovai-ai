@@ -12,7 +12,7 @@ import { useRuntimePhase } from './useRuntimePhase'
 import { useOptionalFilePreview } from './file-preview-context'
 import { MessageMarkdown } from './MessageMarkdown'
 import { ExecutionNarration } from './ExecutionNarration'
-import { revealMessageQuote } from './message-quote-reveal'
+import { revealPrivateQuote } from './message-quote-reveal'
 import { ReturnToLatest } from './ReturnToLatest'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
 import type { MessageQuoteAction, MessageQuoteSnapshot } from '@contracts'
@@ -336,16 +336,22 @@ export function SingleChatRunHistory({
   finalMessage,
   now,
   cancelling = false,
-  onNotify = () => undefined
+  onNotify = () => undefined,
+  onExpand,
+  privateFinal,
+  chatId
 }: {
   threadId: string
   conversationId: string
-  run: SingleChatRunView
+  run: Omit<SingleChatRunView, 'threadTurnId'> & { threadTurnId?: string }
   evidence: AgentRunExecutionEvidenceView[]
   finalMessage: SingleChatMessageView | null
   now: string
   cancelling?: boolean
   onNotify?(message: string): void
+  chatId?: string
+  privateFinal?: React.ReactNode
+  onExpand?(expanded: boolean): void
 }): React.JSX.Element {
   const runtime = useRuntimePhase(threadId, run)
   const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
@@ -454,7 +460,7 @@ export function SingleChatRunHistory({
         <details
           className={`single-chat-run-history${terminal ? ' is-terminal' : ' is-live'}`}
           open={!terminal || open}
-          onToggle={(event) => { if (terminal) setOpen(event.currentTarget.open) }}
+          onToggle={(event) => { if (terminal) { setOpen(event.currentTarget.open); onExpand?.(event.currentTarget.open) } }}
         >
           <summary hidden={!terminal}>
             <span className="single-chat-run-summary" data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={terminal ? run.threadTurnId : undefined}>{terminal && executionRunSummary(run, now)}</span>
@@ -476,8 +482,8 @@ export function SingleChatRunHistory({
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}>
-            {handoff ? bodySlot(handoff) : <MessageMarkdown theme={theme}>{finalMessage.body}</MessageMarkdown>}
+          <div className="single-chat-final" data-reply-sequence={chatId ? finalMessage.sequence : undefined} data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}>
+            {privateFinal ?? (handoff ? bodySlot(handoff) : <MessageMarkdown theme={theme}>{finalMessage.body}</MessageMarkdown>)}
           </div>
         </>}
         {narration.map(item => {
@@ -487,14 +493,6 @@ export function SingleChatRunHistory({
       </div>
     </section>
   )
-}
-
-async function revealPrivateQuote(quote: MessageQuoteSnapshot): Promise<void> {
-  if (!quote.source) return
-  const root = document.querySelector<HTMLElement>(`[data-single-chat-owner="${CSS.escape(quote.source.conversationId ?? '')}"]`)
-  const target = root?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(quote.source.messageId)}"]`)
-  if (!target) throw new Error('quote.source_unavailable')
-  revealMessageQuote(target)
 }
 
 function SingleChatTranscript({

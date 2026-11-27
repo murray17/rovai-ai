@@ -300,6 +300,50 @@ test('phone project folders drag by their icon, keep label gestures, and survive
   }
 })
 
+test('first mobile chat opens a usable member picker and keeps the choice as a local draft', { timeout: 60_000 }, async t => {
+  if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) { t.skip('Requires macOS Chrome'); return }
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mobile-first-chat-')))
+  const data = join(fixture, 'core')
+  const host = launchHost(process.env.ROVAI_HOST_BIN ?? join(repository, 'target/debug/rovai-host'), [
+    ...coreDataDirectoryArguments(data), '--skill-library-root', join(data, 'skills'), '--mcp-config-path', join(data, 'mcp.json')
+  ], { cwd: repository })
+  let browser
+  try {
+    await within(host.ready)
+    const web = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: process.env.ROVAI_WEB_UI ?? join(repository, 'out/web') })
+    browser = await launchAcceptanceBrowser({ executable, args: ['--headless=new', '--user-data-dir=' + join(fixture, 'chrome'),
+      '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', 'about:blank'] })
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    await browser.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+    await browser.send('Page.navigate', { url: web.origin })
+    await browser.wait("!!document.querySelector('#administrator-token')")
+    await browser.click("document.querySelector('#administrator-token')")
+    await browser.send('Input.insertText', { text: web.administratorToken })
+    await browser.click("document.querySelector('.web-login button[type=submit]')")
+    const menu = "[...document.querySelectorAll('button[aria-label=打开主菜单]')].find(button => button.getClientRects().length)"
+    await browser.wait('!!' + menu)
+    await browser.click(menu)
+    const drawer = "document.querySelector('.mobile-conversation-drawer')"
+    const chat = drawer + "?.querySelector('[title=聊天]:not(:disabled)')"
+    await browser.wait('!!' + chat + ' && Math.abs(' + drawer + '.getBoundingClientRect().left) < 1')
+    await browser.click(chat)
+    const option = "document.querySelector('.chat-start-option')"
+    await browser.wait('!!' + option)
+    assert.equal(await browser.evaluate(`(() => {
+      const [avatar, name] = ${option}.children
+      return avatar.getBoundingClientRect().right <= name.getBoundingClientRect().left
+    })()`), true)
+    await browser.click(option)
+    await browser.wait("!!document.querySelector('#independent-chat-input') && !document.querySelector('.mobile-conversation-drawer')")
+    assert.deepEqual((await host.request('chats.list')).items, [])
+  } finally {
+    await browser?.close()
+    await host.close()
+    await removeEphemeralRuntimeCampFilesRoot(data, { temporaryDirectory: fixture })
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test('phone workbench uses shared navigation, schedules and per-tab drafts', { timeout: 180_000 }, async t => {
   if (process.platform !== 'darwin' || !await access(executable).then(() => true, () => false)) { t.skip('Requires macOS Chrome; does not qualify real phones or other OSes'); return }
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mobile-web-')))

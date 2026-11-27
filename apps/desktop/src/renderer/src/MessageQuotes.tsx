@@ -4,11 +4,13 @@ import { createPortal } from 'react-dom'
 import * as Popover from '@radix-ui/react-popover'
 import type { MessageQuoteAction, MessageQuoteSelection, MessageQuoteSnapshot } from '@contracts'
 import { readMessageQuoteSelection } from './message-quote-selection'
+import { MAX_LOCAL_COMPOSER_QUOTES } from './camp-composer-local-store'
 import { readErrorMessage } from './error-message'
 import { UiText, uiAttribute } from './interface-language'
 
 export function quoteErrorMessage(error: unknown): string {
   const text = readErrorMessage(error)
+  if (text.includes('quote.too_many')) return uiAttribute('最多可引用 {0} 段，请先移除一段。', String(MAX_LOCAL_COMPOSER_QUOTES))
   if (text.includes('limit_exceeded')) return uiAttribute("引用选文合计最多 12,000 字，请缩小选区或移除已有引用。")
   if (text.includes('source_unavailable') || text.includes('owner_mismatch')) return uiAttribute("原消息暂不可用，已保留已有引用。")
   if (text.includes('question_required')) return uiAttribute("请填写这次的问题后再发送。")

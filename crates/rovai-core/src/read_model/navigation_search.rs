@@ -223,7 +223,19 @@ pub(crate) struct NavigationSearchResult {
     through_global_sequence: i64,
     query: String,
     items: Vec<SearchTarget>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    chats: Vec<ChatSearchItem>,
     truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatSearchItem {
+    chat_id: String,
+    title: String,
+    agent_id: String,
+    display_name: String,
+    avatar_ref: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -433,7 +445,32 @@ pub(crate) fn search(
             items.push(candidate.target(Some(found)));
         }
     }
+    let mut chats = Vec::new();
+    let mut chat_query=connection.prepare("SELECT t.conversation_id,t.title,p.id,p.display_name,p.avatar_ref FROM chat_topic t JOIN conversation c ON c.id=t.conversation_id JOIN agent_profile p ON p.id=c.agent_id WHERE t.owner_user_id=?1 AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL ORDER BY t.last_activity_global_sequence DESC,t.conversation_id")?;
+    let mut chat_rows = chat_query.query([crate::current_user::CURRENT_USER_ID])?;
+    while let Some(row) = chat_rows.next()? {
+        let title: String = row.get(1)?;
+        let display_name: String = row.get(3)?;
+        if !recent
+            && matcher.first_range(&title).is_none()
+            && matcher.first_range(&display_name).is_none()
+        {
+            continue;
+        }
+        if chats.len() == if recent { RECENT_LIMIT } else { NAME_LIMIT } {
+            truncated = true;
+            break;
+        }
+        chats.push(ChatSearchItem {
+            chat_id: row.get(0)?,
+            title,
+            agent_id: row.get(2)?,
+            display_name,
+            avatar_ref: row.get(4)?,
+        });
+    }
     Ok(NavigationSearchResult {
+        chats,
         schema_version: 1,
         through_global_sequence,
         query: input.query,

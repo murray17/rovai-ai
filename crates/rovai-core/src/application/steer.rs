@@ -15,7 +15,7 @@ impl ActiveInputRuntime {
         images: &[PiPromptImage],
     ) -> Result<String> {
         match self {
-            Self::Codex(runtime, turn) => runtime.steer(turn, payload).await,
+            Self::Codex(runtime, turn) => runtime.steer(turn, input_id, payload).await,
             Self::Claude(runtime) => runtime.steer(input_id, payload).await,
             Self::Pi(runtime) => runtime.steer(payload, images).await,
             Self::Acp(runtime, prompt) => runtime.steer(prompt, input_id, payload).await,
@@ -56,6 +56,12 @@ impl Core {
             .flatten();
         if let Some(camp) = camp {
             emit_navigation_invalidated(&self.output, "delivery.input_changed", Some(&camp));
+        } else if let Ok(chat) = database.connection().query_row(
+            "SELECT conversation_id FROM single_chat_pending_input WHERE id=?1",
+            [&pending.delivery_id],
+            |r| r.get::<_, String>(0),
+        ) {
+            emit(&self.output, "chats.listChanged", json!({"chatId":chat}));
         }
         true
     }
@@ -129,8 +135,8 @@ impl Core {
         let sources = {
             let database = self.database.lock().await;
             let json: String = database.connection().query_row(
-                "SELECT m.source_attachments_json FROM camp_message m JOIN camp_message_delivery d ON d.message_id=m.id WHERE d.id=?1",
-                [&pending.delivery_id], |r|r.get(0))?;
+                "SELECT m.source_attachments_json FROM camp_message m JOIN camp_message_delivery d ON d.message_id=m.id WHERE d.id=?1 AND d.claimed_agent_run_id=?2 UNION ALL SELECT source_attachments_json FROM single_chat_pending_input WHERE id=?1 AND target_run_id=?2 AND requested_mode='steer'",
+                [&pending.delivery_id,&pending.agent_run_id], |r|r.get(0))?;
             rovai_core::local_attachment_source::parse_source_attachments(&json)?
         };
         let paths =
@@ -274,28 +280,40 @@ impl Core {
         let evidence = {
             let database = self.database.lock().await;
             let row = database.connection().query_row(
-                "SELECT i.id,i.agent_run_id,i.execution_epoch,i.status,initial.native_input_id,m.rendered_payload_blob_id
+                "SELECT i.id,i.agent_run_id,i.execution_epoch,i.status,initial.native_input_id
                  FROM camp_message_delivery d JOIN camp_message msg ON msg.id=d.message_id
                  JOIN context_manifest m ON m.source_delivery_id=d.id
                  JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
                  JOIN runtime_input_delivery initial ON initial.agent_run_id=i.agent_run_id AND initial.execution_epoch=i.execution_epoch AND initial.input_kind='start'
-                 WHERE d.id=?1 AND msg.author_type='user' AND d.requested_mode='steer'",
-                [delivery_id], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,String>(5)?))).optional()?;
+                 WHERE d.id=?1 AND msg.author_type='user' AND d.requested_mode='steer'
+                 UNION ALL
+                 SELECT i.id,i.agent_run_id,i.execution_epoch,i.status,initial.native_input_id
+                 FROM single_chat_pending_input p JOIN chat_topic t ON t.conversation_id=p.conversation_id
+                 JOIN context_manifest m ON m.source_chat_input_id=p.id JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
+                 JOIN runtime_input_delivery initial ON initial.agent_run_id=i.agent_run_id AND initial.execution_epoch=i.execution_epoch AND initial.input_kind='start'
+                 WHERE p.id=?1 AND p.requested_mode='steer' AND t.owner_user_id='local_user' AND t.deletion_operation_id IS NULL",
+                [delivery_id], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?))).optional()?;
             let Some(row) = row else {
                 return Ok(json!({"status":"unavailable"}));
             };
             if row.3 != "delivery_unknown" {
                 return Ok(json!({"status":row.3}));
             }
-            let payload = ManagedBlobStore::new(&self.data_dir).read_text(&database, &row.5)?;
-            (row, payload)
+            row
         };
-        let ((id, run, epoch, _, turn, _), payload) = evidence;
+        let (id, run, epoch, _, turn) = evidence;
         if let (Some(turn), Some(runtime)) = (turn, self.codex_cli.get_agent_run(&run, epoch).await)
         {
-            if runtime.contains_steered_input(&turn, &payload).await? {
+            if runtime.contains_steered_input(&turn, &id).await? {
                 let mut database = self.database.lock().await;
                 ContextService.acknowledge_input_delivery(&mut database, &id, &turn)?;
+                if let Ok(chat) = database.connection().query_row(
+                    "SELECT conversation_id FROM single_chat_pending_input WHERE id=?1",
+                    [delivery_id],
+                    |r| r.get::<_, String>(0),
+                ) {
+                    emit(&self.output, "chats.listChanged", json!({"chatId":chat}));
+                }
                 return Ok(json!({"status":"accepted"}));
             }
         }

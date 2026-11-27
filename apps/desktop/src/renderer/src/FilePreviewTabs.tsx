@@ -175,6 +175,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
   const focusConversation = (): void => {
     window.requestAnimationFrame(() => {
       const target = document.querySelector<HTMLElement>('.thread-timeline:not([hidden])')
+        ?? document.querySelector<HTMLElement>('#independent-chat-input')
         ?? document.querySelector<HTMLElement>('.timeline-pane')
       target?.focus({ preventScroll: true })
     })

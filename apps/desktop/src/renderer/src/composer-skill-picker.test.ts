@@ -102,3 +102,36 @@ describe('Composer Skill picker catalog', () => {
     expect(availableComposerSkillsForLead([skill('available')], groups, 'other-agent')).toEqual([])
   })
 })
+
+describe('independent Chat skill candidates', () => {
+  it('offers the toolbox for one-off selection and only user skills from the selected Runtime', async () => {
+    const calls: unknown[] = []
+    const client = { request: async (method: string, params?: Record<string, unknown>) => {
+      calls.push([method,params])
+      if (method === 'toolbox.list') return [{name:'review-duo',description:'Review',memberIds:[],sourceError:null}]
+      const native = (name:string, scope:string, runtime:string) => ({
+        id: 'native:'+name,name,sourceScope:scope,adapterKind:runtime,entryPath:'/fixture/'+name+'/SKILL.md',description:name
+      })
+      return {skills:[native('mine','user','codex-cli'),native('project-only','project','codex-cli'),
+        native('another-runtime','user','hermes-cli')],diagnostics:[]}
+    }} as import('./camp-client').ThreadClient
+    const { chatSkillOptions } = await import('./useChatSkills')
+    const catalog = await chatSkillOptions(client,'codex-cli',false)
+    expect(catalog.skills.map(item => item.id)).toEqual(['rovai:review-duo','native:mine'])
+    expect(calls).toEqual([['toolbox.list',undefined],['nativeSkills.list',{adapterKind:'codex-cli',refresh:false}]])
+    calls.length = 0
+    expect((await chatSkillOptions(client,null,false)).skills.map(item => item.id)).toEqual(['rovai:review-duo'])
+    expect(calls).toEqual([['toolbox.list',undefined]])
+  })
+})
+
+it('moves a queued selection back to its original position next to identical typed text', async () => {
+  const {chatInputFromDocument,chatDocumentFromInput} = await import('./chat-draft')
+  const document = {version:2,segments:[
+    {kind:'text',text:'🌿 /review-duo 在这里只是文字。用 '},
+    {kind:'atom',atom:{type:'skill',skillId:'rovai:review-duo',nameAtSend:'review-duo'}},
+    {kind:'text',text:' 评审'}
+  ]} satisfies import('@contracts').ComposerDocument
+  const input = chatInputFromDocument(document)
+  expect(chatDocumentFromInput(input.body,input.skills)).toEqual(document)
+})

@@ -46,7 +46,7 @@ Windows `BrowserWindow` 保留系统 frame，但以 `titleBarStyle: hidden` 隐�
 
 导航折叠按钮位于 File 左侧，为独立 `no-drag` 控件，不属于菜单的方向键循环；折叠后保持原位。
 按钮使用无填色的圆角小窗图标，收起状态内侧竖线贴近左边缘。macOS 对照位置为系统红黄绿右侧。
-完整行为见[App Shell 调宽与完全折叠](components/app-shell-navigation.md#调宽与完全折叠)。
+完整行为见[App Shell 调宽与折叠](components/app-shell-navigation.md#调宽与折叠)。
 
 顶层菜单行与 Window Controls Overlay 使用当前有效 `ThemeId` 的 `--rail` 背景和 `--ink` 图标色，
 覆盖日间、夜间、晨雾、朝霞与绯夜；`system` 解析为日间或夜间。建窗与主题切换使用同一配色解析，

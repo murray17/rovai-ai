@@ -11,6 +11,8 @@ export const BUILTIN_CLI_NAMES: Readonly<Record<string, string>> = Object.freeze
   'team.get_task': 'rovai task get',
   'team.list_tasks': 'rovai task list',
   'team.update_task': 'rovai task update',
+  'chat.history': 'rovai chat history',
+  'thread.create': 'rovai thread create',
   'thread.list': 'rovai thread list',
   'thread.search': 'rovai thread search',
   'thread.read': 'rovai thread read',

@@ -108,6 +108,7 @@ pub enum NativeInteractionAnswer {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RespondNativeInteraction {
     pub command_id: String,
+    #[serde(alias = "chatId")]
     pub thread_id: String,
     pub agent_run_id: String,
     pub execution_epoch: i64,

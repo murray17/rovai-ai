@@ -1242,8 +1242,8 @@ export class FilePreviewService {
     }
   }
 
-  #fileAccessOptions(target: { sourceKind: OpenFilePreviewRequest['kind'] }): { allowExternalFile: boolean } {
-    return { allowExternalFile: target.sourceKind !== 'authorized_root' }
+  #fileAccessOptions(target: { sourceKind: OpenFilePreviewRequest['kind'];sourceIdentity?:string }): { allowExternalFile: boolean } {
+    return { allowExternalFile: target.sourceKind !== 'authorized_root' && !/^chat-(?:message|activity):/u.test(target.sourceIdentity ?? '') }
   }
 
   #parsedReference(target: { rawReference?: string; candidatePath?: string; target?: FileLocationTarget }): ParsedFileReference {

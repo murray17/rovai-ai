@@ -7,9 +7,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::{
-        AgentProfileService, CreateAgentProfileCommand, validate_member_identity_input,
-    },
+    agent_profile::{AgentProfileService, CreateAgentProfileCommand, normalize_member_identity},
     command::{ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError},
     current_user::CURRENT_USER_ID,
     db::Database,
@@ -145,7 +143,7 @@ pub fn create_member(
         .ok()
         .filter(|parsed| parsed.hyphenated().to_string() == input.creation_key)
         .ok_or_else(invalid_creation_key)?;
-    validate_member_identity_input(
+    let identity = normalize_member_identity(
         &input.display_name,
         &input.team_role,
         &input.professional_responsibilities,
@@ -165,6 +163,47 @@ pub fn create_member(
         details: None,
     })?;
 
+    let existing = database.connection().query_row(
+        "SELECT coalesce(m.conversation_id, m.camp_id), json_extract(m.snapshot_json, '$.avatarRef'),
+                CASE WHEN m.conversation_id IS NOT NULL AND json_extract(e.result_payload_json, '$.cardDigest') IS NULL
+                     THEN json_extract(m.snapshot_json, '$.agentId') END
+         FROM member_creation m
+         LEFT JOIN event_log e ON e.command_id = m.creation_id AND e.event_type = 'command.result'
+         WHERE m.creation_id = ?1",
+        [format!("member-create:{creation_id}")],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?)),
+    ).optional()?;
+    if let Some((owner, avatar, legacy_chat_member)) = existing {
+        let chat = crate::chat::run_conversation(
+            database.connection(),
+            &authenticated_run.agent_run_id,
+            authenticated_run.execution_epoch,
+        )?;
+        anyhow::ensure!(
+            owner == chat.as_deref().unwrap_or(&authenticated_run.camp_id),
+            creation_key_conflict()
+        );
+        if chat.is_some() {
+            anyhow::ensure!(
+                avatar.is_some() == input.avatar_file.is_some(),
+                creation_key_conflict()
+            );
+        }
+        // Older preview receipts predate card digests. An untouched profile still proves the original card.
+        if let Some(id) = legacy_chat_member {
+            let profile = AgentProfileService::default().get_profile(database, &id)?;
+            let matches = profile.is_some_and(|p| {
+                p.version == 1
+                    && p.display_name == identity.display_name
+                    && p.team_role == identity.team_role
+                    && p.professional_responsibilities == identity.professional_responsibilities
+                    && p.personality_traits == identity.personality_traits
+                    && p.working_principles == identity.working_principles
+                    && p.growth_topic == identity.growth_topic
+            });
+            anyhow::ensure!(matches, creation_key_conflict());
+        }
+    }
     let avatar_ref = input
         .avatar_file
         .as_deref()
@@ -192,19 +231,18 @@ pub fn create_member(
             growth_topic: input.growth_topic,
         },
     };
-    let execution = AgentProfileService::default()
+    let mut execution = AgentProfileService::default()
         .create_profile_with_creation_source(database, &envelope, Some(authenticated_run))
         .map_err(|error| {
             if error.downcast_ref::<CommandGatewayError>().is_some() {
-                anyhow::Error::new(MemberOperationError {
-                    code: "member.creation_key_conflict",
-                    message: "creationKey was already used with different member details",
-                    details: None,
-                })
+                anyhow::Error::new(creation_key_conflict())
             } else {
                 error
             }
         })?;
+    if let Some(payload) = execution.result.payload.as_object_mut() {
+        payload.remove("cardDigest");
+    }
     Ok(MemberCreateOutcome {
         execution,
         avatar_ref,
@@ -234,9 +272,11 @@ pub(crate) fn record_member_creation(
     source: &AuthenticatedTeamToolRun,
     receipt: &MemberCreationView,
 ) -> Result<()> {
+    let chat =
+        crate::chat::run_conversation(transaction, &source.agent_run_id, source.execution_epoch)?;
     transaction.execute(
-        "INSERT INTO member_creation(creation_id, camp_id, snapshot_json, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![receipt.creation_id, source.camp_id, serde_json::to_string(receipt)?, receipt.created_at],
+        "INSERT INTO member_creation(creation_id, camp_id, snapshot_json, created_at,conversation_id) VALUES (?1, ?2, ?3, ?4,?5)",
+        params![receipt.creation_id, crate::runtime::run_thread_id(&source.camp_id), serde_json::to_string(receipt)?, receipt.created_at,chat],
     )?;
     transaction.execute(
         "INSERT INTO member_creation_preference(singleton, helper_agent_id) VALUES (1, ?1)
@@ -288,6 +328,13 @@ pub(crate) fn has_direct_user_input(
     connection: &Connection,
     authenticated_run: &AuthenticatedTeamToolRun,
 ) -> Result<bool> {
+    if let Some(chat) = crate::chat::run_conversation(
+        connection,
+        &authenticated_run.agent_run_id,
+        authenticated_run.execution_epoch,
+    )? {
+        return Ok(connection.query_row("SELECT EXISTS(SELECT 1 FROM agent_run r JOIN conversation_message m ON m.id=r.trigger_conversation_message_id AND m.conversation_id=r.conversation_id WHERE r.id=?1 AND r.conversation_id=?2 AND m.author_type='user' AND m.author_id=?3)",params![authenticated_run.agent_run_id,chat,CURRENT_USER_ID],|row|row.get(0))?);
+    }
     let trigger = connection
         .query_row(
             r#"
@@ -312,6 +359,14 @@ pub(crate) fn has_direct_user_input(
         )
         .optional()?;
     Ok(trigger == Some(true))
+}
+
+fn creation_key_conflict() -> MemberOperationError {
+    MemberOperationError {
+        code: "member.creation_key_conflict",
+        message: "creationKey was already used with different member details",
+        details: None,
+    }
 }
 
 fn invalid_creation_key() -> MemberOperationError {

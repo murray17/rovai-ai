@@ -211,6 +211,19 @@ fn run_evidence_root(
     agent_run_id: &str,
     execution_epoch: i64,
 ) -> Result<Option<String>> {
+    if uuid::Uuid::parse_str(camp_id).is_ok() {
+        let belongs=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM agent_run r JOIN chat_topic t ON t.conversation_id=r.conversation_id
+            WHERE r.id=?1 AND r.execution_epoch=?2 AND r.invocation_kind='chat' AND t.conversation_id=?3 AND t.owner_user_id=?4 AND t.deletion_operation_id IS NULL)",
+            params![agent_run_id,execution_epoch,camp_id,crate::current_user::CURRENT_USER_ID],|r|r.get::<_,bool>(0))?;
+        if !belongs {
+            return Ok(None);
+        }
+        return Ok(Some(
+            crate::storage_layout::chat_directory(database.runtime_camp_files_root(), camp_id)?
+                .to_string_lossy()
+                .into_owned(),
+        ));
+    }
     let row = database
         .connection()
         .query_row(
@@ -378,7 +391,7 @@ fn byte_is_escaped(bytes: &[u8], offset: usize) -> bool {
         == 1
 }
 
-fn markdown_destination_has_link_label(before: &str, marker: &str) -> bool {
+fn markdown_destination_has_link_label(before: &str, marker: &str, include_images: bool) -> bool {
     let Some(label_end) = before.len().checked_sub(marker.len()) else {
         return false;
     };
@@ -392,7 +405,8 @@ fn markdown_destination_has_link_label(before: &str, marker: &str) -> bool {
             b']' => nested += 1,
             b'[' if nested > 0 => nested -= 1,
             b'[' => {
-                return offset == 0
+                return include_images
+                    || offset == 0
                     || bytes[offset - 1] != b'!'
                     || byte_is_escaped(bytes, offset - 1);
             }
@@ -402,15 +416,20 @@ fn markdown_destination_has_link_label(before: &str, marker: &str) -> bool {
     false
 }
 
-fn markdown_segment_authorizes_reference(segment: &str, raw_reference: &str) -> bool {
+fn markdown_segment_authorizes_reference(
+    segment: &str,
+    raw_reference: &str,
+    include_images: bool,
+) -> bool {
     for (offset, _) in segment.match_indices(raw_reference) {
         let before = &segment[..offset];
         let after = &segment[offset + raw_reference.len()..];
         let markdown_destination = if before.ends_with("](<") {
-            after.starts_with('>') && markdown_destination_has_link_label(before, "](<")
+            after.starts_with('>')
+                && markdown_destination_has_link_label(before, "](<", include_images)
         } else if before.ends_with("](") {
             (after.starts_with(')') || after.starts_with(char::is_whitespace))
-                && markdown_destination_has_link_label(before, "](")
+                && markdown_destination_has_link_label(before, "](", include_images)
         } else {
             false
         };
@@ -422,11 +441,54 @@ fn markdown_segment_authorizes_reference(segment: &str, raw_reference: &str) -> 
 }
 
 fn message_authorizes_reference(body: &str, raw_reference: &str) -> bool {
+    markdown_authorizes_reference(body, raw_reference, false)
+}
+
+fn markdown_authorizes_reference(body: &str, raw_reference: &str, include_images: bool) -> bool {
     if !plausible_file_reference(raw_reference) {
         return false;
     }
     let visible = visible_markdown_without_fences(body);
-    markdown_segment_authorizes_reference(&markdown_without_inline_code(&visible), raw_reference)
+    markdown_segment_authorizes_reference(
+        &markdown_without_inline_code(&visible),
+        raw_reference,
+        include_images,
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChatFileReference {
+    chat_id: String,
+    message_id: String,
+    raw_reference: String,
+}
+
+/// The renderer may show the link once verified. Opening and reading recheck its source.
+pub fn can_preview_chat_reference(database: &Database, input: ChatFileReference) -> Result<bool> {
+    let chat = required_bounded(Some(&input.chat_id), "chatId", 128)?;
+    if uuid::Uuid::parse_str(chat).is_err() {
+        return Ok(false);
+    }
+    let message = required_bounded(Some(&input.message_id), "messageId", 128)?;
+    let raw = required_bounded(Some(&input.raw_reference), "rawReference", 4096)?;
+    Ok(message_source(database, chat, message, raw)?.is_some())
+}
+
+fn chat_file_is_inside(root: &Path, raw: &str) -> Result<bool> {
+    let Ok(path) = crate::file_reference_path::reference_path(raw, root) else {
+        return Ok(false);
+    };
+    if !path.starts_with(root) || path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Ok(false);
+    }
+    // The managed root itself may not be replaced by a link. Files within it
+    // may use links whose canonical target remains in the same chat directory.
+    crate::camp_attachment_view::reject_existing_symlink_components(root)?;
+    let (Ok(root), Ok(target)) = (root.canonicalize(), path.canonicalize()) else {
+        return Ok(false);
+    };
+    Ok(target.starts_with(root) && target.is_file())
 }
 
 fn message_source(
@@ -435,6 +497,35 @@ fn message_source(
     message_id: &str,
     raw_reference: &str,
 ) -> Result<Option<ResolvedFilePreviewSource>> {
+    if uuid::Uuid::parse_str(camp_id).is_ok() {
+        let body: Option<String> = database.connection().query_row(
+            "SELECT m.body FROM conversation_message m
+             JOIN chat_topic t ON t.conversation_id = m.conversation_id
+             JOIN agent_run r ON r.final_conversation_message_id = m.id AND r.conversation_id = t.conversation_id
+             WHERE t.conversation_id = ?1 AND m.id = ?2 AND m.author_type = 'agent'
+               AND t.deletion_operation_id IS NULL AND t.owner_user_id = ?3",
+            params![camp_id, message_id, crate::current_user::CURRENT_USER_ID],
+            |row| row.get(0),
+        ).optional()?;
+        if !body.is_some_and(|s| markdown_authorizes_reference(&s, raw_reference, true)) {
+            return Ok(None);
+        }
+        let root =
+            crate::storage_layout::chat_directory(database.runtime_camp_files_root(), camp_id)?;
+        if !chat_file_is_inside(&root, raw_reference)? {
+            return Ok(None);
+        }
+        let root = root.to_string_lossy().into_owned();
+        return Ok(Some(ResolvedFilePreviewSource::FileTarget {
+            camp_id: camp_id.into(),
+            source_kind: "message_reference".into(),
+            source_identity: format!("chat-message:{message_id}"),
+            base_path: root.clone(),
+            root_path: root,
+            raw_reference: raw_reference.into(),
+            allow_children: false,
+        }));
+    }
     let row = database
         .connection()
         .query_row(
@@ -534,9 +625,10 @@ const RUN_FILE_EVIDENCE_SQL: &str = r#"
     FROM agent_run_execution_evidence AS evidence
     JOIN agent_run ON agent_run.id=evidence.agent_run_id
     LEFT JOIN camp_turn ON camp_turn.id=agent_run.camp_turn_id
-    JOIN camp ON camp.id=COALESCE(agent_run.camp_id,camp_turn.camp_id)
+    LEFT JOIN camp ON camp.id=COALESCE(agent_run.camp_id,camp_turn.camp_id)
     WHERE evidence.id=?1 AND evidence.agent_run_id=?2 AND evidence.execution_epoch=?3
-      AND camp.id=?4 AND camp.activation_state='active' AND camp.deletion_operation_id IS NULL
+      AND ((camp.id=?4 AND camp.activation_state='active' AND camp.deletion_operation_id IS NULL)
+        OR (agent_run.invocation_kind='chat' AND agent_run.conversation_id=?4 AND agent_run.camp_id IS NULL))
 "#;
 
 fn legacy_file_activity_key_sql(has_operation_id: bool) -> String {
@@ -739,11 +831,20 @@ fn run_activity_file(
     else {
         return Ok(None);
     };
+    let private = uuid::Uuid::parse_str(camp_id).is_ok();
+    if private && !chat_file_is_inside(Path::new(&root_path), raw_reference)? {
+        return Ok(None);
+    }
     Ok(Some(ResolvedFilePreviewSource::FileTarget {
         camp_id: camp_id.to_string(),
         source_kind: "run_activity_file".to_string(),
         source_identity: format!(
-            "run-activity-file:{agent_run_id}:{execution_epoch}:{evidence_id}"
+            "{}:{agent_run_id}:{execution_epoch}:{evidence_id}",
+            if private {
+                "chat-activity"
+            } else {
+                "run-activity-file"
+            }
         ),
         base_path: root_path.clone(),
         root_path,

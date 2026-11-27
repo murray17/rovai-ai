@@ -35,6 +35,7 @@ import type {
 } from '@contracts'
 import { parseControlledMemberAvatarRef } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
+import { ChatContactButton } from './ChatContact'
 import {
   AppDialogBody,
   AppDialogContent,
@@ -999,6 +1000,7 @@ function MemberDetailHeader({
         </div>
       </div>
       <div className="member-profile-tools">
+        <ChatContactButton agentId={agent.agentId} className="member-editor-icon-button member-message-button"/>
         <Menu.Root>
           <Menu.Trigger asChild>
             <button

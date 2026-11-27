@@ -4,6 +4,8 @@ import { RECOVERY_KEY, type RecoveryStorage } from './tab-recovery'
 import { fileDigest } from './file-digest'
 import { uploadRequest } from './upload-request'
 import { newCommandId } from '../../desktop/src/shared/command-id'
+import { applyReturnedChatInput } from '../../desktop/src/renderer/src/chat-draft-recovery'
+import { recoverChatSend, type ReturnedChatInput } from '../../desktop/src/renderer/src/chat-draft'
 import { recoverLocalThreadSend } from '../../desktop/src/renderer/src/camp-composer-send-recovery'
 import type { ThreadReadInvalidation, ChannelKind, ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
 
@@ -123,6 +125,15 @@ export const WEB_OPERATIONS = [
   'runtime.startup.inspect',
   'runtime.startup.check',
   'navigation.findThread',
+  'chats.list',
+  'chats.open',
+  'runtimeInputs.reconcile',
+  'chats.canPreviewFile',
+  'chats.send',
+  'chats.pendingInputs.edit',
+  'chats.setArchived',
+  'chats.delete',
+  'chats.rename',
   'navigation.search',
   'navigation.searchMessages',
   'agentRunExecution.page',
@@ -250,6 +261,11 @@ export const WEB_OPERATIONS = [
 export type WebOperation = typeof WEB_OPERATIONS[number]
 
 const RECONCILABLE_COMMANDS = new Set<WebOperation>([
+  'chats.send',
+  'chats.pendingInputs.edit',
+  'chats.setArchived',
+  'chats.delete',
+  'chats.rename',
   'teams.save',
   'teams.delete',
   'threads.rename',
@@ -307,7 +323,7 @@ export type ConnectionState = 'connecting' | 'live' | 'offline' | 'expired'
 export type RequestResult<T> = { result: T; source: 'direct' | 'recovery' }
 type PendingCommand = { operation: WebOperation; params: unknown; resolve(value: unknown, source?: RequestResult<unknown>['source']): void; reject(error: unknown): void }
 export type UploadProgress = { id: string; name: string; phase: 'hashing' | 'transferring' | 'binding' | 'unknown' | 'received'; percent: number; cancelled: boolean }
-type UploadTarget = { kind: 'pasted_text' } | { kind: 'single_chat'; conversationId: string }
+type UploadTarget = {kind:'chat'} | { kind: 'pasted_text' } | { kind: 'single_chat'; conversationId: string }
   | { kind: 'single_chat_pending'; conversationId: string; pendingInputId: string; editToken: string }
 type UploadIntent = { commandId: string; threadId: string; expectedRevision: number; target?: UploadTarget; displayName: string; byteSize: number; sha256: string }
 type PendingUpload = { cancelled?: boolean; signal?: AbortSignal; intent: UploadIntent; data: FormData | null; resolve(draft: unknown): void; reject(error: unknown): void }
@@ -336,7 +352,7 @@ export class InvalidationDecoder {
           const messages = Array.isArray(payload.messages) ? payload.messages.filter(change =>
             typeof change.threadId === 'string' && typeof change.indexChanged === 'boolean'
             && Number.isSafeInteger(change.throughGlobalSequence)) : []
-          this.#changes.push({ messages, ...(payload.referencesChanged === true ? { referencesChanged: true } : {}), ...(payload.tasksChanged === true ? { tasksChanged: true } : {}), ...(payload.memoryChanged === true ? { memoryChanged: true } : {}), ...(payload.memoryContentChanged === true ? { memoryContentChanged: true } : {}), ...(payload.teamsChanged === true ? { teamsChanged: true } : {}), ...(payload.notificationsChanged === true ? { notificationsChanged: true } : {}), ...(payload.nativeInteractionsChanged === true ? { nativeInteractionsChanged: true } : {}) })
+          this.#changes.push({ messages, ...(payload.chatsChanged === true ? { chatsChanged: true } : {}), ...(payload.referencesChanged === true ? { referencesChanged: true } : {}), ...(payload.tasksChanged === true ? { tasksChanged: true } : {}), ...(payload.memoryChanged === true ? { memoryChanged: true } : {}), ...(payload.memoryContentChanged === true ? { memoryContentChanged: true } : {}), ...(payload.teamsChanged === true ? { teamsChanged: true } : {}), ...(payload.notificationsChanged === true ? { notificationsChanged: true } : {}), ...(payload.nativeInteractionsChanged === true ? { nativeInteractionsChanged: true } : {}) })
         }
       }
     }
@@ -541,6 +557,17 @@ export class ConsoleClient {
   }
 
   #settleRecovered(operation: WebOperation, params: unknown, result: unknown): void {
+    const { commandId, command } = (params ?? {}) as {
+      commandId?: string
+      command?: ReturnedChatInput & { chatId?: string; agentId?: string; draftId?: string; inputId?: string; operation?: string }
+    }
+    if (operation === 'chats.send' && command) recoverChatSend(command, result as { chatId?: string })
+    if (operation === 'chats.pendingInputs.edit' && command?.operation === 'return_to_composer'
+      && commandId && command.chatId && command.inputId && typeof (result as ReturnedChatInput)?.body === 'string') {
+      applyReturnedChatInput({
+        commandId, command: { ...command, chatId: command.chatId, inputId: command.inputId }
+      }, result as ReturnedChatInput)
+    }
     if (operation === 'thread.messages.send') recoverLocalThreadSend(params, result)
     if (operation === 'singleChat.send' && this.#storage && this.editingScope && (result as { status?: string })?.status !== 'rejected') {
       const command = (params as { command?: { threadId?: string; conversationId?: string; body?: string } })?.command
@@ -1176,7 +1203,7 @@ export class ConsoleClient {
             if (done) break
             if (frames.push(decoder.decode(value, { stream: true }))) {
               const changes = frames.takeChanges()
-              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.referencesChanged) ? { referencesChanged: true } : {}), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.nativeInteractionsChanged) ? { nativeInteractionsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), ...(changes.some(change => change.memoryChanged) ? { memoryChanged: true } : {}), ...(changes.some(change => change.memoryContentChanged) ? { memoryContentChanged: true } : {}), ...(changes.some(change => change.teamsChanged) ? { teamsChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
+              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.referencesChanged) ? { referencesChanged: true } : {}), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.nativeInteractionsChanged) ? { nativeInteractionsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), ...(changes.some(change => change.memoryChanged) ? { memoryChanged: true } : {}), ...(changes.some(change => change.memoryContentChanged) ? { memoryContentChanged: true } : {}), ...(changes.some(change => change.teamsChanged) ? { teamsChanged: true } : {}), ...(changes.some(change => change.chatsChanged) ? { chatsChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
               void this.reconcilePending()
             }
           }

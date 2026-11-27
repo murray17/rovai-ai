@@ -76,6 +76,9 @@ pub const MAX_SESSION_BOOTSTRAP_BYTES: usize = 256 * 1024;
 // This fixed reserve is independent of current Adapter body admission.
 const LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES: usize = 128 * 1024;
 fn run_facts_schema_version(manifest_version: i64, invocation_kind: &str) -> i64 {
+    if invocation_kind == "chat" {
+        return 15;
+    }
     if invocation_kind == "batch" {
         match manifest_version {
             PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION => 14,
@@ -647,7 +650,51 @@ impl ContextService {
         )? {
             return Ok(ContextMaterialization::Ready(existing));
         }
-        let selected_messages = source_delivery_id
+        let chat_input_id = source_delivery_id.filter(|_| snapshot.invocation_kind == "chat");
+        let mut chat_steer = None;
+        if let Some(id) = chat_input_id {
+            let private_input = database.connection_mut().transaction()?;
+            let (body,quotes,skills):(String,String,String)=private_input.query_row(
+                "SELECT body,quotes_json,chat_skills_json FROM single_chat_pending_input WHERE id=?1 AND conversation_id=?2 AND target_run_id=?3 AND target_execution_epoch=?4 AND requested_mode='steer' AND state='queued'",
+                params![id,snapshot.conversation_id,snapshot.agent_run_id,snapshot.execution_epoch],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+            let mentions = serde_json::from_str::<Vec<crate::chat::ChatSkill>>(&skills)?
+                .into_iter()
+                .map(
+                    |s| crate::camp_content::StructuredThreadMessageSegment::SkillMention {
+                        skill_id: s.skill_id,
+                        name_at_send: s.name_at_send,
+                    },
+                )
+                .collect::<Vec<_>>();
+            let adapter = run_snapshot_adapter_kind(&snapshot)?;
+            snapshot.skill_selection_snapshot =
+                crate::current_input_skill::freeze_skill_selection_with_messages(
+                    &private_input,
+                    &mentions,
+                    &vec![0; mentions.len()],
+                    adapter,
+                )?;
+            snapshot.skill_selection_snapshot_digest =
+                snapshot.skill_selection_snapshot.canonical_digest()?;
+            private_input.commit()?;
+            let quotes = crate::message_quote::parse_quotes(&quotes)?;
+            let mut payload = json!({"message":body});
+            if !quotes.is_empty() {
+                payload["quotes"] =
+                    serde_json::to_value(crate::message_quote::model_quotes(&quotes))?;
+            }
+            chat_steer = Some(CurrentInput {
+                id: id.to_owned(),
+                payload,
+                source_camp_message_id: None,
+                source_conversation_message_id: None,
+                source_content_digest: sha256_text(&body),
+                mentions_current_user: false,
+                quotes,
+            });
+        }
+        let public_delivery_id = source_delivery_id.filter(|_| chat_input_id.is_none());
+        let selected_messages = public_delivery_id
             .map(|id| input::select_delivery(database, &mut snapshot, id))
             .transpose()?;
         let batch_context_manifest_version = (snapshot.invocation_kind == "batch")
@@ -666,7 +713,7 @@ impl ContextService {
         } else {
             None
         };
-        let dynamic_context = if source_delivery_id.is_some() {
+        let dynamic_context = if public_delivery_id.is_some() {
             let mut dynamic = input::DynamicInputContext::prepare(database, &snapshot, None)?;
             let mut facts: Value = serde_json::from_str(&dynamic.run_facts.payload_json)?;
             facts["historyHint"] = json!(public_history_hint(
@@ -705,7 +752,7 @@ impl ContextService {
             prepared
         } else {
             let snapshot = if source_delivery_id.is_some() {
-                let value: String = database.connection().query_row("SELECT skill_exposure_json FROM context_manifest WHERE agent_run_id=?1 AND source_delivery_id IS NULL", [&snapshot.agent_run_id], |r|r.get(0))?;
+                let value: String = database.connection().query_row("SELECT skill_exposure_json FROM context_manifest WHERE agent_run_id=?1 AND source_delivery_id IS NULL AND source_chat_input_id IS NULL", [&snapshot.agent_run_id], |r|r.get(0))?;
                 serde_json::from_str(&value)?
             } else {
                 SkillExposureSnapshot::default()
@@ -715,7 +762,7 @@ impl ContextService {
             &fallback_skill_exposure
         };
         let fallback_mcp_snapshot = if source_delivery_id.is_some() {
-            let value: String = database.connection().query_row("SELECT mcp_exposure_json FROM context_manifest WHERE agent_run_id=?1 AND source_delivery_id IS NULL", [&snapshot.agent_run_id], |r|r.get(0))?;
+            let value: String = database.connection().query_row("SELECT mcp_exposure_json FROM context_manifest WHERE agent_run_id=?1 AND source_delivery_id IS NULL AND source_chat_input_id IS NULL", [&snapshot.agent_run_id], |r|r.get(0))?;
             serde_json::from_str(&value)?
         } else {
             McpExposureSnapshot::default()
@@ -780,7 +827,10 @@ impl ContextService {
             );
         }
 
-        let mut collaboration_state = if let Some(claimed) = &dynamic_context {
+        let private_chat = snapshot.invocation_kind == "chat";
+        let mut collaboration_state = if private_chat {
+            json!({})
+        } else if let Some(claimed) = &dynamic_context {
             claimed.collaboration_state.clone()
         } else {
             let members = load_collaboration_projection_members(database, &snapshot.camp_id)?;
@@ -792,9 +842,10 @@ impl ContextService {
             add_legacy_collaboration_responsibilities(database, &mut collaboration_state)?;
         }
         let collaboration_state_digest = canonical_json_digest(&collaboration_state)?;
-        let collaboration_changed = bootstrap_required
-            || snapshot.native_collaboration_state_digest.as_deref()
-                != Some(collaboration_state_digest.as_str());
+        let collaboration_changed = !private_chat
+            && (bootstrap_required
+                || snapshot.native_collaboration_state_digest.as_deref()
+                    != Some(collaboration_state_digest.as_str()));
         let profile = match batch_context_manifest_version {
             Some(29) => {
                 crate::context_delivery::PUBLIC_CAMP_BATCH_CONTEXT_DELIVERY_PROFILE_V9.validate()?
@@ -814,6 +865,9 @@ impl ContextService {
                     .validate()?
             }
             Some(_) => current_public_camp_batch_context_delivery_profile()?,
+            None if private_chat => {
+                crate::context_delivery::CHAT_CONTEXT_DELIVERY_PROFILE_V17.validate()?
+            }
             None => current_context_delivery_profile()?,
         };
         let mut batch_model_context = if selected_messages.is_some() {
@@ -845,7 +899,7 @@ impl ContextService {
             } else {
                 load_self_active_tasks(database, &snapshot, profile.max_self_active_tasks)?
             };
-        let mut recent_messages = if snapshot.invocation_kind == "batch" {
+        let mut recent_messages = if private_chat || snapshot.invocation_kind == "batch" {
             Vec::new()
         } else {
             load_recent_public_messages(
@@ -856,7 +910,7 @@ impl ContextService {
                 profile,
             )?
         };
-        let reference_selection = if snapshot.invocation_kind == "batch" {
+        let reference_selection = if private_chat || snapshot.invocation_kind == "batch" {
             ReferenceClosureSelection {
                 messages: Vec::new(),
                 omissions: Vec::new(),
@@ -871,11 +925,12 @@ impl ContextService {
             .map(|entry| entry.message.message_id.clone())
             .collect::<HashSet<_>>();
         recent_messages.retain(|message| !closure_message_ids.contains(&message.message_id));
-        let mut originating_public_user_message = if snapshot.invocation_kind == "batch" {
-            None
-        } else {
-            load_originating_public_user_message(database, &snapshot, profile, None)?
-        };
+        let mut originating_public_user_message =
+            if private_chat || snapshot.invocation_kind == "batch" {
+                None
+            } else {
+                load_originating_public_user_message(database, &snapshot, profile, None)?
+            };
         if originating_public_user_message
             .as_ref()
             .is_some_and(|message| {
@@ -914,7 +969,10 @@ impl ContextService {
                 &message.sender_id,
             )?);
         }
-        let current_input = load_current_input(database, &snapshot)?;
+        let current_input = match chat_steer {
+            Some(input) => input,
+            None => load_current_input(database, &snapshot)?,
+        };
         let mut attachment_refs = load_current_attachment_refs(database, &current_input)?;
         let mut pending_reads = BTreeMap::new();
         let mut legacy_message_ids = HashSet::new();
@@ -973,8 +1031,10 @@ impl ContextService {
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
         attachment_paths.extend_from_slice(source_attachment_paths);
-        if !matches!(snapshot.invocation_kind.as_str(), "direct" | "batch")
-            && !snapshot.skill_selection_snapshot.entries.is_empty()
+        if !matches!(
+            snapshot.invocation_kind.as_str(),
+            "direct" | "batch" | "chat"
+        ) && !snapshot.skill_selection_snapshot.entries.is_empty()
         {
             anyhow::bail!("Non-direct AgentRun has a non-empty Skill selection snapshot");
         }
@@ -986,14 +1046,34 @@ impl ContextService {
             prepared_skill_exposure,
             adapter_kind,
         )?;
-        let a2a_count = if snapshot.invocation_kind == "batch" {
+        let a2a_count = if private_chat || snapshot.invocation_kind == "batch" {
             0
         } else {
             count_a2a_runs(database, &snapshot.camp_turn_id)?
         };
         let collaboration_state_section = collaboration_changed.then_some(collaboration_state);
-        let (rendered_run_facts, mission_details_version) = if let Some(claimed) = &dynamic_context
-        {
+        let (rendered_run_facts, mission_details_version) = if private_chat {
+            let effect = has_unsettled_effect(database.connection(), &snapshot.conversation_id)?;
+            (
+                RenderedRunFacts {
+                    references: if effect {
+                        vec![RunFactRef {
+                            fact: "external_effect".into(),
+                            task_id: None,
+                            mission_id: None,
+                        }]
+                    } else {
+                        Vec::new()
+                    },
+                    payload_json: if effect {
+                        json!({"externalEffect":{"state":"unsettled","requiredAction":"reconcile_before_repeat"}}).to_string()
+                    } else {
+                        "{}".to_owned()
+                    },
+                },
+                None,
+            )
+        } else if let Some(claimed) = &dynamic_context {
             (
                 claimed.run_facts_for_session(requires_new_native_session)?,
                 claimed.mission_details_version,
@@ -1122,7 +1202,9 @@ impl ContextService {
             bootstrap_in_runtime_payload = bootstrap_payload.is_some();
         }
 
-        let workspace_fact = if let Some(claimed) = &dynamic_context {
+        let workspace_fact = if private_chat {
+            PreparedWorkspaceFact::default()
+        } else if let Some(claimed) = &dynamic_context {
             let mut workspace = claimed.workspace.clone();
             let accepted: Option<String> = database.connection().query_row(
                 "SELECT native_workspace_fact_digest FROM conversation WHERE id=?1",
@@ -1176,7 +1258,7 @@ impl ContextService {
                         .map(|entry| entry.message.message_id.clone()),
                 )
                 .collect::<HashSet<_>>();
-            let omitted_messages = if snapshot.invocation_kind == "batch" {
+            let omitted_messages = if private_chat || snapshot.invocation_kind == "batch" {
                 None
             } else {
                 omitted_public_messages(
@@ -1452,7 +1534,11 @@ impl ContextService {
             .flatten();
         let transaction = database.connection_mut().transaction()?;
         if let Some(id) = source_delivery_id {
-            let valid: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM camp_message_delivery d JOIN agent_run r ON r.id=d.claimed_agent_run_id JOIN conversation c ON c.id=r.conversation_id WHERE d.id=?1 AND r.id=?2 AND r.execution_epoch=?3 AND r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL AND d.status='claimed' AND c.native_binding_generation=?4)", params![id,snapshot.agent_run_id,snapshot.execution_epoch,expected_binding_generation], |r|r.get(0))?;
+            let valid: bool = if chat_input_id.is_some() {
+                transaction.query_row("SELECT EXISTS(SELECT 1 FROM single_chat_pending_input p JOIN agent_run r ON r.id=p.target_run_id JOIN conversation c ON c.id=p.conversation_id JOIN chat_topic t ON t.conversation_id=c.id WHERE p.id=?1 AND r.id=?2 AND p.target_execution_epoch=?3 AND r.execution_epoch=?3 AND r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL AND p.state='queued' AND p.requested_mode='steer' AND c.native_binding_generation=?4 AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)",params![id,snapshot.agent_run_id,snapshot.execution_epoch,expected_binding_generation],|r|r.get(0))?
+            } else {
+                transaction.query_row("SELECT EXISTS(SELECT 1 FROM camp_message_delivery d JOIN agent_run r ON r.id=d.claimed_agent_run_id JOIN conversation c ON c.id=r.conversation_id WHERE d.id=?1 AND r.id=?2 AND r.execution_epoch=?3 AND r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL AND d.status='claimed' AND c.native_binding_generation=?4)", params![id,snapshot.agent_run_id,snapshot.execution_epoch,expected_binding_generation], |r|r.get(0))?
+            };
             anyhow::ensure!(valid, "Input target ended during context construction");
         } else {
             revalidate_snapshot_for_manifest(&transaction, &snapshot, expected_binding_generation)?;
@@ -1468,8 +1554,11 @@ impl ContextService {
             anyhow::bail!("Current Input Skill availability changed during materialization");
         }
         let global_public_message_boundary = capture_history_body_boundary(&transaction)?;
-        let context_manifest_version =
-            batch_context_manifest_version.unwrap_or(CONTEXT_MANIFEST_VERSION);
+        let context_manifest_version = batch_context_manifest_version.unwrap_or(if private_chat {
+            46
+        } else {
+            CONTEXT_MANIFEST_VERSION
+        });
         let context_formatter_version = batch_context_manifest_version
             .inspect(|&version| {
                 debug_assert!(matches!(
@@ -1487,7 +1576,11 @@ impl ContextService {
                         | PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION
                 ));
             })
-            .unwrap_or(CONTEXT_FORMATTER_VERSION);
+            .unwrap_or(if private_chat {
+                46
+            } else {
+                CONTEXT_FORMATTER_VERSION
+            });
         let run_facts_schema_version =
             run_facts_schema_version(context_manifest_version, &snapshot.invocation_kind);
         let inserted = transaction.execute(
@@ -1526,14 +1619,14 @@ impl ContextService {
                 formatter_version,
                 rendered_payload_blob_id, rendered_payload_digest, created_at,
                 workspace_fact_json,workspace_fact_digest,workspace_fact_included,
-                mission_details_version, source_delivery_id
+                mission_details_version, source_delivery_id, source_chat_input_id
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
                 ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
                 ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50,
-                ?51, ?52, ?53, ?54, ?55, ?56
+                ?51, ?52, ?53, ?54, ?55, ?56, ?57
             )
             "#,
             params![
@@ -1604,12 +1697,13 @@ impl ContextService {
                 workspace_fact.digest,
                 i64::from(workspace_fact.included),
                 mission_details_version,
-                source_delivery_id,
+                public_delivery_id,
+                chat_input_id,
             ],
         )?;
         let persisted_manifest_id = if inserted != 1 {
             let (existing_id, existing_digest): (String, String) = transaction.query_row(
-                "SELECT id, rendered_payload_blob_id FROM context_manifest WHERE agent_run_id = ?1 AND source_delivery_id IS ?2",
+                "SELECT id, rendered_payload_blob_id FROM context_manifest WHERE agent_run_id = ?1 AND coalesce(source_delivery_id,source_chat_input_id) IS ?2",
                 params![snapshot.agent_run_id, source_delivery_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
@@ -2292,7 +2386,7 @@ impl ContextService {
                 WHERE run.id = ?1 AND run.execution_epoch = ?2
                   AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
                   AND (
-                      run.invocation_kind = 'batch'
+                      run.invocation_kind = 'batch' OR (run.invocation_kind = 'chat' AND EXISTS (SELECT 1 FROM chat_topic t WHERE t.conversation_id=run.conversation_id AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL))
                       OR (
                           turn.status IN ('running', 'waiting')
                           AND turn.cancel_requested_at IS NULL
@@ -2417,7 +2511,7 @@ impl ContextService {
             return Ok(existing);
         }
         let is_initial: bool = transaction.query_row(
-            "SELECT source_delivery_id IS NULL FROM context_manifest WHERE id=?1",
+            "SELECT source_delivery_id IS NULL AND source_chat_input_id IS NULL FROM context_manifest WHERE id=?1",
             [manifest_id],
             |r| r.get(0),
         )?;
@@ -2441,7 +2535,7 @@ impl ContextService {
                        conversation.native_binding_id,
                        conversation.native_binding_generation,
                        agent_run.status, agent_run.execution_epoch,
-                       COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                       COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                        context_manifest.collaboration_state_digest,
                        context_manifest.collaboration_state_included,
                        context_manifest.context_manifest_version,
@@ -2544,7 +2638,7 @@ impl ContextService {
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'prepared', ?9, ?9,
                 ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-                (SELECT CASE WHEN source_delivery_id IS NULL THEN 'start' ELSE 'steer' END FROM context_manifest WHERE id=?4),
+                (SELECT CASE WHEN source_delivery_id IS NULL AND source_chat_input_id IS NULL THEN 'start' ELSE 'steer' END FROM context_manifest WHERE id=?4),
                 (SELECT COALESCE(MAX(input_sequence)+1,0) FROM runtime_input_delivery WHERE agent_run_id=?2 AND execution_epoch=?3)
             )
             "#,
@@ -2624,7 +2718,7 @@ impl ContextService {
                   WHERE run.id = ?2 AND run.execution_epoch = ?3
                     AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
                     AND (
-                        run.invocation_kind = 'batch'
+                        run.invocation_kind = 'batch' OR (run.invocation_kind = 'chat' AND EXISTS (SELECT 1 FROM chat_topic t WHERE t.conversation_id=run.conversation_id AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL))
                         OR (
                             turn.status IN ('running', 'waiting')
                             AND turn.cancel_requested_at IS NULL
@@ -2635,7 +2729,7 @@ impl ContextService {
         )?;
         if changed == 1 {
             let source: Option<String> = transaction.query_row(
-                "SELECT cm.source_delivery_id FROM runtime_input_delivery i JOIN context_manifest cm ON cm.id=i.context_manifest_id WHERE i.id=?1",
+                "SELECT coalesce(cm.source_delivery_id,cm.source_chat_input_id) FROM runtime_input_delivery i JOIN context_manifest cm ON cm.id=i.context_manifest_id WHERE i.id=?1",
                 [delivery_id], |row| row.get(0),
             )?;
             if let Some(source) = source {
@@ -2753,7 +2847,9 @@ impl ContextService {
                 row.execution_epoch,
                 &json!({"runtimeInputDeliveryId":delivery_id}),
             )?;
-            crate::message_changes::record(&transaction, &row.camp_id, true, &[]);
+            if !row.camp_id.is_empty() {
+                crate::message_changes::record(&transaction, &row.camp_id, true, &[]);
+            }
             transaction.commit()?;
             return Ok(());
         }
@@ -2985,7 +3081,7 @@ fn acknowledge_input_delivery_transaction(
             WHERE run.id = ?1 AND run.execution_epoch = ?2
               AND run.status IN ('running', 'waiting') AND run.cancel_requested_at IS NULL
               AND (
-                  run.invocation_kind = 'batch'
+                  run.invocation_kind = 'batch' OR (run.invocation_kind = 'chat' AND EXISTS (SELECT 1 FROM chat_topic t WHERE t.conversation_id=run.conversation_id AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL))
                   OR (
                       turn.status IN ('running', 'waiting')
                       AND turn.cancel_requested_at IS NULL
@@ -3124,8 +3220,18 @@ fn acknowledge_input_delivery_transaction(
     }
     if let Some(source_id) = &row.source_delivery_id {
         crate::execution_input::changed(transaction, source_id)?;
-        transaction.execute("UPDATE camp_message_delivery SET status='settled', failure_code=NULL, ended_at=?2, updated_at=?2, version=version+1 WHERE id=?1 AND status IN ('claimed','failed') AND claimed_agent_run_id=?3", params![source_id,now,row.agent_run_id])?;
-        crate::message_changes::record(transaction, &row.camp_id, true, &[]);
+        if row.camp_id.is_empty() {
+            crate::chat::accept_steer(
+                transaction,
+                source_id,
+                &row.agent_run_id,
+                row.execution_epoch,
+                now,
+            )?;
+        } else {
+            transaction.execute("UPDATE camp_message_delivery SET status='settled', failure_code=NULL, ended_at=?2, updated_at=?2, version=version+1 WHERE id=?1 AND status IN ('claimed','failed') AND claimed_agent_run_id=?3", params![source_id,now,row.agent_run_id])?;
+            crate::message_changes::record(transaction, &row.camp_id, true, &[]);
+        }
     }
     append_raw_event(
         transaction,
@@ -3289,7 +3395,7 @@ fn load_run_snapshot<R: ContextReadConnection>(
         .context_connection()
         .query_row(
             r#"
-            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+            SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    COALESCE(agent_run.camp_turn_id, ''), agent_run.conversation_id,
                    conversation.agent_id, agent_run.task_id,
                    agent_run.execution_epoch, agent_run.purpose,
@@ -3323,11 +3429,14 @@ fn load_run_snapshot<R: ContextReadConnection>(
                    agent_run.claim_has_additional_public_messages
             FROM agent_run
             LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+            LEFT JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
             JOIN conversation ON conversation.id = agent_run.conversation_id
             WHERE agent_run.id = ?1
               AND agent_run.status IN ('running', 'waiting')
               AND agent_run.execution_epoch = ?2
+              AND (camp.id IS NOT NULL OR (agent_run.invocation_kind='chat' AND EXISTS (
+                SELECT 1 FROM chat_topic t WHERE t.conversation_id=conversation.id
+                AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL)))
             "#,
             params![agent_run_id, execution_epoch],
             |row| {
@@ -3425,6 +3534,9 @@ fn build_session_charter(
     has_active_file_delivery_binding: bool,
     is_mission: bool,
 ) -> Result<String> {
+    if snapshot.invocation_kind == "chat" {
+        return Ok("You are in Rovai. Reply in this private chat.".to_owned());
+    }
     let with_completion_rule = |mut charter: String| -> Result<String> {
         if matches!(
             run_snapshot_adapter_kind(snapshot)?,
@@ -3872,7 +3984,7 @@ fn frozen_team_guidance(
     contract: &str,
 ) -> Result<Option<String>> {
     if contract != NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION
-        || snapshot.invocation_kind == "single_chat"
+        || matches!(snapshot.invocation_kind.as_str(), "single_chat" | "chat")
     {
         return Ok(None);
     }
@@ -4322,6 +4434,10 @@ fn add_legacy_collaboration_responsibilities<R: ContextReadConnection>(
     Ok(())
 }
 
+fn has_unsettled_effect(c: &rusqlite::Connection, conversation_id: &str) -> Result<bool> {
+    Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM action_execution a JOIN agent_run r ON r.id=a.agent_run_id WHERE r.conversation_id=?1 AND a.status='unknown')",[conversation_id],|row|row.get(0))?)
+}
+
 fn build_run_facts<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
@@ -4380,18 +4496,7 @@ fn build_run_facts<R: ContextReadConnection>(
             required_action: "recheck_private_session_assumptions",
         });
     }
-    let unsettled_effect: bool = database.context_connection().query_row(
-        r#"
-        SELECT COUNT(*) > 0
-        FROM action_execution
-        JOIN agent_run ON agent_run.id = action_execution.agent_run_id
-        WHERE agent_run.conversation_id = ?1
-          AND action_execution.status = 'unknown'
-        "#,
-        [&snapshot.conversation_id],
-        |row| row.get(0),
-    )?;
-    if unsettled_effect {
+    if has_unsettled_effect(database.context_connection(), &snapshot.conversation_id)? {
         facts.external_effect = Some(ExternalEffectFact {
             state: "unsettled",
             required_action: "reconcile_before_repeat",
@@ -5854,7 +5959,7 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
         }
         return Ok(None);
     }
-    if snapshot.invocation_kind == "single_chat" {
+    if matches!(snapshot.invocation_kind.as_str(), "single_chat" | "chat") {
         if snapshot.trigger_message_delivery_id.is_some()
             || snapshot.a2a_parent_agent_run_id.is_some()
             || snapshot.a2a_root_agent_run_id.is_some()
@@ -6855,7 +6960,7 @@ fn load_current_input_body<R: ContextReadConnection>(
                 )
                 .optional()?
                 .context("AgentRun trigger ConversationMessage does not exist")?;
-            if snapshot.invocation_kind == "single_chat" {
+            if matches!(snapshot.invocation_kind.as_str(), "single_chat" | "chat") {
                 if snapshot.trigger_message_delivery_id.is_some()
                     || snapshot.a2a_parent_agent_run_id.is_some()
                     || snapshot.a2a_root_agent_run_id.is_some()
@@ -6870,11 +6975,15 @@ fn load_current_input_body<R: ContextReadConnection>(
                 return Ok(CurrentInput {
                     quotes: Vec::new(),
                     id,
-                    payload: json!({
-                        "source": { "type": "user" },
-                        "message": body,
-                        "mentionsCurrentUser": false,
-                    }),
+                    payload: if snapshot.invocation_kind == "chat" {
+                        json!({ "message": body })
+                    } else {
+                        json!({
+                            "source": { "type": "user" },
+                            "message": body,
+                            "mentionsCurrentUser": false,
+                        })
+                    },
                     source_camp_message_id: None,
                     source_conversation_message_id: Some(conversation_message_id.to_string()),
                     source_content_digest: body_digest.clone(),
@@ -7261,7 +7370,7 @@ fn selected_mission_facts(
     connection: &Connection,
     snapshot: &RunSnapshot,
 ) -> Result<Option<SelectedMissionFacts>> {
-    if snapshot.invocation_kind == "single_chat" {
+    if matches!(snapshot.invocation_kind.as_str(), "single_chat" | "chat") {
         return Ok(None);
     }
     let row = connection
@@ -7679,7 +7788,7 @@ fn load_existing_manifest(
             JOIN managed_blob AS blob ON blob.id=manifest.rendered_payload_blob_id
             JOIN native_session_bootstrap_evidence AS bootstrap
               ON bootstrap.id = manifest.bootstrap_evidence_id
-            WHERE manifest.agent_run_id = ?1 AND manifest.source_delivery_id IS ?2
+            WHERE manifest.agent_run_id = ?1 AND coalesce(manifest.source_delivery_id,manifest.source_chat_input_id) IS ?2
             "#,
             params![snapshot.agent_run_id,source_delivery_id],
             |row| {
@@ -8410,7 +8519,7 @@ fn append_raw_event(
             Uuid::new_v4().to_string(),
             event_type,
             serde_json::to_string(payload)?,
-            camp_id,
+            crate::runtime::run_thread_id(camp_id),
             entity_type,
             entity_id,
             execution_epoch,
@@ -8474,13 +8583,13 @@ fn load_delivery_target(
                    bootstrap.memory_entrypoint_digest,
                    context_manifest.collaboration_state_digest,
                    context_manifest.collaboration_state_included,
-                   COALESCE(agent_run.camp_id, camp_turn.camp_id),
+                   COALESCE(agent_run.camp_id, camp_turn.camp_id, ''),
                    runtime_input_delivery.status,
                    runtime_input_delivery.native_input_id,
                    runtime_input_delivery.bootstrap_redelivery_revision,
                    context_manifest.mission_details_version,
                    bootstrap.contract_version,
-                   platform.section_digest, context_manifest.id, context_manifest.source_delivery_id, runtime_input_delivery.input_sequence,
+                   platform.section_digest, context_manifest.id, coalesce(context_manifest.source_delivery_id, context_manifest.source_chat_input_id), runtime_input_delivery.input_sequence,
                    CASE WHEN agent_run.invocation_kind <> 'single_chat' AND bootstrap.contract_version='native_session_bootstrap_v6'
                        THEN (SELECT guidance FROM thread_team_bootstrap WHERE camp_id=COALESCE(agent_run.camp_id,camp_turn.camp_id)) END
             FROM runtime_input_delivery
@@ -10154,10 +10263,12 @@ mod slow_tests {
             .send_public_message_attested(
                 &mut fixture.database,
                 &ThreadMessageSendInvocation {
+                    cli_receipt_proof: None,
                     native_binding_id: fixture.native_binding_id.clone(),
                     binding_credential: fixture.binding_credential.clone(),
                     runtime_tool_call_id: call_id.to_string(),
                     input: ThreadMessageSendInput {
+                        thread_id: None,
                         body: body.to_string(),
                         to: Vec::new(),
                         public_only: false,

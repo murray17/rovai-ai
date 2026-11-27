@@ -57,6 +57,38 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
     }
     validate_schema(&public_input, &definition["inputSchema"])
         .map_err(|_| anyhow::anyhow!("{canonical_name} input does not match its schema"))?;
+    if matches!(
+        canonical_name,
+        CAMP_MESSAGE_SEND_TOOL_NAME
+            | TEAM_CREATE_TASK_TOOL_NAME
+            | TEAM_UPDATE_TASK_TOOL_NAME
+            | TEAM_GET_TASK_TOOL_NAME
+            | TEAM_LIST_TASKS_TOOL_NAME
+            | MEMBER_GET_TOOL_NAME
+            | MEMBER_LIST_TOOL_NAME
+            | MEMBER_UPDATE_TOOL_NAME
+            | "mission.update"
+            | "mission.status"
+    ) && let Some(target) = input["threadId"].as_str()
+    {
+        crate::camp_id::ThreadId::parse(target)?;
+    }
+    let mut scoped_input = input.clone();
+    if canonical_name.starts_with("automation.")
+        || matches!(
+            canonical_name,
+            MEMBER_LIST_TOOL_NAME
+                | MEMBER_GET_TOOL_NAME
+                | MEMBER_UPDATE_TOOL_NAME
+                | "mission.update"
+                | "mission.status"
+        )
+    {
+        scoped_input
+            .as_object_mut()
+            .and_then(|o| o.remove("threadId"));
+    }
+    let input = &scoped_input;
     if canonical_name == crate::thread_runs::THREAD_RUNS_TOOL_NAME {
         return serde_json::from_value::<crate::thread_runs::ThreadRunsInput>(input.clone())?
             .validate();
@@ -93,6 +125,12 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
             serde_json::from_value::<HistorySearchInput>(input.clone()).map(|_| ())
         }
         CAMP_READ_TOOL_NAME => serde_json::from_value::<ThreadReadInput>(input.clone()).map(|_| ()),
+        "thread.create" => {
+            serde_json::from_value::<crate::chat::CreateThread>(input.clone()).map(|_| ())
+        }
+        crate::chat::HISTORY_TOOL => {
+            serde_json::from_value::<crate::chat::HistoryInput>(input.clone()).map(|_| ())
+        }
         SINGLE_CHAT_HISTORY_TOOL_NAME => {
             serde_json::from_value::<SingleChatHistoryInput>(input.clone()).map(|_| ())
         }
@@ -1034,7 +1072,7 @@ pub fn builtin_tool_definitions() -> &'static [Value] {
 }
 
 fn build_builtin_tool_definitions() -> Vec<Value> {
-    vec![
+    let mut definitions = vec![
         json!({
             "name": "mission.list",
             "title": "List Missions",
@@ -1073,8 +1111,8 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
                 }
             }
         }),
-        json!({"name":"mission.update","title":"Update the current Mission","description":"Update the current Mission's title or description without starting work.","inputSchema":{"type":"object","additionalProperties":false,"anyOf":[{"required":["title"]},{"required":["description"]}],"properties":{"title":{"type":"string","minLength":1,"maxLength":200},"description":{"type":"string","maxLength":12000}}},"outputSchema":mission_mutation_schema()}),
-        json!({"name":"mission.status","title":"Set the current Mission status","description":"Set the current Mission's status without starting or stopping work.","inputSchema":{"type":"object","additionalProperties":false,"required":["status"],"properties":{"status":{"type":"string","enum":["needs_you","not_started","in_progress","completed"],"description":"One of: needs_you, not_started, in_progress, completed."},"sourceMessageId":{"type":"string","minLength":1,"description":"Optional reference to an existing public message in this Thread."}}},"outputSchema":mission_mutation_schema()}),
+        json!({"name":"mission.update","title":"Update the current Mission","description":"Update the current Mission's title or description without starting work.","inputSchema":{"type":"object","additionalProperties":false,"anyOf":[{"required":["title"]},{"required":["description"]}],"properties":{"threadId":{"type":"string","minLength":1},"title":{"type":"string","minLength":1,"maxLength":200},"description":{"type":"string","maxLength":12000}}},"outputSchema":mission_mutation_schema()}),
+        json!({"name":"mission.status","title":"Set the current Mission status","description":"Set the current Mission's status without starting or stopping work.","inputSchema":{"type":"object","additionalProperties":false,"required":["status"],"properties":{"threadId":{"type":"string","minLength":1},"status":{"type":"string","enum":["needs_you","not_started","in_progress","completed"],"description":"One of: needs_you, not_started, in_progress, completed."},"sourceMessageId":{"type":"string","minLength":1,"description":"Optional reference to an existing public message in this Thread."}}},"outputSchema":mission_mutation_schema()}),
         json!({
             "name": AUTOMATION_LIST_TOOL_NAME,
             "title": "List scheduled Automations",
@@ -1304,6 +1342,13 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
             "inputSchema": crate::thread_runs::input_schema(),
             "outputSchema": crate::thread_runs::output_schema()
         }),
+        json!({"name":"thread.create","title":"Create a team Thread","description":"Create a public team conversation when the user asks in a private Chat.","inputSchema":{"type":"object","additionalProperties":false,"required":["title","memberAgentIds","defaultLeadAgentId"],"properties":{"title":{"type":"string","minLength":1,"maxLength":80},"memberAgentIds":{"type":"array","minItems":1,"items":{"type":"string"}},"defaultLeadAgentId":{"type":"string","minLength":1}}},"outputSchema":{"type":"object","required":["threadId"],"properties":{"threadId":{"type":"string"}},"additionalProperties":false}}),
+        json!({
+            "name":crate::chat::HISTORY_TOOL,"title":"Read this private Chat",
+            "description":"Read earlier messages in the current private Chat. Continue with the returned cursor.",
+            "inputSchema":{"type":"object","properties":{"cursor":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false},
+            "outputSchema":{"type":"object","properties":{"messages":{"type":"array","items":{"type":"object"}},"nextCursor":{"type":["string","null"]}},"required":["messages","nextCursor"]},
+        }),
         json!({
             "name": SINGLE_CHAT_HISTORY_TOOL_NAME,
             "title": "Read current Single Chat history",
@@ -1361,7 +1406,30 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
                 ]
             }
         }),
-    ]
+    ];
+    for def in &mut definitions {
+        if def["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("automation."))
+        {
+            def["inputSchema"]["properties"]["threadId"] = json!({"type":"string","minLength":1,"description":"Explicit public Thread for current project or automation lookup."});
+        }
+        if def["name"]
+            .as_str()
+            .is_some_and(crate::memory_capability::is_memory_operation)
+        {
+            let schema = &mut def["inputSchema"];
+            let target = json!({"type":"string","minLength":1,"description":"Public Thread used for relationship membership, when applicable."});
+            if let Some(alternatives) = schema.get_mut("oneOf").and_then(Value::as_array_mut) {
+                for branch in alternatives {
+                    branch["properties"]["threadId"] = target.clone();
+                }
+            } else {
+                schema["properties"]["threadId"] = target;
+            }
+        }
+    }
+    definitions
 }
 
 #[cfg(test)]
@@ -1461,7 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn public_send_has_no_agent_supplied_camp_scope() {
+    fn public_send_accepts_an_explicit_destination_but_not_a_reply_anchor() {
         let send = builtin_tool_definitions()
             .into_iter()
             .find(|definition| definition["name"] == CAMP_MESSAGE_SEND_TOOL_NAME)
@@ -1472,7 +1540,7 @@ mod tests {
             send["inputSchema"]["properties"]["files"]["default"],
             json!([])
         );
-        assert!(send["inputSchema"]["properties"].get("threadId").is_none());
+        assert!(send["inputSchema"]["properties"].get("threadId").is_some());
         assert!(
             send["inputSchema"]["properties"]
                 .get("replyToThreadMessageId")

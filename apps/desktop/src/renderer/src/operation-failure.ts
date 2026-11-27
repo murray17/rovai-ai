@@ -54,6 +54,8 @@ export function normalizeFailure(value: unknown): NormalizedFailure {
 }
 
 const operationNames = {
+  'chat.send': () => uiAttribute('发送消息'),
+  'chat.queue': () => uiAttribute('更新排队消息'),
   'run.stop': () => uiAttribute('停止'),
   'thread.open': () => uiAttribute('打开会话'),
   'thread.refresh': () => uiAttribute('刷新会话'),
@@ -136,6 +138,16 @@ export function failureFeedback(
   { subject, presentation = 'standalone' }: FailureFeedbackOptions = {}
 ): FailureFeedback {
   const { code, kind } = failure
+  if (operation === 'chat.send' && (code === 'chat.runtime_not_ready' || failure.raw.startsWith('chat.runtime_not_ready:'))) {
+    const reason = failure.raw.split(':').at(-1)?.trim()
+    if (reason === 'member_away') return failed(uiAttribute('这位队员暂离，归队后可以发送。'))
+    if (reason === 'runtime_not_configured') return failed(uiAttribute('这位队员未配置智能体，请在队员资料中设置。'))
+    return failed(uiAttribute('目标队员的智能体暂不可用。'))
+  }
+  if ((operation === 'chat.send' || operation === 'chat.queue' || operation === 'run.stop')
+    && [code, failure.raw].some(reason => reason === 'chat.input_changed' || reason === 'chat.execution_changed' || reason === 'chat.steer_unavailable')) {
+    return changed(uiAttribute('内容刚刚有变化，请再试一次。'), 'stale')
+  }
   if (operation === 'run.stop') {
     if (code === 'command.version_conflict') return changed(uiAttribute('执行状态刚刚更新，请再点一次停止。'), 'stale')
     if (code === 'agent_run.turn_cancellation_in_progress') return changed(uiAttribute('正在停止…'), 'resolved')

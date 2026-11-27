@@ -77,7 +77,7 @@ export function ComposerDeliveryAction({ plans, mode, onModeChange, ...props }: 
       <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu steer-choice-menu" align="end" side="top" sideOffset={6} collisionPadding={10}>
         <DropdownMenu.RadioGroup value={mode} onValueChange={value => onModeChange(value as DeliveryMode)}>
           <DropdownMenu.RadioItem className="sidebar-action-menu-item steer-choice-row" value="steer">
-            <span><strong>{uiAttribute('优先插话')}</strong><small>{uiAttribute('支持的队员加入当前执行')}</small></span><DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>
+            <span><strong>{uiAttribute(multiple ? '优先插话' : '插话')}</strong><small>{uiAttribute(multiple ? '支持的队员加入当前执行' : '加入当前执行')}</small></span><DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>
           </DropdownMenu.RadioItem>
           <DropdownMenu.RadioItem className="sidebar-action-menu-item steer-choice-row" value="start">
             <span><strong>{uiAttribute('排队发送')}</strong><small>{uiAttribute(multiple ? '忙碌队员执行结束后处理' : '当前执行结束后处理')}</small></span><DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>

@@ -52,7 +52,8 @@ pub enum SteerUnavailableReason {
     VersionUnverified,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActiveInputAvailability {
     pub can_steer: bool,
     pub ready: bool,
@@ -217,7 +218,7 @@ pub fn active_input_availability(
     };
     let reason = if actual_epoch != epoch {
         Some(ExecutionChanged)
-    } else if kind != "batch"
+    } else if !matches!(kind.as_str(), "batch" | "chat")
         || !matches!(status.as_str(), "queued" | "running" | "waiting")
         || cancel.is_some()
     {
@@ -336,7 +337,7 @@ pub fn pending_inputs(connection: &Connection) -> Result<Vec<PendingInput>> {
                 AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
                     WHERE m.source_delivery_id=earlier.id AND i.input_kind='steer' AND i.status='delivery_unknown'))
         ORDER BY d.queue_sequence,d.id")?;
-    Ok(query
+    let mut inputs = query
         .query_map([], |r| {
             Ok(PendingInput {
                 delivery_id: r.get(0)?,
@@ -344,11 +345,14 @@ pub fn pending_inputs(connection: &Connection) -> Result<Vec<PendingInput>> {
                 execution_epoch: r.get(2)?,
             })
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    inputs.extend(crate::chat::ready_steers(connection)?);
+    Ok(inputs)
 }
 
 /// Preparation failures update the source receipt and its existing execution marker atomically.
 pub fn fail_preparation(tx: &Transaction<'_>, delivery: &str) -> Result<()> {
+    crate::chat::return_steer_to_queue(tx, delivery, &chrono::Utc::now().to_rfc3339())?;
     let changed = tx.execute("UPDATE camp_message_delivery SET status='failed',failure_code='input_preparation_failed',ended_at=datetime('now'),updated_at=datetime('now'),version=version+1 WHERE id=?1 AND status='claimed' AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id WHERE m.source_delivery_id=?1 AND i.dispatch_started_at IS NOT NULL)", [delivery])?;
     if changed == 1 {
         crate::execution_input::changed(tx, delivery)?;
@@ -358,6 +362,7 @@ pub fn fail_preparation(tx: &Transaction<'_>, delivery: &str) -> Result<()> {
 
 /// Called only with proof that native submission did not accept this input.
 pub fn return_to_queue(tx: &Transaction<'_>, delivery_id: &str, now: &str) -> Result<()> {
+    crate::chat::return_steer_to_queue(tx, delivery_id, now)?;
     let updated = tx.execute("UPDATE camp_message_delivery SET requested_mode='start',status='waiting',claimed_agent_run_id=NULL,target_execution_epoch=NULL,
         claimed_at=NULL,ended_at=NULL,failure_code=NULL,updated_at=?2,version=version+1
         WHERE id=?1 AND EXISTS(SELECT 1 FROM camp_message WHERE id=camp_message_delivery.message_id AND tombstoned_at IS NULL AND recall_state<>'withdrawn') AND requested_mode='steer' AND (status='claimed' OR (status='failed' AND failure_code='input_delivery_unknown'))
@@ -406,6 +411,7 @@ pub(crate) fn settle_execution(
         WHERE claimed_agent_run_id=?1 AND requested_mode='steer' AND status='claimed'
           AND EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
               WHERE m.source_delivery_id=camp_message_delivery.id AND i.status='delivery_unknown')", params![run_id,now])?;
+    crate::chat::settle_steers(tx, run_id, run_status, now)?;
     for source in changed_sources {
         crate::execution_input::changed(tx, &source)?;
     }

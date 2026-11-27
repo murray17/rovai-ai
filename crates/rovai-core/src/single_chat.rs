@@ -408,8 +408,23 @@ impl SingleChatService {
         let (conversation_id, current_input_sequence) =
             load_single_chat_history_target(database, agent_run_id, execution_epoch)?
                 .ok_or_else(|| anyhow::anyhow!("Single Chat history target is unavailable"))?;
-        let before_sequence = input
-            .before_sequence
+        Self::history_page(
+            database,
+            &conversation_id,
+            current_input_sequence,
+            input.before_sequence,
+            limit,
+        )
+    }
+
+    pub(crate) fn history_page(
+        database: &Database,
+        conversation_id: &str,
+        current_input_sequence: i64,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<SingleChatHistoryOutput> {
+        let before_sequence = before
             .unwrap_or(current_input_sequence)
             .min(current_input_sequence);
         let mut statement = database.connection().prepare(
@@ -1687,7 +1702,7 @@ impl SingleChatService {
             native_interactions: None,
             approvals: crate::read_model::load_conversation_approvals(
                 database.connection(),
-                &conversation.camp_id,
+                Some(&conversation.camp_id),
                 Some(conversation_id),
                 true,
                 None,
@@ -1762,7 +1777,7 @@ struct EndTarget {
     ended_at: Option<String>,
 }
 
-fn source_attachment_views(value: &str) -> Result<Vec<LocalAttachmentSourceView>> {
+pub(crate) fn source_attachment_views(value: &str) -> Result<Vec<LocalAttachmentSourceView>> {
     Ok(parse_source_attachments(value)?
         .iter()
         .map(|source_ref| source_ref.view(LocalAttachmentAvailability::Unknown))
@@ -2275,6 +2290,110 @@ struct AdmittedSingleChatMessage {
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(crate) struct PrivateRun<'a> {
+    pub id: &'a str,
+    pub turn_id: Option<&'a str>,
+    pub conversation_id: &'a str,
+    pub agent_id: &'a str,
+    pub trigger: &'a str,
+    pub now: &'a str,
+    pub public_boundary: i64,
+    pub sequence: i64,
+    pub command_id: &'a str,
+}
+
+pub(crate) fn insert_private_run(
+    transaction: &Transaction<'_>,
+    run: PrivateRun<'_>,
+    runtime: &crate::agent_profile::FrozenAgentRuntimeConfig,
+) -> Result<()> {
+    let chat = run.turn_id.is_none();
+    let kind = if chat { "chat" } else { "single_chat" };
+    let effective_config =
+        build_effective_config(transaction, run.conversation_id, run.agent_id, runtime)?;
+    transaction.execute(
+        r#"
+        INSERT INTO agent_run(
+            id, camp_turn_id, conversation_id,
+            trigger_conversation_message_id, input_ready_at,
+            initial_camp_context_through_sequence,
+            initial_conversation_context_through_sequence,
+            responsibility_key, responsibility_generation,
+            start_reason, purpose, completion_role,
+            effective_config_json, workspace_json, permission_semantics,
+            runtime_adapter_kind, runtime_installation_id,
+            runtime_executable_path, runtime_auth_scope,
+            runtime_reported_version, runtime_executable_fingerprint,
+            runtime_initial_reported_version,
+            runtime_initial_executable_fingerprint,
+            runtime_capabilities_json, runtime_model_selection_json,
+            runtime_permission_config_json,
+            runtime_binding_compatibility_digest,
+            runtime_host_config_digest, runtime_protocol_version,
+            runtime_installation_generation,
+            runtime_search_environment_generation,
+            runtime_native_session_compatibility_key,
+            invocation_kind, response_delivery, operation_policy,
+            operation_policy_version, destination_conversation_id,
+            status, idempotency_key, version,
+            created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+            ?8, 0, 'initial', ?9, 'required',
+            ?10, NULL, 'runtime_managed_v2',
+            ?11, ?12, ?13, ?14, ?15, ?16, ?15, ?16,
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+            ?27, 'conversation_message', ?28, ?29, ?3,
+            'queued', ?26, 1, ?5, ?5
+        )
+        "#,
+        params![
+            run.id,
+            run.turn_id,
+            run.conversation_id,
+            run.trigger,
+            run.now,
+            run.public_boundary,
+            run.sequence,
+            format!("{kind}/{}", run.agent_id),
+            if chat {
+                "Reply in this private chat"
+            } else {
+                "Respond to the user's Single Chat message"
+            },
+            serde_json::to_string(&effective_config)?,
+            runtime.adapter_kind.as_str(),
+            runtime.installation_id,
+            runtime.executable_path,
+            runtime.auth_scope,
+            runtime.reported_version,
+            runtime.executable_fingerprint,
+            serde_json::to_string(&runtime.capabilities)?,
+            serde_json::to_string(&runtime.model)?,
+            serde_json::to_string(&runtime.permissions)?,
+            runtime.binding_compatibility_digest,
+            runtime.host_config_digest,
+            runtime.protocol_version,
+            runtime.installation_generation,
+            runtime.search_environment_generation,
+            runtime.native_session_compatibility_key,
+            run.command_id,
+            kind,
+            if chat {
+                "chat_v1"
+            } else {
+                SINGLE_CHAT_OPERATION_POLICY
+            },
+            if chat {
+                1
+            } else {
+                SINGLE_CHAT_OPERATION_POLICY_VERSION
+            },
+        ],
+    )?;
+    Ok(())
+}
+
 fn admit_single_chat_message(
     transaction: &Transaction<'_>,
     target: &ActiveTarget,
@@ -2315,12 +2434,6 @@ fn admit_single_chat_message(
     )?;
     anyhow::ensure!(updated == 1, "single_chat.version_conflict");
     let conversation_sequence = target.last_message_sequence + 1;
-    let effective_config = build_effective_config(
-        transaction,
-        &target.conversation_id,
-        &target.agent_id,
-        runtime,
-    )?;
     transaction.execute(
         r#"
         INSERT INTO camp_turn(
@@ -2350,70 +2463,20 @@ fn admit_single_chat_message(
             budget.root_agent_run_responsibilities,
         ],
     )?;
-    transaction.execute(
-        r#"
-        INSERT INTO agent_run(
-            id, camp_turn_id, conversation_id,
-            trigger_conversation_message_id, input_ready_at,
-            initial_camp_context_through_sequence,
-            initial_conversation_context_through_sequence,
-            responsibility_key, responsibility_generation,
-            start_reason, purpose, completion_role,
-            effective_config_json, workspace_json, permission_semantics,
-            runtime_adapter_kind, runtime_installation_id,
-            runtime_executable_path, runtime_auth_scope,
-            runtime_reported_version, runtime_executable_fingerprint,
-            runtime_initial_reported_version,
-            runtime_initial_executable_fingerprint,
-            runtime_capabilities_json, runtime_model_selection_json,
-            runtime_permission_config_json,
-            runtime_binding_compatibility_digest,
-            runtime_host_config_digest, runtime_protocol_version,
-            runtime_installation_generation,
-            runtime_search_environment_generation,
-            runtime_native_session_compatibility_key,
-            invocation_kind, response_delivery, operation_policy,
-            operation_policy_version, destination_conversation_id,
-            status, idempotency_key, version,
-            created_at, updated_at
-        ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7,
-            ?8, 0, 'initial', ?9, 'required',
-            ?10, NULL, 'runtime_managed_v2',
-            ?11, ?12, ?13, ?14, ?15, ?16, ?15, ?16,
-            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-            'single_chat', 'conversation_message', 'single_chat_v1', 2, ?3,
-            'queued', ?26, 1, ?5, ?5
-        )
-        "#,
-        params![
-            agent_run_id,
-            camp_turn_id,
-            target.conversation_id,
-            conversation_message_id,
-            now,
-            target.current_public_boundary_sequence,
-            conversation_sequence,
-            format!("single_chat/{}", target.agent_id),
-            "Respond to the user's Single Chat message",
-            serde_json::to_string(&effective_config)?,
-            runtime.adapter_kind.as_str(),
-            runtime.installation_id,
-            runtime.executable_path,
-            runtime.auth_scope,
-            runtime.reported_version,
-            runtime.executable_fingerprint,
-            serde_json::to_string(&runtime.capabilities)?,
-            serde_json::to_string(&runtime.model)?,
-            serde_json::to_string(&runtime.permissions)?,
-            runtime.binding_compatibility_digest,
-            runtime.host_config_digest,
-            runtime.protocol_version,
-            runtime.installation_generation,
-            runtime.search_environment_generation,
-            runtime.native_session_compatibility_key,
+    insert_private_run(
+        transaction,
+        PrivateRun {
+            id: &agent_run_id,
+            turn_id: Some(&camp_turn_id),
+            conversation_id: &target.conversation_id,
+            agent_id: &target.agent_id,
+            trigger: &conversation_message_id,
+            now: &now,
+            public_boundary: target.current_public_boundary_sequence,
+            sequence: conversation_sequence,
             command_id,
-        ],
+        },
+        runtime,
     )?;
     transaction.execute(
         r#"

@@ -12,7 +12,7 @@ import type {
 const STORAGE_PREFIX = 'rovai.camp-composer-draft.v1:'
 const MAX_STORED_DRAFT_BYTES = 4 * 1024 * 1024
 export const MAX_LOCAL_COMPOSER_ATTACHMENTS = 10
-const MAX_QUOTES = 32
+export const MAX_LOCAL_COMPOSER_QUOTES = 32
 
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
@@ -42,7 +42,7 @@ function isQuote(value: unknown): value is MessageQuoteSnapshot {
     || !string(value.text) || value.format !== 'plain_text' || !string(value.capturedAt, 128)) return false
   // Source labels are optional navigation hints, never a reason to lose saved text.
   if (value.source !== undefined && (!object(value.source) || !string(value.source.messageId, 512)
-    || !string(value.source.campId, 512) || !['camp', 'single_chat'].includes(String(value.source.scope)))) delete value.source
+    || (value.source.scope === 'chat' ? !string(value.source.conversationId, 512) : !string(value.source.campId, 512) || !['camp', 'single_chat'].includes(String(value.source.scope))))) delete value.source
   if (value.authorAtCapture !== undefined && (!object(value.authorAtCapture) || !string(value.authorAtCapture.displayName, 512)
     || !['user', 'agent'].includes(String(value.authorAtCapture.type)))) delete value.authorAtCapture
   return true
@@ -97,7 +97,7 @@ function isStoredDraft(value: unknown, threadId: string): value is ThreadCompose
     && Number.isInteger(value.revision)
     && Number(value.revision) >= 1
     && Array.isArray(value.quotes)
-    && value.quotes.length <= MAX_QUOTES
+    && value.quotes.length <= MAX_LOCAL_COMPOSER_QUOTES
     && value.quotes.every(isQuote)
     && Array.isArray(value.attachments)
     && value.attachments.length <= MAX_LOCAL_COMPOSER_ATTACHMENTS
@@ -167,14 +167,17 @@ export function localThreadComposerDraftIsEmpty(draft: ThreadComposerDraftView):
 
 export function saveLocalThreadComposerDraft(
   draft: ThreadComposerDraftView,
-  storage: DraftStorage | null = browserStorage()
-): void {
-  if (!storage) return
+  storage: DraftStorage | null = browserStorage(),
+  deferIfFull = false
+): boolean {
+  if (!storage) return false
+  if (deferIfFull && !isStoredDraft(draft, draft.threadId)) return false
+  if (draft.quotes.length > MAX_LOCAL_COMPOSER_QUOTES) throw new Error('quote.too_many')
   loadLocalThreadComposerDraft(draft.threadId, storage)
   if (!validateComposerDocument(draft.content)) throw new Error('当前草稿格式无效，原始内容已保留')
   if (localThreadComposerDraftIsEmpty(draft)) {
     storage.removeItem(storageKey(draft.threadId))
-    return
+    return true
   }
   const { threadId, replyIntent, continuationIntent, ...rest } = draft
   const encoded = JSON.stringify({
@@ -190,9 +193,16 @@ export function saveLocalThreadComposerDraft(
     })()
   })
   if (encoded.length > MAX_STORED_DRAFT_BYTES) {
+    if (deferIfFull) return false
     throw new Error('当前输入超过本机草稿保存上限。')
   }
-  storage.setItem(storageKey(draft.threadId), encoded)
+  try {
+    storage.setItem(storageKey(draft.threadId), encoded)
+  } catch (error) {
+    if (deferIfFull && error instanceof DOMException && error.name === 'QuotaExceededError') return false
+    throw error
+  }
+  return true
 }
 
 export function clearLocalThreadComposerDraft(

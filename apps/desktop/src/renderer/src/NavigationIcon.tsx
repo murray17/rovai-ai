@@ -1,5 +1,7 @@
 export type NavigationIconName =
   | 'messages'
+  | 'chats'
+  | 'profile'
   | 'circle-plus'
   | 'search'
   | 'folder-open'
@@ -46,6 +48,10 @@ export function NavigationIcon({ name }: { name: NavigationIconName }): React.JS
 
 function navigationIconPaths(name: NavigationIconName): React.JSX.Element {
   switch (name) {
+    case 'chats':
+      return <><path d="M5 4.5h9a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H9l-4 3v-3a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z"/><path d="M19 8.5a3 3 0 0 1 2 3v4a3 3 0 0 1-3 3v2l-3-2h-4"/></>
+    case 'profile':
+      return <><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10.5" r="2"/><path d="M6 16c.6-3 5.4-3 6 0M14.5 10h3.5m-3.5 4h2.5"/></>
     case 'messages':
       return <path d="M8.1 4.75h7.8c3.13 0 5.35 2.15 5.35 5.1v2.3c0 2.95-2.22 5.1-5.35 5.1H9.45l-3.68 2.14c-.39.23-.87-.05-.87-.5v-2.28a4.94 4.94 0 0 1-2.15-4.16v-2.6c0-2.95 2.22-5.1 5.35-5.1Z" />
     case 'circle-plus':

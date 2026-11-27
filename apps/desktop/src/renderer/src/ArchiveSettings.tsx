@@ -11,7 +11,7 @@ import { MissionDelete } from './MissionBoard'
 import { CompactDialog, MissionFilter } from './MissionControls'
 import { MissionIcon } from './MissionIcon'
 import { NavigationIcon } from './NavigationIcon'
-import { archiveTargetIsRemoved, archiveView, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
+import { deleteChat, archiveTargetIsRemoved, archiveView, normalizeArchiveText, requestArchiveCommand, writeArchive } from './thread-archive'
 import { useArchiveRecords } from './useArchiveRecords'
 import './archive-settings.css'
 
@@ -116,6 +116,7 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
   }
 
   function name(projectKey: string): string {
+    if (projectKey === 'private-chat') return uiAttribute('聊天')
     if (projectKey === 'quick-chat') return uiAttribute('快速对话')
     if (projectKey === 'unavailable') return uiAttribute('项目不可用')
     return projectNames[projectKey] ?? projectDirectoryName(projectKey.slice('directory:'.length))
@@ -144,6 +145,10 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
   async function unarchive(item: ArchiveItem): Promise<void> {
     try {
       await operate(item, async () => {
+        if(item.chatId){
+          await requestArchiveCommand(client,'chats.setArchived',{chatId:item.chatId,archived:false})
+          discardStaleItem(item); onNotify(uiAttribute('已恢复聊天')); return
+        }
         const result = await writeArchive(client, false, { threadId: item.threadId })
         if (!result.changed) discardStaleItem(item)
         onRestored(item)
@@ -162,8 +167,13 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
         threadId: item.threadId, workspaceDisposition
       }
       try {
-        await requestArchiveCommand(client, 'threads.delete', command)
-        onDeleted(item.threadId)
+        if(item.chatId) {
+          await deleteChat(client, item.chatId)
+          discardStaleItem(item)
+        } else {
+          await requestArchiveCommand(client, 'threads.delete', command)
+          onDeleted(item.threadId)
+        }
         onNotify(uiAttribute('已提交删除'))
       } catch (error) {
         if (!archiveTargetIsRemoved(error)) throw error
@@ -258,7 +268,9 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
             const time = item.lastMessageAt && messageTimeParts(item.lastMessageAt, language, today)
             const disabled = pending.has(item.threadId) || confirm?.threadId === item.threadId
             return <li className="archive-row" key={item.threadId} data-archive-thread={item.threadId}>
-              <span className="archive-title" title={item.title}>{highlight(item.title, query)}</span>
+              <span className="archive-title" title={item.title}>{highlight(item.title, query)}
+                {item.hasPausedInputs && <small className="archive-queue-hint"><UiText zh="恢复后将继续发送排队中的消息" /></small>}
+              </span>
               {time ? <time dateTime={item.lastMessageAt!} title={time.full} aria-label={time.full}>{time.short}</time>
                 : <span className="archive-date"><UiText zh="暂无消息" /></span>}
               <div className="archive-row-actions">
@@ -280,8 +292,8 @@ export function ArchiveSettings({ projectNames, initialKind = 'chat', firstThrea
   </section>
 }
 
-function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
-  item: ArchiveItem
+export function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
+  item: Pick<ArchiveItem, 'missionId' | 'chatId' | 'title'>
   busy: boolean
   onClose(): void
   onDelete(disposition?: 'retain' | 'cleanup'): Promise<void>
@@ -301,7 +313,7 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
   }, [client, item.missionId, retry])
   if (mission) return <MissionDelete mission={mission} recordTitle={item.title}
     onClose={onClose} onDelete={onDelete} />
-  return <CompactDialog title={uiAttribute(item.missionId ? '删除使命' : '删除会话')} onClose={() => { if (!busy) onClose() }}
+  return <CompactDialog title={uiAttribute(item.missionId ? '删除使命' : item.chatId ? '删除聊天' : '删除会话')} onClose={() => { if (!busy) onClose() }}
     footer={<>
       <button type="button" className="compact-cancel" onClick={onClose} disabled={busy}><UiText zh="取消" /></button>
       <button type="button" className="compact-primary archive-delete-confirm"
@@ -317,7 +329,7 @@ function ArchiveDeleteDialog({ item, busy, onClose, onDelete }: {
     <p>{item.title}</p>
     {item.missionId ? <p role={error ? 'alert' : 'status'}>{error ?? uiAttribute('正在读取关联工作区…')}
       {error && <button type="button" className="quiet-button" onClick={() => setRetry(value => value + 1)}><UiText zh="重试" /></button>}</p>
-      : <><p><UiText zh="此会话及其中的消息和附件将被永久删除，正在执行的队员会停止。" /></p>
+      : <><p>{item.chatId ? <UiText zh="聊天记录和聊天目录将被永久删除。其他对话里引用此目录的文件将无法打开。外部文件会保留。" /> : <UiText zh="此会话及其中的消息和附件将被永久删除，正在执行的队员会停止。" />}</p>
         {error && <p className="compact-inline-error" role="alert">{error}</p>}
       </>}
   </CompactDialog>

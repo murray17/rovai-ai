@@ -34,6 +34,8 @@ pub const MEMORY_VIEW_OUTPUT_MAX_BYTES: usize = 64 * 1_024;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MemorySearchInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub query: String,
     pub limit: Option<i64>,
 }
@@ -62,6 +64,8 @@ pub struct MemorySearchOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MemoryReadInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub memory_ids: Vec<String>,
 }
 
@@ -115,6 +119,8 @@ pub struct MemoryReadOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MemoryViewInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub scope: MemoryScopeKind,
     pub counterparty_agent_id: Option<String>,
 }
@@ -257,7 +263,12 @@ impl MemoryRetrievalService {
         attested_run: Option<(&str, i64)>,
     ) -> Result<MemorySearchOutput> {
         crate::memory_capability::require_enabled(database.connection())?;
-        let identity = authenticate(database, invocation, attested_run)?;
+        let mut identity = authenticate(database, invocation, attested_run)?;
+        identity.run = memory_target(
+            database.connection(),
+            &identity.run,
+            invocation.input.thread_id.as_deref(),
+        )?;
         let query = invocation.input.query.trim();
         if query.is_empty() || query.len() > MEMORY_SEARCH_QUERY_MAX_BYTES {
             return Err(tool_error(
@@ -394,7 +405,12 @@ impl MemoryRetrievalService {
         attested_run: Option<(&str, i64)>,
     ) -> Result<MemoryReadOutput> {
         crate::memory_capability::require_enabled(database.connection())?;
-        let identity = authenticate(database, invocation, attested_run)?;
+        let mut identity = authenticate(database, invocation, attested_run)?;
+        identity.run = memory_target(
+            database.connection(),
+            &identity.run,
+            invocation.input.thread_id.as_deref(),
+        )?;
         if invocation.input.memory_ids.is_empty()
             || invocation.input.memory_ids.len() > MEMORY_READ_MAX_IDS
         {
@@ -524,7 +540,12 @@ impl MemoryRetrievalService {
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         crate::memory_capability::require_enabled(&transaction)?;
-        let identity = authenticate_on_connection(&transaction, invocation, attested_run)?;
+        let mut identity = authenticate_on_connection(&transaction, invocation, attested_run)?;
+        identity.run = memory_target(
+            &transaction,
+            &identity.run,
+            invocation.input.thread_id.as_deref(),
+        )?;
         let counterparty = match invocation.input.scope {
             MemoryScopeKind::Relationship => {
                 let counterparty = invocation
@@ -867,6 +888,30 @@ fn authorized_target(memory: &StoredMemoryView, agent_id: &str) -> Result<Memory
     })
 }
 
+pub(crate) fn memory_target(
+    c: &Connection,
+    run: &AuthenticatedTeamToolRun,
+    thread: Option<&str>,
+) -> Result<AuthenticatedTeamToolRun> {
+    let scoped = crate::chat::directory_target(c, run, thread, false)?;
+    if run.camp_id.is_empty()
+        && let Some(target) = thread
+    {
+        anyhow::ensure!(
+            crate::chat::authorize_destination(
+                c,
+                &run.agent_run_id,
+                run.execution_epoch,
+                &run.agent_id,
+                target,
+                true
+            )?,
+            "memory.run_not_current"
+        );
+    }
+    Ok(scoped)
+}
+
 fn authenticate<T>(
     database: &Database,
     invocation: &MemoryRetrievalInvocation<T>,
@@ -1049,7 +1094,7 @@ fn record_evidence(
             identity.native_binding_id,
             identity.native_binding_generation,
             identity.run.agent_id,
-            identity.run.camp_id,
+            crate::runtime::run_thread_id(&identity.run.camp_id),
             evidence_kind,
             query_digest,
             memory_id,

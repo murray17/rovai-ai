@@ -685,6 +685,15 @@ fn parse_date_range(from: Option<&str>, to: Option<&str>) -> Result<ParsedDateRa
 }
 
 fn load_run_fence(transaction: &Connection, run: &AuthenticatedTeamToolRun) -> Result<RunFence> {
+    if run.camp_id.is_empty() {
+        anyhow::ensure!(
+            crate::chat::run_conversation(transaction, &run.agent_run_id, run.execution_epoch)?
+                .is_some(),
+            "chat.private_run_required"
+        );
+        return Ok(transaction.query_row("SELECT id,global_public_message_boundary FROM context_manifest WHERE agent_run_id=?1 AND source_chat_input_id IS NULL AND source_delivery_id IS NULL",
+            [&run.agent_run_id],|r|Ok(RunFence{manifest_id:r.get(0)?,current_camp_id:String::new(),current_boundary:0,global_boundary:r.get(1)?,live_directory:true}))?);
+    }
     transaction
         .query_row(
             r#"
@@ -814,6 +823,21 @@ fn resolve_camp_target(
     fence: &RunFence,
     requested_camp_id: Option<&str>,
 ) -> Result<Option<ThreadTarget>> {
+    if run.camp_id.is_empty() {
+        let target = requested_camp_id.ok_or_else(|| {
+            tool_error("chat.thread_id_required", "Specify the target --thread-id")
+        })?;
+        if !crate::chat::authorize_destination(
+            transaction,
+            &run.agent_run_id,
+            run.execution_epoch,
+            &run.agent_id,
+            target,
+            false,
+        )? {
+            return Ok(None);
+        }
+    }
     let camp_id = requested_camp_id.unwrap_or(&fence.current_camp_id);
     if camp_id == fence.current_camp_id {
         return Ok(Some(ThreadTarget {
@@ -854,6 +878,21 @@ fn resolve_live_read_target(
     fence: &RunFence,
     requested_camp_id: Option<&str>,
 ) -> Result<Option<ThreadTarget>> {
+    if run.camp_id.is_empty() {
+        let target = requested_camp_id.ok_or_else(|| {
+            tool_error("chat.thread_id_required", "Specify the target --thread-id")
+        })?;
+        if !crate::chat::authorize_destination(
+            transaction,
+            &run.agent_run_id,
+            run.execution_epoch,
+            &run.agent_id,
+            target,
+            false,
+        )? {
+            return Ok(None);
+        }
+    }
     let camp_id = requested_camp_id.unwrap_or(&fence.current_camp_id);
     let boundary = transaction
         .query_row(

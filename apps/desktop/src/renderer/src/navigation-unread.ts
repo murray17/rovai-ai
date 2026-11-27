@@ -1,4 +1,12 @@
-import type { NavigationPreferencesApi, NavigationPreferencesSnapshot, NavigationThreadItem, NavigationThreadReadState } from '@contracts'
+import type { ChatReadState, ChatReplyPosition, NavigationPreferencesApi, NavigationPreferencesSnapshot, NavigationThreadItem, NavigationThreadReadState } from '@contracts'
+
+export function chatHasUnread(reply: ChatReplyPosition, state?: ChatReadState): boolean {
+  return Boolean(state?.manualUnread) || reply.lastReplySequence > (state?.readThroughReplySequence ?? 0)
+}
+
+export function chatRailHasUnread(index: readonly ChatReplyPosition[], states: Record<string, ChatReadState>): boolean {
+  return index.some(reply => chatHasUnread(reply, states[reply.chatId]))
+}
 
 /** Running and unread are separate facts, even though legacy marker picks one. */
 export function navigationThreadHasUnread(thread: NavigationThreadItem, state?: NavigationThreadReadState): boolean {

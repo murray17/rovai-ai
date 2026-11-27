@@ -1069,6 +1069,8 @@ export interface ArchiveListQuery {
 }
 
 export interface ArchiveItem {
+  hasPausedInputs?: boolean
+  chatId?: string
   threadId: string
   missionId: string | null
   title: string
@@ -1130,7 +1132,16 @@ export type NavigationSearchTarget = {
   | { kind: 'mission'; mission: { missionId: string; number: number; status: MissionStatus } }
 )
 
+export interface NavigationChatSearchItem {
+  chatId: string
+  title: string
+  agentId: string
+  displayName: string
+  avatarRef: string | null
+}
+
 export interface NavigationSearchResult {
+  chats?: NavigationChatSearchItem[]
   schemaVersion: 1
   throughGlobalSequence: number
   query: string
@@ -1605,7 +1616,7 @@ export type LocalAttachmentOwnerLocator =
 export interface MessageQuoteSnapshot {
   version: 1
   quoteId: string
-  source?: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
+  source?: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string } | {scope:'chat';campId?:never;conversationId:string;messageId:string}
   authorAtCapture?: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
   text: string
   format: 'plain_text'
@@ -2889,6 +2900,7 @@ export interface ThreadMessageChange {
   throughGlobalSequence: number
 }
 export interface ThreadReadInvalidation {
+  chatsChanged?: boolean
   referencesChanged?: boolean
   notificationsChanged?: boolean
   nativeInteractionsChanged?: boolean
@@ -3820,7 +3832,7 @@ export interface WindowsApplicationMenuPopupRequest {
 }
 
 export interface NavigationPin {
-  kind: 'camp' | 'project'
+  kind: 'camp' | 'project' | 'chat'
   targetKey: string
   pinnedAt: string
 }
@@ -3828,6 +3840,93 @@ export interface NavigationPin {
 export interface RemovedNavigationProject {
   targetKey: string
   removedAt: string
+}
+
+export function isChatId(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)
+}
+
+export interface ChatReadState {
+  manualUnread: boolean
+  readThroughReplySequence: number
+}
+
+export interface ChatReplyPosition {
+  chatId: string
+  lastReplySequence: number
+}
+
+export interface ChatListCursor {
+  chatId: string
+  lastActivityGlobalSequence: number
+}
+
+export interface ChatListItem extends ChatReplyPosition, ChatListCursor {
+  title: string
+  agentId: string
+  displayName: string
+  avatarRef: string | null
+  version: number
+  isProcessing: boolean
+}
+
+export type ChatSendResult =
+  | { kind: 'started'; chatId: string; messageId: string; runId: string; title?: string }
+  | { kind: 'queued'; chatId: string; inputId: string }
+  | { kind: 'steer_submitted'; chatId: string; inputId: string; runId: string; executionEpoch: number; evidenceSequence: number }
+
+export type ChatSupplement = {
+  inputId: string
+  runId: string
+  evidenceSequence: number
+  occurredAt: string
+  unconfirmed: boolean
+} & (
+  | { messageId: string }
+  | ({ messageId: null } & Pick<SingleChatMessageView, 'body' | 'quotes' | 'attachments'>)
+)
+
+export interface ChatOpenResult {
+  approvals?: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
+  supplements?: ChatSupplement[]
+  activeInput?: { canSteer: boolean; ready: boolean; unavailableReason: NonNullable<AgentRunView['steerUnavailableReason']> | null } | null
+  pendingInputs: {
+    inputId: string
+    body: string
+    revision: number
+    convertedFromSteer: boolean
+    state: 'queued' | 'needs_repair'
+    attachmentNames?: string[]
+    quotePreview?: string
+  }[]
+  chat: Pick<ChatListItem, 'chatId' | 'agentId' | 'displayName' | 'avatarRef' | 'title' | 'version'> & {
+    archivedAt: string | null
+  }
+  messages: SingleChatMessageView[]
+  runs: {
+    runId: string
+    triggerMessageId: string
+    finalMessageId: string | null
+    status: SingleChatRunView['status']
+    executionEpoch: number
+    throughChangeSequence: number
+    version: number
+    createdAt: string
+    startedAt: string | null
+    endedAt: string | null
+    cancelRequestedAt: string | null
+    lastErrorCode: string | null
+  }[]
+  nextBeforeSequence: number | null
+}
+
+export interface ChatListPage {
+  activeItem?: ChatListItem
+  pinnedItems?: ChatListItem[]
+  items: ChatListItem[]
+  nextCursor: ChatListCursor | null
+  replyIndex: ChatReplyPosition[]
 }
 
 export interface NavigationThreadReadState {
@@ -3845,7 +3944,7 @@ export interface NavigationProjectMove {
 }
 
 export interface NavigationPreferencesSnapshot {
-  schemaVersion: 7
+  schemaVersion: 8
   registeredProjects: string[]
   legacyProjectsSynced: boolean
   /** Read degradation only; never persisted. */
@@ -3856,12 +3955,14 @@ export interface NavigationPreferencesSnapshot {
   pinnedProjectOrder: string[]
   projectNames: Record<string, string>
   threadReadStates: Record<string, NavigationThreadReadState>
+  chatReadStates: Record<string, ChatReadState>
 }
 
 export interface NavigationPreferencesApi {
   moveProject(move: NavigationProjectMove): Promise<NavigationPreferencesSnapshot>
   registerProjects(projectPaths: string[], completeLegacy?: boolean): Promise<NavigationPreferencesSnapshot>
   get(): Promise<NavigationPreferencesSnapshot>
+  setChatReadState(chatId: string, state: ChatReadState | null): Promise<NavigationPreferencesSnapshot>
   setThreadReadState(threadId: string, state: NavigationThreadReadState | null): Promise<NavigationPreferencesSnapshot>
   onChanged(listener: (snapshot: NavigationPreferencesSnapshot) => void): () => void
   replacePins(pins: NavigationPin[]): Promise<NavigationPreferencesSnapshot>
@@ -4385,7 +4486,7 @@ export interface HearthReviewItem {
   targetMemoryId: string | null
   baseRevisionId: string | null
   sourceAgentId: string
-  sourceThreadId: string
+  sourceThreadId: string | null
   sourceAgentRunId: string
   sourceExecutionEpoch: number
   acceptedMemoryId: string | null
@@ -4753,6 +4854,14 @@ export type CoreMethod =
   | 'navigation.threads'
   | 'navigation.groupThreads'
   | 'navigation.findThread'
+  | 'chats.open'
+  | 'chats.canPreviewFile'
+  | 'chats.send'
+  | 'chats.pendingInputs.edit'
+  | 'chats.setArchived'
+  | 'chats.delete'
+  | 'chats.rename'
+  | 'chats.list'
   | 'navigation.search'
   | 'navigation.searchMessages'
   | 'navigation.campViewed'

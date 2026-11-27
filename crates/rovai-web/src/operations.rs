@@ -198,6 +198,24 @@ pub enum Operation {
 
     #[serde(rename = "navigation.findThread", alias = "navigation.findCamp")]
     NavigationFindCamp,
+    #[serde(rename = "chats.send")]
+    ChatsSend,
+    #[serde(rename = "chats.pendingInputs.edit")]
+    ChatsEditPending,
+    #[serde(rename = "chats.setArchived")]
+    ChatsSetArchived,
+    #[serde(rename = "chats.delete")]
+    ChatsDelete,
+    #[serde(rename = "chats.rename")]
+    ChatsRename,
+    #[serde(rename = "chats.open")]
+    ChatsOpen,
+    #[serde(rename = "runtimeInputs.reconcile")]
+    RuntimeInputsReconcile,
+    #[serde(rename = "chats.canPreviewFile")]
+    ChatsCanPreviewFile,
+    #[serde(rename = "chats.list")]
+    ChatsList,
     #[serde(rename = "navigation.search")]
     NavigationSearch,
     #[serde(rename = "navigation.searchMessages")]
@@ -567,6 +585,15 @@ impl Operation {
             Self::RuntimeStartupCheck => "runtime.startup.check",
 
             Self::NavigationFindCamp => "navigation.findCamp",
+            Self::ChatsSend => "chats.send",
+            Self::ChatsEditPending => "chats.pendingInputs.edit",
+            Self::ChatsSetArchived => "chats.setArchived",
+            Self::ChatsDelete => "chats.delete",
+            Self::ChatsRename => "chats.rename",
+            Self::ChatsOpen => "chats.open",
+            Self::RuntimeInputsReconcile => "runtimeInputs.reconcile",
+            Self::ChatsCanPreviewFile => "chats.canPreviewFile",
+            Self::ChatsList => "chats.list",
             Self::NavigationSearch => "navigation.search",
             Self::NavigationSearchMessages => "navigation.searchMessages",
             Self::RunExecutionPage => "agentRunExecution.page",

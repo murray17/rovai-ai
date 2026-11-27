@@ -64,6 +64,7 @@
 .archive-row + .archive-row { border-top: 1px solid var(--line); }
 .archive-title { grid-area: title; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1.5; }
 .archive-row time, .archive-date { grid-area: time; color: var(--muted); font-size: 11.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.archive-queue-hint { display: block; color: var(--muted); font-weight: 400; }
 .archive-title mark { padding-inline: 1px; border-radius: 3px; background: var(--conversation-find-match); color: inherit; }
 .archive-row-actions { grid-area: actions; display: flex; align-items: center; gap: 2px; }
 .archive-restore, .archive-delete {

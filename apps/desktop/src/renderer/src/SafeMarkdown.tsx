@@ -150,10 +150,10 @@ function scrollToMarkdownHeading(root: HTMLElement, target: string): boolean {
   return Boolean(heading)
 }
 
-function remarkFileLinks(): (tree: MarkdownTreeNode) => void {
+function remarkFileLinks(options: { includeImages?: boolean } = {}): (tree: MarkdownTreeNode) => void {
   return (tree) => {
     const visit = (node: MarkdownTreeNode): void => {
-      if (node.type === 'link' && node.url && parseFileReference(node.url)) {
+      if ((node.type === 'link' || (options.includeImages && node.type === 'image')) && node.url && parseFileReference(node.url)) {
         node.url = `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(node.url)}`
       }
       node.children?.forEach(visit)
@@ -171,6 +171,7 @@ export function SafeMarkdown({
   className,
   onFileReference,
   localImageUrl,
+  verifyFileReference,
   localImageContent,
   headingTarget,
   onHeadingTargetResult,
@@ -185,6 +186,7 @@ export function SafeMarkdown({
   children: string
   className?: string
   onFileReference?: FileReferenceActivation
+  verifyFileReference?(rawReference: string): Promise<boolean>
   localImageUrl?(rawReference: string): string | null
   localImageContent?(rawReference: string): Promise<FilePreviewOperationResult<FilePreviewBinaryContent>>
   headingTarget?: string
@@ -250,7 +252,7 @@ export function SafeMarkdown({
           remarkCjkFriendly,
           [remarkCjkFriendlyStrikethrough, { singleTilde: false }],
           remarkRepairCjkUrlTail,
-          [remarkFileLinks, fileReferencesEnabled]
+          [remarkFileLinks, fileReferencesEnabled ? { includeImages: Boolean(verifyFileReference) } : false]
         ]}
         rehypePlugins={[
           rehypeRaw,
@@ -295,7 +297,7 @@ export function SafeMarkdown({
                 return <code className="markdown-inert-link">{linkChildren}</code>
               }
               if (!parseFileReference(rawReference)) return <code className="markdown-inert-link">{linkChildren}</code>
-              return (
+              const link = (
                 <FileReferenceLink
                   className={['markdown-file-reference', linkClassName].filter(Boolean).join(' ')}
                   rawReference={rawReference}
@@ -304,6 +306,9 @@ export function SafeMarkdown({
                   {markdownHeadingText(linkChildren).trim() ? linkChildren : rawReference}
                 </FileReferenceLink>
               )
+              return verifyFileReference
+                ? <VerifiedFileLink reference={rawReference} verify={verifyFileReference}>{link}</VerifiedFileLink>
+                : link
             }
             if (href?.startsWith('#')) {
               let target = href.slice(1)
@@ -339,7 +344,12 @@ export function SafeMarkdown({
             const rawReference = src.startsWith(FILE_REFERENCE_FRAGMENT)
               ? decodeURIComponent(src.slice(FILE_REFERENCE_FRAGMENT.length))
               : src
-            if (localImageContent) return <LocalMarkdownImage reference={rawReference} alt={alt ?? ''} read={localImageContent} />
+            if (localImageContent) return (
+              <LocalMarkdownImage reference={rawReference} alt={alt ?? ''} read={localImageContent}
+                onOpen={verifyFileReference && fileReferencesEnabled
+                  ? source => callbacks.current.onFileReference?.(rawReference, source)
+                  : undefined} />
+            )
             const safeUrl = localImageUrl?.(rawReference)
             return safeUrl ? <img src={safeUrl} alt={alt ?? ''} loading="lazy" /> : null
           }
@@ -349,7 +359,7 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, mode, theme, CodeBlock, blocks])
+  }, [children, fileReferencesEnabled, verifyFileReference, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, mode, theme, CodeBlock, blocks])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>
@@ -371,14 +381,9 @@ export function SafeMarkdown({
   )
 }
 
-function LocalMarkdownImage({ reference, alt, read }: {
-  reference: string; alt: string
-  read(reference: string): Promise<FilePreviewOperationResult<FilePreviewBinaryContent>>
-}): React.JSX.Element {
+function useVisibleReference() {
   const root = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
-  const [url, setUrl] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
   useEffect(() => {
     if (!root.current || typeof IntersectionObserver === 'undefined') { setVisible(true); return }
     const observer = new IntersectionObserver(entries => {
@@ -387,6 +392,37 @@ function LocalMarkdownImage({ reference, alt, read }: {
     observer.observe(root.current)
     return () => observer.disconnect()
   }, [])
+  return { root, visible }
+}
+
+function VerifiedFileLink({ reference, verify, children }: {
+  reference: string
+  verify(reference: string): Promise<boolean>
+  children: ReactNode
+}): JSX.Element {
+  const { root, visible } = useVisibleReference()
+  const [verified, setVerified] = useState<string | null>(null)
+  useEffect(() => {
+    if (!visible) return
+    let active = true
+    setVerified(null)
+    void verify(reference).then(allowed => {
+      if (active && allowed) setVerified(reference)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [visible, reference, verify])
+  return <span ref={root}>{verified === reference ? children : <code className="markdown-inert-link">{reference}</code>}</span>
+}
+
+function LocalMarkdownImage({ reference, alt, read, onOpen }: {
+  reference: string
+  alt: string
+  read(reference: string): Promise<FilePreviewOperationResult<FilePreviewBinaryContent>>
+  onOpen?(source: HTMLElement): void
+}): JSX.Element {
+  const { root, visible } = useVisibleReference()
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     if (!visible) return
     let active = true
@@ -400,5 +436,11 @@ function LocalMarkdownImage({ reference, alt, read }: {
     }).catch(() => { if (active) setFailed(true) })
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [reference, read, visible])
-  return <span ref={root}>{url ? <img src={url} alt={alt} loading="lazy" /> : failed ? <span role="status">{alt ||uiAttribute("图片")}<UiText zh={"（暂不可读）"} /></span> : <span>{alt ||uiAttribute("图片")}</span>}</span>
+  const image = url ? <img src={url} alt={alt} loading="lazy" /> : null
+  return <span ref={root}>{image
+    ? (onOpen ? <button type="button" className="chat-inline-image" aria-label={alt || uiAttribute('图片')} onClick={event => onOpen(event.currentTarget)}>{image}</button> : image)
+    : failed && onOpen ? <code className="markdown-inert-link">{reference}</code>
+    : failed ? <span role="status">{alt || uiAttribute('图片')}<UiText zh={"（暂不可读）"} /></span>
+    : <span>{alt || uiAttribute('图片')}</span>
+  }</span>
 }

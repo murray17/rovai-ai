@@ -8,7 +8,7 @@ last_updated: 2026-11-23
 
 User 的主称呼、结构化提及及冻结恢复见 [User Naming v1](user-naming-v1.md)。
 
-公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)。当前模型与 CLI 版本见 [ContextManifest v45](context-manifest-evidence-v45.md) 和 [Built-in Tool Transport v46](builtin-tool-transport-v46.md)。
+公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)。当前模型与 CLI 版本见 [ContextManifest v45](context-manifest-evidence-v45.md) 和 [Built-in Tool Transport v47](builtin-tool-transport-v47.md)。
 
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
@@ -86,7 +86,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | --- | --- |
 | [Hermes Managed Runtime v1](hermes-managed-runtime-v1.md) | 官方 ACP、原生 Home、会话定位 CLI、user 层规则及共享 Gateway 边界。 |
 | [Native Session Bootstrap v6](native-session-bootstrap-v6.md) | 唯一可选 TEAM_GUIDANCE、冻结文本和恢复边界。 |
-| [Built-in Tool Transport v46](builtin-tool-transport-v46.md) | 将两个消息搜索的成功结果精简为两个顶层字段。引用输出见 [v45（历史）](builtin-tool-transport-v45.md)，Thread read 正向分页与 Send 输入来源见 [v44（历史）](builtin-tool-transport-v44.md)。 |
+| [Built-in Tool Transport v47](builtin-tool-transport-v47.md) | 增加独立聊天的历史查询与创建 Thread 操作。消息搜索输出见 [v46](builtin-tool-transport-v46.md)。引用输出见 [v45（历史）](builtin-tool-transport-v45.md)，Thread read 正向分页与 Send 输入来源见 [v44（历史）](builtin-tool-transport-v44.md)。 |
 | [ContextManifest Evidence v45（当前）](context-manifest-evidence-v45.md) | 公共普通初始输入增加可选 edited，公共 45 / non-batch 44，Facts 14/13、Profile 15/16 |
 | [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md) | 新公开批次使用 Profile 15，非批次使用 Profile 16；旧冻结输入按原版本恢复。 |
 | [Run Facts v11（当前）](run-facts-v11.md) | 公共普通批次存在编辑消息时追加一条 historyHint 提示 |

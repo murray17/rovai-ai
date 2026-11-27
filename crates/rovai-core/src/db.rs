@@ -4,6 +4,12 @@ mod attachment_paths;
 mod automation_naming;
 #[path = "db_channel_native.rs"]
 mod channel_native;
+#[path = "db_chat_inputs.rs"]
+mod chat_inputs;
+#[path = "db_chat_runtime.rs"]
+mod chat_runtime;
+#[path = "db_chat_topics.rs"]
+mod chat_topics;
 #[path = "db_claim_context.rs"]
 mod claim_context;
 #[path = "db_compact_execution.rs"]
@@ -530,7 +536,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 182;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 187;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1038,6 +1044,11 @@ struct CurrentMigrationState {
     v230: bool,
     v231: bool,
     v232: bool,
+    v233: bool,
+    v234: bool,
+    v235: bool,
+    v236: bool,
+    v237: bool,
 }
 
 impl CurrentMigrationState {
@@ -1059,6 +1070,31 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v237 {
+            let mut previous = *self;
+            previous.v237 = false;
+            return schema == 187 && previous.admits(contract, 186, classifier);
+        }
+        if self.v236 {
+            let mut previous = *self;
+            previous.v236 = false;
+            return schema == 186 && previous.admits(contract, 185, classifier);
+        }
+        if self.v235 {
+            let mut previous = *self;
+            previous.v235 = false;
+            return schema == 185 && previous.admits(contract, 184, classifier);
+        }
+        if self.v234 {
+            let mut previous = *self;
+            previous.v234 = false;
+            return schema == 184 && previous.admits(contract, 183, classifier);
+        }
+        if self.v233 {
+            let mut previous = *self;
+            previous.v233 = false;
+            return schema == 183 && previous.admits(contract, 182, classifier);
+        }
         if self.v232 {
             let mut previous = *self;
             previous.v232 = false;
@@ -3884,6 +3920,10 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 185
+                || chat_runtime::schema_matches(connection)?)
+            && (marker.projection_schema_version < 184 || chat_inputs::schema_matches(connection)?)
+            && (marker.projection_schema_version < 183 || chat_topics::schema_matches(connection)?)
             && (marker.projection_schema_version < 181
                 || run_continuation::retired_schema_matches(connection)?)
             && (!(177..=180).contains(&marker.projection_schema_version)
@@ -6024,7 +6064,8 @@ fn single_chat_v140_schema_matches(connection: &Connection) -> rusqlite::Result<
     )?;
     Ok(required_objects == 11
         && retired_objects == 0
-        && conversation_sql.contains("kind IN ('camp_member', 'single_chat')")
+        && (conversation_sql.contains("kind IN ('camp_member', 'single_chat')")
+            || conversation_sql.contains("kind IN ('camp_member', 'single_chat', 'chat')"))
         && camp_turn_sql.contains("kind IN ('camp', 'single_chat')")
         && camp_turn_sql.contains("'conversation_message'")
         && agent_run_sql.contains("'single_chat'")
@@ -6321,7 +6362,12 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=229),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=230),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=231),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=232)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=232),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=233),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=234),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=235),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=236),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=237)
         "#,
         [],
         |row| {
@@ -6489,6 +6535,11 @@ fn load_current_migration_state(
                 v230: row.get(160)?,
                 v231: row.get(161)?,
                 v232: row.get(162)?,
+                v233: row.get(163)?,
+                v234: row.get(164)?,
+                v235: row.get(165)?,
+                v236: row.get(166)?,
+                v237: row.get(167)?,
             })
         },
     )
@@ -7049,6 +7100,18 @@ fn register_runtime_camp_files_functions(
         .to_str()
         .context("Runtime Camp Files Root is not valid UTF-8")?
         .to_string();
+    let chat_root = PathBuf::from(&root);
+    connection.create_scalar_function(
+        "rovai_chat_directory",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |ctx| {
+            let id: String = ctx.get(0)?;
+            crate::storage_layout::chat_directory(&chat_root, &id)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|err| rusqlite::Error::UserFunctionError(err.into()))
+        },
+    )?;
     let identity = root_identity_digest.to_string();
     connection.create_scalar_function(
         "rovai_runtime_camp_files_root",
@@ -8905,6 +8968,25 @@ impl Database {
         if !self.schema_migration_applied(232)? {
             observe_migration_step(progress, "migration_232", || {
                 quote_text::migrate_edited_messages(self)
+            })?;
+        }
+        if !self.schema_migration_applied(233)? {
+            observe_migration_step(progress, "migration_233", || chat_topics::migrate(self))?;
+        }
+        if !self.schema_migration_applied(234)? {
+            observe_migration_step(progress, "migration_234", || chat_inputs::migrate(self))?;
+        }
+        if !self.schema_migration_applied(235)? {
+            observe_migration_step(progress, "migration_235", || chat_runtime::migrate(self))?;
+        }
+        if !self.schema_migration_applied(236)? {
+            observe_migration_step(progress, "migration_236", || {
+                chat_runtime::repair_chat_runtime(self)
+            })?;
+        }
+        if !self.schema_migration_applied(237)? {
+            observe_migration_step(progress, "migration_237", || {
+                chat_runtime::repair_chat_inputs(self)
             })?;
         }
         if let Err(error) =
@@ -40666,7 +40748,11 @@ mod tests {
             "migration_229".into(),
             "migration_230".into(),
             "migration_231".into(),
-            "migration_232".into()
+            "migration_232".into(),
+            "migration_233".into(),
+            "migration_234".into(),
+            "migration_235".into(),
+            "migration_236".into()
         ]));
         assert!(connection_has_current_data_contract(complete.connection()).unwrap());
 
@@ -40746,7 +40832,11 @@ mod tests {
                 "migration_229",
                 "migration_230",
                 "migration_231",
-                "migration_232"
+                "migration_232",
+                "migration_233",
+                "migration_234",
+                "migration_235",
+                "migration_236"
             ]
         );
         assert!(older.schema_migration_applied(227).unwrap());
@@ -42839,6 +42929,10 @@ mod tests {
             v230: version >= 230,
             v231: version >= 231,
             v232: version >= 232,
+            v233: version >= 233,
+            v234: version >= 234,
+            v235: version >= 235,
+            v236: version >= 236,
         }
     }
 

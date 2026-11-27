@@ -105,7 +105,6 @@ impl OwnedTestDatabase {
         drop(self.database.take());
     }
 
-    #[cfg(feature = "slow-tests")]
     pub(crate) fn reopen_production(&mut self) -> anyhow::Result<&mut Database> {
         self.close();
         self.database = Some(Database::open(&self.directory)?);

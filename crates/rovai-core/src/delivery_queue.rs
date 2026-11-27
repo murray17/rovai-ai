@@ -226,6 +226,15 @@ pub fn has_pending_delivery_batch_work(database: &Database) -> Result<bool> {
               AND agent_run.input_ready_at IS NOT NULL
               AND agent_run.cancel_requested_at IS NULL
               AND camp.deletion_operation_id IS NULL
+        ) OR EXISTS(
+            SELECT 1 FROM single_chat_pending_input p
+            JOIN agent_run r ON r.id=p.target_run_id AND r.execution_epoch=p.target_execution_epoch
+            JOIN chat_topic t ON t.conversation_id=p.conversation_id
+            WHERE p.requested_mode='steer' AND p.state='queued'
+              AND r.status IN ('running','waiting') AND r.cancel_requested_at IS NULL
+              AND t.archived_at IS NULL AND t.deletion_operation_id IS NULL
+              AND NOT EXISTS (SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
+                              WHERE m.source_chat_input_id=p.id AND i.dispatch_started_at IS NOT NULL)
         )
         "#,
         [],

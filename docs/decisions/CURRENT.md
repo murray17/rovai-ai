@@ -33,13 +33,13 @@ Team 创建模板与启动指引：[Team Templates v1](../contracts/team-templat
 队员单文件头像当前规范：[Member Avatar v4](../contracts/member-avatar-v4.md)、[队员身份 UI](../ui/components/member-identity.md)；取舍见 [V1.72-D42](../versions/v1.72/decisions.md#v1-72-d42)。
 
 成员路由与职责扩容当前规范：[Collaboration State v4](../contracts/collaboration-state-v4.md)、
-[Built-in Transport v46](../contracts/builtin-tool-transport-v46.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
+[Built-in Transport v47](../contracts/builtin-tool-transport-v47.md)、[ContextManifest v34](../contracts/context-manifest-evidence-v34.md)；
 分层与保持 resume 的取舍见 [V1.72-D40](../versions/v1.72/decisions.md#v1-72-d40)。
 
 
-内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v46](../contracts/builtin-tool-transport-v46.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
+内部减重当前规范：[输入快照/数据库准入](../contracts/input-snapshot-storage-v1.md)、[Built-in Tool Transport v47](../contracts/builtin-tool-transport-v47.md)、[Domain Command Result v2](../contracts/domain-command-result-v2.md)；取舍见 [V1.72-D38](../versions/v1.72/decisions.md#v1-72-d38)。
 
-Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v46](../contracts/builtin-tool-transport-v46.md)和
+Send 正文文件与旧调用兼容：当前规范为 [Built-in Tool Transport v47](../contracts/builtin-tool-transport-v47.md)和
 [Built-in 运输不变量](../architecture/foundational-invariants.md#skills-builtin-transport)；单入口与精简教学的取舍见
 [V1.72-D33](../versions/v1.72/decisions.md#v1-72-d33)。
 

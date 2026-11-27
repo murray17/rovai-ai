@@ -1065,7 +1065,12 @@ impl CodexRuntime {
     }
 
     /// Native expectedTurnId fences the end race without starting another turn.
-    pub async fn steer(&self, expected_turn_id: &str, text: &str) -> Result<String> {
+    pub async fn steer(
+        &self,
+        expected_turn_id: &str,
+        input_id: &str,
+        text: &str,
+    ) -> Result<String> {
         let thread_id = self
             .thread_id()
             .await
@@ -1075,6 +1080,7 @@ impl CodexRuntime {
                 "turn/steer",
                 json!({
                     "threadId": thread_id, "expectedTurnId": expected_turn_id,
+                    "clientUserMessageId": input_id,
                     "input": [{"type":"text","text":text,"text_elements":[]}],
                 }),
             )
@@ -1094,7 +1100,7 @@ impl CodexRuntime {
     pub async fn contains_steered_input(
         &self,
         expected_turn_id: &str,
-        payload: &str,
+        input_id: &str,
     ) -> Result<bool> {
         let thread_id = self
             .thread_id()
@@ -1118,17 +1124,8 @@ impl CodexRuntime {
                     .into_iter()
                     .flatten()
             })
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("userMessage"))
-            .flat_map(|item| {
-                item.get("content")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-            })
-            .any(|part| {
-                part.get("text")
-                    .and_then(Value::as_str)
-                    .is_some_and(|text| text == payload || text.ends_with(&format!("\n{payload}")))
+            .any(|item| {
+                item["type"] == "userMessage" && item["clientId"].as_str() == Some(input_id)
             }))
     }
 
@@ -2524,7 +2521,7 @@ mod tests {
             "#!/bin/sh\n[ -f \"$ROVAI_CLI_CONTEXT\" ] && [ -d \"$ROVAI_RUN_TMP\" ] || exit 1\nIFS= read -r initialize || exit 1\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nIFS= read -r initialized || exit 1\nwhile IFS= read -r ignored; do :; done\n",
         );
         let attachment_authorization = ThreadOutputDirectory {
-            camp_id: "camp-process-compatibility".to_string(),
+            owner_id: "camp-process-compatibility".to_string(),
             output_root: root.join("attachments"),
         };
         std::fs::create_dir_all(&attachment_authorization.output_root).unwrap();
@@ -3404,9 +3401,10 @@ for line in sys.stdin:
         if marker in ('rejected', 'internal-error'):
             response = {'id': request['id'], 'error': {'code': -32600 if marker == 'rejected' else -32603, 'message': marker}}
         else:
+            accepted_id = request['params']['clientUserMessageId']
             response['result'] = {'turnId': request['params']['expectedTurnId']}
     elif method == 'thread/read':
-        response['result'] = {'thread': {'turns': [{'id':'turn-fixture','items':[{'type':'userMessage','content':[{'type':'text','text':'accepted-input'}]}]}]}}
+        response['result'] = {'thread': {'turns': [{'id':'turn-fixture','items':[{'type':'userMessage','clientId':accepted_id,'content':[{'type':'text','text':'accepted-input'}]}]}]}}
     print(json.dumps(response), flush=True)
 "#.replace("__SCENARIO__", scenario));
             // Default launches must also work after discarding the entire Host,
@@ -3502,28 +3500,36 @@ for line in sys.stdin:
                             if scenario == "default" && attempt == 0 {
                                 assert_eq!(
                                     runtime
-                                        .steer("turn-fixture", "accepted-input")
+                                        .steer("turn-fixture", "first-client-id", "accepted-input")
                                         .await
                                         .unwrap(),
                                     "turn-fixture"
                                 );
                                 assert!(
                                     runtime
-                                        .contains_steered_input("turn-fixture", "accepted-input")
+                                        .contains_steered_input("turn-fixture", "first-client-id")
                                         .await
                                         .unwrap()
                                 );
                                 assert!(
                                     !runtime
-                                        .contains_steered_input("other-turn", "accepted-input")
+                                        .contains_steered_input("other-turn", "first-client-id")
+                                        .await
+                                        .unwrap()
+                                );
+                                assert!(
+                                    !runtime
+                                        .contains_steered_input("turn-fixture", "another-client-id")
                                         .await
                                         .unwrap()
                                 );
                                 for (marker, rejected) in
                                     [("rejected", true), ("internal-error", false)]
                                 {
-                                    let error =
-                                        runtime.steer("turn-fixture", marker).await.unwrap_err();
+                                    let error = runtime
+                                        .steer("turn-fixture", "later-client-id", marker)
+                                        .await
+                                        .unwrap_err();
                                     assert_eq!(
                                         error
                                             .downcast_ref::<CodexResponseError>()
@@ -3533,7 +3539,7 @@ for line in sys.stdin:
                                     );
                                 }
                                 let lost = runtime
-                                    .steer("turn-fixture", "transport-lost")
+                                    .steer("turn-fixture", "lost-client-id", "transport-lost")
                                     .await
                                     .unwrap_err();
                                 assert!(

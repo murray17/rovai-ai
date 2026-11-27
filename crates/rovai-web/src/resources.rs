@@ -250,6 +250,12 @@ async fn resolve(state: &WebState, client: &DraftClient, source: &Value) -> Resu
         .await
         .context("file_not_found")?;
     if !path.starts_with(&root) {
+        ensure!(
+            !target["sourceIdentity"].as_str().is_some_and(
+                |id| id.starts_with("chat-message:") || id.starts_with("chat-activity:")
+            ),
+            "outside_authorized_root"
+        );
         // Like Desktop, an exact Core-authorized external file uses its parent
         // only as an ephemeral child/watch boundary, never a persistent grant.
         ensure!(

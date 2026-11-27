@@ -29,7 +29,9 @@ impl BootstrapContents {
         )?;
         let memory_enabled = crate::memory_capability::discoverable(connection);
         let (memory_entrypoint, observed_memory_revisions, authorization_basis_digest) =
-            if !memory_enabled || snapshot.invocation_kind == "single_chat" {
+            if !memory_enabled
+                || matches!(snapshot.invocation_kind.as_str(), "single_chat" | "chat")
+            {
                 (
                     String::new(),
                     Vec::new(),
@@ -53,7 +55,7 @@ impl BootstrapContents {
             omitted.join("; ")
         );
         Ok(Self {
-            team_guidance: if snapshot.invocation_kind == "single_chat" {
+            team_guidance: if matches!(snapshot.invocation_kind.as_str(), "single_chat" | "chat") {
                 None
             } else {
                 crate::teams::thread_guidance(connection, &snapshot.camp_id)?

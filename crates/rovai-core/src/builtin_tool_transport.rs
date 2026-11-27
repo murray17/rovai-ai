@@ -10,12 +10,12 @@ use serde_json::{Map, Value, json};
 
 use crate::team_tool_catalog::builtin_tool_definitions;
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 46;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 47;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 3;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 46;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 47;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 16;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v46";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v47";
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
@@ -23,12 +23,14 @@ pub const COMPACTION_HOOK_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const COMPACTION_OBSERVATION_IPC_KIND: &str = "compaction_observation";
 pub const COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION: u32 = 1;
 
-/// The two existing instance capabilities projected into CLI discovery.
+/// Instance capabilities and the active Run scope used by CLI discovery.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BuiltinToolCapabilities {
     pub tasks_enabled: bool,
     pub memory_enabled: bool,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,6 +95,8 @@ pub struct BuiltinToolCliContext {
     pub tasks_enabled: bool,
     #[serde(default)]
     pub memory_enabled: bool,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 impl BuiltinToolCliContext {
@@ -188,7 +192,7 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 30] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 32] = [
     BuiltinToolCliIdentity {
         operation: "thread.message.send",
         group: "send",
@@ -253,6 +257,16 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 30] = [
         operation: "thread.runs",
         group: "thread",
         action: "runs",
+    },
+    BuiltinToolCliIdentity {
+        operation: "thread.create",
+        group: "thread",
+        action: "create",
+    },
+    BuiltinToolCliIdentity {
+        operation: "chat.history",
+        group: "chat",
+        action: "history",
     },
     BuiltinToolCliIdentity {
         operation: "single_chat.history",
@@ -1067,6 +1081,8 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         | "memory.search"
         | "memory.read"
         | "memory.view"
+        | "thread.create"
+        | "chat.history"
         | "single_chat.history"
         | "mission.list"
         | "mission.get"
@@ -1197,10 +1213,10 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 46);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 46);
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 47);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 47);
         assert_eq!(BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION, 16);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v46");
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v47");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -1210,8 +1226,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 30);
-        assert_eq!(commands.len(), 30);
+        assert_eq!(operations.len(), 32);
+        assert_eq!(commands.len(), 32);
     }
 
     #[test]
@@ -1386,7 +1402,7 @@ mod tests {
                 .map(|argument| argument.flag.as_str()),
             Some("--to-user")
         );
-        assert!(send.input_schema["properties"].get("threadId").is_none());
+        assert!(send.input_schema["properties"].get("threadId").is_some());
         assert!(
             send.input_schema["properties"]
                 .get("replyToThreadMessageId")

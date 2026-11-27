@@ -272,30 +272,7 @@ pub struct ThreadMembershipReconciliationView {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskView {
-    pub task_id: String,
-    #[serde(rename = "threadId", alias = "campId")]
-    pub camp_id: String,
-    pub title: String,
-    pub description: String,
-    pub status: String,
-    pub assignee_agent_id: Option<String>,
-    pub blocked_reason: Option<String>,
-    pub completion_summary: Option<String>,
-    pub cancel_reason: Option<String>,
-    pub created_by_type: String,
-    pub created_by_id: String,
-    pub source_agent_run_id: Option<String>,
-    pub closed_by_type: Option<String>,
-    pub closed_by_id: Option<String>,
-    pub closed_by_agent_run_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub closed_at: Option<String>,
-    pub available_actions: Vec<String>,
-}
+pub type TaskView = crate::collaboration::TaskDetail;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2148,103 +2125,24 @@ fn load_tasks(
     camp_id: &str,
     limit: Option<i64>,
 ) -> Result<Vec<TaskView>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT id, camp_id, title, description, acceptance_criteria_json,
-               status, assignee_agent_id, blocked_reason, completion_summary, cancel_reason,
-               created_by_type, created_by_id, source_agent_run_id,
-               closed_by_type, closed_by_id, closed_by_agent_run_id,
-               created_at, updated_at, closed_at
-        FROM task
-        WHERE camp_id = ?1
-        ORDER BY
-          CASE
-            WHEN ?2 IS NOT NULL AND status IN ('pending', 'in_progress', 'blocked') THEN 0
-            WHEN ?2 IS NOT NULL THEN 1
-            ELSE 0
-          END,
-          created_at DESC, id
-        LIMIT COALESCE(?2, -1)
-        "#,
+    let mut statement = transaction.prepare_cached(&format!(
+        "{} WHERE t.camp_id = ?1
+         ORDER BY CASE WHEN ?2 IS NULL OR t.status IN ('pending','in_progress','blocked') THEN 0 ELSE 1 END,
+                  t.created_at DESC, t.id
+         LIMIT coalesce(?2, -1)", crate::collaboration::PUBLIC_TASK_SELECT))?;
+    let rows = statement.query_map(
+        params![camp_id, limit],
+        crate::collaboration::task_record_from_row,
     )?;
-    let rows = statement.query_map(params![camp_id, limit], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, Option<String>>(6)?,
-            row.get::<_, Option<String>>(7)?,
-            row.get::<_, Option<String>>(8)?,
-            row.get::<_, Option<String>>(9)?,
-            row.get::<_, String>(10)?,
-            row.get::<_, String>(11)?,
-            row.get::<_, Option<String>>(12)?,
-            row.get::<_, Option<String>>(13)?,
-            row.get::<_, Option<String>>(14)?,
-            row.get::<_, Option<String>>(15)?,
-            row.get::<_, String>(16)?,
-            row.get::<_, String>(17)?,
-            row.get::<_, Option<String>>(18)?,
-        ))
-    })?;
     let mut result = Vec::new();
     for row in rows {
-        let (
-            id,
-            task_camp_id,
-            title,
-            description,
-            acceptance_criteria_json,
-            status,
-            assignee,
-            blocked_reason,
-            completion_summary,
-            cancel_reason,
-            created_by_type,
-            created_by_id,
-            source_agent_run_id,
-            closed_by_type,
-            closed_by_id,
-            closed_by_agent_run_id,
-            created_at,
-            updated_at,
-            closed_at,
-        ) = row?;
-        let available_actions = if matches!(status.as_str(), "completed" | "cancelled") {
-            Vec::new()
-        } else {
-            vec!["update".to_string()]
+        let task = row?;
+        let actions = match task.status {
+            crate::collaboration::TaskStatus::Completed
+            | crate::collaboration::TaskStatus::Cancelled => Vec::new(),
+            _ => vec!["update".to_owned()],
         };
-        let legacy_acceptance_criteria =
-            serde_json::from_str::<Vec<String>>(&acceptance_criteria_json)
-                .context("Task acceptance criteria are invalid")?;
-        result.push(TaskView {
-            task_id: id,
-            camp_id: task_camp_id,
-            title,
-            description: crate::collaboration::synthesize_task_description(
-                &description,
-                &legacy_acceptance_criteria,
-            ),
-            status,
-            assignee_agent_id: assignee,
-            blocked_reason,
-            completion_summary,
-            cancel_reason,
-            created_by_type,
-            created_by_id,
-            source_agent_run_id,
-            closed_by_type,
-            closed_by_id,
-            closed_by_agent_run_id,
-            created_at,
-            updated_at,
-            closed_at,
-            available_actions,
-        });
+        result.push(crate::collaboration::public_task_detail(task, actions));
     }
     Ok(result)
 }
@@ -4296,12 +4194,12 @@ fn load_approvals(
     pending_only: bool,
     limit: Option<i64>,
 ) -> Result<Vec<ApprovalView>> {
-    load_conversation_approvals(transaction, camp_id, None, pending_only, limit)
+    load_conversation_approvals(transaction, Some(camp_id), None, pending_only, limit)
 }
 
 pub(crate) fn load_conversation_approvals(
     connection: &rusqlite::Connection,
-    camp_id: &str,
+    camp_id: Option<&str>,
     conversation_id: Option<&str>,
     pending_only: bool,
     limit: Option<i64>,
@@ -4325,10 +4223,10 @@ pub(crate) fn load_conversation_approvals(
         JOIN agent_run ON agent_run.id = action_execution.agent_run_id
         LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
-        WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
+        WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) IS ?1
           AND (?2 = 0 OR approval.status = 'pending')
-          AND ((?4 IS NULL AND conversation.kind <> 'single_chat')
-            OR (?4 IS NOT NULL AND conversation.kind = 'single_chat' AND conversation.id = ?4))
+          AND ((?4 IS NULL AND ?1 IS NOT NULL AND conversation.kind <> 'single_chat')
+            OR (?4 IS NOT NULL AND conversation.kind IN ('single_chat','chat') AND conversation.id = ?4))
         ORDER BY approval.requested_at DESC, approval.id
         LIMIT COALESCE(?3, -1)
         "#,
@@ -4450,6 +4348,11 @@ fn load_events(
     } else {
         "AND COALESCE(event_log.entity_type, '') <> 'task'"
     };
+    let event_thread = if tasks_enabled {
+        "COALESCE(NULLIF(event_log.camp_id,''), task.camp_id)"
+    } else {
+        "NULLIF(event_log.camp_id,'')"
+    };
     let order = if newest_first_window { "DESC" } else { "ASC" };
     let sql = format!(
         r#"
@@ -4461,7 +4364,11 @@ fn load_events(
                event_log.payload_json, event_log.command_type,
                event_log.result_status, event_log.result_code,
                event_log.result_payload_json, event_log.result_entity_type,
-               event_log.result_entity_id, event_log.created_at
+               event_log.result_entity_id, event_log.created_at,
+               CASE WHEN event_log.source_agent_run_id IS NOT NULL AND {event_thread} IS NOT NULL THEN
+                   NOT EXISTS (SELECT 1 FROM agent_run r LEFT JOIN camp_turn t ON t.id=r.camp_turn_id
+                               WHERE r.id=event_log.source_agent_run_id AND COALESCE(r.camp_id,t.camp_id)={event_thread})
+               ELSE 0 END AS hide_source
         FROM event_log
         {task_join}
         WHERE event_log.global_sequence > ?1
@@ -4482,6 +4389,7 @@ fn load_events(
         .query_map(
             params![after, through, camp_id, limit, presentation_only],
             |row| {
+                let hide_source: bool = row.get(18)?;
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -4491,8 +4399,16 @@ fn load_events(
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
+                    if hide_source {
+                        None
+                    } else {
+                        row.get::<_, Option<String>>(8)?
+                    },
+                    if hide_source {
+                        None
+                    } else {
+                        row.get::<_, Option<i64>>(9)?
+                    },
                     row.get::<_, String>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,

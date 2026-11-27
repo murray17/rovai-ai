@@ -710,7 +710,7 @@ Object.assign(window, { startupTest: {
     responses.set('members.list', [])
     responses.set('runtime.installations.list', [])
     responses.set('navigation.snapshot', { schemaVersion: 3, projects: [], quickChat: { recentThreads: [], totalCount: 0 } })
-    const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 7, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
+    const navPreferences: NavigationPreferencesSnapshot = { schemaVersion: 8, chatReadStates: {}, pinnedProjectOrder: [], registeredProjects: [], legacyProjectsSynced: false, pins: [], removedProjects: [], projectOrder: [], projectNames: {}, threadReadStates: {} }
     responses.set('navigationPreferences.get', navPreferences)
     responses.set('memory.hearthReviewItems.list', [])
     responses.set('preferences.memory.get', { enabled: true, headsUpAfterGlobalSequence: 0, observedThroughChangeSequence: 0 })

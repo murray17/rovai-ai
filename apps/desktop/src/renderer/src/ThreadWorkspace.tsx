@@ -186,6 +186,7 @@ import {
   timelineDayLabel,
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { ChatContactButton } from './ChatContact'
 import { ImageGallery, partitionMessageAttachments, releaseUnshownUserImages, type GalleryImage, type ImagePublication } from './ImageGallery'
 import type { ImagePreviewUrl } from './image-preview-url'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
@@ -7137,6 +7138,7 @@ export function ThreadWorkspace({
           members={snapshot.members}
           profiles={agents}
           installations={installations}
+          messageSource={{threadId:snapshot.thread.id,title:snapshot.thread.title}}
           onClose={closeMentionPopover}
         />
       )}
@@ -8930,8 +8932,10 @@ function MentionProfilePopover({
   members,
   profiles,
   installations,
+  messageSource,
   onClose
 }: {
+  messageSource?: {threadId:string; title:string}
   request: MentionPopoverRequest
   members: ThreadSnapshot['members']
   profiles: AgentProfile[]
@@ -9095,6 +9099,7 @@ function MentionProfilePopover({
                       <i aria-hidden="true" />{mentionPresenceLabel(profile.presence)}
                     </span>
                   </div>
+                  {messageSource && <ChatContactButton agentId={profile.agentId} source={messageSource} className="identity-card-close identity-card-message-button" onOpened={() => onClose(false)}/>}
                   <button className="identity-card-close" type="button" aria-label={uiAttribute('关闭身份卡')} onClick={() => onClose(true)}>
                     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
                   </button>
@@ -11186,7 +11191,7 @@ export function MessageAttachmentGroups({
 }
 
 
-function attachmentErrorMessage(error: unknown): string {
+export function attachmentErrorMessage(error: unknown): string {
   const message = readErrorMessage(error)
   if (message.includes('25 MiB')) return uiAttribute("文件超过 25 MiB")
   if (message.includes('attachment_unreadable')) return uiAttribute("文件当前无法读取")

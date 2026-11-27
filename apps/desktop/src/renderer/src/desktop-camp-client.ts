@@ -1,7 +1,9 @@
+import { chatDraftRecovery } from './chat-draft-recovery'
 import type { ThreadClient } from './camp-client'
 
 /** Lazy Desktop-only compatibility adapter; importing it never accesses Electron. */
 export const desktopThreadClient: ThreadClient = {
+  chatDraftRecovery,
   reeditScope: 'desktop:local_user', // Electron userData already isolates the local profile/Core.
   exportMonitoring: async filter => { const path = await window.rovai.exportMonitoring(filter); return { exported: Boolean(path), ...(path ? { path } : {}) } },
   revealMonitoringExport: path => window.rovai.revealMonitoringExport(path),

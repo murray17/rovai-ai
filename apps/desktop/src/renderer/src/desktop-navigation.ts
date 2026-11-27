@@ -13,6 +13,7 @@ export type ArchiveNavigationSelection = { kind: ArchiveKind; threadId: string }
 
 export type NavigationTarget = Exclude<RestorableLocation, { kind: 'memory' }>
   | MemoryNavigationTarget
+  | { kind: 'chat'; chatId: string | null; draftAgentId?: string }
   | { kind: 'settings'; section: SettingsSection; overview?: true; archive?: ArchiveNavigationSelection }
   | { kind: 'automations' }
   | { kind: 'missions' }
@@ -30,6 +31,7 @@ export const MAX_NAVIGATION_ENTRIES = 50
 export function sameNavigationDestination(a: NavigationTarget, b: NavigationTarget): boolean {
   if (a.kind !== b.kind) return false
   switch (a.kind) {
+    case 'chat': return b.kind === 'chat' && a.chatId === b.chatId && (a.chatId !== null || a.draftAgentId === b.draftAgentId)
     case 'camp': return b.kind === 'camp' && a.threadId === b.threadId
     case 'settings': return b.kind === 'settings' && a.section === b.section && a.overview === b.overview
       && a.archive?.kind === b.archive?.kind && a.archive?.threadId === b.archive?.threadId
