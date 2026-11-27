@@ -302,6 +302,37 @@ describe('DingTalk OpenAPI client', () => {
     expect(calls[1]).toBe('https://api.dingtalk.com/v1.0/robot/groups/robots/query')
   })
 
+  it('cancels one token waiter while an independent roster read continues', async () => {
+    const controller = new AbortController()
+    let finish!: (value: Response) => void
+    const token = vi.fn(() => new Promise<Response>(resolve => { finish = resolve }))
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | RequestInfo) =>
+      String(url).endsWith('/oauth2/accessToken') ? token() : Response.json({ robotList: [] })))
+    const client = new DingTalkOpenApiClient({ appKey: 'app', appSecret: 'fixture' })
+    const download = client.messageFileDownloadUrl({ robotCode: 'bot', downloadCode: 'code', signal: controller.signal })
+    const group = client.groupRobotCodes('group')
+    controller.abort()
+    await expect(download).rejects.toThrow()
+    finish(Response.json({ accessToken: 'token', expireIn: 7200 }))
+    await expect(group).resolves.toEqual([])
+    expect(token).toHaveBeenCalledOnce()
+  })
+
+  it('shares token acquisition, accepts an explicit empty roster and rejects incomplete lists', async () => {
+    const token = vi.fn(() => Response.json({ accessToken: 'token', expireIn: 7200 }))
+    const bodies: object[] = [{ robotList: [] }, {}, { result: [{}] }, {result:[]}]
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | RequestInfo) =>
+      String(url).endsWith('/oauth2/accessToken') ? token() : Response.json(bodies.shift())))
+    const client = new DingTalkOpenApiClient({ appKey: 'app', appSecret: 'first' })
+    const reads = await Promise.allSettled([1,2,3].map(() => client.groupRobotCodes('group')))
+    expect(reads[0]).toEqual({status:'fulfilled',value:[]})
+    expect(reads.slice(1).every(r => r.status === 'rejected')).toBe(true)
+    expect(token).toHaveBeenCalledOnce()
+    const rotated = new DingTalkOpenApiClient({appKey:'app',appSecret:'second'})
+    await rotated.groupRobotCodes('group')
+    expect(token).toHaveBeenCalledTimes(2)
+  })
+
   it('finalizes failed streaming cards with a unique guid and error marker', async () => {
     const calls: Array<{ url: string; body: any }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {

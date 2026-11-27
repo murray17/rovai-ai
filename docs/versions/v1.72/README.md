@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-25
+last_updated: 2026-11-26
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -16,6 +16,12 @@ last_updated: 2026-11-25
 Migration 233 将 projection schema 升至 183，允许独立 `conversation` 使用空的 `camp_id`，并以 `chat_topic` 保存话题标题与排序。`chats.list` 在同一快照读取当前页和全部未归档话题的答复序号。Desktop 和 Web 将其与本机已读位置比较，驱动左栏总蓝点。标题修改按版本提交，成功改动后通知客户端刷新。[聊天后端提案](chat-backend-proposal.md#4-历史导航归档与删除)
 
 Migration 234 将 projection schema 升至 184。选人打开本机草稿，首发在一个事务内创建话题、首条消息、Run 和回执。活动轮存在时可提交 FIFO，未派发的输入可以移回编辑。草稿和续聊共用 `/` 选择器，按队员的运行端读取用户级技能，工具箱技能可逐条点选。Migration 235 将 projection schema 升至 185。Core 从聊天直接派发 Run，每段聊天使用自己的工作目录和原生会话。插话按原 Run 和执行代次签收，最终正文回写原话题。归档暂停队列，删除时由持久日志清理聊天目录。公开写入沿用队员身份并检查目标成员资格。Migration 236 将 projection schema 升至 186，修正已升级数据库中记忆写入的队员归属校验，并按原投递记录结算遗留插话。[模型输入 R8](model-context-change-independent-chat.md) · [工具合同 v47](../../contracts/builtin-tool-transport-v47.md)
+
+Migration 237 将 projection schema 升至 187。正式发表的聊天输入只在消息表保存正文和附件，旧队列记录保留关联与状态。普通执行失败后，确定尚未派发的插话按原顺序回到队列。
+
+## 渠道名单按需验证
+
+三个渠道的普通群仅在有效 @ 入站和确认绑定时查名单。进出通知即时更新对应成员，派发沿用本地名单。整轮失败时入站最多等一次重试。范围和验收依据见[本版决定](decisions.md#v1-72-d96)和[渠道维护契约](../../contracts/channel-host-maintenance-v6.md)。
 
 ## macOS 应用内 ZIP 增量更新（2026-11-23）
 

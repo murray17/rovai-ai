@@ -110,6 +110,9 @@ export function draftFingerprint(draft: AutomationDraft): string {
 
 export function automationFromResult(result: StoredCommandResult): AutomationView {
   if (result.status === 'rejected') {
+    if (result.code === 'automation.schedule_in_past') {
+      throw new AutomationCommandError(result.code, uiAttribute('请选择晚于现在的时间。'))
+    }
     const message = typeof result.payload.message === 'string'
       ? result.payload.message
       : result.code === 'command.version_conflict'
@@ -196,9 +199,46 @@ export function runStatus(run: AutomationRunSummary | null): { label: string; to
 
 export type AutomationFilter = 'all' | 'enabled' | 'closed'
 
+export function automationPlanState(task: AutomationView): 'manual' | 'ended' | 'scheduled' {
+  const { schedule } = task
+  if (schedule.kind === 'manual') return 'manual'
+  if (!task.enabled && schedule.kind === 'once') {
+    const scheduledAt = new Date(`${schedule.date}T${schedule.at}:00`).getTime()
+    return scheduledAt > Date.now() ? 'scheduled' : 'ended'
+  }
+  return 'scheduled'
+}
+
+const planPresentation = {
+  scheduled: {
+    row: 'switch', toolbar: 'switch',
+    label: (task: AutomationView) => task.enabled ? uiAttribute('已开启') : uiAttribute('已关闭'),
+    timing: (task: AutomationView) => task.enabled && task.nextRunAt ? uiAttribute('下次 {0}', dateTimeLabel(task.nextRunAt)) : null
+  },
+  manual: {
+    row: 'label', toolbar: 'run-once',
+    label: () => uiAttribute('手动触发'),
+    timing: (task: AutomationView) => task.lastRun ? uiAttribute('上次 {0}', dateTimeLabel(task.lastRun.createdAt)) : uiAttribute('尚未运行')
+  },
+  ended: {
+    row: 'label', toolbar: 'run-once',
+    label: () => uiAttribute('计划已结束'),
+    timing: () => null
+  }
+} as const
+
+export function describeAutomationPlan(task: AutomationView) {
+  const kind = automationPlanState(task)
+  const { row, toolbar, label, timing } = planPresentation[kind]
+  return {
+    kind, row, toolbar, label: label(task), timing: timing(task),
+    summary: kind === 'manual' ? null : scheduleLabel(task.schedule)
+  }
+}
+
 export function filterAutomations(automations: AutomationView[], filter: AutomationFilter, query: string): AutomationView[] {
   const needle = query.trim().toLocaleLowerCase()
-  return automations.filter((item) => (filter === 'all' || item.enabled === (filter === 'enabled'))
+  return automations.filter((item) => (filter === 'all' || (item.schedule.kind !== 'manual' && item.enabled === (filter === 'enabled')))
     && (!needle || [item.name, item.prompt, scheduleLabel(item.schedule)].some((value) => value.toLocaleLowerCase().includes(needle))))
 }
 

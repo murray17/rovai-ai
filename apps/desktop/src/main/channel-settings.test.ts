@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createLarkChannel,
+  Client,
+  DefaultCache,
   Domain,
   LarkChannelError,
   LoggerLevel,
@@ -273,7 +275,7 @@ function controlledChannels(identities: Record<string, { openId: string; name: s
       updateCard,
       recallMessage,
       getChatMode,
-      getChatInfo: vi.fn(async () => ({ name: '测试群' })),
+      getChatInfo: vi.fn(async (chatId: string) => ({ name: '测试群', chatType: await getChatMode(chatId) })),
       rawClient: {
         im: { v1: {
           message: { create: createMessage, reply: replyMessage, get: getMessage },
@@ -890,7 +892,7 @@ describe('channel settings service', () => {
     } finally { await service.stop() }
   })
 
-  it('does not expire a connected account when startup inspection throws a transient error', async () => {
+  it('opens settings and starts without inspecting the developer web session', async () => {
     const session = developerSession()
     session.inspect.mockRejectedValue(new Error('ERR_INTERNET_DISCONNECTED'))
     const commands: string[] = []
@@ -906,7 +908,8 @@ describe('channel settings service', () => {
     })
     try {
       await service.start()
-      await vi.waitFor(() => expect(session.inspect).toHaveBeenCalled())
+      await service.get()
+      expect(session.inspect).not.toHaveBeenCalled()
       expect(commands).not.toContain('channels.feishu.account.expire')
       expect(session.disconnect).not.toHaveBeenCalled()
     } finally {
@@ -1066,7 +1069,7 @@ describe('channel settings service', () => {
   })
 
   it.each(['expired', 'identity_changed'] as const)(
-    'expires the account only after a conclusive background inspection: %s',
+    'leaves saved identity alone at startup even if the next operation would report %s',
     async (reason) => {
       const session = developerSession()
       session.inspect.mockResolvedValue({ status: 'invalid', reason })
@@ -1081,7 +1084,9 @@ describe('channel settings service', () => {
       })
       try {
         await service.start()
-        await vi.waitFor(() => expect(commands).toContain('channels.feishu.account.expire'))
+        await service.get()
+        expect(session.inspect).not.toHaveBeenCalled()
+        expect(commands).not.toContain('channels.feishu.account.expire')
       } finally {
         await service.stop()
       }
@@ -1175,6 +1180,28 @@ describe('channel settings service', () => {
     }, { needCheck: false })).resolves.toEqual({
       toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
     })
+  })
+
+  it('shares a token exchange across SDK clients and obtains a fresh token after credential rotation', async () => {
+    const transport = vi.fn(async (_url: string, credentials: { app_secret: string }) => ({
+      tenant_access_token: credentials.app_secret === 'first' ? 'first-token' : 'rotated-token', expire: 7200
+    }))
+    const manager = (secret: string, cache: DefaultCache) => {
+      const client = new Client({ appId: 'cli_shared_token', appSecret: secret, cache, loggerLevel: LoggerLevel.error })
+      const token = (client as unknown as { tokenManager: {
+        requestToken: typeof transport; getCustomTenantAccessToken(): Promise<string>
+      } }).tokenManager
+      token.requestToken = transport
+      return token
+    }
+    const cache = new DefaultCache()
+    const a = manager('first', cache)
+    const b = manager('first', cache)
+    expect(await Promise.all([a.getCustomTenantAccessToken(), b.getCustomTenantAccessToken()]))
+      .toEqual(['first-token', 'first-token'])
+    expect(transport).toHaveBeenCalledTimes(1)
+    expect(await manager('rotated', new DefaultCache()).getCustomTenantAccessToken()).toBe('rotated-token')
+    expect(transport).toHaveBeenCalledTimes(2)
   })
 
   it('surfaces Feishu Bot removal events through the installed Lark SDK', async () => {
@@ -2861,6 +2888,7 @@ describe('channel settings service', () => {
               payload: {}
             }
           }
+          if (command.checkRoster) return { status: 'applied', code: 'channel.binding.roster_required', payload: {tenantKey:'tenant-1',chatId:'oc_group'} }
           return {
             status: 'accepted',
             code: 'channel.binding.resolved',
@@ -2978,7 +3006,7 @@ describe('channel settings service', () => {
       operatorUnionId: 'on_owner'
     })
     expect(JSON.stringify(callback)).not.toContain('ou_spoofed')
-    const firstResolveIndex = commands.findIndex(({ method }) => (
+    const firstResolveIndex = commands.findLastIndex(({ method }) => (
       method === 'channels.feishu.pendingBinding.resolve'
     ))
     expect(commands[firstResolveIndex - 1]?.method).toBe('channels.roster.reconcile')
@@ -3009,12 +3037,13 @@ describe('channel settings service', () => {
         }
       }
     })
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(1)
     expect(nonOwnerResult).toEqual({
       toast: { type: 'warning', content: '仅 Rovai Owner 可以选择项目' }
     })
     expect(commands.filter(({ method }) => (
       method === 'channels.feishu.pendingBinding.resolve'
-    ))).toHaveLength(2)
+    ))).toHaveLength(3)
     expect(harness.updateCard).not.toHaveBeenCalled()
 
     for (const owner of [true, false]) {
@@ -3041,7 +3070,8 @@ describe('channel settings service', () => {
       const resolveIndex = commands.findLastIndex(({ method }) => (
         method === 'channels.feishu.pendingBinding.resolve'
       ))
-      expect(commands[resolveIndex - 1]?.method).toBe('channels.roster.reconcile')
+      if (owner) expect(commands[resolveIndex - 1]?.method).toBe('channels.roster.reconcile')
+      else expect(commands[resolveIndex]?.command.checkRoster).toBe(true)
       expect(commands[resolveIndex]?.command).toMatchObject({
         action: 'quick_chat',
         projectId: null,
@@ -3272,6 +3302,113 @@ describe('channel settings service', () => {
     }
   )
 
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])(
+    '$kind asks Core before reading the parent group during recovery', async profile => {
+      const harness = controlledChannels({ cli_a: { openId: 'ou_a', name: '审阅员' } })
+      const pending = new Set(['ready', 'duplicate', 'stale'])
+      const submissions: string[] = []
+      let reconciled = false
+      const service = new ChannelSettingsService({
+        ...inertInterval(), profile, createChannel: harness.createChannel,
+        credentialStore: memoryCredentialStore({ 'bot-cred': { appId: 'cli_a', appSecret: 'secret' } }, () => profile.kind),
+        core: channelCore((method, raw) => {
+          if (method === `${profile.methodPrefix}snapshot`) return coreSnapshot({ memberBots: [{
+            agentId: 'agent-a', accountId: 'account-1', brand: profile.kind, appId: 'cli_a',
+            botDisplayName: '审阅员', credentialRef: 'bot-cred', status: 'published',
+            failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+          }], pendingAggregates: [...pending].map(id => ({
+            aggregateId: id, tenantKey: 'tenant-1', chatId: `group-${id}`, conversationKind: 'topic'
+          })) })
+          if (method === `${profile.hostMethodPrefix}inbound.finalize`) {
+            const { aggregateId, requireFreshRoster } = (raw as { command: { aggregateId: string; requireFreshRoster: boolean } }).command
+            expect(requireFreshRoster).toBe(true)
+            submissions.push(aggregateId)
+            if (aggregateId === 'stale' && !reconciled) return { status: 'rejected', code: 'channel.roster_sync_required', payload: {} }
+            pending.delete(aggregateId)
+            return aggregateId === 'duplicate'
+              ? { status: 'applied', code: 'channel.inbound.already_finalized', payload: {} }
+              : { status: 'accepted', code: 'channel.turn.admitted', payload: {} }
+          }
+          if (method === `${profile.hostMethodPrefix}roster.reconcile`) reconciled = true
+          if (method === `${profile.hostMethodPrefix}host.tick`) return { deliveries: [] }
+          return { status: 'applied', payload: {} }
+        })
+      })
+      try {
+        await service.start()
+        await vi.waitFor(() => expect(pending.size).toBe(0))
+        expect(submissions.sort()).toEqual(['duplicate', 'ready', 'stale', 'stale'])
+        expect(harness.isInChat.get('cli_a')).toHaveBeenCalledExactlyOnceWith({ path: { chat_id: 'group-stale' } })
+      } finally { await service.stop() }
+    }
+  )
+
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])(
+    '$kind admits group mentions with partial results or after one failed retry', async profile => {
+      vi.useFakeTimers()
+      const ids = ['a', 'b', 'c', 'd', 'e']
+      const harness = controlledChannels(Object.fromEntries(ids.map(id => [id, { openId: 'ou_' + id, name: id }])))
+      let pending = ''
+      let fresh = false
+      const writes: unknown[] = []
+      const admissions: Array<[string, boolean]> = []
+      const service = new ChannelSettingsService({
+        profile, createChannel: harness.createChannel,
+        credentialStore: memoryCredentialStore(Object.fromEntries(ids.map(id => [id, { appId: id, appSecret: 'fixture' }])), () => profile.kind),
+        core: channelCore((method, raw) => {
+          if (method.endsWith('.snapshot')) return coreSnapshot({
+            memberBots: ids.map(id => ({ agentId: id, accountId: 'account-1', brand: profile.kind, appId: id,
+              botDisplayName: id, credentialRef: id, status: 'published', failureCode: null, ownerIdentityStatus: 'verified', version: 1 })),
+            pendingAggregates: pending ? [{ aggregateId: pending, tenantKey: 'tenant-1', chatId: 'group', conversationKind: 'group' }] : []
+          })
+          if (method.endsWith('host.tick')) return { deliveries: [], hasOutstandingWork: Boolean(pending) }
+          const { command } = raw as { command: { aggregateId: string; requireFreshRoster: boolean } }
+          if (method.endsWith('roster.reconcile')) {
+            fresh = true
+            writes.push(command)
+          }
+          if (method.endsWith('inbound.finalize')) {
+            if (command.requireFreshRoster && !fresh) return { status: 'rejected', code: 'channel.roster_sync_required', payload: {} }
+            admissions.push([command.aggregateId, command.requireFreshRoster])
+            pending = ''
+            return { status: 'accepted', code: 'channel.turn.admitted', payload: {} }
+          }
+          return { status: 'applied', payload: {} }
+        })
+      })
+      try {
+        await service.start()
+        await vi.advanceTimersByTimeAsync(0)
+        harness.isInChat.get('a')!.mockResolvedValue({ code: 99991672 })
+        harness.isInChat.get('b')!.mockResolvedValue({ code: 0, data: { is_in_chat: false } })
+        pending = 'partial'
+        service.handleCoreEvent({ method: 'automation.notification.available', params: {} })
+        await vi.advanceTimersByTimeAsync(0)
+        expect(writes).toEqual([expect.objectContaining({ presentAppIds: ['c', 'd', 'e'], absentAppIds: ['b'] })])
+        expect(admissions).toEqual([['partial', true]])
+        expect((await service.get()).channels[0].memberBots.find(bot => bot.agentId === 'a')?.rosterIssue).toBe('permission')
+        for (const read of harness.isInChat.values()) {
+          expect(read).toHaveBeenCalledTimes(1)
+          read.mockRejectedValue(new Error('offline'))
+        }
+        fresh = false
+        pending = 'all-failed'
+        service.handleCoreEvent({ method: 'automation.notification.available', params: {} })
+        await vi.advanceTimersByTimeAsync(4_999)
+        expect(admissions).toHaveLength(1)
+        for (const read of harness.isInChat.values()) expect(read).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(admissions).toEqual([['partial', true], ['all-failed', false]])
+        await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000)
+        for (const read of harness.isInChat.values()) expect(read).toHaveBeenCalledTimes(3)
+        expect(writes).toHaveLength(1)
+      } finally {
+        await service.stop()
+        vi.useRealTimers()
+      }
+    }
+  )
+
   it('accepts topics only from a standalone topic-group chat mode', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     harness.getChatMode.mockImplementation(async (chatId: string) => (
@@ -3279,6 +3416,7 @@ describe('channel settings service', () => {
     ))
     const observations: Record<string, unknown>[] = []
     let hostTicks = 0
+    let needsRoster = false
     const service = new ChannelSettingsService({
       credentialStore: memoryCredentialStore({
         'feishu-member-a': { appId: 'cli_a', appSecret: 'secret-a' }
@@ -3305,12 +3443,17 @@ describe('channel settings service', () => {
             payload: { classification: 'owner' }
           }
         }
+        if (method === 'channels.inbound.finalize' && needsRoster) {
+          return { status: 'rejected', code: 'channel.roster_sync_required', payload: {} }
+        }
+        if (method === 'channels.roster.reconcile') needsRoster = false
         if (method === 'channels.inbound.observe') {
           observations.push(command)
+          needsRoster = true
           return {
             status: 'accepted',
             code: 'channel.inbound.collecting',
-            payload: { aggregateId: `rvcia_${observations.length}`, readyToFinalize: false }
+            payload: { aggregateId: `rvcia_${observations.length}`, readyToFinalize: true }
           }
         }
         if (method === 'channels.host.tick') {
@@ -3388,7 +3531,7 @@ describe('channel settings service', () => {
       operator: { openId: 'ou_owner' },
       botName: '审阅员'
     })
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 3)
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(initialRosterReads + 2)
     await service.stop()
   })
 
@@ -3516,6 +3659,67 @@ describe('channel settings service', () => {
     await service.stop()
   })
 
+  it('filters ineligible group messages locally and retains only successful group-name reads for 24 hours', async () => {
+    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
+    let now = Date.now()
+    let owner = false
+    const observations: Array<Record<string, unknown>> = []
+    const changes: Array<Record<string, unknown>> = []
+    const service = new ChannelSettingsService({
+      ...inertInterval(), now: () => now, createChannel: harness.createChannel,
+      credentialStore: memoryCredentialStore({ 'credential-a': { appId: 'cli_a', appSecret: 'fixture' } }),
+      core: channelCore((method, raw) => {
+        if (method.endsWith('.snapshot')) return coreSnapshot({ transportConversations: [{
+          tenantKey: 'tenant-1', chatId: 'known-group', conversationKind: 'group', bindingId: 'binding'
+        }], memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', appId: 'cli_a', botDisplayName: '审阅员',
+          brand: 'feishu', status: 'published', credentialRef: 'credential-a', ownerIdentityStatus: 'verified', failureCode: null
+        }] })
+        if (method.endsWith('owner.verify')) return { code: 'verified', payload: { classification: owner ? 'owner' : 'non_owner' } }
+        if (method.endsWith('inbound.observe')) {
+          observations.push((raw as { command: Record<string, unknown> }).command)
+          return { code: 'channel.inbound.collecting', payload: { aggregateId: 'agg', readyToFinalize: false } }
+        }
+        if (method.endsWith('roster.reconcile')) changes.push((raw as { command: Record<string, unknown> }).command)
+        if (method.endsWith('host.tick')) return { deliveries: [] }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    const forward = harness.handlers.get('cli_a:message')!
+    const groupMessage = (messageId: string, content: string, mentioned: boolean) =>
+      normalizedMessage({ messageId, content, chatId: 'oc_cached', chatType: 'group', senderUserId: 'owner',
+        mentions: mentioned ? [{ key: '@_bot', openId: 'ou_bot_a', name: '审阅员', isBot: true }] : [] })
+    try {
+      for (const chatId of ['unused-group', 'known-group']) {
+        await harness.handlers.get('cli_a:botAdded')!({ chatId })
+        await harness.handlers.get('cli_a:botRemoved')!({ chatId })
+      }
+      expect(changes.map(c => [c.chatId, c.membershipEvent])).toEqual([
+        ['known-group', { appId: 'cli_a', present: true }], ['known-group', { appId: 'cli_a', present: false }]
+      ])
+      await forward(groupMessage('missing-mention', '消息', false))
+      await forward(groupMessage('wrong-owner', '消息', true))
+      owner = true
+      await forward(groupMessage('group-new', '/new', true))
+      expect(harness.getMessage).not.toHaveBeenCalled()
+      expect(harness.getChatMode).not.toHaveBeenCalled()
+      expect(harness.isInChat.get('cli_a')).not.toHaveBeenCalled()
+
+      harness.getChatMode.mockRejectedValueOnce(new Error('offline'))
+      await forward(groupMessage('cold', '消息', true))
+      await forward(groupMessage('success', '消息', true))
+      await forward(groupMessage('cached', '消息', true))
+      now += 24 * 60 * 60 * 1000 + 1
+      await service.get()
+      expect(harness.getChatMode).toHaveBeenCalledTimes(2)
+      harness.getChatMode.mockRejectedValueOnce(new Error('offline'))
+      await forward(groupMessage('stale', '消息', true))
+      expect(harness.getChatMode).toHaveBeenCalledTimes(3)
+      expect(observations.map(c => c.conversationDisplayName)).toEqual(['', '测试群', '测试群', '测试群'])
+    } finally { await service.stop() }
+  })
+
   it('refreshes a Topic parent roster requested by Core before delivery materialization', async () => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const calls: Array<{ method: string; command: Record<string, unknown> }> = []
@@ -3572,10 +3776,7 @@ describe('channel settings service', () => {
     })
 
     expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(1)
-    expect(calls.map((call) => call.method).slice(0, 2)).toEqual([
-      'channels.host.tick',
-      'channels.roster.reconcile'
-    ])
+    expect(calls[0].method).toBe('channels.host.tick')
     expect(calls.find((call) => call.method === 'channels.roster.reconcile')?.command)
       .toMatchObject({
         provider: 'feishu',
@@ -3583,8 +3784,7 @@ describe('channel settings service', () => {
         chatId: 'oc_topic_group',
         presentAppIds: ['cli_a']
       })
-    // A forced generation refresh must still run inside the cache lifetime. The next
-    // background sweep, fifteen seconds later, must reuse that observation without a receipt.
+    // Only the group named in the durable refresh set consumes another round.
     const wake = async () => {
       const ticks = calls.filter((call) => call.method === 'channels.host.tick').length
       service.handleCoreEvent({ method: 'agent_run.started', params: {} })
@@ -3600,76 +3800,8 @@ describe('channel settings service', () => {
     expect(calls.filter((call) => call.method === 'channels.roster.reconcile')).toHaveLength(2)
     now = 260_000
     await wake()
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(3)
+    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledTimes(2)
     await service.stop()
-  })
-
-  it.each([
-    ['feishu', FEISHU_PROVIDER_PROFILE],
-    ['lark', LARK_PROVIDER_PROFILE]
-  ] as const)('delivers %s replies while a historical group roster request is pending', async (provider, profile) => {
-    const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
-    const settlements: Array<Record<string, unknown>> = []
-    let now = 100_000
-    let delivered = false
-    let ticks = 0
-    const hostPrefix = provider === 'feishu' ? 'channels.' : 'channels.lark.'
-    const service = new ChannelSettingsService({
-      profile,
-      credentialStore: memoryCredentialStore({
-        'member-a': { appId: 'cli_a', appSecret: 'secret-a' }
-      }, () => provider),
-      createChannel: harness.createChannel,
-      ...inertInterval(),
-      now: () => now,
-      core: channelCore((method, rawParams) => {
-        if (method === `channels.${provider}.snapshot`) {
-          return coreSnapshot({
-            memberBots: [{
-              agentId: 'agent-a', accountId: 'account-1', brand: provider, appId: 'cli_a',
-              botDisplayName: '审阅员', credentialRef: 'member-a', status: 'published',
-              failureCode: null, version: 1, ownerIdentityStatus: 'verified'
-            }],
-            transportConversations: [{ tenantKey: 'tenant-1', chatId: 'oc_group' }]
-          })
-        }
-        if (method === `${hostPrefix}host.tick`) {
-          ticks += 1
-          if (delivered) return { deliveries: [], rosterRefreshes: [], hasOutstandingWork: true }
-          if (now < 130_000) return { deliveries: [], rosterRefreshes: [], hasOutstandingWork: true }
-          delivered = true
-          return { deliveries: [{
-            deliveryId: 'delivery-output', requestId: null, deliveryKind: 'agent_output',
-            targetAppId: 'cli_a', credentialRef: 'member-a', chatId: 'oc_private',
-            topicKey: '', conversationKind: 'p2p', attemptCount: 1,
-            updateMessageId: null, recipientOpenId: null,
-            payload: { kind: 'agent_output', presentationVersion: 1, body: '回复已生成。',
-              mentionPrincipal: false, memberRecipients: [] }
-          }], rosterRefreshes: [], hasOutstandingWork: true }
-        }
-        if (method === `${hostPrefix}deliveries.settle`) {
-          settlements.push((rawParams as { command: Record<string, unknown> }).command)
-        }
-        return { status: 'applied', payload: {} }
-      })
-    })
-
-    await service.start()
-    await vi.waitFor(() => expect(ticks).toBe(1))
-    let releaseRoster!: () => void
-    const delayedRoster = new Promise((resolve) => {
-      releaseRoster = () => resolve({ code: 0, data: { is_in_chat: true } })
-    })
-    harness.isInChat.get('cli_a')!.mockImplementation(() => delayedRoster)
-    now = 140_000
-    service.handleCoreEvent({ method: 'agent_run.started', params: { agentRunId: 'run-1' } })
-    await vi.waitFor(() => expect(settlements).toHaveLength(1))
-
-    expect(harness.createMessage).toHaveBeenCalledOnce()
-    expect(settlements[0]).toMatchObject({ outcome: 'sent', deliveryId: 'delivery-output' })
-    expect(harness.isInChat.get('cli_a')).toHaveBeenCalledOnce()
-    await service.stop()
-    releaseRoster()
   })
 
   it.each([true, false])('delivers group/topic workspace pickers and recalls them durably (projects: %s)', async (hasProjects) => {

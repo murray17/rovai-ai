@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { dingTalkAbortable } from './dingtalk-session-error'
 
 const DEFAULT_API_ORIGIN = 'https://api.dingtalk.com'
 const DEFAULT_OAPI_ORIGIN = 'https://oapi.dingtalk.com'
@@ -57,8 +58,9 @@ export class DingTalkOpenApiError extends Error {
   }
 
   get retryable(): boolean {
-    return this.status === 0 || this.status === 429 || this.status >= 500
-      || this.remoteCode === '90002' || this.remoteCode === '15' || this.remoteCode === '88'
+    if (this.status === 0 || this.status === 429 || this.status >= 500) return true
+    return this.status >= 200 && this.status < 300
+      && (this.remoteCode === '90002' || this.remoteCode === '15' || this.remoteCode === '88')
   }
 }
 
@@ -67,6 +69,7 @@ export class DingTalkOpenApiClient {
   readonly #appSecret: string
   readonly #apiOrigin: string
   readonly #oapiOrigin: string
+  #tokenRequest: { value: Promise<string>; controller: AbortController; waiters: number } | null = null
   #accessToken: { value: string; expiresAt: number } | null = null
 
   constructor(input: { appKey: string; appSecret: string; apiOrigin?: string; oapiOrigin?: string }) {
@@ -142,13 +145,16 @@ export class DingTalkOpenApiClient {
       ? response.chatbotInstanceVOList
       : Array.isArray(response.robotList)
         ? response.robotList
-        : Array.isArray(response.result) ? response.result : []
-    return [...new Set(items.flatMap((item) => {
-      if (!item || typeof item !== 'object') return []
-      const value = item as Record<string, unknown>
-      const robotCode = optionalString(value, 'robotCode') ?? optionalString(value, 'appKey')
-      return robotCode ? [robotCode] : []
-    }))].sort()
+        : Array.isArray(response.result) ? response.result : null
+    if (!items) throw new DingTalkOpenApiError('dingtalk_roster_incomplete', 200)
+    const codes = new Set<string>()
+    for (const item of items) {
+      const code = item && typeof item === 'object'
+        ? optionalString(item, 'robotCode') ?? optionalString(item, 'appKey') : null
+      if (!code) throw new DingTalkOpenApiError('dingtalk_roster_incomplete', 200)
+      codes.add(code)
+    }
+    return [...codes].sort()
   }
 
   async sendGroupMarkdown(input: {
@@ -345,7 +351,7 @@ export class DingTalkOpenApiClient {
   }
 
   async #request(path: string, init: RequestInit): Promise<Record<string, unknown>> {
-    const token = await this.#token(init.signal ?? undefined)
+    const token = await this.#token(init.signal)
     const headers = new Headers(init.headers)
     if (!(init.body instanceof FormData)) headers.set('content-type', 'application/json')
     headers.set('x-acs-dingtalk-access-token', token)
@@ -361,13 +367,16 @@ export class DingTalkOpenApiClient {
       throw new DingTalkOpenApiError('dingtalk_open_api_network', 0)
     }
     const body = await response.json().catch(() => null)
-    if (!response.ok || !body || typeof body !== 'object' || Array.isArray(body)) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status)
     }
     const value = body as Record<string, unknown>
+    const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode') ?? optionalString(value, 'Code')
+    if (!response.ok) {
+      throw new DingTalkOpenApiError(`dingtalk_open_api_http_${response.status}`, response.status, code)
+    }
     if (containsBusinessFailure(value)) {
-      const code = optionalString(value, 'code') ?? optionalString(value, 'errorCode') ?? 'failed'
-      throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, code)
+      throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, code ?? 'failed')
     }
     if (value.code && value.code !== '0' && value.code !== 0) {
       throw new DingTalkOpenApiError('dingtalk_open_api_failed', response.status, String(value.code))
@@ -375,26 +384,48 @@ export class DingTalkOpenApiClient {
     return value
   }
 
-  async #token(signal?: AbortSignal): Promise<string> {
+  async #token(signal?: AbortSignal | null): Promise<string> {
+    signal?.throwIfAborted()
     if (this.#accessToken && this.#accessToken.expiresAt > Date.now() + 60_000) {
       return this.#accessToken.value
     }
+    if (!this.#tokenRequest) {
+      const controller = new AbortController()
+      const value = this.#fetchToken(controller.signal)
+      this.#tokenRequest = { value, controller, waiters: 0 }
+    }
+    const pending = this.#tokenRequest
+    pending.waiters++
+    try {
+      return await (signal ? dingTalkAbortable(pending.value, signal) : pending.value)
+    } finally {
+      if (--pending.waiters === 0) {
+        pending.controller.abort()
+        this.#tokenRequest = null
+      }
+    }
+  }
+
+  async #fetchToken(signal: AbortSignal): Promise<string> {
     let response: Response
     try {
       response = await fetch(new URL('/v1.0/oauth2/accessToken', this.#apiOrigin), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ appKey: this.#appKey, appSecret: this.#appSecret }),
-        signal: AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])])
+        signal: AbortSignal.any([AbortSignal.timeout(20_000), signal])
       })
-    } catch (error) {
-      if (signal?.aborted) throw error
+    } catch {
       throw new DingTalkOpenApiError('dingtalk_app_access_token_network', 0)
     }
     const body = await response.json().catch(() => null) as Record<string, unknown> | null
-    if (!response.ok || !body) throw new DingTalkOpenApiError('dingtalk_app_access_token_failed', response.status)
+    if (!response.ok || !body) {
+      const code = body ? optionalString(body, 'code') ?? optionalString(body, 'Code') : null
+      throw new DingTalkOpenApiError('dingtalk_app_access_token_failed', response.status, code)
+    }
     const value = requiredString(body, 'accessToken')
     const expiresIn = typeof body.expireIn === 'number' ? body.expireIn : 7_200
+    signal.throwIfAborted()
     this.#accessToken = { value, expiresAt: Date.now() + expiresIn * 1_000 }
     return value
   }

@@ -1,5 +1,6 @@
 import { templates, localizedAutomationTemplate, scheduleLabel, type TemplateId } from './automation-workspace-model'
-import { UiText } from './interface-language'
+import { UiText, uiAttribute } from './interface-language'
+import { BusyLabel } from './BusyLabel'
 
 export type AutomationIcon = 'clock' | 'play' | 'pause' | 'plus' | 'trash' | 'chat' | 'search' | 'more' | 'chevron' | 'back' | 'close' | 'check' | 'failed' | 'skip' | 'channel' | 'folder' | 'code' | 'calendar' | 'document' | 'text'
 
@@ -12,7 +13,7 @@ export function AutomationGlyph({ name }: { name: AutomationIcon }): React.JSX.E
     {name === 'trash' && <><path d="M5 7h14M9 7l1-3h4l1 3M7 7l1 13h8l1-13M10 11v5M14 11v5" /></>}
     {name === 'chat' && <><path d="M5 5.5h14v10H9l-4 3Z" /><path d="M8.5 9h7M8.5 12h5" /></>}
     {name === 'search' && <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></>}
-    {name === 'more' && <><circle cx="5" cy="12" r=".8" /><circle cx="12" cy="12" r=".8" /><circle cx="19" cy="12" r=".8" /></>}
+    {name === 'more' && <g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></g>}
     {name === 'chevron' && <path d="m8 10 4 4 4-4" />}
     {name === 'back' && <path d="m14 6-6 6 6 6" />}
     {name === 'close' && <path d="m6 6 12 12M18 6 6 18" />}
@@ -26,6 +27,28 @@ export function AutomationGlyph({ name }: { name: AutomationIcon }): React.JSX.E
     {name === 'text' && <path d="M4 6h16M12 6v14M8 20h8" />}
     {name === 'document' && <><path d="M6 3h8l4 5v13H6Z" /><path d="M14 3v5h4M9 12h6M9 16h6" /></>}
   </svg>
+}
+
+export function AutomationRunSwitch({ enabled, disabled, switching, taskName, onChange }: {
+  enabled: boolean
+  disabled: boolean
+  switching: boolean
+  taskName?: string
+  onChange(): void
+}): React.JSX.Element {
+  return <button type="button" role="switch" aria-checked={enabled} aria-busy={switching || undefined} className="automation-run-switch"
+    aria-label={taskName === undefined ? uiAttribute('自动运行') : uiAttribute('{0}自动运行', taskName)}
+    disabled={disabled} onClick={onChange}>
+    {taskName === undefined && <UiText zh="自动运行" />}
+    <span className="automation-switch-track" aria-hidden="true" />
+  </button>
+}
+
+export function AutomationRunOnce({ disabled, running, onRun }: { disabled: boolean; running: boolean; onRun(): void }): React.JSX.Element {
+  return <button className="quiet-button compact automation-run-once" type="button" disabled={disabled}
+    aria-busy={running} onClick={onRun}>
+    <AutomationGlyph name="play" /><BusyLabel busy={running}><UiText zh="运行一次" /></BusyLabel>
+  </button>
 }
 
 export function AutomationTemplates({ onChoose, compact = false }: {

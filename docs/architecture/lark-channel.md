@@ -89,3 +89,9 @@ Provider 身份、存储、隔离和请求面由自动化测试验收。登录�
 - [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)
 - [渠道设置](../ui/components/channel-settings.md)
 - [V1.72-D01](../versions/v1.72/decisions.md#v1-72-d01)
+
+## 群名单按需读取
+
+Lark 使用独立租户与应用凭据。普通群仅在有效 @ 入站和确认绑定时查父群。入站先提交 Core，每轮按已发布 Bot 分别查询 `isInChat`。只写成功项，失败项保留上次状态，实际收件 Bot 直接记为在群。整轮失败最多退避重试一次，然后按本地名单继续。绑定群的进出通知即时更新对应的线程成员。
+
+桌面输入、转派、排队开工和重试直接使用本地成员。话题父群保留既有代次要求。名单允许短时过期，下一条 @ 或进出通知会校正。若离线漏收退群，此前的转派可能在本地执行一次，群回复按普通发送失败处理。[Channel Host Maintenance v6](../contracts/channel-host-maintenance-v6.md)

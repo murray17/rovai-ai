@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-11-16
+last_updated: 2026-11-26
 ---
 
 # Rovai AI 开发者指南
@@ -132,6 +132,9 @@ Linux 覆盖确认运行 `xvfb-run -a dbus-run-session -- pnpm test:attachment-s
 `node --test scripts/lib/member-editor.test.mjs`，底部执行台运行 `pnpm test:execution-avatar-rail`。
 定时任务详情运行 `pnpm test:automation-splitter`，用独立 Renderer fixture 验证最小宽度、同次手势反向展开、
 取消、保存失败保留草稿与迟到保存结果隔离；`ROVAI_KEEP_AUTOMATION_SPLITTER_FIXTURE=1` 保留截图。
+修改定时任务的列表排序与筛选、跨窗口刷新、行操作或已结束单次任务的展示时，运行 `pnpm test:automation-list`。
+它用隔离 Chrome 和内存数据验证正式页面的桌面与手机交互，包含在 `CI / gate` 和 `pnpm test:desktop:integration` 中。
+可用 `ROVAI_TEST_CHROME` 指定 Chrome 路径。默认使用当前平台的安装路径，浏览器缺失时会明确标记“验收未运行”。
 
 真实 Runtime Smoke、完整 macOS 打包、Windows 打包/安装和 UI 截图验收耗时更长，且部分命令会调用上游
 模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。

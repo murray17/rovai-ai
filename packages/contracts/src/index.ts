@@ -3523,6 +3523,7 @@ export interface ChannelConnectionView {
 }
 
 export interface ChannelMemberBotView {
+  rosterIssue?: 'permission' | 'credentials'
   /** Durable Bot publication fact, even if a later connection/retry failed. */
   published?: boolean
   /** Live transport observation, independent of durable publication status. */

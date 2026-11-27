@@ -187,7 +187,8 @@ import {
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
 import { ChatContactButton } from './ChatContact'
-import { ImageGallery, partitionMessageAttachments, type GalleryImage } from './ImageGallery'
+import { ImageGallery, partitionMessageAttachments, releaseUnshownUserImages, type GalleryImage, type ImagePublication } from './ImageGallery'
+import type { ImagePreviewUrl } from './image-preview-url'
 import { ExecutionAvatarRail } from './ExecutionAvatarRail'
 import { ExecutionIcon, ExecutionOverviewMark, ExecutionStopIcon, RunInputIcon } from './ExecutionIcons'
 import { ExecutionStatusGlyph, type ExecutionStatusShape } from './ExecutionStatusGlyph'
@@ -1678,6 +1679,7 @@ export function ThreadWorkspace({
   messageHistory = null,
   onLoadEarlierMessages,
   optimisticMessages = EMPTY_CAMP_MESSAGES,
+  imagePublications,
   projectName,
   agents,
   installations = [],
@@ -1748,12 +1750,14 @@ export function ThreadWorkspace({
   messageHistory?: ThreadOpenMessageCoverage | null
   onLoadEarlierMessages?(): Promise<void>
   optimisticMessages?: ThreadMessageView[]
+  imagePublications?: readonly ImagePublication[]
   projectName: string | null
   agents: AgentProfile[]
   installations?: AdapterInstallation[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
-  onSend(draft: ThreadComposerDraftView, deliveryMode?: 'start' | 'steer', steerTargets?: Array<{agentRunId: string; executionEpoch: number}>): Promise<ThreadMessageSendReceipt | void>
+  onSend(draft: ThreadComposerDraftView, deliveryMode?: 'start' | 'steer', steerTargets?: Array<{agentRunId: string; executionEpoch: number}>,
+    displayedImages?: ReadonlyMap<string, ImagePreviewUrl>): Promise<ThreadMessageSendReceipt | void>
   onWithdrawMessage?(message: ThreadMessageView): Promise<void>
   onMessageMutation?(threadId: string): Promise<void>
   onForkMessage?(message: ThreadMessageView): void
@@ -1808,6 +1812,8 @@ export function ThreadWorkspace({
   const tasksEnabled = taskCapability.enabled && snapshot.tasksEnabled
   const taskFocusWasRemoved = !tasksEnabled && typeof document !== 'undefined' && !!document.activeElement?.closest('.task-panel-scroll, .camp-detail-entry[data-detail="tasks"], .task-editor-dialog, .task-cancel-dialog')
   const client = useThreadClient()
+  const displayedComposerImages = useMemo(() => new Map<string, ImagePreviewUrl>(), [client, snapshot.thread.id])
+  useEffect(() => () => releaseUnshownUserImages(client, snapshot.thread.id), [client, snapshot.thread.id])
   const interfaceLanguage = useInterfaceLanguage()
   const messageTimeDate = useMessageTimeDate()
   const { profile: currentUserProfile } = useCurrentUserProfile()
@@ -2694,12 +2700,16 @@ export function ThreadWorkspace({
     }
     return ids
   }, [snapshot.messages, snapshot.agentRuns])
+  const imagePublicationReady = useCallback((message: ThreadMessageView): boolean =>
+    !imagePublications?.some(publication => publication.awaitingReceipt(snapshot.thread.id, message)),
+  [imagePublications, snapshot.thread.id])
   const visibleThreadMessages = useMemo(() => mergeNavigationMessages(
     runSourceNavigation.messages, anchoredMessages, anchorNavigation.navigation.windowMessages(), optimisticMessages, snapshot.messages
   ).filter(message => !message.missionStart && !deletedMessageIds.has(message.id)
+    && imagePublicationReady(message)
     && (message.withdrawn || !anchorNavigation.navigation.bodyIsUnavailable(message.id))),
   [runSourceNavigation.messages, anchoredMessages, anchorNavigation.window, anchorNavigation.anchors,
-    anchorNavigation.navigation, optimisticMessages, snapshot.messages, deletedMessageIds])
+    anchorNavigation.navigation, optimisticMessages, snapshot.messages, deletedMessageIds, imagePublicationReady])
   const messageExport = useMessageExport(snapshot.thread.id, visibleThreadMessages)
   const normalStart = messageHistory?.oldestLoadedSequence ?? snapshot.messages[0]?.sequence ?? null
   const anchorWindowEnd = anchorNavigation.window?.messages.at(-1)?.sequence ?? null
@@ -4552,7 +4562,8 @@ export function ThreadWorkspace({
         }
       }
       sendAttempted = true
-      const sendReceipt = await onSend(routedDraft, deliveryMode, submittedDeliveryPlans.flatMap(plan => plan.route === 'steer' && plan.target ? [plan.target] : []))
+      const steerTargets = submittedDeliveryPlans.flatMap(plan => plan.route === 'steer' && plan.target ? [plan.target] : [])
+      const sendReceipt = await onSend(routedDraft, deliveryMode, steerTargets, displayedComposerImages)
       if (!sendReceipt) throw new Error(uiAttribute('消息未被当前 Thread 接受。'))
       sendAccepted = true
       if (currentSnapshot.thread.activationState === 'pending' && sendReceipt.threadMessageId) {
@@ -6617,6 +6628,7 @@ export function ThreadWorkspace({
         </section>
 
         {replyDetail.messageId && <ReplyDetails state={replyDetail} reader={replyReader} width={replyWidth} full={replyFull}
+          imagePublicationReady={imagePublicationReady}
           onWidth={setReplyWidth} onFull={() => setReplyFull(value => !value)} onClose={() => closeReplyDetails()}
           snapshot={snapshot} profiles={agents} eventsByRunId={executionEventsByRunId} windowedEvidence={openCoverage !== null}
           author={message => campMessageAuthorLabel(message, memberById, currentUserName)}
@@ -6863,6 +6875,7 @@ export function ThreadWorkspace({
                     {composerDraft?.attachments.map((attachment) => (
                       <AttachmentCard
                         attachment={attachment}
+                        displayedImages={displayedComposerImages}
                         locator={{
                           owner: 'composer',
                           threadId: snapshot.thread.id,

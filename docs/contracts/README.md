@@ -134,7 +134,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Channel Message Bridge v1（当前）](channel-message-bridge-v1.md) | 入站在消息与 Delivery 提交后完成；Channel-bound Camp 的 Agent 公共消息默认创建独立 outbox |
 | [Channel Storage v3（当前）](channel-storage-v3.md) | 凭据与存储边界不变；整轮中止使用 nullable retry suppression，迟到 sent 保留证据 |
 | [Channel Camp Naming v1（当前）](channel-camp-naming-v1.md) | 五种渠道复用普通自动命名、原始 title 与只读 channelSource 分离、闭合绑定来源保留和 Renderer 前缀 |
-| [Channel Host Maintenance v5（当前）](channel-host-maintenance-v5.md) | v4 outstanding/watchdog 不变；飞书只响应执行卡相关 live Run，启动恢复不先扫描历史群；钉钉行为不变 |
+| [Channel Host Maintenance v6（当前）](channel-host-maintenance-v6.md) | 群内 @ 与绑定按需查名单、部分结果、失败回退和本地派发 |
+| [Channel Host Maintenance v5（历史）](channel-host-maintenance-v5.md) | v4 outstanding/watchdog 不变；飞书只响应执行卡相关 live Run，启动恢复不先扫描历史群；钉钉行为不变 |
 | [Channel/Main Schema Join v2（当前）](channel-main-schema-join-v2.md) | 精确来源与既有 receipt 含义不变；原库事务重映射 main 117/118/119→126/127/130，逐步恢复，128/129 历史合同保留，131 封口 |
 | [Lark Channel v1（当前）](lark-channel-v1.md) | Lark 独立 provider：Host 身份、21 个请求名、结构等价的 `lark_*` 表、可信域与登录配置、`Domain.Lark`、入站附件与真实租户能力 gate |
 | [Feishu Channel v17（当前）](feishu-channel-v17.md) | v16 不变；飞书只接受 `brand=feishu`，`larksuite.com` 移交 Lark，SDK 显式 `Domain.Feishu`，遗留 `brand=lark` 行只保留可读 |

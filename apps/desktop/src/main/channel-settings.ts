@@ -1,8 +1,10 @@
+import { ChannelRosterQueries } from './channel-roster'
 import { createHash, randomUUID } from 'node:crypto'
 import { BotConnection, type BotConnectionStatus } from './bot-connection'
 import { readFile } from 'node:fs/promises'
 import {
   createLarkChannel,
+  DefaultCache,
   LarkChannelError,
   normalize,
   type BotAddedEvent,
@@ -284,8 +286,6 @@ type ExecutionCardPresentationState = {
 }
 
 const HOST_WORKER_ID = `desktop-${randomUUID()}`
-const ROSTER_CACHE_MS = 20_000
-const ROSTER_SWEEP_MS = 30_000
 const NON_OWNER_DM_HINT_THROTTLE_MS = 24 * 60 * 60_000
 const unavailableMemberBotAvatarSource: MemberBotAvatarSourceResolver = {
   async resolve(avatarRef) {
@@ -309,10 +309,10 @@ export class ChannelSettingsService {
   readonly #publicationFailures = new Map<string, string>()
   readonly #connectionFailures = new Map<string, string>()
   #connectionGeneration = 0
-  readonly #chatModeCache = new Map<string, 'p2p' | 'group' | 'topic'>()
-  readonly #chatNameCache = new Map<string, string>()
-  readonly #rosterReconciledAt = new Map<string, number>()
-  readonly #rosterReconciliations = new Map<string, Promise<boolean>>()
+  readonly #chatInfo = new Map<string, { name: string; mode: 'group' | 'topic'; readAt: number }>()
+  readonly #chatInfoReads = new Map<string, Promise<{ name?: string; mode?: 'group' | 'topic' }>>()
+  readonly #rosters = new ChannelRosterQueries(() => this.#now(), ms => this.#hostPump?.wakeAfter(ms))
+  readonly #finalizing = new Map<string, Promise<boolean>>()
   readonly #dmHints = new Map<string, number>()
   readonly #executionCardStates = new Map<string, ExecutionCardPresentationState>()
   readonly #executionCardTails = new Map<string, Promise<unknown>>()
@@ -334,9 +334,6 @@ export class ChannelSettingsService {
   #stopped = false
   #inboundDownloads = new Set<string>()
   #inboundAbort = new AbortController()
-  #nextRosterSweepAt = 0
-  #nextAggregateRecoveryAt = 0
-  #rosterSweep: Promise<boolean> | null = null
   #aggregateRecovery: Promise<boolean> | null = null
   #sessionStatus: 'valid' | 'invalid' | 'unavailable' | 'unknown' = 'unknown'
   #sessionCheckGeneration = 0
@@ -379,7 +376,7 @@ export class ChannelSettingsService {
     const generation = ++this.#connectionGeneration
     const current = (): boolean => !this.#stopped && generation === this.#connectionGeneration
     this.#inboundAbort = new AbortController()
-    const sessionCheckGeneration = ++this.#sessionCheckGeneration
+    ++this.#sessionCheckGeneration
     try {
       const publishedCredentials = await this.#dependencies.credentialStore.listPublished()
       if (!current()) return
@@ -414,11 +411,7 @@ export class ChannelSettingsService {
       }
       await this.#emit()
       if (!current()) return
-      this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
       this.#hostPump?.start()
-      if (snapshot.account?.status === 'connected') {
-        void this.#checkDeveloperSession(snapshot.account, sessionCheckGeneration)
-      }
     } catch (error) {
       if (!current()) return
       await this.stop()
@@ -432,7 +425,6 @@ export class ChannelSettingsService {
     this.#stopped = true
     this.#connectionFailures.clear()
     ++this.#connectionGeneration
-    this.#rosterSweep = null
     this.#aggregateRecovery = null
     this.#inboundAbort.abort()
     this.#sessionCheckGeneration += 1
@@ -445,7 +437,10 @@ export class ChannelSettingsService {
     this.#hostPump?.stop()
     const channels = [...this.#managedChannels.values()]
     this.#managedChannels.clear()
-    this.#rosterReconciledAt.clear()
+    this.#rosters.clear()
+    this.#finalizing.clear()
+    this.#chatInfo.clear()
+    this.#chatInfoReads.clear()
     for (const state of this.#executionCardStates.values()) {
       this.#dependencies?.executionView?.revokeExecutionViewUrl(state.executionViewUrl)
     }
@@ -677,13 +672,15 @@ export class ChannelSettingsService {
       && this.#memberBotProvisioner.reconcile
       && snapshot.account?.status === 'connected'
     ) {
+      const generation = this.#sessionCheckGeneration
       const inspection = await this.#inspectDeveloperSession()
+      if (generation !== this.#sessionCheckGeneration) throw new Error('飞书账号已变化，请重新操作。')
       if (
         inspection.status === 'valid'
         && accountIdForIdentity(inspection.identity) === snapshot.account.accountId
         && userIdDigest(this.#profile.kind, inspection.identity.userId) === snapshot.account.userIdDigest
         && inspection.identity.tenantId === snapshot.account.tenantId
-      ) return this.#publishNewMemberBot(agentId, 'retry')
+      ) return this.#publishNewMemberBot(agentId, 'retry', inspection)
     }
     const bindingAccountId = bot?.accountId ?? intent?.accountId
     if (!bindingAccountId) throw new Error('该队员缺少可恢复的飞书账号绑定。')
@@ -733,7 +730,8 @@ export class ChannelSettingsService {
 
   async #publishNewMemberBot(
     agentId: string,
-    operation: 'publish' | 'retry'
+    operation: 'publish' | 'retry',
+    verified?: FeishuDeveloperSessionInspection
   ): Promise<ChannelSettingsSnapshot> {
     this.#requireHost()
     if (this.#activeProvisioningAbort && this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(
@@ -782,7 +780,9 @@ export class ChannelSettingsService {
     ) {
       throw new Error('该队员已有未完成的发布记录。')
     }
-    const inspection = await this.#inspectDeveloperSession()
+    const generation = this.#sessionCheckGeneration
+    const inspection = verified ?? await this.#inspectDeveloperSession()
+    if (generation !== this.#sessionCheckGeneration) throw new Error('飞书账号已变化，请重新操作。')
     if (inspection.status === 'unavailable') {
       throw new Error('暂时无法检查飞书登录状态，请稍后重试。已有登录会话已保留。')
     }
@@ -796,6 +796,7 @@ export class ChannelSettingsService {
       throw new Error('飞书登录已过期或账号已变化，请先重新连接账号。')
     }
     const { identity } = inspection
+    await this.#upsertAccount(identity)
     const agent = await this.#dependencies!.core.request<AgentProfile>('members.get', { agentId })
     if (!agent || agent.presence !== 'present') throw new Error('该队员当前不可发布。')
     const appDescription = memberBotAppDescription(this.#profile.kind, agent.teamRole)
@@ -1192,29 +1193,6 @@ export class ChannelSettingsService {
     return inspection
   }
 
-  async #checkDeveloperSession(
-    account: NonNullable<CoreChannelSnapshot['account']>,
-    generation: number
-  ): Promise<void> {
-    try {
-      const inspection = await this.#inspectDeveloperSession()
-      if (inspection.status === 'unavailable') return
-      const current = (await this.#coreSnapshot()).account
-      if (this.#stopped || generation !== this.#sessionCheckGeneration
-        || current?.accountId !== account.accountId || current.version !== account.version
-        || current.status !== 'connected') return
-      if (inspection.status === 'invalid'
-        || accountIdForIdentity(inspection.identity) !== account.accountId) {
-        await this.#expireAccount(account)
-      } else {
-        await this.#upsertAccount(inspection.identity)
-      }
-      await this.#emit()
-    } catch {
-      // Background account verification must not tear down independently authenticated Bots.
-    }
-  }
-
   async #expireAccount(account: NonNullable<CoreChannelSnapshot['account']>): Promise<void> {
     this.#sessionStatus = 'invalid'
     if (account.status !== 'connected') return
@@ -1467,7 +1445,9 @@ export class ChannelSettingsService {
     const existing = this.#managedChannels.get(bot.appId)
     if (existing) {
       if (existing.credentialRef !== bot.credentialRef || existing.agentId !== bot.agentId) throw new Error('published_bot_binding_immutable')
-      return existing
+      if (existing.credentialDigest === digest(credential.appSecret)) return existing
+      this.#managedChannels.delete(bot.appId)
+      void this.#disconnectManaged(existing)
     }
     const agentId = bot.agentId
     const credentialRef = bot.credentialRef
@@ -1478,6 +1458,7 @@ export class ChannelSettingsService {
       transport: 'websocket',
       source: 'rovai-ai',
       includeRawEvent: true,
+      cache: new DefaultCache(),
       handshakeTimeoutMs: 20_000,
       identityTimeoutMs: 15_000,
       initialConnectRetry: false,
@@ -1513,8 +1494,8 @@ export class ChannelSettingsService {
         reason: `sdk_policy_${event.reason}`
       })
     }))
-    managed.unsubscribers.push(channel.on('botAdded', (event) => this.#handleBotRosterChanged(event)))
-    managed.unsubscribers.push(channel.on('botRemoved', (event) => this.#handleBotRosterChanged(event)))
+    managed.unsubscribers.push(channel.on('botAdded', (event) => this.#handleBotRosterChanged(managed, event, false)))
+    managed.unsubscribers.push(channel.on('botRemoved', (event) => this.#handleBotRosterChanged(managed, event, true)))
     const generation = this.#connectionGeneration
     managed.connection = new BotConnection({
       channel,
@@ -1651,10 +1632,16 @@ export class ChannelSettingsService {
       || raw.sender?.sender_id?.user_id
       || raw.sender?.sender_id?.open_id
       || message.senderId
-    const conversationKind = await this.#conversationKind(managed.channel, message, tenantKey)
-    const topicKey = conversationKind === 'topic'
-      ? (message.rootId || (message.replyToMessageId ? '' : message.messageId))
-      : ''
+    const isGroup = message.chatType !== 'p2p'
+    if (isGroup && !message.mentionedBot) return reject('bot_not_mentioned')
+    if (isGroup && canonicalInboundBody(message, new Set(message.mentions.map(m => m.name ?? ''))) === '/new') {
+      return reject('control_command_dm_only')
+    }
+    const coreSnapshot = await this.#coreSnapshot()
+    const prior = coreSnapshot.transportConversations.find(c => c.chatId === message.chatId && c.tenantKey === tenantKey)
+    let conversationKind: 'group' | 'topic' | 'p2p' = isGroup ? prior?.conversationKind ?? 'group' : 'p2p'
+    const messageTopic = message.rootId || (message.replyToMessageId ? '' : message.messageId)
+    let topicKey = conversationKind === 'topic' ? messageTopic : ''
     const owner = await this.#commandWithId(
       this.#method('owner.verify'),
       stableCommandId('owner', managed.appId, tenantKey, message.messageId),
@@ -1702,18 +1689,11 @@ export class ChannelSettingsService {
         }
       }).catch(() => undefined)
     }
-    const coreSnapshot = await this.#coreSnapshot()
+    const chatInfo = isGroup ? await this.#readChatInfo(managed.channel, tenantKey, message.chatId) : null
+    conversationKind = chatInfo?.mode ?? conversationKind
+    topicKey = conversationKind === 'topic' ? messageTopic : ''
     if (conversationKind === 'group' && message.threadId) {
       reject('message_thread_unsupported', conversationKind)
-      return
-    }
-    if (conversationKind !== 'p2p' && !message.mentionedBot) {
-      reject('bot_not_mentioned', conversationKind)
-      return
-    }
-    if (conversationKind !== 'p2p'
-      && !await this.#reconcileChatRoster(message.chatId, tenantKey, true, coreSnapshot)) {
-      reject('roster_reconciliation_failed', conversationKind)
       return
     }
     if (conversationKind === 'topic' && !topicKey) {
@@ -1771,11 +1751,9 @@ export class ChannelSettingsService {
     )
     if (managed.channel.botIdentity?.name) expectedBotNames.add(managed.channel.botIdentity.name)
     const body = canonicalInboundBody(message, expectedBotNames)
-    const conversationDisplayName = await this.#conversationDisplayName(
-      managed.channel,
-      message,
-      conversationKind
-    )
+    const name = chatInfo?.name
+    const conversationDisplayName = !isGroup ? message.senderName || '飞书私聊'
+      : name && conversationKind === 'topic' ? name + ' · 话题' : name || ''
     if (body === '/new') {
       if (conversationKind !== 'p2p') {
         reject('control_command_dm_only', conversationKind)
@@ -1852,14 +1830,7 @@ export class ChannelSettingsService {
     })
     const aggregateId = stringPayload(observation, 'aggregateId')
     if (observation.payload.readyToFinalize === true) {
-      await this.#finalizeAggregate(
-        managed,
-        tenantKey,
-        message.chatId,
-        topicKey,
-        conversationKind,
-        aggregateId
-      )
+      await this.#finalizeAggregate(aggregateId, tenantKey, message.chatId, conversationKind)
       this.#hostPump?.wake()
     }
     await this.#emit()
@@ -1915,19 +1886,7 @@ export class ChannelSettingsService {
     const raw = (event.raw ?? {}) as RawCardActionEvent
     let result: StoredCommandResult
     try {
-      if ((projectAction.action === 'bind' || projectAction.action === 'quick_chat')
-        && !await this.#reconcileCardActionRoster(event.chatId)) {
-        logFeishuBotDiagnostic('card.resolve_failed', {
-          appIdDigest: digest(managed.appId),
-          agentId: managed.agentId,
-          reason: 'roster_reconciliation_failed'
-        })
-        return { toast: { type: 'error', content: '群内 Bot 状态读取失败，请重试' } }
-      }
-      result = await this.#commandWithId(
-        this.#method('pendingBinding.resolve'),
-        randomUUID(),
-        {
+      const command = {
           pendingBindingId: projectAction.pendingBindingId,
           appId: managed.appId,
           externalPickerMessageId: event.messageId,
@@ -1938,9 +1897,17 @@ export class ChannelSettingsService {
           operatorOpenId: raw.operator?.open_id ?? event.operator.openId ?? null,
           operatorUserId: raw.operator?.user_id ?? event.operator.userId ?? null,
           operatorUnionId: raw.operator?.union_id ?? null
-        },
-        false
-      )
+      }
+      const method = this.#method('pendingBinding.resolve')
+      result = await this.#commandWithId(method, randomUUID(), {
+        ...command, checkRoster: ['bind', 'quick_chat'].includes(command.action)
+      }, false)
+      if (result.code === 'channel.binding.roster_required') {
+        if (!await this.#reconcileChatRoster(stringPayload(result, 'chatId'), stringPayload(result, 'tenantKey'))) {
+          return { toast: { type: 'error', content: '群内 Bot 状态读取失败，请重试' } }
+        }
+        result = await this.#commandWithId(method, randomUUID(), command, false)
+      }
     } catch (error) {
       logFeishuBotDiagnostic('card.resolve_failed', {
         appIdDigest: digest(managed.appId),
@@ -2087,172 +2054,107 @@ export class ChannelSettingsService {
     }
   }
 
-  async #finalizeAggregate(
-    managed: ManagedChannel | null,
-    tenantKey: string,
-    chatId: string,
-    topicKey: string,
-    conversationKind: 'p2p' | 'group' | 'topic',
-    aggregateId: string
-  ): Promise<void> {
-    let finalized = await this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
-      aggregateId
-    }, false)
-    if (['channel.roster_sync_required', 'channel.bot_not_in_roster'].includes(finalized.code)
-      && conversationKind !== 'p2p'
-      && await this.#reconcileChatRoster(chatId, tenantKey, true)) {
-      finalized = await this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
-        aggregateId
+  #finalizeAggregate(
+    aggregateId: string, tenantKey: string, chatId: string, conversationKind: 'p2p' | 'group' | 'topic'
+  ): Promise<boolean> {
+    const existing = this.#finalizing.get(aggregateId)
+    if (existing) return existing
+    const finish = async () => {
+      let requireFreshRoster = true
+      const signal = this.#inboundAbort.signal
+      const submit = () => this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
+        aggregateId, requireFreshRoster
       }, false)
-    }
-    if (finalized.code === 'channel.membership_sync_required') {
-      const threadId = stringPayload(finalized, 'threadId')
-      const bindingId = stringPayload(finalized, 'bindingId')
-      const agentIds = arrayPayload(finalized, 'agentIds')
-      let membershipGeneration = numberPayload(finalized, 'expectedMembershipGeneration')
-      let reconciliationGeneration = numberPayload(finalized, 'nextReconciliationGeneration')
-      for (const agentId of agentIds) {
-        const added = await this.#commandWithId('channels.membership.add', randomUUID(), {
-          threadId,
-          agentId,
-          expectedMembershipGeneration: membershipGeneration,
-          capabilityOverrides: {},
-          source: { namespace: this.#profile.kind, bindingId, reconciliationGeneration }
-        })
-        membershipGeneration = numberPayload(added, 'membershipGeneration')
-        reconciliationGeneration += 1
+      let finalized = await submit()
+      if (finalized.code === 'channel.roster_sync_required' && conversationKind !== 'p2p') {
+        requireFreshRoster = await this.#reconcileChatRoster(chatId, tenantKey)
+        if (signal.aborted || (!requireFreshRoster && this.#rosters.waitForInboundRetry(tenantKey, chatId))) return false
+        finalized = await submit()
       }
-      finalized = await this.#commandWithId(this.#hostMethod('inbound.finalize'), randomUUID(), {
-        aggregateId
-      }, false)
+      if (finalized.code === 'channel.membership_sync_required') {
+        const threadId = stringPayload(finalized, 'threadId')
+        const bindingId = stringPayload(finalized, 'bindingId')
+        const agentIds = arrayPayload(finalized, 'agentIds')
+        let membershipGeneration = numberPayload(finalized, 'expectedMembershipGeneration')
+        let reconciliationGeneration = numberPayload(finalized, 'nextReconciliationGeneration')
+        for (const agentId of agentIds) {
+          const added = await this.#commandWithId('channels.membership.add', randomUUID(), {
+            threadId,
+            agentId,
+            expectedMembershipGeneration: membershipGeneration,
+            capabilityOverrides: {},
+            source: { namespace: this.#profile.kind, bindingId, reconciliationGeneration }
+          })
+          membershipGeneration = numberPayload(added, 'membershipGeneration')
+          reconciliationGeneration += 1
+        }
+        finalized = await submit()
+      }
+      return finalized.status !== 'rejected'
     }
-    void managed
+    const result = finish().finally(() => this.#finalizing.delete(aggregateId))
+    this.#finalizing.set(aggregateId, result)
+    return result
   }
 
   async #recoverPendingAggregates(): Promise<boolean> {
     const lifetimeSignal = this.#inboundAbort.signal
     const snapshot = await this.#coreSnapshot()
     if (lifetimeSignal.aborted || this.#stopped) return false
-    await Promise.allSettled(snapshot.pendingAggregates.map((aggregate) => this.#finalizeAggregate(
-      this.#managedChannels.get(aggregate.acknowledgementAppId) ?? null,
-      aggregate.tenantKey,
-      aggregate.chatId,
-      aggregate.topicKey,
-      aggregate.conversationKind,
-      aggregate.aggregateId
+    const results = await Promise.allSettled(snapshot.pendingAggregates.map(aggregate => this.#finalizeAggregate(
+      aggregate.aggregateId, aggregate.tenantKey, aggregate.chatId, aggregate.conversationKind
     )))
-    return snapshot.pendingAggregates.length > 0
+    return results.some(result => result.status === 'fulfilled' && result.value)
   }
 
-  async #handleBotRosterChanged(event: BotAddedEvent): Promise<void> {
+  async #handleBotRosterChanged(managed: ManagedChannel, event: BotAddedEvent, removed: boolean): Promise<void> {
     if (this.#stopped) return
-    this.#hostPump?.wake()
-    const snapshot = await this.#coreSnapshot().catch(() => null)
-    if (!snapshot) return
-    const tenantKeys = new Set(
-      snapshot.transportConversations
-        .filter((conversation) => conversation.chatId === event.chatId)
-        .map((conversation) => conversation.tenantKey)
-    )
-    if (tenantKeys.size === 0 && snapshot.account?.tenantId) {
-      tenantKeys.add(snapshot.account.tenantId)
-    }
-    await Promise.allSettled(
-      [...tenantKeys].map((tenantKey) => this.#reconcileChatRoster(
-        event.chatId,
-        tenantKey,
-        true,
-        snapshot
-      ))
-    )
-    this.#hostPump?.wake()
-  }
-
-  async #reconcileCardActionRoster(chatId: string): Promise<boolean> {
-    const snapshot = await this.#coreSnapshot().catch(() => null)
-    if (!snapshot) return false
-    const tenantKeys = new Set(
-      snapshot.transportConversations
-        .filter((conversation) => conversation.chatId === chatId)
-        .map((conversation) => conversation.tenantKey)
-    )
-    if (tenantKeys.size === 0 && snapshot.account?.tenantId) {
-      tenantKeys.add(snapshot.account.tenantId)
-    }
-    if (tenantKeys.size === 0) return false
-    const outcomes = await Promise.all(
-      [...tenantKeys].map((tenantKey) => this.#reconcileChatRoster(
-        chatId,
-        tenantKey,
-        true,
-        snapshot
-      ))
-    )
-    return outcomes.every(Boolean)
-  }
-
-  async #reconcileChatRoster(
-    chatId: string,
-    tenantKey: string,
-    force: boolean,
-    suppliedSnapshot?: CoreChannelSnapshot
-  ): Promise<boolean> {
-    const lifetimeSignal = this.#inboundAbort.signal
-    const key = `${tenantKey}\0${chatId}`
-    if (!force && this.#now() - (this.#rosterReconciledAt.get(key) ?? 0) < ROSTER_CACHE_MS) {
-      return true
-    }
-    const inflight = this.#rosterReconciliations.get(key)
-    if (inflight) return inflight
-    const reconciliation = (async (): Promise<boolean> => {
-      const snapshot = suppliedSnapshot ?? await this.#coreSnapshot()
-      const publishedBots = snapshot.memberBots.filter((bot) => bot.status === 'published')
-      const managedBots = publishedBots.map((bot) => this.#managedChannels.get(bot.appId))
-      if (managedBots.some((managed) => !managed)) return false
-      const observations = await Promise.all(managedBots.map(async (managed) => {
-        const response = await managed!.channel.rawClient.im.v1.chatMembers.isInChat({
-          path: { chat_id: chatId }
-        })
-        if (response.code !== 0 || typeof response.data?.is_in_chat !== 'boolean') {
-          throw new Error('roster_observation_incomplete')
-        }
-        return { appId: managed!.appId, present: response.data.is_in_chat }
-      })).catch(() => null)
-      if (!observations || lifetimeSignal.aborted || this.#stopped) return false
-      const result = await this.#commandWithId(this.#hostMethod('roster.reconcile'), randomUUID(), {
-        provider: this.#profile.kind,
-        tenantKey,
-        chatId,
-        presentAppIds: observations.filter((item) => item.present).map((item) => item.appId)
-      }, false)
-      if (result.status === 'rejected') return false
-      this.#rosterReconciledAt.set(key, this.#now())
-      return true
-    })().finally(() => this.#rosterReconciliations.delete(key))
-    this.#rosterReconciliations.set(key, reconciliation)
-    return reconciliation
-  }
-
-  async #reconcileKnownGroupRosters(): Promise<boolean> {
-    const lifetimeSignal = this.#inboundAbort.signal
+    logFeishuBotDiagnostic(removed ? 'bot.removed' : 'bot.added', { chatIdDigest: digest(event.chatId), appIdDigest: digest(managed.appId) })
     const snapshot = await this.#coreSnapshot()
-    if (lifetimeSignal.aborted || this.#stopped) return false
-    const unique = new Map<string, { tenantKey: string; chatId: string }>()
-    for (const conversation of snapshot.transportConversations) {
-      unique.set(`${conversation.tenantKey}\0${conversation.chatId}`, {
-        tenantKey: conversation.tenantKey,
-        chatId: conversation.chatId
-      })
-    }
-    const results = await Promise.allSettled(
-      [...unique.values()].map((conversation) => this.#reconcileChatRoster(
-        conversation.chatId,
-        conversation.tenantKey,
-        false,
-        snapshot
-      ))
-    )
-    return results.some((result) => result.status === 'fulfilled' && result.value)
+    const bound = snapshot.transportConversations.find(c => c.chatId === event.chatId && c.bindingId)
+    if (!bound || this.#stopped) return
+    await this.#command(this.#hostMethod('roster.reconcile'), {
+      provider: this.#profile.kind, tenantKey: bound.tenantKey, chatId: event.chatId,
+      presentAppIds: [], membershipEvent: { appId: managed.appId, present: !removed }
+    })
+    this.#hostPump?.wake()
+  }
+
+  #reconcileChatRoster(chatId: string, tenantKey: string): Promise<boolean> {
+    const signal = this.#inboundAbort.signal
+    return this.#rosters.run(tenantKey, chatId, async () => {
+      const snapshot = await this.#coreSnapshot()
+      const bots = snapshot.memberBots.filter(bot => bot.status === 'published')
+      const presentAppIds: string[] = []
+      const absentAppIds: string[] = []
+      let issueChanged = false
+      await Promise.all(bots.map(async bot => {
+        const managed = this.#managedChannels.get(bot.appId)
+        if (!managed) {
+          if (this.#connectionFailures.get(bot.agentId) === 'published_bot_credential_missing'
+            && this.#rosters.setIssue(this.#profile.kind, bot.agentId, 'credentials')) issueChanged = true
+          return
+        }
+        try {
+          const response = await managed.channel.rawClient.im.v1.chatMembers.isInChat({ path: { chat_id: chatId } })
+          if (response.code !== 0 || typeof response.data?.is_in_chat !== 'boolean') throw response
+          if (signal.aborted) return
+          if (response.data.is_in_chat) presentAppIds.push(bot.appId)
+          else absentAppIds.push(bot.appId)
+          if (this.#rosters.setIssue(this.#profile.kind, bot.agentId)) issueChanged = true
+        } catch (error) {
+          const issue = feishuRosterAccessIssue(error)
+          if (!signal.aborted && issue && this.#rosters.setIssue(this.#profile.kind, bot.agentId, issue)) issueChanged = true
+        }
+      }))
+      if (signal.aborted) return false
+      if (issueChanged && this.#listeners.size) void this.#emit().catch(() => undefined)
+      if (!presentAppIds.length && !absentAppIds.length) return false
+      const result = await this.#commandWithId(this.#hostMethod('roster.reconcile'), randomUUID(), {
+        provider: this.#profile.kind, tenantKey, chatId, presentAppIds, absentAppIds
+      }, false)
+      return result.status !== 'rejected'
+    })
   }
 
   async #readExternalQuote(channel: LarkChannel, messageId: string): Promise<{
@@ -2285,37 +2187,19 @@ export class ChannelSettingsService {
     }
   }
 
-  async #conversationKind(
-    channel: LarkChannel,
-    message: NormalizedMessage,
-    tenantKey: string
-  ): Promise<'p2p' | 'group' | 'topic'> {
-    if (message.chatType === 'p2p') return 'p2p'
-    const cached = this.#chatModeCache.get(message.chatId)
-    if (cached) return cached
-    const mode = await channel.getChatMode(message.chatId).catch(() => null)
-    if (!mode) {
-      const snapshot = await this.#coreSnapshot()
-      return snapshot.transportConversations.find(conversation =>
-        conversation.chatId === message.chatId && conversation.tenantKey === tenantKey
-      )?.conversationKind ?? 'group'
-    }
-    this.#chatModeCache.set(message.chatId, mode)
-    return mode
-  }
-
-  async #conversationDisplayName(
-    channel: LarkChannel,
-    message: NormalizedMessage,
-    conversationKind: 'p2p' | 'group' | 'topic'
-  ): Promise<string> {
-    if (message.chatType === 'p2p') return message.senderName || '飞书私聊'
-    let name = this.#chatNameCache.get(message.chatId)
-    if (!name) {
-      name = (await channel.getChatInfo(message.chatId).catch(() => null))?.name || '飞书群聊'
-      this.#chatNameCache.set(message.chatId, name)
-    }
-    return conversationKind === 'topic' ? `${name} · 话题` : name
+  async #readChatInfo(channel: LarkChannel, tenant: string, chat: string): Promise<{ name?: string; mode?: 'group' | 'topic' }> {
+    const key = JSON.stringify([tenant, chat])
+    const saved = this.#chatInfo.get(key)
+    if (saved && this.#now() - saved.readAt < 86_400_000) return saved
+    const active = this.#chatInfoReads.get(key)
+    if (active) return active
+    const read = channel.getChatInfo(chat).then(info => {
+      const mode = String(info.chatType) === 'topic' ? 'topic' as const : 'group' as const
+      if (info.name) this.#chatInfo.set(key, { name: info.name, mode, readAt: this.#now() })
+      return info.name ? { name: info.name, mode } : saved ?? (mode === 'topic' ? { mode } : {})
+    }).catch(() => saved ?? {}).finally(() => this.#chatInfoReads.delete(key))
+    this.#chatInfoReads.set(key, read)
+    return read
   }
 
   async #handleNativeCardAction(managed: ManagedChannel, event: CardActionEvent): Promise<FeishuCardActionResponse> {
@@ -2371,7 +2255,7 @@ export class ChannelSettingsService {
         || !Number.isSafeInteger(refresh.requiredRosterGeneration)) {
         return Promise.resolve(false)
       }
-      return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey, true)
+      return this.#reconcileChatRoster(refresh.chatId, refresh.tenantKey)
     }))
     if (rosterResults.some((result) => result.status === 'fulfilled' && result.value)) {
       this.#hostPump?.wake()
@@ -2409,38 +2293,16 @@ export class ChannelSettingsService {
   }
 
   #scheduleBackgroundMaintenance(): void {
-    if (this.#now() >= this.#nextAggregateRecoveryAt) {
-      this.#nextAggregateRecoveryAt = this.#now() + 2_000
-      if (!this.#aggregateRecovery) {
-        const recovery = this.#recoverPendingAggregates()
-        this.#aggregateRecovery = recovery
-        void recovery.then((hadPending) => {
-          if (hadPending && this.#aggregateRecovery === recovery && !this.#stopped) {
-            this.#hostPump?.wake()
-          }
-        }, (error) => {
-          console.warn(`[rovai] ${this.#profile.logLabel} aggregate recovery failed: ${channelFailureCode(error)}`)
-        }).finally(() => {
-          if (this.#aggregateRecovery === recovery) this.#aggregateRecovery = null
-        })
-      }
-    }
-    if (this.#now() >= this.#nextRosterSweepAt) {
-      this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
-      if (!this.#rosterSweep) {
-        const sweep = this.#reconcileKnownGroupRosters()
-        this.#rosterSweep = sweep
-        void sweep.then((changed) => {
-          if (changed && this.#rosterSweep === sweep && !this.#stopped) {
-            this.#hostPump?.wake()
-          }
-        }, (error) => {
-          console.warn(`[rovai] ${this.#profile.logLabel} roster sweep failed: ${channelFailureCode(error)}`)
-        }).finally(() => {
-          if (this.#rosterSweep === sweep) this.#rosterSweep = null
-        })
-      }
-    }
+    if (this.#aggregateRecovery) return
+    const recovery = this.#recoverPendingAggregates()
+    this.#aggregateRecovery = recovery
+    void recovery.then(progress => {
+      if (progress && this.#aggregateRecovery === recovery && !this.#stopped) this.#hostPump?.wake()
+    }, error => {
+      console.warn(`[rovai] ${this.#profile.logLabel} aggregate recovery failed: ${channelFailureCode(error)}`)
+    }).finally(() => {
+      if (this.#aggregateRecovery === recovery) this.#aggregateRecovery = null
+    })
   }
 
   async #downloadInboundAttachments(
@@ -2800,7 +2662,7 @@ export class ChannelSettingsService {
           const publicationNeedsAction = intent?.state === 'failed_unknown_remote_state'
             || (intent?.state === 'failed_recoverable'
               && !['version_published', 'connection_verified'].includes(intent.lastCompletedStep ?? ''))
-          return { ...bot, publicationStatus: published.has(bot.agentId)
+          return { ...bot, rosterIssue: this.#rosters.issues.get(bot.agentId), publicationStatus: published.has(bot.agentId)
               ? publicationNeedsAction ? 'failed' as const : 'published' as const : bot.publicationStatus,
             failureCode: publicationNeedsAction ? intent?.failureCode ?? bot.failureCode : bot.failureCode,
             published: published.has(bot.agentId),
@@ -3054,6 +2916,15 @@ function latestPublicationIntent(
 function stableCommandId(...parts: string[]): string {
   const hex = createHash('sha256').update(parts.join('\0')).digest('hex')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+function feishuRosterAccessIssue(error: unknown): 'credentials' | 'permission' | undefined {
+  const failure = error as { code?: unknown; response?: { status?: number; data?: { code?: unknown } } } | null
+  const status = failure?.response?.status
+  const tokenCode = error instanceof Error ? /failed to get (?:tenant|app)_access_token, code: (\d+)/u.exec(error.message)?.[1] : undefined
+  const code = Number(failure?.response?.data?.code ?? tokenCode ?? failure?.code)
+  if (status === 401 || [10005, 10015, 20013, 99991663, 99991664, 99991665, 99991668].includes(code)) return 'credentials'
+  if (status === 403 || code === 99991672) return 'permission'
 }
 
 function channelFailureCode(error: unknown): string {

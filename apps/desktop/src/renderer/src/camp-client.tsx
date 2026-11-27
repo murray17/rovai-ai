@@ -55,15 +55,24 @@ export type ThreadClient = Pick<RovaiApi,
 }
 
 const ThreadClientContext = createContext<ThreadClient | null>(null)
+// Web keeps the editor mounted across login while its image views belong to one authenticated session.
+const ImagePreviewSessionContext = createContext<number | null>(0)
 
-export function ThreadClientProvider({ client, children }: {
+export function ThreadClientProvider({ client, imagePreviewSession = 0, children }: {
   // Stable for one Host/Owner/editor scope. Authentication renewal changes the
   // transport generation, not this object or the mounted Composer.
   client: ThreadClient
+  imagePreviewSession?: number | null
   children: ReactNode
 }): React.JSX.Element {
-  return <ThreadClientContext.Provider value={client}><TaskCapabilityProvider client={client}><MemoryCapabilityProvider client={client}>{children}</MemoryCapabilityProvider></TaskCapabilityProvider></ThreadClientContext.Provider>
+  return <ThreadClientContext.Provider value={client}>
+    <ImagePreviewSessionContext.Provider value={imagePreviewSession}>
+      <TaskCapabilityProvider client={client}><MemoryCapabilityProvider client={client}>{children}</MemoryCapabilityProvider></TaskCapabilityProvider>
+    </ImagePreviewSessionContext.Provider>
+  </ThreadClientContext.Provider>
 }
+
+export function useImagePreviewSession(): number | null { return useContext(ImagePreviewSessionContext) }
 
 export function useThreadClient(): ThreadClient {
   // Existing Desktop mounts retain their real bridge. Browser/review mounts must

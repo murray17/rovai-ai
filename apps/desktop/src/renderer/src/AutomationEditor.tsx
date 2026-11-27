@@ -5,7 +5,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, AutomationRunListPage, AutomationRunSummary, AutomationView, ChannelSettingsSnapshot, ProjectNavigationGroup } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { AutomationGlyph, type AutomationIcon } from './AutomationControls'
-import { dateTimeLabel, projectValue, projectFromValue, runStatus, scheduleKinds, scheduleWithKind, weekdays, type AutomationDraft } from './automation-workspace-model'
+import { automationPlanState, dateTimeLabel, projectValue, projectFromValue, runStatus, scheduleKinds, scheduleWithKind, weekdays, type AutomationDraft } from './automation-workspace-model'
 import { readErrorMessage } from './error-message'
 import { automationScheduleError } from './automation-schedule-validation'
 import { AutomationDatePicker, AutomationTimePicker } from './AutomationSchedulePickers'
@@ -177,8 +177,8 @@ export function AutomationEditor({ draft, onChange, agents, projects, automation
         </div></div>}
       </div>
       {schedule.kind !== 'cron' && scheduleError && <p className="automation-schedule-error" role="alert">{scheduleError}</p>}
-      {automation?.nextRunAt && <p className="automation-next-run"><UiText zh={"下次 "} /><time dateTime={automation.nextRunAt}>{dateTimeLabel(automation.nextRunAt)}</time><span><UiText zh={"本地时间"} /></span></p>}
-      {automation && !automation.enabled && <p className="automation-next-run"><UiText zh={"已关闭，可在任务操作中运行一次。"} /></p>}
+      {automation?.enabled && automation.nextRunAt && <p className="automation-next-run"><UiText zh={"下次 "} /><time dateTime={automation.nextRunAt}>{dateTimeLabel(automation.nextRunAt)}</time><span><UiText zh={"本地时间"} /></span></p>}
+      {automation && automationPlanState(automation) === 'ended' && <p className="automation-next-run"><UiText zh="计划已结束" /></p>}
     </section>
     <AutomationNamingControls name={draft.name} prompt={draft.prompt} value={draft.threadNaming} disabled={busy} onChange={(threadNaming) => onChange((current) => ({ ...current, threadNaming }))} />
     <details className="automation-channel-disclosure" onToggle={(event) => setChannelsOpen(event.currentTarget.open)}>

@@ -1,4 +1,6 @@
 import { BusyLabel } from './BusyLabel'
+import { prepareImagePublication, releaseClientImageCache, type ImagePublication } from './ImageGallery'
+import type { ImagePreviewUrl } from './image-preview-url'
 import type { NavigationFindIntent, NavigationSearchRow } from './camp-navigation-search'
 import { ArchiveSettings } from './ArchiveSettings'
 import { deleteChat, isArchiveChangeEvent, requestArchiveCommand, writeArchive } from './thread-archive'
@@ -1050,6 +1052,7 @@ export function BusinessApp({
   if (taskCapabilityRef.current !== taskCapability.enabled) taskCapabilityRevisionRef.current += 1
   taskCapabilityRef.current = taskCapability.enabled
   const { client, preferences: uiPreferences, desktop } = environment
+  useEffect(() => () => releaseClientImageCache(client), [client])
   const reeditStore = useMemo(() => new MessageReeditStore(client.reeditScope ?? '',
     client.reeditScope ? undefined : null), [client])
   const userAnchorNavigationFor = useThreadUserAnchorCache(client)
@@ -1144,6 +1147,7 @@ export function BusinessApp({
   const [singleChatThreadId, setSingleChatThreadId] = useState<string | null>(null)
   const [campDetailEntryHost, setThreadDetailEntryHost] = useState<HTMLDivElement | null>(null)
   const [optimisticThreadMessages, setOptimisticThreadMessages] = useState<OptimisticThreadMessageEntry[]>([])
+  const [imagePublications, setImagePublications] = useState<ImagePublication[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [cancellingRunIds, setCancellingRunIds] = useState<Set<string>>(() => new Set())
   const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
@@ -4307,7 +4311,8 @@ export function BusinessApp({
   }
 
   const sendThreadMessage = async (
-    draft: ThreadComposerDraftView, deliveryMode: 'start' | 'steer' = 'start', steerTargets: Array<{agentRunId: string; executionEpoch: number}> = []
+    draft: ThreadComposerDraftView, deliveryMode: 'start' | 'steer' = 'start',
+    steerTargets: Array<{agentRunId: string; executionEpoch: number}> = [], displayedImages?: ReadonlyMap<string, ImagePreviewUrl>
   ): Promise<ThreadMessageSendReceipt | void> => {
     const hasReadyAttachment = draft.attachments.length > 0
     const hasSendablePayload = composerHasSendablePayload(draft.body, hasReadyAttachment)
@@ -4320,8 +4325,9 @@ export function BusinessApp({
       commandId,
       draft
     )
-    // Core decides direct publication versus private queue admission. Never expose
-    // a pending input as an optimistic public ThreadMessage before that decision.
+    // The public message ID confirms the image owner, including when recipient delivery is still waiting.
+    const imagePublication = prepareImagePublication(client, draft, optimisticMessage.sequence, displayedImages)
+    if (imagePublication) setImagePublications(current => [...current, imagePublication])
     setBusy('camp-message')
     setError(null)
     setRuntimeRecovery((current) => current?.threadId === threadId ? null : current)
@@ -4354,6 +4360,7 @@ export function BusinessApp({
         ? result.commandResult.payload.sequence
         : optimisticMessage.sequence
       if (threadMessageId) {
+        imagePublication?.publish(threadMessageId, viewRef.current === 'camp' && activeThreadIdRef.current === threadId)
         // File publication fields arrive from Core's projection; never display a fabricated file segment.
         if (!draft.content.segments.some(segment => segment.kind === 'atom' && segment.atom.type === 'project_file_reference')) {
           setOptimisticThreadMessages((current) => [...current, {
@@ -4386,6 +4393,10 @@ export function BusinessApp({
       if (!rejectedForRuntime) notify(errorMessage(nextError))
       throw nextError
     } finally {
+      if (imagePublication) {
+        imagePublication.release()
+        setImagePublications(current => current.filter(entry => entry !== imagePublication))
+      }
       setBusy(null)
     }
   }
@@ -5025,6 +5036,7 @@ export function BusinessApp({
               : null}
             onLoadEarlierMessages={loadEarlierThreadMessages}
             optimisticMessages={activeOptimisticMessages}
+            imagePublications={imagePublications}
             projectName={activeThreadProject?.name ?? null}
             agents={agents}
             installations={installations}
