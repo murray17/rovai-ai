@@ -1,533 +1,79 @@
-name: Full check
+name: Signed macOS release acceptance
 
 on:
   workflow_dispatch:
-    inputs:
-      scope:
-        description: Validation scope
-        type: choice
-        default: full
-        options:
-          - full
-          - server
-          - server-updates
-          - desktop-windows
-          - windows-runtime
-          - windows-check
-      server_target:
-        description: Native Server target (server or server-updates scope)
-        type: choice
-        default: all
-        options:
-          - all
-          - macos-arm64
-          - macos-x64
-          - windows-x64
-          - linux-x64
-      server_release_draft:
-        description: Add Server assets to the unified draft Release after native checks pass (main only)
-        type: boolean
-        default: false
 
 permissions:
+  actions: read
   contents: read
 
-concurrency:
-  group: full-check-${{ github.ref }}-${{ inputs.scope }}-${{ inputs.server_target || 'all' }}
-  cancel-in-progress: true
-
 jobs:
-  linux-full:
-    if: inputs.scope == 'full'
-    name: Linux full
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 11.20.0
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run full Node checks
-        run: |
-          pnpm typecheck
-          pnpm test
-
-      - name: Run real Electron integration suite
-        env:
-          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
-        # The largest desktop fixture opens a 2560 × 1440 native window.
-        run: xvfb-run -a -s '-screen 0 2560x1600x24' pnpm test:desktop:integration
-
-  desktop-windows:
-    name: Windows Desktop
-    if: inputs.scope == 'full' || inputs.scope == 'desktop-windows'
-    runs-on: windows-2022
-    timeout-minutes: 20
+  native-upgrade:
+    name: Signed install and upgrade / ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 28
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 26
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 11.20.0
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: 24
+          run_install: false
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - name: Check close policy and existing quit/update owners
-        run: pnpm exec vitest run apps/desktop/src/main/windows-window-close.test.ts apps/desktop/src/main/window-close-preferences.test.ts apps/desktop/src/main/window-close-ipc.test.ts apps/desktop/src/preload/window-close-api.test.ts apps/desktop/src/main/app-quit-coordinator.test.ts apps/desktop/src/main/app-updates.test.ts
-      - name: Exercise Windows close choice and native tray
-        env:
-          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
-        run: pnpm test:windows-close
-      - name: Preserve standalone window close
-        env:
-          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
-        run: pnpm test:window-close
-      - name: Verify the isolated production bridge
-        env:
-          ROVAI_REQUIRE_ELECTRON_INTEGRATION: '1'
-        run: pnpm test:desktop-bridge
-
-  rust-full:
-    if: inputs.scope == 'full'
-    name: Rust full
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Restore Cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 11.20.0
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24
-
-      - name: Run Send file CLI process regression
-        run: pnpm test:send-input-file
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run all-features Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run all-features Rust tests
-        run: cargo test --workspace --all-features
-
-  windows-check:
-    if: inputs.scope == 'windows-check'
-    name: Windows compile
-    runs-on: windows-2022
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Restore Cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Check all Windows targets
-        run: >-
-          cargo check --workspace --all-targets
-          --target x86_64-pc-windows-msvc
-
-  windows-full:
-    if: inputs.scope == 'full' || inputs.scope == 'windows-runtime'
-    name: Windows full
-    runs-on: windows-2022
-    timeout-minutes: 120
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Restore Cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Check all Windows targets
-        run: >-
-          cargo check --workspace --all-targets
-          --target x86_64-pc-windows-msvc
-
-      - name: Exercise optional storage and Runtime fault isolation
-        shell: pwsh
-        run: |
-          foreach ($owner in @('managed_blob::tests::', 'mcp_projection::tests::', 'runtime_mcp::tests::', 'camp_attachment_view::tests::', 'runtime_custom_api::tests::', 'runtime_startup::tests::', 'member_environment::tests::', 'core_subsystems::tests::')) {
-            cargo test -p rovai-core --features extended-tests --lib --target x86_64-pc-windows-msvc $owner -- --test-threads=2
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-
-      - name: Install Node for native Core RPC acceptance
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: 24
-
-      - name: Exercise native Core startup and in-process optional retry
-        shell: pwsh
-        run: |
-          cargo build -p rovai-core --bin rovai-core --target x86_64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:ROVAI_CORE_BIN = (Resolve-Path 'target/x86_64-pc-windows-msvc/debug/rovai-core.exe').Path
-          node --test --test-name-pattern='Thread output|optional startup|a missing Pi|authority recovery|a startup retry' scripts/lib/core-startup-availability.test.mjs
-
-      - name: Exercise Windows managed process ownership
-        run: >-
-          cargo test -p rovai-core --lib
-          --target x86_64-pc-windows-msvc
-          managed_process
-
-      - name: Exercise Runtime program identity and native model options
-        shell: pwsh
-        run: |
-          foreach ($owner in @('runtime_discovery::', 'runtime_discovery_windows::', 'windows_runtime_entrypoint::', 'identity_checked_probe', 'grouped_acp_models', 'read_model::message_model::')) {
-            cargo test -p rovai-core --features extended-tests --lib --target x86_64-pc-windows-msvc $owner
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-
-      - name: Exercise Windows Fleet cleanup receipts
-        run: >-
-          cargo test -p rovai-core --lib --features extended-tests
-          --target x86_64-pc-windows-msvc runtime_fleet::tests::
-
-      - name: Exercise Windows Codex release policy
-        run: >-
-          cargo test -p rovai-core --lib --features extended-tests
-          --target x86_64-pc-windows-msvc codex::tests::
-
-      - name: Exercise Windows Claude settings files and resume
-        run: >-
-          cargo test -p rovai-core --lib --features extended-tests
-          --target x86_64-pc-windows-msvc claude::tests:: -- --test-threads=2
-
-      - name: Exercise Windows OpenCode compaction plugin installation
-        run: >-
-          cargo test -p rovai-core --lib --features extended-tests
-          --target x86_64-pc-windows-msvc acp::compaction_detector_tests::
-
-      - name: Exercise Windows database recovery and ordinary permissions
-        run: >-
-          cargo test -p rovai-core --lib --features extended-tests
-          --target x86_64-pc-windows-msvc database_admission::
-
-      - name: Exercise Windows migration and interruption recovery
-        run: >-
-          cargo test -p rovai-core --lib --features extended-tests
-          --target x86_64-pc-windows-msvc authority_migration::
-
-      - name: Exercise Windows instance exclusion
-        run: >-
-          cargo test -p rovai-core --lib
-          --target x86_64-pc-windows-msvc
-          core_data_dir_lock
-
-      - name: Exercise Windows data-root layout
-        run: >-
-          cargo test -p rovai-core --all-targets
-          --target x86_64-pc-windows-msvc
-          windows_data_root
-
-      - name: Exercise Core-independent Windows bootstrap storage
-        run: >-
-          cargo test -p rovai-core --all-targets
-          --target x86_64-pc-windows-msvc
-          windows_bootstrap_root
-
-      - name: Exercise Windows attachment traversal
-        run: >-
-          cargo test -p rovai-core --lib
-          --target x86_64-pc-windows-msvc
-          windows_attachment
-
-      - name: Exercise Windows CLI attachment snapshots
-        run: >-
-          cargo test -p rovai-core --bin rovai
-          --target x86_64-pc-windows-msvc
-          send_attachments
-
-      - name: Exercise Windows Skill Library
-        run: >-
-          cargo test -p rovai-core --lib
-          --target x86_64-pc-windows-msvc
-          windows_skill_library
-
-      - name: Exercise Windows Skill projection lifecycle
-        run: >-
-          cargo test -p rovai-core --lib
-          --target x86_64-pc-windows-msvc
-          windows_skill_projection
-
-      - name: Exercise Windows Named Pipe transport
-        run: >-
-          cargo test -p rovai-core --all-targets
-          --target x86_64-pc-windows-msvc
-          windows_named_pipe
-
-      - name: Exercise Windows private JSON replacement
-        run: >-
-          cargo test -p rovai-core --lib
-          --target x86_64-pc-windows-msvc
-          private_json_replacement
-
-      - name: Exercise Windows MCP configuration permissions
-        run: >-
-          cargo test -p rovai-core --features slow-tests --lib
-          --target x86_64-pc-windows-msvc
-          mcp::slow_tests::
-
-
-  server-updates:
-    name: Server update tests / ${{ matrix.target }}
-    if: inputs.scope == 'server-updates'
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON('{"all":["macos-arm64","macos-x64","windows-x64","linux-x64"],"macos-arm64":["macos-arm64"],"macos-x64":["macos-x64"],"windows-x64":["windows-x64"],"linux-x64":["linux-x64"]}')[inputs.server_target || 'all'] }}
-    runs-on: ${{ fromJSON('{"macos-arm64":"macos-15","macos-x64":"macos-15-intel","windows-x64":"windows-2022","linux-x64":"ubuntu-22.04"}')[matrix.target] }}
-    timeout-minutes: 30
-    env:
-      CARGO_BUILD_JOBS: 3
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: server-${{ matrix.target }}
-      - name: Verify credentials and content versions
-        id: web_check
-        run: cargo test --locked -p rovai-web
-      - name: Verify updater and process handoff
-        if: ${{ !cancelled() && (steps.web_check.conclusion == 'success' || steps.web_check.conclusion == 'failure') }}
-        run: cargo test --locked -p rovai-host --lib server_updates
-      - name: Verify Windows resolved-file boundary
-        if: ${{ matrix.target == 'windows-x64' && !cancelled() && (steps.web_check.conclusion == 'success' || steps.web_check.conclusion == 'failure') }}
-        run: cargo test --locked -p rovai-core --lib windows_attachment_directory_rejects_junctions_and_cleans_only_owned_tree
-
-  server-native:
-    name: Server preview / ${{ matrix.target }}
-    if: inputs.scope == 'server'
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON('{"all":["macos-arm64","macos-x64","windows-x64","linux-x64"],"macos-arm64":["macos-arm64"],"macos-x64":["macos-x64"],"windows-x64":["windows-x64"],"linux-x64":["linux-x64"]}')[inputs.server_target || 'all'] }}
-    runs-on: ${{ fromJSON('{"macos-arm64":"macos-15","macos-x64":"macos-15-intel","windows-x64":"windows-2022","linux-x64":"ubuntu-22.04"}')[matrix.target] }}
-    timeout-minutes: 60
-    env:
-      CARGO_BUILD_JOBS: 3
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-      - name: Restore Cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: server-${{ matrix.target }}
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 26
-      - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 11.20.0
-          run_install: false
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build native matching Host and WebUI package
-        run: node scripts/build-server.mjs --target-key ${{ matrix.target }}
-      - name: Verify Linux ABI rejection cases
-        if: matrix.target == 'linux-x64'
-        run: node --test scripts/lib/linux-server-abi.test.mjs
-      - name: Verify credential state transitions
-        run: cargo test -p rovai-web
-      - name: Verify Server updater state transitions
-        run: cargo test -p rovai-host --lib server_updates
-      - name: Verify native process and private storage seams
-        run: |
-          cargo test -p rovai-core --lib managed_process
-          cargo test -p rovai-core --lib antigravity::tests::
-          cargo test -p rovai-core --lib codebuddy_launch_preserves_native_default_and_explicit_model_selection
-          node --test scripts/test-zcode-owner.mjs
-          cargo test -p rovai-core --lib core_data_dir_lock
-          cargo test -p rovai-core --lib storage_layout
-      - name: Verify packaged Host and shared Web lifecycle
-        env:
-          ROVAI_HOST_BIN: ${{ github.workspace }}/out/server/${{ matrix.target }}/rovai-host${{ matrix.target == 'windows-x64' && '.exe' || '' }}
-          ROVAI_SERVER_BIN: ${{ github.workspace }}/out/server/${{ matrix.target }}/rovai-server${{ matrix.target == 'windows-x64' && '.exe' || '' }}
-          ROVAI_SERVER_RELEASE_DIR: ${{ github.workspace }}/out/server/releases/${{ matrix.target }}
-          ROVAI_WEB_UI: ${{ github.workspace }}/out/server/${{ matrix.target }}/web-ui
-        # Each file starts isolated Host/Core processes; avoid competing cold starts on small runners.
-        run: node --test --test-concurrency=1 scripts/lib/host-lifecycle.test.mjs scripts/lib/host-web.test.mjs scripts/lib/host-web-channels.test.mjs scripts/lib/server-entry.test.mjs scripts/lib/server-install.test.mjs
-      - name: Upload checksummed native archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rovai-server-archive-${{ matrix.target }}-${{ github.sha }}
-          path: out/server/releases/${{ matrix.target }}/
-          if-no-files-found: error
-          retention-days: 7
-      - name: Observe native managed Runtime file boundary
-        # Single-Owner trusted Host: keep same-UID observations as risk evidence,
-        # not a strong-isolation release gate. Workspace access must still work.
-        run: |
-          node -e "require('node:fs').mkdirSync('out/server-evidence', { recursive: true })"
-          cargo run --quiet -p rovai-core --example host_runtime_boundary_probe > out/server-evidence/${{ matrix.target }}.json
-          node -e "const r=JSON.parse(require('node:fs').readFileSync('out/server-evidence/${{ matrix.target }}.json','utf8')); console.log(JSON.stringify(r)); if (!r.observation.authorizedWorkspaceWritable || !r.observation.descendant.authorizedWorkspaceWritable) process.exit(2)"
-      - name: Upload native boundary observation
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rovai-server-boundary-${{ matrix.target }}-${{ github.sha }}
-          path: out/server-evidence/${{ matrix.target }}.json
-          if-no-files-found: warn
-          retention-days: 3
-
-      - name: Upload native preview package
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rovai-server-preview-${{ matrix.target }}-${{ github.sha }}
-          path: out/server/${{ matrix.target }}/
-          if-no-files-found: error
-          retention-days: 3
-
-  server-linux-os:
-    name: Linux Server OS / ${{ matrix.os }}
-    needs: server-native
-    if: inputs.scope == 'server' && (inputs.server_target == 'all' || inputs.server_target == 'linux-x64')
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: rovai-server-archive-linux-x64-${{ github.sha }}
-          path: out/server-downloads
-      - name: Install the unchanged Ubuntu 22.04 archive
-        shell: bash
-        run: |
-          version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
-          sh scripts/install-server.sh --version "$version" --from-dir "$PWD/out/server-downloads" --prefix "$RUNNER_TEMP/rovai-linux" --bin-dir "$RUNNER_TEMP/rovai-linux-bin" --no-modify-path
-      - name: Exercise Server with no development tools on its PATH
-        run: python3 scripts/smoke-linux-server.py "$RUNNER_TEMP/rovai-linux/current" --expected-source "$GITHUB_SHA" --output out/server-evidence/${{ matrix.os }}.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rovai-server-os-${{ matrix.os }}-${{ github.sha }}
-          path: out/server-evidence/${{ matrix.os }}.json
-          if-no-files-found: error
-
-  server-linux-debian:
-    name: Linux Server OS / Debian 12 VM
-    needs: server-native
-    if: inputs.scope == 'server' && (inputs.server_target == 'all' || inputs.server_target == 'linux-x64')
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: rovai-server-archive-linux-x64-${{ github.sha }}
-          path: out/server-downloads
-      - name: Prepare Debian VM tooling
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
-      - name: Exercise the unchanged archive inside Debian 12
-        run: bash scripts/smoke-debian-server-vm.sh out/server-downloads "$GITHUB_SHA" out/server-evidence/debian-12.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rovai-server-os-debian-12-${{ github.sha }}
-          path: out/server-evidence/debian-12.json
-          if-no-files-found: error
-
-  server-release-draft:
-    name: Assemble unified draft Release with native Server assets
-    needs: [server-native, server-linux-os, server-linux-debian]
-    if: inputs.scope == 'server' && inputs.server_release_draft && inputs.server_target == 'all' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 26
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: 11.20.0
-          run_install: false
-      - name: Install locked dependencies for release-note validation
-        run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: rovai-server-archive-*-${{ github.sha }}
-          path: out/server-downloads
-      - name: Check matched native archives and assemble checksums
-        run: node scripts/prepare-server-release.mjs out/server-downloads out/server-release
-      - name: Create an unpublished draft without changing the default channel
+      - name: Download exact public baseline and signed build artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          ROVAI_RELEASE_ARCH: ${{ matrix.arch }}
+          ROVAI_RELEASE_SOURCE: 2a09837a89bcf30d2efab20315cfa18947d3e8cc
+          ROVAI_RELEASE_RUN: '45932450887'
         shell: bash
         run: |
           set -euo pipefail
-          version=$(node -p 'require("./package.json").version')
-          gh release create "v$version" --draft --target "$GITHUB_SHA" --title "Rovai AI v$version" --notes-file out/server-release/RELEASE-NOTES.md out/server-release/*.tar.gz out/server-release/*.zip out/server-release/SHA256SUMS scripts/install-server.sh scripts/install-server.ps1
+          test "$GITHUB_REPOSITORY" = 'murray17/rovai-ai'
+          old="$RUNNER_TEMP/rv517-baseline"
+          candidate="$RUNNER_TEMP/rv517-candidate"
+          mkdir -p "$old" "$candidate"
+          base='https://github.com/murray17/rovai-ai/releases/download/v0.5.16'
+          curl -fsSL --retry 3 "$base/SHA256SUMS.txt" -o "$old/SHA256SUMS.txt"
+          archive="Rovai-AI-0.5.16-$ROVAI_RELEASE_ARCH"
+          curl -fsSL --retry 3 "$base/$archive.dmg" -o "$old/$archive.dmg" &
+          dmg_pid=$!
+          curl -fsSL --retry 3 "$base/$archive.zip" -o "$old/$archive.zip" &
+          zip_pid=$!
+          curl -fsSL --retry 3 "$base/$archive.zip.blockmap" -o "$old/$archive.zip.blockmap" &
+          map_pid=$!
+          wait "$dmg_pid"
+          wait "$zip_pid"
+          wait "$map_pid"
+          (
+            cd "$old"
+            awk -v name="$archive" '$2 == (name ".zip") || $2 == (name ".dmg") || $2 == (name ".zip.blockmap")' SHA256SUMS.txt > checked-sums
+            test "$(wc -l < checked-sums | tr -d ' ')" = 3
+            shasum -a 256 --check checked-sums
+          )
+          actual_source=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ROVAI_RELEASE_RUN" --jq '.head_sha')
+          test "$actual_source" = "$ROVAI_RELEASE_SOURCE"
+          artifact="rovai-macos-$ROVAI_RELEASE_ARCH-signed"
+          for round in {1..70}; do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ROVAI_RELEASE_RUN/artifacts" --jq '.artifacts[].name' | grep -Fx "$artifact"; then
+              break
+            fi
+            sleep 12
+          done
+          gh run download "$ROVAI_RELEASE_RUN" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "$candidate"
+      - name: Exercise clean DMG install and three real signed update paths
+        shell: bash
+        run: |
+          node scripts/smoke-macos-signed-release.mjs "$RUNNER_TEMP/rv517-baseline" "$RUNNER_TEMP/rv517-candidate"
