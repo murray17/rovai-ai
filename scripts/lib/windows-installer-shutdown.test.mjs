@@ -29,6 +29,7 @@ test('Windows installer grants Planned Shutdown its full budget before bounded f
   assert.equal(pollMs * gracefulTicks, 20_000)
   assert.equal(pollMs * forceTicks, 5_000)
   assert.match(installerInclude, /!macro customCheckAppRunning/u)
+  assert.doesNotMatch(installerInclude, /!insertmacro IS_POWERSHELL_AVAILABLE/u)
   assert.match(installerInclude, /ROVAI_REQUEST_GRACEFUL_CLOSE/u)
   assert.match(installerInclude, /ROVAI_WAIT_FOR_QUIESCENCE \$\{ROVAI_GRACEFUL_SHUTDOWN_MS\} \$\{ROVAI_GRACEFUL_SHUTDOWN_TICKS\}/u)
   assert.match(

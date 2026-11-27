@@ -10,6 +10,7 @@
 !define ROVAI_FORCE_SHUTDOWN_TICKS 10
 
 Var pid
+Var IsPowerShellAvailable
 Var rovaiProcessDirectory
 Var rovaiQuitForUpdate
 Var rovaiProcessStatus
@@ -197,7 +198,8 @@ Var rovaiShutdownFailure
   ${GetProcessInfo} 0 $pid $0 $1 $2 $3
   InitPluginsDir
   File /oname=$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR} "${BUILD_RESOURCES_DIR}\installer-process-coordinator.ps1"
-  !insertmacro IS_POWERSHELL_AVAILABLE
+  ; The real no-profile Status call below determines whether coordination works.
+  StrCpy $IsPowerShellAvailable 0
 
   !insertmacro ROVAI_FIND_INSTALL_PROCESSES $rovaiProcessStatus
   ${if} $rovaiProcessStatus != 0
