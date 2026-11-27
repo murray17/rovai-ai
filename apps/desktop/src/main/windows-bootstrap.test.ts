@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { assessWindowsDesktopBootstrap, windowsBootstrapInstanceKey } from './windows-bootstrap'
+import { assessWindowsDesktopBootstrap, windowsBootstrapInstanceKey, windowsSecondInstanceAction } from './windows-bootstrap'
 import {
   expectedWindowsDataRootLayout,
   prepareWindowsBootstrapRoot,
@@ -71,6 +71,27 @@ describe('Windows pre-ready Bootstrap composition', () => {
     expect(assessWindowsDesktopBootstrap({ electronApp: appFixture(false), prepareShell: () => shell, prepareAuthority }))
       .toEqual({ kind: 'secondary' })
     expect(prepareAuthority).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('ends an update sender before authority preparation with lock result %s', (lockResult) => {
+    const electronApp = appFixture(lockResult)
+    const prepareAuthority = vi.fn(() => formal)
+    const quitForUpdate = { kind: 'quit-for-update', executablePath: 'C:\\Rovai\\Rovai-ai.exe' } as const
+
+    expect(assessWindowsDesktopBootstrap({
+      electronApp, prepareShell: () => shell, prepareAuthority, isolatedInstance: true, quitForUpdate
+    })).toEqual({ kind: 'secondary' })
+    expect(electronApp.requestSingleInstanceLock).toHaveBeenCalledExactlyOnceWith(quitForUpdate)
+    expect(prepareAuthority).not.toHaveBeenCalled()
+  })
+
+  it('dispatches update quit only to the matching Windows executable', () => {
+    const executablePath = 'C:\\Rovai\\Rovai-ai.exe'
+    expect(windowsSecondInstanceAction(undefined, executablePath)).toBe('restore')
+    expect(windowsSecondInstanceAction({ kind: 'quit-for-update' }, executablePath)).toBe('ignore')
+    expect(windowsSecondInstanceAction({ kind: 'quit-for-update', executablePath: 'Rovai-ai.exe' }, executablePath)).toBe('ignore')
+    expect(windowsSecondInstanceAction({ kind: 'quit-for-update', executablePath: 'C:/Other/Rovai-ai.exe' }, executablePath)).toBe('ignore')
+    expect(windowsSecondInstanceAction({ kind: 'quit-for-update', executablePath: 'c:/rovai/rovai-ai.exe' }, executablePath)).toBe('quit')
   })
 
   it('restores every shell path if formal Electron path binding throws halfway', () => {

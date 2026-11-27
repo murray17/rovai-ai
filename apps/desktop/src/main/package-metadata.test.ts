@@ -85,6 +85,7 @@ describe('desktop package metadata', () => {
         to: 'bin/rovai.exe'
       },
       { from: 'out/web', to: 'web-ui' },
+      { from: 'build/windows-quit-for-update-v1', to: 'windows-quit-for-update-v1' },
       { from: 'skills', to: 'skills' }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')

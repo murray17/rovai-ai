@@ -56,13 +56,13 @@ try {
   report.processCount = running.processIds.length
 
   const shutdownStartedAt = Date.now()
-  const requested = runCoordinator('RequestClose')
+  const requested = runCoordinator('RequestUpdateQuit')
   if (requested.status !== 0) {
     throw new Error(`installer coordinator could not request graceful close: ${combinedOutput(requested)}`)
   }
   const request = parseCoordinatorOutput(requested.stdout)
-  if (!request.processIds.includes(app.pid)) {
-    throw new Error(`installer coordinator did not target the App main window: ${requested.stdout}`)
+  if (request.event !== 'update_quit_requested' || request.processIds.length !== 1) {
+    throw new Error(`installer coordinator did not launch one update quit sender: ${requested.stdout}`)
   }
 
   const waited = runCoordinator('WaitForExit', 20_000)
@@ -116,7 +116,8 @@ function launchApp() {
       cwd: installDirectory,
       env: {
         ...process.env,
-        ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
+        ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+        ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT: dataRoot
       },
       stdio: ['ignore', stdoutHandle, stderrHandle]
     })
@@ -164,6 +165,11 @@ function runCoordinator(action, timeoutMilliseconds = null) {
   return spawnSync('powershell.exe', arguments_, {
     cwd: root,
     encoding: 'utf8',
+    env: {
+      ...process.env,
+      ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+      ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT: dataRoot
+    },
     windowsHide: true
   })
 }

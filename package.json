@@ -358,6 +358,10 @@
           "to": "web-ui"
         },
         {
+          "from": "build/windows-quit-for-update-v1",
+          "to": "windows-quit-for-update-v1"
+        },
+        {
           "from": "skills",
           "to": "skills"
         }

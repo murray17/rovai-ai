@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('Status', 'RequestClose', 'WaitForExit', 'ForceClose')]
+  [ValidateSet('Status', 'RequestClose', 'RequestUpdateQuit', 'WaitForExit', 'ForceClose')]
   [string]$Action,
 
   [Parameter(Mandatory = $true)]
@@ -141,6 +141,35 @@ try {
       exit 10
     }
     Write-CoordinatorEvent -Event 'quiescent'
+    exit 0
+  }
+
+  if ($Action -eq 'RequestUpdateQuit') {
+    if ($unresolvedIds.Count -gt 0) {
+      Write-CoordinatorEvent -Event 'identity_unresolved' -UnresolvedProcessIds $unresolvedIds
+      exit 11
+    }
+    $targetExe = Join-Path $normalizedInstallDirectory $ExecutableName
+    $desktop = @($inspection.Matched | Where-Object { $_.ExecutablePath -ieq $targetExe })
+    if ($desktop.Count -eq 0) {
+      Write-CoordinatorEvent -Event 'no_desktop_to_notify'
+      exit 0
+    }
+    $capability = Join-Path $normalizedInstallDirectory 'resources\windows-quit-for-update-v1'
+    if (-not (Test-Path -LiteralPath $capability -PathType Leaf)) {
+      Write-CoordinatorEvent -Event 'update_quit_unsupported'
+      exit 11
+    }
+    $arguments = @('--quit-for-update')
+    $acceptanceRoot = $env:ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT
+    if ($env:ROVAI_ALLOW_ISOLATED_INSTANCE -eq '1' -and $acceptanceRoot) {
+      if (-not [System.IO.Path]::IsPathRooted($acceptanceRoot) -or $acceptanceRoot.Contains('"')) {
+        throw 'Invalid installer acceptance data root.'
+      }
+      $arguments += ('--user-data-dir="' + [System.IO.Path]::GetFullPath($acceptanceRoot) + '"')
+    }
+    $sender = Start-Process -FilePath $targetExe -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    Write-CoordinatorEvent -Event 'update_quit_requested' -ProcessIds @($sender.Id)
     exit 0
   }
 

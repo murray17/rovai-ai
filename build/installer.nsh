@@ -10,6 +10,8 @@
 !define ROVAI_FORCE_SHUTDOWN_TICKS 10
 
 Var pid
+Var rovaiProcessDirectory
+Var rovaiQuitForUpdate
 Var rovaiProcessStatus
 Var rovaiShutdownTicks
 Var rovaiShutdownPrompt
@@ -33,12 +35,12 @@ Var rovaiShutdownFailure
 !macroend
 
 !macro ROVAI_RUN_PROCESS_COORDINATOR ACTION RESULT
-  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "${ACTION}" -InstallDirectory "$INSTDIR\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid'
+  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "${ACTION}" -InstallDirectory "$rovaiProcessDirectory\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid'
   Pop ${RESULT}
 !macroend
 
 !macro ROVAI_RUN_PROCESS_COORDINATOR_WAIT TIMEOUT_MS RESULT
-  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "WaitForExit" -InstallDirectory "$INSTDIR\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid -TimeoutMilliseconds "${TIMEOUT_MS}"'
+  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "WaitForExit" -InstallDirectory "$rovaiProcessDirectory\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid -TimeoutMilliseconds "${TIMEOUT_MS}"'
   Pop ${RESULT}
 !macroend
 
@@ -85,7 +87,11 @@ Var rovaiShutdownFailure
 
 !macro ROVAI_REQUEST_GRACEFUL_CLOSE
   ${if} $IsPowerShellAvailable == 0
-    !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestClose" $rovaiProcessStatus
+    ${if} $rovaiQuitForUpdate == 1
+      !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestUpdateQuit" $rovaiProcessStatus
+    ${else}
+      !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestClose" $rovaiProcessStatus
+    ${endif}
     DetailPrint "Rovai graceful close request returned $rovaiProcessStatus."
   ${else}
     DetailPrint "Automatic close is unavailable because the exact Rovai process identity could not be verified."
@@ -125,6 +131,27 @@ Var rovaiShutdownFailure
   ${endif}
 !macroend
 
+!ifndef BUILD_UNINSTALLER
+!macro ROVAI_SET_UPGRADE_CONFIRMATION
+  ${if} $LANGUAGE == 2052
+    StrCpy $rovaiShutdownPrompt "安装更新需要退出 Rovai。正在执行的任务会停止。现在退出并安装吗？"
+    ${if} $rovaiQuitForUpdate == 0
+      StrCpy $rovaiShutdownPrompt "$rovaiShutdownPrompt$\r$\n$\r$\n如果 Rovai 弹出关闭选项，请选「退出 Rovai」。如果已收进托盘，请右键点击托盘图标并选「退出 Rovai」。"
+    ${endif}
+  ${elseif} $LANGUAGE == 1028
+    StrCpy $rovaiShutdownPrompt "安裝更新需要退出 Rovai。正在執行的工作會停止。現在退出並安裝嗎？"
+    ${if} $rovaiQuitForUpdate == 0
+      StrCpy $rovaiShutdownPrompt "$rovaiShutdownPrompt$\r$\n$\r$\n如果 Rovai 顯示關閉選項，請選「退出 Rovai」。如果已縮小至系統匣，請以右鍵點選圖示並選「退出 Rovai」。"
+    ${endif}
+  ${else}
+    StrCpy $rovaiShutdownPrompt "Installing the update requires quitting Rovai. Running tasks will stop. Quit and install now?"
+    ${if} $rovaiQuitForUpdate == 0
+      StrCpy $rovaiShutdownPrompt "$rovaiShutdownPrompt$\r$\n$\r$\nIf Rovai shows close options, choose Quit Rovai. If it is in the system tray, right-click its icon and choose Quit Rovai."
+    ${endif}
+  ${endif}
+!macroend
+!endif
+
 !macro ROVAI_WAIT_FOR_QUIESCENCE TIMEOUT_MS TICKS LOOP_ID EXHAUSTED_LABEL
   ${if} $IsPowerShellAvailable == 0
     !insertmacro ROVAI_RUN_PROCESS_COORDINATOR_WAIT ${TIMEOUT_MS} $rovaiProcessStatus
@@ -157,6 +184,16 @@ Var rovaiShutdownFailure
 !macroend
 
 !macro customCheckAppRunning
+  StrCpy $rovaiProcessDirectory $INSTDIR
+  StrCpy $rovaiQuitForUpdate 0
+  !ifndef BUILD_UNINSTALLER
+    ; The wizard destination can differ from the directory the old uninstaller will remove.
+    ReadRegStr $0 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" InstallLocation
+    ${if} $0 != ""
+      StrCpy $rovaiProcessDirectory $0
+    ${endif}
+    ClearErrors
+  !endif
   ${GetProcessInfo} 0 $pid $0 $1 $2 $3
   InitPluginsDir
   File /oname=$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR} "${BUILD_RESOURCES_DIR}\installer-process-coordinator.ps1"
@@ -167,13 +204,33 @@ Var rovaiShutdownFailure
     Goto rovai_not_running
   ${endif}
 
+  !ifndef BUILD_UNINSTALLER
+    ${if} $IsPowerShellAvailable == 0
+      IfFileExists "$rovaiProcessDirectory\resources\windows-quit-for-update-v1" 0 +2
+      StrCpy $rovaiQuitForUpdate 1
+    ${endif}
+  !endif
   ${IfNot} ${Silent}
-    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK rovai_begin_shutdown IDCANCEL rovai_cancel_setup
+    !ifdef BUILD_UNINSTALLER
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK rovai_begin_shutdown IDCANCEL rovai_cancel_setup
+    !else
+      !insertmacro ROVAI_SET_UPGRADE_CONFIRMATION
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "$rovaiShutdownPrompt" IDOK rovai_begin_shutdown IDCANCEL rovai_cancel_setup
+    !endif
   ${EndIf}
 
   rovai_begin_shutdown:
     DetailPrint "Requesting Rovai AI controlled shutdown and waiting up to 20 seconds."
-    !insertmacro ROVAI_REQUEST_GRACEFUL_CLOSE
+    !ifdef BUILD_UNINSTALLER
+      !insertmacro ROVAI_REQUEST_GRACEFUL_CLOSE
+    !else
+      ${if} ${Silent}
+      ${andIf} ${isUpdated}
+        DetailPrint "Waiting for the shutdown initiated by Rovai's in-app updater."
+      ${else}
+        !insertmacro ROVAI_REQUEST_GRACEFUL_CLOSE
+      ${endif}
+    !endif
     !insertmacro ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_GRACEFUL_SHUTDOWN_MS} ${ROVAI_GRACEFUL_SHUTDOWN_TICKS} graceful rovai_graceful_timeout
 
   rovai_graceful_timeout:
@@ -193,7 +250,7 @@ Var rovaiShutdownFailure
     !insertmacro ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_MANUAL_SHUTDOWN_MS} ${ROVAI_MANUAL_SHUTDOWN_TICKS} manual rovai_shutdown_failed
 
   rovai_force_shutdown:
-    DetailPrint "Controlled shutdown timed out; force-closing only verified processes from $INSTDIR."
+    DetailPrint "Controlled shutdown timed out; force-closing only verified processes from $rovaiProcessDirectory."
     !insertmacro ROVAI_FORCE_CLOSE
     !insertmacro ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_FORCE_SHUTDOWN_MS} ${ROVAI_FORCE_SHUTDOWN_TICKS} force rovai_shutdown_failed
 

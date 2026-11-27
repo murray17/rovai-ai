@@ -51,8 +51,9 @@ NSIS Release 还必须同版本上传 installer、`.exe.blockmap` 与 `latest.ym
 [`build/release-notes.md`](../../build/release-notes.md) 读取与 `package.json.version` 绑定的共用 Markdown，
 要求 `latest.yml.releaseNotes` 存在且与源文件完全相同；缺少、为空、版本标题陈旧、内容漂移或缺少任一
 更新文件时不得发布应用内升级。初始安装仍使用 assisted installer，应用内“安装并重启”使用 silent
-upgrade，不再次展示安装向导。verifier 还冻结运行中升级协调器：先向安装目录内旧 Electron 主窗口发送
-标准关闭请求，完整等待 20 秒 Planned Shutdown，再进入最多 5 秒的精确安装树强制回收；不得恢复
+upgrade，不再次展示安装向导。外部安装器检测注册表记录的旧安装目录，用户确认后通过旧包的
+`--quit-for-update` 通知主实例进入 Planned Shutdown。旧包缺少能力标记时，首次确认显示手动退出说明，
+并仍发送标准关闭请求。安装器完整等待 20 秒，再开放原有超时处理，精确安装树的强制回收最多 5 秒；不得恢复
 electron-builder 默认的 1 秒等待或仅按相同路径前缀批量结束进程。
 
 共享的 `build:desktop` 前置检查同时要求 [`build/release-metadata.json`](../../build/release-metadata.json)
@@ -91,7 +92,8 @@ verifier 版本，不能与正式签名发布混用，也不能用 Windows Serve
 ## 安装、升级与卸载
 
 - clean install：新用户安装、启动、Core ready、v20 Built-in roundtrip 与现有 Onboarding gate 通过；
-- upgrade：安装器先请求正在运行的 App 正常关闭，并给 Planned Shutdown 20 秒完整预算；交互安装超时后由
+- upgrade：双击安装包先确认退出，取消保留 App 和正在执行的工作。已支持的旧包使用单实例通知退出，
+  前台与托盘共用入口，应用内更新由旧 App 发起退出。安装器给 Planned Shutdown 20 秒完整预算；交互安装超时后由
   用户选择再等待、仅强制关闭已证明属于精确安装目录的进程树，或取消。silent upgrade 只在该预算耗尽后
   进入有界强制回收；若 PowerShell 被策略禁用、无法证明进程路径，安装器只允许手动关闭或安全停止，
   不按映像名强杀；新旧 Core 不并行；
@@ -118,7 +120,8 @@ pnpm accept:windows:installer-shutdown
 
 该验收必须看到 App、Core 与 Electron 子进程全部退出，并从 Desktop 日志读到
 `forcedSignal: null` 与 `report.status: completed`。它不能替代带旧版安装器的完整升级验收，
-但可以在日常开发机上证明安装器使用的 `WM_CLOSE` 路径确实进入 Planned Shutdown。
+但可以在日常开发机上验证安装器的单实例退出请求进入 Planned Shutdown。此验收保留隔离数据和 MCP，
+用同一个 `ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT` 为旧实例和通知进程启用单实例锁。
 
 报告中的 `crossVersionUpgrade`、`baselineVersion` 和 `runningAppUpgrade` 是跨版本结论的必要证据；
 未传 baseline 时不得把同版本结果表述为 0.0.1→0.0.3 已实测。

@@ -131,6 +131,7 @@ import {
 import {
   assessWindowsDesktopBootstrap,
   windowsBootstrapInstanceKey,
+  windowsSecondInstanceAction,
   type WindowsBootstrapAssessment
 } from './windows-bootstrap'
 import {
@@ -397,6 +398,9 @@ const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
 const isolatedAcceptanceInstance =
   process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
   && hasExplicitUserDataDirectory
+const windowsUpdateQuit = process.platform === 'win32' && app.isPackaged && app.commandLine.hasSwitch('quit-for-update')
+  ? { kind: 'quit-for-update' as const, executablePath: process.execPath }
+  : undefined
 let coreDataPath: string | null = null
 let windowsBootstrap: WindowsBootstrapAssessment | null = null
 let primaryInstance: boolean
@@ -404,7 +408,9 @@ if (process.platform === 'win32') {
   const explicitRoot = hasExplicitUserDataDirectory ? app.commandLine.getSwitchValue('user-data-dir') : null
   windowsBootstrap = assessWindowsDesktopBootstrap({
     electronApp: app,
-    isolatedInstance: isolatedAcceptanceInstance,
+    isolatedInstance: isolatedAcceptanceInstance
+      && explicitRoot !== process.env.ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT,
+    quitForUpdate: windowsUpdateQuit,
     prepareShell: () => prepareWindowsBootstrapRoot(
       resolveDesktopBootstrapBinary(), windowsBootstrapInstanceKey(explicitRoot)
     ),
@@ -422,7 +428,8 @@ if (process.platform === 'win32') {
     // No safe Chromium profile exists. Do not silently switch to a broad-ACL
     // default or write authority into a fallback folder. This is a native dialog,
     // not a thrown module-load exception or a Full Core crash/restart loop.
-    dialog.showErrorBox('Rovai 无法准备安全的桌面存储',
+    if (windowsUpdateQuit) console.error(windowsBootstrap.error.message)
+    else dialog.showErrorBox('Rovai 无法准备安全的桌面存储',
       `Core 未启动，也没有创建替代工作区。\n\n${windowsBootstrap.error.message}`)
   }
 } else {
@@ -435,7 +442,8 @@ if (process.platform === 'win32') {
   coreDataPath = app.getPath('userData')
   primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 }
-if (!primaryInstance) app.quit()
+if (windowsUpdateQuit) app.exit(windowsBootstrap?.kind === 'secondary' ? 0 : 1)
+else if (!primaryInstance) app.quit()
 const core = new CoreClient(coreDataPath)
 if (windowsBootstrap?.kind === 'blocked') {
   core.blockStartup(windowsBootstrap.error, 'preparing_windows_data_root')
@@ -1215,9 +1223,11 @@ async function removeRetiredChannelCredentialFiles(userDataPath: string): Promis
     .map((entry) => unlink(join(root, entry.name)).catch(() => undefined)))
 }
 
-app.on('second-instance', () => {
+app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
   if (process.platform === 'win32') {
-    restoreMainWindow(mainWindow)
+    const action = windowsSecondInstanceAction(additionalData, process.execPath)
+    if (action === 'quit') app.quit()
+    else if (action === 'restore') restoreMainWindow(mainWindow)
     return
   }
   if (!mainWindow || mainWindow.isDestroyed()) return

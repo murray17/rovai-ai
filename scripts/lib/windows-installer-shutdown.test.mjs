@@ -41,7 +41,7 @@ test('Windows installer grants Planned Shutdown its full budget before bounded f
   assert.match(installerInclude, /Refusing to force-close a process whose installation path could not be verified/u)
   assert.doesNotMatch(installerInclude, /!insertmacro KILL_PROCESS/u)
 
-  assert.match(coordinator, /\[ValidateSet\('Status', 'RequestClose', 'WaitForExit', 'ForceClose'\)\]/u)
+  assert.match(coordinator, /\[ValidateSet\('Status', 'RequestClose', 'RequestUpdateQuit', 'WaitForExit', 'ForceClose'\)\]/u)
   assert.match(installerInclude, /FIND_PROCESS "rovai-host\.exe"/u)
   assert.match(coordinator, /'rovai-host\.exe'/u)
   assert.match(coordinator, /System\.Diagnostics\.Stopwatch/u)
@@ -53,7 +53,7 @@ test('Windows installer grants Planned Shutdown its full budget before bounded f
   assert.doesNotMatch(coordinator, /StartsWith\(\$normalizedInstallDirectory/u)
 
   assert.match(acceptance, /--prepare-windows-data-root/u)
-  assert.match(acceptance, /runCoordinator\('RequestClose'\)/u)
+  assert.match(acceptance, /runCoordinator\('RequestUpdateQuit'\)/u)
   assert.match(acceptance, /shutdown\?\.report\?\.status !== 'completed'/u)
   assert.match(acceptance, /runCoordinator\('WaitForExit', 20_000\)/u)
 
@@ -113,6 +113,13 @@ test('Windows installer coordinator targets an exact installation tree', {
 
   await waitForCoordinatorStatus(installDirectory, 10)
   await waitForCoordinatorStatus(siblingDirectory, 10)
+
+  const unsupported = runCoordinator('RequestUpdateQuit', installDirectory)
+  assert.equal(unsupported.status, 11, combinedOutput(unsupported))
+  assert.equal(JSON.parse(unsupported.stdout).event, 'update_quit_unsupported')
+  const absent = runCoordinator('RequestUpdateQuit', join(fixtureRoot, 'not-installed'))
+  assert.equal(absent.status, 0, combinedOutput(absent))
+  assert.equal(JSON.parse(absent.stdout).event, 'no_desktop_to_notify')
 
   const waiting = runCoordinator('WaitForExit', installDirectory, 100)
   assert.equal(waiting.status, 10, combinedOutput(waiting))
