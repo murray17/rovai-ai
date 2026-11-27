@@ -248,7 +248,7 @@ async function verifyInstallerConfiguration() {
   for (const required of [
     '!macro customCheckAppRunning',
     'ROVAI_REQUEST_GRACEFUL_CLOSE',
-    'RequestUpdateQuit',
+    `Exec '"$rovaiProcessDirectory\\\${APP_EXECUTABLE_FILENAME}" --quit-for-update$0'`,
     'windows-quit-for-update-v1',
     'ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_GRACEFUL_SHUTDOWN_MS} ${ROVAI_GRACEFUL_SHUTDOWN_TICKS}',
     'Refusing to force-close a process whose installation path could not be verified',
@@ -262,8 +262,7 @@ async function verifyInstallerConfiguration() {
     throw new Error('NSIS running-App fallback must not force-close a path-unverified process')
   }
   for (const required of [
-    "[ValidateSet('Status', 'RequestClose', 'RequestUpdateQuit', 'WaitForExit', 'ForceClose')]",
-    "@('--quit-for-update')",
+    "[ValidateSet('Status', 'RequestClose', 'WaitForExit', 'ForceClose')]",
     '[System.Diagnostics.Stopwatch]::StartNew()',
     '.CloseMainWindow()',
     'Stop-Process -Id $processId -Force',

@@ -45,8 +45,30 @@ Var rovaiShutdownFailure
   Pop ${RESULT}
 !macroend
 
-; Return the same convention as electron-builder's FIND_PROCESS macro:
-; 0 means at least one relevant process remains; non-zero means quiescent.
+; Keep the same-user image check when exact paths are unavailable. A failed
+; tasklist or findstr is inconclusive, so only a successful scan with no match
+; can let setup continue.
+!macro ROVAI_FIND_INSTALL_IMAGES RESULT
+  StrCpy ${RESULT} 0
+  nsExec::Exec '"$CmdPath" /D /C ""$SYSDIR\tasklist.exe" /FI "USERNAME eq %USERNAME%" /FO CSV /NH > "$PLUGINSDIR\rovai-install-processes.csv""'
+  Pop $0
+  ${if} $0 == 0
+    nsExec::Exec '"$SYSDIR\findstr.exe" /B /I /L /C:"\"${APP_EXECUTABLE_FILENAME}\"" /C:"\"rovai-host.exe\"" /C:"\"rovai-core.exe\"" /C:"\"rovai.exe\"" "$PLUGINSDIR\rovai-install-processes.csv"'
+    Pop $0
+    ${if} $0 == 1
+      ; findstr can also return 1 for an unreadable file. Confirm the scan
+      ; returned a readable list for this user by finding tasklist itself.
+      nsExec::Exec '"$SYSDIR\findstr.exe" /B /I /L /C:"\"tasklist.exe\"" "$PLUGINSDIR\rovai-install-processes.csv"'
+      Pop $0
+      ${if} $0 == 0
+        StrCpy ${RESULT} 1
+      ${endif}
+    ${endif}
+  ${endif}
+!macroend
+
+; 0 means a relevant process remains or the check was inconclusive.
+; 1 means quiescent.
 !macro ROVAI_FIND_INSTALL_PROCESSES RESULT
   ${if} $IsPowerShellAvailable == 0
     !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "Status" ${RESULT}
@@ -61,38 +83,33 @@ Var rovaiShutdownFailure
     ${else}
       DetailPrint "Rovai process coordinator was unavailable (exit ${RESULT}); using the image-name fallback."
       StrCpy $IsPowerShellAvailable 1
-      !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" ${RESULT}
-      ${if} ${RESULT} != 0
-        !insertmacro FIND_PROCESS "rovai-host.exe" ${RESULT}
-      ${endif}
-      ${if} ${RESULT} != 0
-        !insertmacro FIND_PROCESS "rovai-core.exe" ${RESULT}
-      ${endif}
-      ${if} ${RESULT} != 0
-        !insertmacro FIND_PROCESS "rovai.exe" ${RESULT}
-      ${endif}
     ${endif}
-  ${else}
-    !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" ${RESULT}
-    ${if} ${RESULT} != 0
-      !insertmacro FIND_PROCESS "rovai-host.exe" ${RESULT}
-    ${endif}
-    ${if} ${RESULT} != 0
-      !insertmacro FIND_PROCESS "rovai-core.exe" ${RESULT}
-    ${endif}
-    ${if} ${RESULT} != 0
-      !insertmacro FIND_PROCESS "rovai.exe" ${RESULT}
-    ${endif}
+  ${endif}
+  ${if} $IsPowerShellAvailable != 0
+    !insertmacro ROVAI_FIND_INSTALL_IMAGES ${RESULT}
   ${endif}
 !macroend
 
 !macro ROVAI_REQUEST_GRACEFUL_CLOSE
-  ${if} $IsPowerShellAvailable == 0
-    ${if} $rovaiQuitForUpdate == 1
-      !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestUpdateQuit" $rovaiProcessStatus
-    ${else}
-      !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestClose" $rovaiProcessStatus
+  ${if} $rovaiQuitForUpdate == 1
+    StrCpy $0 ""
+    ; Isolated acceptance uses the same data root and single-instance lock as
+    ; the running fixture.
+    ReadEnvStr $1 ROVAI_ALLOW_ISOLATED_INSTANCE
+    ${if} $1 == "1"
+      ReadEnvStr $1 ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT
+      ${if} $1 != ""
+        StrCpy $0 ' --user-data-dir="$1"'
+      ${endif}
     ${endif}
+    ClearErrors
+    Exec '"$rovaiProcessDirectory\${APP_EXECUTABLE_FILENAME}" --quit-for-update$0'
+    ${if} ${Errors}
+      DetailPrint "Could not launch Rovai's update quit request from $rovaiProcessDirectory."
+      ClearErrors
+    ${endif}
+  ${elseif} $IsPowerShellAvailable == 0
+    !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestClose" $rovaiProcessStatus
     DetailPrint "Rovai graceful close request returned $rovaiProcessStatus."
   ${else}
     DetailPrint "Automatic close is unavailable because the exact Rovai process identity could not be verified."
@@ -207,10 +224,8 @@ Var rovaiShutdownFailure
   ${endif}
 
   !ifndef BUILD_UNINSTALLER
-    ${if} $IsPowerShellAvailable == 0
-      IfFileExists "$rovaiProcessDirectory\resources\windows-quit-for-update-v1" 0 +2
-      StrCpy $rovaiQuitForUpdate 1
-    ${endif}
+    IfFileExists "$rovaiProcessDirectory\resources\windows-quit-for-update-v1" 0 +2
+    StrCpy $rovaiQuitForUpdate 1
   !endif
   ${IfNot} ${Silent}
     !ifdef BUILD_UNINSTALLER
