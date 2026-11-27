@@ -21,6 +21,11 @@ const outputDirectory = join(root, 'dist', 'windows-installer-shutdown-acceptanc
 const reportPath = join(outputDirectory, 'report.json')
 const stderrPath = join(fixtureRoot, 'packaged-app-stderr.log')
 const stdoutPath = join(fixtureRoot, 'packaged-app-stdout.log')
+const appEnvironment = {
+  ...process.env,
+  ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+  ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT: dataRoot
+}
 
 for (const path of [executable, core, coordinator]) {
   if (!existsSync(path)) throw new Error(`Windows installer shutdown acceptance input is missing: ${path}`)
@@ -56,14 +61,10 @@ try {
   report.processCount = running.processIds.length
 
   const shutdownStartedAt = Date.now()
-  const requested = runCoordinator('RequestClose')
-  if (requested.status !== 0) {
-    throw new Error(`installer coordinator could not request graceful close: ${combinedOutput(requested)}`)
-  }
-  const request = parseCoordinatorOutput(requested.stdout)
-  if (!request.processIds.includes(app.pid)) {
-    throw new Error(`installer coordinator did not target the App main window: ${requested.stdout}`)
-  }
+  run(executable, ['--quit-for-update', `--user-data-dir=${dataRoot}`], {
+    env: appEnvironment,
+    timeout: 20_000
+  })
 
   const waited = runCoordinator('WaitForExit', 20_000)
   if (waited.status !== 0) {
@@ -114,10 +115,7 @@ function launchApp() {
   try {
     return spawn(executable, [`--user-data-dir=${dataRoot}`], {
       cwd: installDirectory,
-      env: {
-        ...process.env,
-        ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
-      },
+      env: appEnvironment,
       stdio: ['ignore', stdoutHandle, stderrHandle]
     })
   } finally {
@@ -126,12 +124,13 @@ function launchApp() {
   }
 }
 
-function run(command, args) {
+function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024
+    maxBuffer: 16 * 1024 * 1024,
+    ...options
   })
   if (result.error) throw result.error
   if (result.status !== 0) {

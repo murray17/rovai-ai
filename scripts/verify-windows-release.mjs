@@ -248,6 +248,8 @@ async function verifyInstallerConfiguration() {
   for (const required of [
     '!macro customCheckAppRunning',
     'ROVAI_REQUEST_GRACEFUL_CLOSE',
+    `Exec '"$rovaiProcessDirectory\\\${APP_EXECUTABLE_FILENAME}" --quit-for-update$0'`,
+    'windows-quit-for-update-v1',
     'ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_GRACEFUL_SHUTDOWN_MS} ${ROVAI_GRACEFUL_SHUTDOWN_TICKS}',
     'Refusing to force-close a process whose installation path could not be verified',
     '!macro customUnInstallCheck'
@@ -272,6 +274,10 @@ async function verifyInstallerConfiguration() {
     }
   }
 
+  const capability = join(appDirectory, 'resources', 'windows-quit-for-update-v1')
+  if ((await readFile(capability, 'utf8')).trim() !== '1') {
+    throw new Error('Packaged installer quit capability has an unsupported version')
+  }
   report.push('NSIS configuration: assisted per-user install, selectable destination, 20s controlled shutdown and bounded force close passed')
   return {
     assisted: true,
@@ -279,6 +285,7 @@ async function verifyInstallerConfiguration() {
     allowElevation: false,
     selectableInstallationDirectory: true,
     runningAppUpgrade: {
+      updateQuitCapability: 1,
       gracefulShutdownMs: gracefulMs,
       forceCloseWaitMs: forceMs,
       exactInstallTree: true,

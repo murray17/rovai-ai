@@ -10,6 +10,9 @@
 !define ROVAI_FORCE_SHUTDOWN_TICKS 10
 
 Var pid
+Var IsPowerShellAvailable
+Var rovaiProcessDirectory
+Var rovaiQuitForUpdate
 Var rovaiProcessStatus
 Var rovaiShutdownTicks
 Var rovaiShutdownPrompt
@@ -33,17 +36,39 @@ Var rovaiShutdownFailure
 !macroend
 
 !macro ROVAI_RUN_PROCESS_COORDINATOR ACTION RESULT
-  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "${ACTION}" -InstallDirectory "$INSTDIR\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid'
+  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "${ACTION}" -InstallDirectory "$rovaiProcessDirectory\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid'
   Pop ${RESULT}
 !macroend
 
 !macro ROVAI_RUN_PROCESS_COORDINATOR_WAIT TIMEOUT_MS RESULT
-  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "WaitForExit" -InstallDirectory "$INSTDIR\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid -TimeoutMilliseconds "${TIMEOUT_MS}"'
+  nsExec::ExecToLog '"$PowerShellPath" -NoLogo -NoProfile -NonInteractive -File "$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR}" -Action "WaitForExit" -InstallDirectory "$rovaiProcessDirectory\." -ExecutableName "${APP_EXECUTABLE_FILENAME}" -ExcludeProcessId $pid -TimeoutMilliseconds "${TIMEOUT_MS}"'
   Pop ${RESULT}
 !macroend
 
-; Return the same convention as electron-builder's FIND_PROCESS macro:
-; 0 means at least one relevant process remains; non-zero means quiescent.
+; Keep the same-user image check when exact paths are unavailable. A failed
+; tasklist or findstr is inconclusive, so only a successful scan with no match
+; can let setup continue.
+!macro ROVAI_FIND_INSTALL_IMAGES RESULT
+  StrCpy ${RESULT} 0
+  nsExec::Exec '"$CmdPath" /D /C ""$SYSDIR\tasklist.exe" /FI "USERNAME eq %USERNAME%" /FO CSV /NH > "$PLUGINSDIR\rovai-install-processes.csv""'
+  Pop $0
+  ${if} $0 == 0
+    nsExec::Exec '"$SYSDIR\findstr.exe" /B /I /L /C:"\"${APP_EXECUTABLE_FILENAME}\"" /C:"\"rovai-host.exe\"" /C:"\"rovai-core.exe\"" /C:"\"rovai.exe\"" "$PLUGINSDIR\rovai-install-processes.csv"'
+    Pop $0
+    ${if} $0 == 1
+      ; findstr can also return 1 for an unreadable file. Confirm the scan
+      ; returned a readable list for this user by finding tasklist itself.
+      nsExec::Exec '"$SYSDIR\findstr.exe" /B /I /L /C:"\"tasklist.exe\"" "$PLUGINSDIR\rovai-install-processes.csv"'
+      Pop $0
+      ${if} $0 == 0
+        StrCpy ${RESULT} 1
+      ${endif}
+    ${endif}
+  ${endif}
+!macroend
+
+; 0 means a relevant process remains or the check was inconclusive.
+; 1 means quiescent.
 !macro ROVAI_FIND_INSTALL_PROCESSES RESULT
   ${if} $IsPowerShellAvailable == 0
     !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "Status" ${RESULT}
@@ -58,33 +83,32 @@ Var rovaiShutdownFailure
     ${else}
       DetailPrint "Rovai process coordinator was unavailable (exit ${RESULT}); using the image-name fallback."
       StrCpy $IsPowerShellAvailable 1
-      !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" ${RESULT}
-      ${if} ${RESULT} != 0
-        !insertmacro FIND_PROCESS "rovai-host.exe" ${RESULT}
-      ${endif}
-      ${if} ${RESULT} != 0
-        !insertmacro FIND_PROCESS "rovai-core.exe" ${RESULT}
-      ${endif}
-      ${if} ${RESULT} != 0
-        !insertmacro FIND_PROCESS "rovai.exe" ${RESULT}
-      ${endif}
     ${endif}
-  ${else}
-    !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" ${RESULT}
-    ${if} ${RESULT} != 0
-      !insertmacro FIND_PROCESS "rovai-host.exe" ${RESULT}
-    ${endif}
-    ${if} ${RESULT} != 0
-      !insertmacro FIND_PROCESS "rovai-core.exe" ${RESULT}
-    ${endif}
-    ${if} ${RESULT} != 0
-      !insertmacro FIND_PROCESS "rovai.exe" ${RESULT}
-    ${endif}
+  ${endif}
+  ${if} $IsPowerShellAvailable != 0
+    !insertmacro ROVAI_FIND_INSTALL_IMAGES ${RESULT}
   ${endif}
 !macroend
 
 !macro ROVAI_REQUEST_GRACEFUL_CLOSE
-  ${if} $IsPowerShellAvailable == 0
+  ${if} $rovaiQuitForUpdate == 1
+    StrCpy $0 ""
+    ; Isolated acceptance uses the same data root and single-instance lock as
+    ; the running fixture.
+    ReadEnvStr $1 ROVAI_ALLOW_ISOLATED_INSTANCE
+    ${if} $1 == "1"
+      ReadEnvStr $1 ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT
+      ${if} $1 != ""
+        StrCpy $0 ' --user-data-dir="$1"'
+      ${endif}
+    ${endif}
+    ClearErrors
+    Exec '"$rovaiProcessDirectory\${APP_EXECUTABLE_FILENAME}" --quit-for-update$0'
+    ${if} ${Errors}
+      DetailPrint "Could not launch Rovai's update quit request from $rovaiProcessDirectory."
+      ClearErrors
+    ${endif}
+  ${elseif} $IsPowerShellAvailable == 0
     !insertmacro ROVAI_RUN_PROCESS_COORDINATOR "RequestClose" $rovaiProcessStatus
     DetailPrint "Rovai graceful close request returned $rovaiProcessStatus."
   ${else}
@@ -125,6 +149,27 @@ Var rovaiShutdownFailure
   ${endif}
 !macroend
 
+!ifndef BUILD_UNINSTALLER
+!macro ROVAI_SET_UPGRADE_CONFIRMATION
+  ${if} $LANGUAGE == 2052
+    StrCpy $rovaiShutdownPrompt "安装更新需要退出 Rovai。正在执行的任务会停止。现在退出并安装吗？"
+    ${if} $rovaiQuitForUpdate == 0
+      StrCpy $rovaiShutdownPrompt "$rovaiShutdownPrompt$\r$\n$\r$\n如果 Rovai 弹出关闭选项，请选「退出 Rovai」。如果已收进托盘，请右键点击托盘图标并选「退出 Rovai」。"
+    ${endif}
+  ${elseif} $LANGUAGE == 1028
+    StrCpy $rovaiShutdownPrompt "安裝更新需要退出 Rovai。正在執行的工作會停止。現在退出並安裝嗎？"
+    ${if} $rovaiQuitForUpdate == 0
+      StrCpy $rovaiShutdownPrompt "$rovaiShutdownPrompt$\r$\n$\r$\n如果 Rovai 顯示關閉選項，請選「退出 Rovai」。如果已縮小至系統匣，請以右鍵點選圖示並選「退出 Rovai」。"
+    ${endif}
+  ${else}
+    StrCpy $rovaiShutdownPrompt "Installing the update requires quitting Rovai. Running tasks will stop. Quit and install now?"
+    ${if} $rovaiQuitForUpdate == 0
+      StrCpy $rovaiShutdownPrompt "$rovaiShutdownPrompt$\r$\n$\r$\nIf Rovai shows close options, choose Quit Rovai. If it is in the system tray, right-click its icon and choose Quit Rovai."
+    ${endif}
+  ${endif}
+!macroend
+!endif
+
 !macro ROVAI_WAIT_FOR_QUIESCENCE TIMEOUT_MS TICKS LOOP_ID EXHAUSTED_LABEL
   ${if} $IsPowerShellAvailable == 0
     !insertmacro ROVAI_RUN_PROCESS_COORDINATOR_WAIT ${TIMEOUT_MS} $rovaiProcessStatus
@@ -157,23 +202,52 @@ Var rovaiShutdownFailure
 !macroend
 
 !macro customCheckAppRunning
+  StrCpy $rovaiProcessDirectory $INSTDIR
+  StrCpy $rovaiQuitForUpdate 0
+  !ifndef BUILD_UNINSTALLER
+    ; The wizard destination can differ from the directory the old uninstaller will remove.
+    ReadRegStr $0 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" InstallLocation
+    ${if} $0 != ""
+      StrCpy $rovaiProcessDirectory $0
+    ${endif}
+    ClearErrors
+  !endif
   ${GetProcessInfo} 0 $pid $0 $1 $2 $3
   InitPluginsDir
   File /oname=$PLUGINSDIR\${ROVAI_INSTALLER_PROCESS_COORDINATOR} "${BUILD_RESOURCES_DIR}\installer-process-coordinator.ps1"
-  !insertmacro IS_POWERSHELL_AVAILABLE
+  ; The real no-profile Status call below determines whether coordination works.
+  StrCpy $IsPowerShellAvailable 0
 
   !insertmacro ROVAI_FIND_INSTALL_PROCESSES $rovaiProcessStatus
   ${if} $rovaiProcessStatus != 0
     Goto rovai_not_running
   ${endif}
 
+  !ifndef BUILD_UNINSTALLER
+    IfFileExists "$rovaiProcessDirectory\resources\windows-quit-for-update-v1" 0 +2
+    StrCpy $rovaiQuitForUpdate 1
+  !endif
   ${IfNot} ${Silent}
-    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK rovai_begin_shutdown IDCANCEL rovai_cancel_setup
+    !ifdef BUILD_UNINSTALLER
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK rovai_begin_shutdown IDCANCEL rovai_cancel_setup
+    !else
+      !insertmacro ROVAI_SET_UPGRADE_CONFIRMATION
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "$rovaiShutdownPrompt" IDOK rovai_begin_shutdown IDCANCEL rovai_cancel_setup
+    !endif
   ${EndIf}
 
   rovai_begin_shutdown:
     DetailPrint "Requesting Rovai AI controlled shutdown and waiting up to 20 seconds."
-    !insertmacro ROVAI_REQUEST_GRACEFUL_CLOSE
+    !ifdef BUILD_UNINSTALLER
+      !insertmacro ROVAI_REQUEST_GRACEFUL_CLOSE
+    !else
+      ${if} ${Silent}
+      ${andIf} ${isUpdated}
+        DetailPrint "Waiting for the shutdown initiated by Rovai's in-app updater."
+      ${else}
+        !insertmacro ROVAI_REQUEST_GRACEFUL_CLOSE
+      ${endif}
+    !endif
     !insertmacro ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_GRACEFUL_SHUTDOWN_MS} ${ROVAI_GRACEFUL_SHUTDOWN_TICKS} graceful rovai_graceful_timeout
 
   rovai_graceful_timeout:
@@ -193,7 +267,7 @@ Var rovaiShutdownFailure
     !insertmacro ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_MANUAL_SHUTDOWN_MS} ${ROVAI_MANUAL_SHUTDOWN_TICKS} manual rovai_shutdown_failed
 
   rovai_force_shutdown:
-    DetailPrint "Controlled shutdown timed out; force-closing only verified processes from $INSTDIR."
+    DetailPrint "Controlled shutdown timed out; force-closing only verified processes from $rovaiProcessDirectory."
     !insertmacro ROVAI_FORCE_CLOSE
     !insertmacro ROVAI_WAIT_FOR_QUIESCENCE ${ROVAI_FORCE_SHUTDOWN_MS} ${ROVAI_FORCE_SHUTDOWN_TICKS} force rovai_shutdown_failed
 

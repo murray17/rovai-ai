@@ -178,7 +178,8 @@ function launchRunningUpgradeApp(executable, dataRoot, logPath) {
       cwd: dirname(executable),
       env: {
         ...process.env,
-        ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
+        ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+        ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT: dataRoot
       },
       stdio: ['ignore', 'ignore', logHandle]
     })
@@ -375,7 +376,13 @@ try {
   const liveDescendantPids = await waitForExpectedProcessTree(runningUpgradeApp.child.pid)
   const liveProcessIds = [runningUpgradeApp.child.pid, ...liveDescendantPids]
   const upgradeStartedAt = Date.now()
-  run(installer, ['/S'])
+  run(installer, ['/S'], {
+    env: {
+      ...process.env,
+      ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+      ROVAI_WINDOWS_INSTALLER_ACCEPTANCE_DATA_ROOT: runningUpgradeDataRoot
+    }
+  })
   const upgradeElapsedMs = Date.now() - upgradeStartedAt
   await waitForProcessesExited(liveProcessIds)
   const shutdownResult = parseShutdownResult(await readFile(runningUpgradeLog, 'utf8'))
